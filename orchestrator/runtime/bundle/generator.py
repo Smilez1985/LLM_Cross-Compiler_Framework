@@ -44,9 +44,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from orchestrator.runtime.bundle.blocks import ENTERPRISE_TRUSTS, Block, BlockCatalog
 from orchestrator.runtime.bundle.installer import (ROOT_HELPER_FILE, SIGNED_FILES, installer_sh, render_steps,
                                                    staged_name)
-from orchestrator.runtime.bundle.manifest import (ENGINE_KINDS, RE_ID, RE_LICENCE, RE_URL, BundleManifest, Component,
-                                                  FileEntry, HarnessPart, ManifestError, RootAction, StartSpec,
-                                                  dump_manifest, load_manifest)
+from orchestrator.runtime.bundle.manifest import (RE_ID, RE_LICENCE, RE_URL, BundleManifest, Component, FileEntry,
+                                                  HarnessPart, ManifestError, RootAction, StartSpec, dump_manifest,
+                                                  is_engine, load_manifest)
 
 PRESETS: Dict[str, Tuple[str, ...]] = {
     "llm": ("llm-llama-server",),
@@ -405,7 +405,7 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
     ports: Dict[int, str] = {}
     memory = 0
     measured_llm = 0          # MiB the llm servers need by the board's measurement
-    engine_mem: Dict[str, int] = {}   # MiB of each engine component (llm, stt, vision)
+    engine_mem: Dict[str, int] = {}   # MiB of each engine component (every kind but gateway and harness)
     if selection.engines not in ENGINE_MODES:
         plan.problems.append(f"the engines run {' or '.join(ENGINE_MODES)}, not {selection.engines!r}"[:200])
     in_turn = selection.engines == "in-turn"
@@ -581,7 +581,7 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         else:
             comp_memory = int(block.memory_base_mb + block.memory_model_factor * model_bytes / 1048576)
         memory += comp_memory
-        if block.kind in ENGINE_KINDS:
+        if is_engine(block.kind):
             engine_mem[comp_id] = comp_memory
         _component_check(plan, comp_id, block, comp_runtime, board_arch, comp_memory, measured_usable)
         if block.kind == "vision" and comp_runtime is not None:
@@ -856,17 +856,17 @@ def _gateway_from_engines(plan: BundlePlan, comp_id: str, given: Dict[str, Any],
             given[mine] = value
 
 
-def engine_units(components: List[Component], roots: List[RootAction]) -> Dict[str, Tuple[str, str]]:
-    """The bundle's engines with a unit of their own: engine kind (llm, stt, vision) -> (component id, unit), the first
-    component of each kind whose install_unit writes `llmcf-<component id>.service` (the one naming rule
-    allow_unit_control accepts)."""
+def engine_units(components: List[Component], roots: List[RootAction]) -> Dict[str, str]:
+    """The bundle's engines with a unit of their own: component id -> unit, for every engine component (any kind but
+    gateway and harness) whose install_unit writes `llmcf-<component id>.service` (the one naming rule
+    allow_unit_control accepts). The gateway knows its engines by these ids, whatever their kind."""
     kinds = {c.id: c.kind for c in components}
-    out: Dict[str, Tuple[str, str]] = {}
+    out: Dict[str, str] = {}
     for action in roots:
-        kind = kinds.get(action.component)
-        if action.action == "install_unit" and kind in ENGINE_KINDS and kind not in out \
+        kind = kinds.get(action.component, "")
+        if action.action == "install_unit" and is_engine(kind) and action.component not in out \
                 and action.unit == f"llmcf-{action.component}.service":
-            out[kind] = (action.component, action.unit)
+            out[action.component] = action.unit
     return out
 
 
@@ -925,10 +925,10 @@ def _engine_control(plan: BundlePlan, components: List[Component], roots: List[R
     """The gateway that starts and stops the bundle's engines: with the gateway's own unit and at least one engine
     unit, the root action allow_unit_control (exactly the gateway's account and exactly these units; llmcf-install
     writes a polkit rule, or a sudoers drop-in with the exact systemctl commands on a board without polkit's rules),
-    and the gateway is told its engines (`--engine KIND=UNIT:MB[:PORT]`, the memory from the plan, the port of a speech
-    or vision engine for its health check), the person's choice (`--engines together|in-turn`) and in turn the memory
-    the engines may use together (the board's usable memory less the rest of the bundle). The unprivileged-only
-    variant writes no unit, so the gateway is told none. In turn needs all this: without it the plan refuses; so does
+    and the gateway is told its engines (`--engine ID=UNIT:MB[:PORT]`: the component id, its memory from the plan,
+    the port of an engine other than the llm for its health check), the person's choice (`--engines
+    together|in-turn`) and in turn the memory the engines may use together (the board's usable memory less the rest
+    of the bundle). The unprivileged-only variant writes no unit, so the gateway is told none. In turn needs all this: without it the plan refuses; so does
     an idle stop (`idle_stop_minutes`), which stops the engines through their units."""
     engine_mem = engine_mem or {}
     gateway = next((c for c in components if c.kind == "gateway"), None)
@@ -955,8 +955,8 @@ def _tell_engines(plan: BundlePlan, components: List[Component], roots: List[Roo
                                  "variant")
         elif len(engines) < len(engine_mem):
             plan.problems.append("in turn the gateway starts and stops each engine through its own unit: give each "
-                                 "engine autostart, and at most one engine of each kind")
-        elif any(kind != "llm" for kind in engines):
+                                 "engine autostart")
+        elif any(c.kind != "llm" for c in components if c.id in engines):
             plan.notes.append("in turn: the gateway starts the speech and vision engines for requests through itself "
                               "(its speech route and chats with images); a program that calls them on their own ports "
                               "finds them stopped while another engine runs")
@@ -968,7 +968,7 @@ def _tell_engines(plan: BundlePlan, components: List[Component], roots: List[Roo
         return components
     if selection.unprivileged_only:
         return components
-    units = tuple(unit for _comp, unit in engines.values())
+    units = tuple(engines.values())
     roots.append(RootAction(action="allow_unit_control", component=gateway.id, user=own.user, units=units))
     if in_turn and len(engine_mem) > 1:
         # in turn the engines' units are installed but not enabled at boot: the gateway starts the llm at its own
@@ -985,10 +985,11 @@ def _tell_engines(plan: BundlePlan, components: List[Component], roots: List[Roo
         return components
     by_id = {c.id: c for c in components}
     args: List[str] = []
-    for kind, (comp_id, unit) in engines.items():
-        spec = f"{kind}={unit}:{int(engine_mem.get(comp_id, 0))}"
+    for comp_id, unit in engines.items():
+        # the engine's id is its component id (the gateway's routes name it so); the llm's port is the upstream
+        spec = f"{comp_id}={unit}:{int(engine_mem.get(comp_id, 0))}"
         port = by_id[comp_id].variables.get("port")
-        if kind != "llm" and isinstance(port, int):
+        if by_id[comp_id].kind != "llm" and isinstance(port, int):
             spec += f":{port}"
         args += ["--engine", spec]
     args += ["--engines", selection.engines]
@@ -999,9 +1000,10 @@ def _tell_engines(plan: BundlePlan, components: List[Component], roots: List[Roo
     return [started if c is gateway else c for c in components]
 
 
-# Who the kernel's out-of-memory killer takes first, if it must take one: a model server (its unit restarts it), never
-# the gateway before it (the gateway keeps the queue and answers the harnesses).
-OOM_SCORE = {"gateway": -500, "llm": 500, "stt": 500, "vision": 500}
+# Who the kernel's out-of-memory killer takes first, if it must take one: an engine (its unit restarts it; every engine
+# kind the same), never the gateway before it (the gateway keeps the queue and answers the harnesses).
+OOM_SCORE = {"gateway": -500}
+OOM_SCORE_ENGINE = 500
 
 
 def _cgroup_action(plan: BundlePlan, comp_id: str, block: Block, unit: str, values: Dict[str, Any],
@@ -1031,7 +1033,8 @@ def _cgroup_action(plan: BundlePlan, comp_id: str, block: Block, unit: str, valu
             plan.notes.append(f"{comp_id}: its unit's memory limit {memory_max} MB: room for the audio uploads and "
                               "images of the requests in flight")
     return RootAction(action="set_cgroup", component=comp_id, unit=unit, memory_max_mb=memory_max,
-                      memory_high_mb=memory_high, oom_score_adj=OOM_SCORE.get(block.kind))
+                      memory_high_mb=memory_high,
+                      oom_score_adj=OOM_SCORE.get(block.kind, OOM_SCORE_ENGINE if is_engine(block.kind) else None))
 
 
 def gateway_upload_kb(values: Dict[str, Any]) -> Tuple[int, int]:

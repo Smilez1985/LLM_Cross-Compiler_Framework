@@ -4,9 +4,10 @@ Building blocks of the board bundle (schema llmcf-bundle-block/1): one folder pe
 `README.md`, published and installed as community packs of kind "block" like target modules (Core/community_manager:
 signed, scrubbed, checked by check_block_folder before it is installed).
 
-A block says what it is (`kind`: llm, stt, tts, vision, gateway, harness), whether it can be built (`status` ready) or
-is a documented template only (`status` template: its guide says what is missing), its typed variables with defaults
-and bounds (manifest.VARIABLE_TYPES), the files it needs with their role, where they come from (`from` person: a file
+A block says what it is (`kind`: llm, stt, tts, vision, gateway, harness, or a kind of its own such as detect: the
+kinds are open, every kind but gateway and harness is an engine treated the same), whether it can be built (`status`
+ready) or is a documented template only (`status` template: its guide says what is missing), its typed variables
+with defaults and bounds (manifest.VARIABLE_TYPES), the files it needs with their role, where they come from (`from` person: a file
 the person picks or a pinned online item; runtime: the board's self-built llama.cpp runtime package of deploy way 2;
 framework: a program the framework builds itself for the board, root_helper.FRAMEWORK_PROGRAMS such as llmcf-gateway;
 harness: the person's harness taken in at its pin, packed as harness.tar, and the framework's harness_watch.sh, only in
@@ -34,8 +35,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from orchestrator.runtime.bundle.manifest import (KINDS, RE_ARG, RE_FILE, RE_ID, RE_VAR, RE_VERSION, ROLES,
-                                                  VARIABLE_TYPES, ManifestError, check_value)
+from orchestrator.runtime.bundle.manifest import (RE_ARG, RE_FILE, RE_ID, RE_VAR, RE_VERSION, ROLES, VARIABLE_TYPES,
+                                                  ManifestError, check_value, valid_kind)
 from orchestrator.runtime.bundle.reach import Reach, ReachError, parse_reach
 
 BLOCK_SCHEMA = "llmcf-bundle-block/1"
@@ -53,6 +54,8 @@ FORMATS = ("gguf", "mmproj-gguf", "ggml-whisper", "onnx", "sherpa-onnx", "elf", 
 TRUSTS = ("framework", "indexed", "signed", "own")
 ENTERPRISE_TRUSTS = ("framework", "indexed")
 MAX_BLOCK_BYTES = 64 * 1024
+KIND_WORDS = ("kind is llm, stt, tts, vision, gateway, harness or a kind of its own: 2 to 32 lower-case letters, "
+              "digits and '-', starting with a letter")
 
 
 class BlockError(ValueError):
@@ -347,8 +350,8 @@ def parse_block(text: str, folder: Path, trust: str = "own", sha256: str = "") -
     if not RE_VERSION.fullmatch(version):
         raise BlockError("version is MAJOR.MINOR.PATCH")
     kind, status = spec.get("kind"), spec.get("status", "ready")
-    if kind not in KINDS:
-        raise BlockError(f"kind must be one of {', '.join(KINDS)}")
+    if not valid_kind(kind):
+        raise BlockError(KIND_WORDS)
     if status not in STATUSES:
         raise BlockError("status is ready or template")
     variables = tuple(_variable(v) for v in (spec.get("variables") or []))
@@ -560,8 +563,8 @@ def new_block(dest_root: Path, block_id: str, *, kind: str, title: str, summary:
     published and installed from the signed index. BlockError when the id is taken or not valid."""
     if not RE_ID.fullmatch(block_id or ""):
         raise BlockError("the block id is lower-case letters, digits, '.', '_' and '-'")
-    if kind not in KINDS:
-        raise BlockError(f"kind must be one of {', '.join(KINDS)}")
+    if not valid_kind(kind):
+        raise BlockError(KIND_WORDS)
     if (builtin / block_id).exists():
         raise BlockError(f"the framework has a block {block_id}; choose another id")
     dest = Path(dest_root) / block_id

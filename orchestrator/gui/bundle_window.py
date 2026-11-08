@@ -915,6 +915,7 @@ class BundleWindow(BoardSteps, QDialog):
         cmb_kind = QComboBox(dialog)
         cmb_kind.setObjectName("cmb_bundle_new_kind")
         cmb_kind.addItems(list(KINDS))
+        cmb_kind.setEditable(True)   # the kinds are open: a kind of its own, such as detect, is typed in
         txt_title = QLineEdit(dialog)
         txt_title.setObjectName("txt_bundle_new_title")
         txt_summary = QLineEdit(dialog)

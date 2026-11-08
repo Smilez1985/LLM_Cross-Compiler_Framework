@@ -8110,7 +8110,8 @@ def bundle_block_list(ctx: FrameworkContext, as_json: bool):
 
 @bundle_block.command('new')
 @click.argument('block_id', metavar='ID')
-@click.option('--kind', required=True, help='llm, stt, tts, vision, gateway or harness')
+@click.option('--kind', required=True,
+              help='llm, stt, tts, vision, gateway, harness or a kind of its own (such as detect)')
 @click.option('--title', required=True, help='A short title')
 @click.option('--summary', default='', help='One or two sentences on what it runs')
 @click.option('--from', 'template', default=None, metavar='BLOCK',

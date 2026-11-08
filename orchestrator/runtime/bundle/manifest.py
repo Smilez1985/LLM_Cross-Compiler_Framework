@@ -31,8 +31,12 @@ MAX_COMPONENTS = 16
 MAX_FILES = 64
 MAX_ARGS = 96
 
-# Component kinds a building block may have (the ROADMAP's bundle components).
+# The component kinds the framework knows (the ROADMAP's bundle components). The kinds are open: a block may name any
+# kind of RE_KIND (a detector, a camera, a kind no one thought of yet); every kind but the gateway and a harness is an
+# engine the gateway may start and stop (is_engine), treated the same whatever its kind.
 KINDS = ("llm", "stt", "tts", "vision", "gateway", "harness")
+RE_KIND = re.compile(r"^[a-z][a-z0-9-]{1,31}$", re.ASCII)
+NOT_ENGINES = ("gateway", "harness")
 # What the installer does with a file of the bundle (its role decides that, never its name).
 ROLES = ("model", "mmproj", "program", "runtime", "config", "data")
 FILE_MODES = ("0600", "0644", "0700", "0755")
@@ -46,9 +50,8 @@ FILE_MODES = ("0600", "0644", "0700", "0755")
 ROOT_ACTIONS = ("create_user", "install_unit", "set_cgroup", "place_root_file",
                 "remove_user", "remove_unit", "remove_cgroup", "remove_root_file", "run_harness",
                 "allow_unit_control")
-# The component kinds whose units the gateway may start and stop (its engines), at most one unit each.
-ENGINE_KINDS = ("llm", "stt", "vision")
-MAX_CONTROL_UNITS = 3
+# The units the gateway may start and stop: one per engine component (every component of the bundle but itself).
+MAX_CONTROL_UNITS = 15
 # Where place_root_file may put a file (fixed places only; llmcf-install knows each one).
 ROOT_PLACES = ("unit-dropin", "tmpfiles", "sysctl")
 MODES = ("full", "unprivileged")
@@ -92,6 +95,17 @@ _BOUNDS = {"port": (1024, 65535), "uint": (0, 2 ** 31 - 1), "threads": (0, 512),
 
 class ManifestError(ValueError):
     """A manifest, a variable or a value that is not what the schema takes; the message says which and why."""
+
+
+def valid_kind(kind: Any) -> bool:
+    """Whether `kind` is a component kind: a known one or any of RE_KIND (2 to 32 lower-case letters, digits and '-',
+    starting with a letter)."""
+    return isinstance(kind, str) and bool(RE_KIND.fullmatch(kind))
+
+
+def is_engine(kind: str) -> bool:
+    """Whether a component of `kind` is an engine (every kind but the gateway and a harness)."""
+    return valid_kind(kind) and kind not in NOT_ENGINES
 
 
 def check_value(kind: str, value: Any, *, choices: Tuple[str, ...] = (), low: Optional[int] = None,
@@ -263,7 +277,7 @@ class Component(_Strict):
     """One component of the bundle, made from the block `block` (version, sha256 of its block folder, its trust when
     the bundle was built) with its checked `variables`."""
     id: str
-    kind: Literal["llm", "stt", "tts", "vision", "gateway", "harness"]
+    kind: str
     block: str
     block_version: str
     block_sha256: str
@@ -279,6 +293,13 @@ class Component(_Strict):
     def _id(cls, v):
         if not RE_ID.fullmatch(v):
             raise ValueError("an id is lower-case letters, digits, '.', '_' and '-'")
+        return v
+
+    @field_validator("kind")
+    @classmethod
+    def _kind(cls, v):
+        if not valid_kind(v):
+            raise ValueError("a kind is 2 to 32 lower-case letters, digits and '-', starting with a letter")
         return v
 
     @field_validator("block_version")
@@ -468,7 +489,7 @@ class BundleManifest(_Strict):
                 self._control_rule(action, comp)
             if action.on_demand:
                 control = next((a for a in self.root_actions if a.action == "allow_unit_control"), None)
-                if comp.kind not in ENGINE_KINDS or control is None or action.unit not in (control.units or ()):
+                if not is_engine(comp.kind) or control is None or action.unit not in (control.units or ()):
                     raise ValueError(f"root action install_unit: {action.unit} is on demand but no engine unit the "
                                      "bundle's gateway may start")
         return self
@@ -476,7 +497,8 @@ class BundleManifest(_Strict):
     def _control_rule(self, action: "RootAction", comp: Component) -> None:
         """allow_unit_control in its bundle (llmcf-install's control_rule, the same rule): it belongs to the bundle's
         gateway component, names the account the gateway's own unit runs as, and each unit is the unit an
-        install_unit of this bundle writes for one of its engine components (llm, stt, vision) under the bundle's one
+        install_unit of this bundle writes for one of its engine components (any kind but gateway and harness) under the
+        bundle's one
         naming rule, llmcf-<component id>.service. No other unit, no pattern, no wildcard."""
         what = "root action allow_unit_control"
         if comp.kind != "gateway":
@@ -487,7 +509,7 @@ class BundleManifest(_Strict):
         kinds = {c.id: c.kind for c in self.components}
         for unit in action.units or ():
             engine = next((a.component for a in self.root_actions if a.action == "install_unit" and a.unit == unit
-                           and kinds.get(a.component) in ENGINE_KINDS), None)
+                           and is_engine(kinds.get(a.component, ""))), None)
             if engine is None or unit != f"llmcf-{engine}.service":
                 raise ValueError(f"{what}: {unit} is no engine unit of this bundle")
 
@@ -537,9 +559,9 @@ def problems_of(data: Any) -> List[str]:
         return [str(e)]
 
 
-__all__ = ["BoardFacts", "BundleManifest", "Component", "ENGINE_KINDS", "FILE_MODES", "FileEntry", "HARNESS_ARCHIVE", "HARNESS_WATCH",
+__all__ = ["BoardFacts", "BundleManifest", "Component", "NOT_ENGINES", "RE_KIND", "FILE_MODES", "FileEntry", "HARNESS_ARCHIVE", "HARNESS_WATCH",
            "HarnessPart", "KINDS", "MODES", "ManifestError",
            "MAX_ROOT_ACTIONS", "RE_ARG", "RE_FACT", "RE_FILE", "RE_ID", "RE_ROOT_FILE", "RE_SHA", "RE_UNIT", "RE_URL",
            "RE_WORD", "ROLES", "ROOT_ACTIONS", "ROOT_PLACES",
            "RootAction", "SCHEMA", "StartSpec", "VARIABLE_TYPES", "check_value", "dump_manifest", "load_manifest",
-           "problems_of"]
+           "is_engine", "problems_of", "valid_kind"]

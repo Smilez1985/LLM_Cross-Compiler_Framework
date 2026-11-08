@@ -1175,6 +1175,170 @@
      }
     ],
     "why": "engine units in turn: installed, started by the gateway on demand"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "stt-whisper-cpp",
+        "block_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "mode": "0755",
+          "name": "whisper-server",
+          "role": "program",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 4096,
+          "source": "bundle"
+         }
+        ],
+        "id": "stt",
+        "kind": "detect",
+        "start": {
+         "args": [
+          "--port",
+          "8090"
+         ],
+         "program": "whisper-server"
+        },
+        "variables": {
+         "autostart": true,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "gateway-llmcf",
+        "block_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "mode": "0755",
+          "name": "llmcf-gateway",
+          "role": "program",
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "size": 2048,
+          "source": "bundle"
+         }
+        ],
+        "id": "gateway",
+        "kind": "gateway",
+        "start": {
+         "args": [
+          "serve",
+          "--port",
+          "8088"
+         ],
+         "program": "llmcf-gateway"
+        },
+        "variables": {
+         "autostart": true,
+         "user": "llmcf"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "stt",
+        "unit": "llmcf-stt.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "gateway",
+        "unit": "llmcf-gateway.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "allow_unit_control",
+        "component": "gateway",
+        "user": "llmcf",
+        "units": [
+         "llmcf-llm.service",
+         "llmcf-stt.service"
+        ]
+       }
+      ]
+     }
+    ],
+    "why": "an engine of a kind of its own (detect): the gateway may start and stop its unit"
    }
   ],
   "base": {
@@ -5080,16 +5244,28 @@
         "component": "gateway",
         "user": "llmcf",
         "units": [
-         "llmcf-llm.service",
-         "llmcf-stt.service",
-         "llmcf-a.service",
-         "llmcf-b.service"
+         "llmcf-e0.service",
+         "llmcf-e1.service",
+         "llmcf-e2.service",
+         "llmcf-e3.service",
+         "llmcf-e4.service",
+         "llmcf-e5.service",
+         "llmcf-e6.service",
+         "llmcf-e7.service",
+         "llmcf-e8.service",
+         "llmcf-e9.service",
+         "llmcf-e10.service",
+         "llmcf-e11.service",
+         "llmcf-e12.service",
+         "llmcf-e13.service",
+         "llmcf-e14.service",
+         "llmcf-e15.service"
         ]
        }
       ]
      }
     ],
-    "why": "unit control with four units"
+    "why": "unit control with sixteen units"
    },
    {
     "patches": [
@@ -7492,6 +7668,71 @@
      }
     ],
     "why": "a unit on demand without the gateway's control"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "kind"
+      ],
+      "value": "Detect"
+     }
+    ],
+    "why": "a kind with upper case"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "kind"
+      ],
+      "value": "d"
+     }
+    ],
+    "why": "a kind of one letter"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "kind"
+      ],
+      "value": "1x"
+     }
+    ],
+    "why": "a kind starting with a digit"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "kind"
+      ],
+      "value": "de_tect"
+     }
+    ],
+    "why": "a kind with an underscore"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "kind"
+      ],
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     }
+    ],
+    "why": "a kind of 33 letters"
    }
   ]
  },

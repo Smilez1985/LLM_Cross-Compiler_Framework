@@ -2,8 +2,9 @@
 //! the board orchestrator of the models.
 //!
 //! Each engine is its own systemd unit with the memory the board's measurement gave it (`--engine
-//! NAME=UNIT:MIB[:PORT]`). A route names the engine it needs (`for_route`, one line per route). `together`: every
-//! engine is started on demand and stays (the idle stop as before). `in-turn` (the person's choice when the measured
+//! ID=UNIT:MIB[:PORT]`, the engine's id its component id in the bundle: llm, stt, vision or any engine of a kind of
+//! its own; the scheduler treats every engine the same, whatever its kind). A route names the engine it needs.
+//! `together`: every engine is started on demand and stays (the idle stop as before). `in-turn` (the person's choice when the measured
 //! memory cannot hold them all): before a request goes to an engine that is not running, the running engines that do
 //! not fit next to it (with `--engines-budget-mb` 0: all others) finish what they have in flight (never stopped with
 //! requests in flight; an engine stays loaded at least `--engine-hold-seconds` after its start so two harnesses cannot
@@ -25,30 +26,16 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Kind {
-    Llm,
-    Stt,
-    Vision,
-}
+/// The id of the language model's engine (the bundle's llm component; its port is the gateway's --upstream-port).
+pub const LLM: &str = "llm";
+pub const STT: &str = "stt";
+pub const VISION: &str = "vision";
 
-impl Kind {
-    pub fn word(self) -> &'static str {
-        match self {
-            Kind::Llm => "llm",
-            Kind::Stt => "stt",
-            Kind::Vision => "vision",
-        }
-    }
-
-    pub fn from_word(s: &str) -> Option<Kind> {
-        match s {
-            "llm" => Some(Kind::Llm),
-            "stt" => Some(Kind::Stt),
-            "vision" => Some(Kind::Vision),
-            _ => None,
-        }
-    }
+/// An engine's id: its component id in the bundle (`^[a-z][a-z0-9-]{0,39}$`, the unit is llmcf-<id>.service).
+pub fn is_engine_id(s: &str) -> bool {
+    (1..=40).contains(&s.len())
+        && s.as_bytes()[0].is_ascii_lowercase()
+        && s.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
 }
 
 /// One route of the gateway to an engine: the client's method and path, the engine it needs and the engine's own path
@@ -57,17 +44,17 @@ impl Kind {
 pub struct Route {
     pub method: &'static str,
     pub path: &'static str,
-    pub engine: Kind,
+    pub engine: &'static str,
     pub upstream: &'static str,
 }
 
 /// The routing table: every route to an engine the gateway serves (/health and /metrics are its own). A chat request
 /// with image parts goes to the vision engine instead (`for_request`). A new route is one line here.
 pub const ROUTES: [Route; 4] = [
-    Route { method: "GET", path: "/v1/models", engine: Kind::Llm, upstream: "/v1/models" },
-    Route { method: "POST", path: "/v1/chat/completions", engine: Kind::Llm, upstream: "/v1/chat/completions" },
-    Route { method: "POST", path: "/v1/completions", engine: Kind::Llm, upstream: "/v1/completions" },
-    Route { method: "POST", path: "/v1/audio/transcriptions", engine: Kind::Stt, upstream: "/inference" },
+    Route { method: "GET", path: "/v1/models", engine: LLM, upstream: "/v1/models" },
+    Route { method: "POST", path: "/v1/chat/completions", engine: LLM, upstream: "/v1/chat/completions" },
+    Route { method: "POST", path: "/v1/completions", engine: LLM, upstream: "/v1/completions" },
+    Route { method: "POST", path: "/v1/audio/transcriptions", engine: STT, upstream: "/inference" },
 ];
 
 /// The route of a method and path (its place in ROUTES).
@@ -76,15 +63,15 @@ pub fn route_index(method: &str, path: &str) -> Option<usize> {
 }
 
 /// The engine a route needs (None: no engine; such a route is the gateway's own).
-pub fn for_route(path: &str) -> Option<Kind> {
+pub fn for_route(path: &str) -> Option<&'static str> {
     ROUTES.iter().find(|r| r.path == path).map(|r| r.engine)
 }
 
 /// The engine one request goes to: a chat request with image parts to the vision engine (a llama-server of its own
 /// with the projector), every other one to its route's engine.
-pub fn for_request(path: &str, images: bool) -> Option<Kind> {
+pub fn for_request(path: &str, images: bool) -> Option<&'static str> {
     match for_route(path) {
-        Some(Kind::Llm) if images && path == "/v1/chat/completions" => Some(Kind::Vision),
+        Some(LLM) if images && path == "/v1/chat/completions" => Some(VISION),
         other => other,
     }
 }
@@ -104,21 +91,27 @@ impl Mode {
     }
 }
 
-/// One engine as `--engine NAME=UNIT:MIB[:PORT]` gives it: its unit, its measured memory need, the loopback port of its
-/// health check (none: the unit's own state; the llm's is the gateway's --upstream-port).
+/// One engine as `--engine ID=UNIT:MIB[:PORT]` gives it: its id, its unit, its measured memory need, the loopback
+/// port of its health check (none: the unit's own state; the llm's is the gateway's --upstream-port).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Spec {
-    pub kind: Kind,
+    pub id: String,
     pub unit: String,
     pub mib: u64,
     pub port: Option<u16>,
 }
 
-/// `NAME=UNIT:MIB[:PORT]`, every part with its bound.
+/// `ID=UNIT:MIB[:PORT]`, every part with its bound.
 pub fn parse_spec(v: &str) -> Result<Spec, String> {
-    let bad = || "--engine is NAME=UNIT:MIB[:PORT] (NAME llm, stt or vision; UNIT llmcf-<name>.service)".to_string();
+    let bad = || {
+        "--engine is ID=UNIT:MIB[:PORT] (ID the engine's component id such as llm, stt, vision or detect; UNIT \
+         llmcf-<id>.service)"
+            .to_string()
+    };
     let (name, rest) = v.split_once('=').ok_or_else(bad)?;
-    let kind = Kind::from_word(name).ok_or_else(bad)?;
+    if !is_engine_id(name) {
+        return Err(bad());
+    }
     let mut parts = rest.split(':');
     let unit = parts.next().filter(|u| crate::args::is_unit(u)).ok_or_else(bad)?;
     let digits = |s: &str, max: u64| -> Option<u64> {
@@ -135,7 +128,7 @@ pub fn parse_spec(v: &str) -> Result<Spec, String> {
     if parts.next().is_some() {
         return Err(bad());
     }
-    Ok(Spec { kind, unit: unit.to_string(), mib, port })
+    Ok(Spec { id: name.to_string(), unit: unit.to_string(), mib, port })
 }
 
 pub type Fut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -228,7 +221,7 @@ impl Drop for Ticket {
 /// An engine's state for /health and /metrics.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EngineState {
-    pub kind: Kind,
+    pub id: String,
     pub unit: String,
     pub mib: u64,
     pub state: &'static str,
@@ -256,12 +249,12 @@ impl Scheduler {
         self.slots.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    pub fn index(&self, kind: Kind) -> Option<usize> {
-        self.specs.iter().position(|s| s.kind == kind)
+    pub fn index(&self, id: &str) -> Option<usize> {
+        self.specs.iter().position(|s| s.id == id)
     }
 
-    pub fn running(&self, kind: Kind) -> bool {
-        self.index(kind).map(|i| self.lock()[i].running).unwrap_or(false)
+    pub fn running(&self, id: &str) -> bool {
+        self.index(id).map(|i| self.lock()[i].running).unwrap_or(false)
     }
 
     pub fn states(&self) -> Vec<EngineState> {
@@ -270,7 +263,7 @@ impl Scheduler {
             .iter()
             .zip(slots.iter())
             .map(|(spec, s)| EngineState {
-                kind: spec.kind,
+                id: spec.id.clone(),
                 unit: spec.unit.clone(),
                 mib: spec.mib,
                 state: if s.starting {
@@ -325,10 +318,10 @@ impl Scheduler {
         None
     }
 
-    /// A ticket for a request to engine `kind`, the engine running (started, and in turn the others stopped, first);
+    /// A ticket for a request to the engine `id`, the engine running (started, and in turn the others stopped, first);
     /// Ok with the time the request waited for it, Err with the reason (the caller answers 503 with Retry-After).
-    pub async fn enter(self: &Arc<Self>, hooks: &dyn Hooks, kind: Kind) -> Result<(Ticket, Duration), String> {
-        let idx = self.index(kind).ok_or_else(|| format!("the board runs no {} engine", kind.word()))?;
+    pub async fn enter(self: &Arc<Self>, hooks: &dyn Hooks, id: &str) -> Result<(Ticket, Duration), String> {
+        let idx = self.index(id).ok_or_else(|| format!("the board runs no {id} engine"))?;
         if let Some(t) = self.try_enter(idx) {
             return Ok((t, Duration::ZERO));
         }
@@ -355,18 +348,17 @@ impl Scheduler {
         }
         self.changed.notify_waiters();
         if let Err(why) = done {
-            eprintln!("llmcf-gateway: the {} engine is not ready: {why}", kind.word());
+            eprintln!("llmcf-gateway: the {id} engine is not ready: {why}");
             return Err(why);
         }
         let waited = started.elapsed();
         if !victims.is_empty() {
             self.metrics.switches.fetch_add(victims.len() as u64, Relaxed);
             self.metrics.switch_wait_micros.fetch_add(waited.as_micros() as u64, Relaxed);
-            let names: Vec<&str> = victims.iter().map(|&i| self.specs[i].kind.word()).collect();
+            let names: Vec<&str> = victims.iter().map(|&i| self.specs[i].id.as_str()).collect();
             eprintln!(
-                "llmcf-gateway: engines in turn: {} stopped for {} after {}ms",
+                "llmcf-gateway: engines in turn: {} stopped for {id} after {}ms",
                 names.join(","),
-                kind.word(),
                 waited.as_millis()
             );
         }
@@ -464,14 +456,14 @@ impl Scheduler {
         Ok(())
     }
 
-    /// The engine `kind` running as `enter` makes it, without a request (the gateway's start).
-    pub async fn prepare(self: &Arc<Self>, hooks: &dyn Hooks, kind: Kind) -> Result<(), String> {
-        self.enter(hooks, kind).await.map(|_| ())
+    /// The engine `id` running as `enter` makes it, without a request (the gateway's start).
+    pub async fn prepare(self: &Arc<Self>, hooks: &dyn Hooks, id: &str) -> Result<(), String> {
+        self.enter(hooks, id).await.map(|_| ())
     }
 
     /// An engine whose health check failed although it was taken as running: the next request starts it again.
-    pub fn mark_down(&self, kind: Kind) {
-        if let Some(i) = self.index(kind) {
+    pub fn mark_down(&self, id: &str) {
+        if let Some(i) = self.index(id) {
             let mut slots = self.lock();
             if slots[i].inflight <= 1 {
                 slots[i].running = false;
@@ -504,16 +496,13 @@ impl Scheduler {
                 slots[i].since = Some(Instant::now());
             } else if let Ok(true) = hooks.control("stop", &spec.unit).await {
                 self.lock()[i].stops += 1;
-                eprintln!(
-                    "llmcf-gateway: engines in turn: {} stopped at the start (it does not fit)",
-                    spec.kind.word()
-                );
+                eprintln!("llmcf-gateway: engines in turn: {} stopped at the start (it does not fit)", spec.id);
             }
         }
     }
 
     /// Stops every engine without a request for `idle` (never one with requests in flight or in a switch).
-    pub async fn stop_idle(&self, hooks: &dyn Hooks, idle: Duration) -> Vec<Kind> {
+    pub async fn stop_idle(&self, hooks: &dyn Hooks, idle: Duration) -> Vec<String> {
         let Ok(_turn) = self.turn.try_lock() else { return Vec::new() };
         let due: Vec<usize> = {
             let slots = self.lock();
@@ -533,7 +522,7 @@ impl Scheduler {
                     slots[i].running = false;
                     slots[i].since = None;
                     slots[i].stops += 1;
-                    out.push(self.specs[i].kind);
+                    out.push(self.specs[i].id.clone());
                 }
             }
         }
@@ -625,8 +614,8 @@ mod tests {
         }
     }
 
-    fn spec(kind: Kind, mib: u64) -> Spec {
-        Spec { kind, unit: format!("llmcf-{}.service", kind.word()), mib, port: None }
+    fn spec(id: &str, mib: u64) -> Spec {
+        Spec { id: id.into(), unit: format!("llmcf-{id}.service"), mib, port: None }
     }
 
     fn quick() -> Timing {
@@ -640,27 +629,32 @@ mod tests {
 
     #[test]
     fn routes_name_their_engine_and_specs_are_checked() {
-        assert_eq!(for_route("/v1/chat/completions"), Some(Kind::Llm));
-        assert_eq!(for_route("/v1/models"), Some(Kind::Llm));
-        assert_eq!(for_route("/v1/audio/transcriptions"), Some(Kind::Stt));
+        assert_eq!(for_route("/v1/chat/completions"), Some(LLM));
+        assert!(is_engine_id("detect") && is_engine_id("llm-2") && !is_engine_id("De") && !is_engine_id("a.b"));
+        assert_eq!(for_route("/v1/models"), Some(LLM));
+        assert_eq!(for_route("/v1/audio/transcriptions"), Some(STT));
         assert_eq!(for_route("/health"), None);
         assert_eq!(for_route("/v1/embeddings"), None, "not served");
         // images: the chat route goes to vision, nothing else does
-        assert_eq!(for_request("/v1/chat/completions", true), Some(Kind::Vision));
-        assert_eq!(for_request("/v1/chat/completions", false), Some(Kind::Llm));
-        assert_eq!(for_request("/v1/completions", true), Some(Kind::Llm));
-        assert_eq!(for_request("/v1/audio/transcriptions", false), Some(Kind::Stt));
+        assert_eq!(for_request("/v1/chat/completions", true), Some(VISION));
+        assert_eq!(for_request("/v1/chat/completions", false), Some(LLM));
+        assert_eq!(for_request("/v1/completions", true), Some(LLM));
+        assert_eq!(for_request("/v1/audio/transcriptions", false), Some(STT));
         assert_eq!(route_index("POST", "/v1/audio/transcriptions"), Some(3));
         assert_eq!(ROUTES[3].upstream, "/inference");
         assert_eq!(route_index("GET", "/v1/audio/transcriptions"), None);
         assert_eq!(route_index("POST", "/metrics"), None);
         assert_eq!(
             parse_spec("stt=llmcf-stt.service:300:8090").unwrap(),
-            Spec { kind: Kind::Stt, unit: "llmcf-stt.service".into(), mib: 300, port: Some(8090) }
+            Spec { id: STT.into(), unit: "llmcf-stt.service".into(), mib: 300, port: Some(8090) }
         );
         assert_eq!(parse_spec("llm=llmcf-llm.service:900").unwrap().port, None);
+        // an engine of a kind of its own is an engine like the others
+        assert_eq!(parse_spec("detect=llmcf-detect.service:120:8093").unwrap().id, "detect");
         for bad in [
-            "tts=llmcf-tts.service:10",
+            "Detect=llmcf-detect.service:10",
+            "de.tect=llmcf-detect.service:10",
+            "=llmcf-x.service:10",
             "llm=sshd.service:10",
             "llm=llmcf-llm.service",
             "llm=llmcf-llm.service:-1",
@@ -675,12 +669,7 @@ mod tests {
 
     #[test]
     fn who_is_stopped_for_whom() {
-        let s = Scheduler::new(
-            Mode::InTurn,
-            1000,
-            vec![spec(Kind::Llm, 700), spec(Kind::Stt, 200), spec(Kind::Vision, 400)],
-            quick(),
-        );
+        let s = Scheduler::new(Mode::InTurn, 1000, vec![spec(LLM, 700), spec(STT, 200), spec(VISION, 400)], quick());
         let now = Instant::now();
         let slot =
             |running: bool, used: u64| Slot { running, used: Some(now + Duration::from_secs(used)), ..Slot::default() };
@@ -692,38 +681,38 @@ mod tests {
         let slots = vec![slot(true, 2), slot(false, 0), slot(false, 0)];
         assert!(s.victims(&slots, 1).is_empty());
         // with a budget of 0 every other running engine is stopped
-        let one = Scheduler::new(Mode::InTurn, 0, vec![spec(Kind::Llm, 700), spec(Kind::Stt, 200)], quick());
+        let one = Scheduler::new(Mode::InTurn, 0, vec![spec(LLM, 700), spec(STT, 200)], quick());
         assert_eq!(one.victims(&[slot(true, 1), slot(false, 0)], 1), vec![0]);
         // together: never
-        let all = Scheduler::new(Mode::Together, 0, vec![spec(Kind::Llm, 700), spec(Kind::Stt, 200)], quick());
+        let all = Scheduler::new(Mode::Together, 0, vec![spec(LLM, 700), spec(STT, 200)], quick());
         assert!(all.victims(&[slot(true, 1), slot(false, 0)], 1).is_empty());
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn together_starts_on_demand_and_stops_nothing() {
         let fake = Fake::with(&["llmcf-llm.service"]);
-        let s = Scheduler::new(Mode::Together, 0, vec![spec(Kind::Llm, 700), spec(Kind::Stt, 200)], quick());
+        let s = Scheduler::new(Mode::Together, 0, vec![spec(LLM, 700), spec(STT, 200)], quick());
         s.reconcile(&*fake).await;
-        assert!(s.running(Kind::Llm) && !s.running(Kind::Stt));
-        let (a, _) = s.enter(&*fake, Kind::Llm).await.unwrap();
-        let (b, waited) = s.enter(&*fake, Kind::Stt).await.unwrap();
+        assert!(s.running(LLM) && !s.running(STT));
+        let (a, _) = s.enter(&*fake, LLM).await.unwrap();
+        let (b, waited) = s.enter(&*fake, STT).await.unwrap();
         assert!(waited < Duration::from_millis(200));
         assert_eq!(fake.calls(), vec!["start llmcf-stt.service"]);
-        assert!(s.running(Kind::Llm) && s.running(Kind::Stt));
+        assert!(s.running(LLM) && s.running(STT));
         drop((a, b));
         assert_eq!(s.metrics.switches.load(Relaxed), 0);
-        assert!(s.enter(&*fake, Kind::Vision).await.is_err(), "no such engine");
+        assert!(s.enter(&*fake, VISION).await.is_err(), "no such engine");
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn in_turn_waits_for_the_running_engine_to_finish_then_switches() {
         let fake = Fake::with(&["llmcf-llm.service"]);
-        let s = Scheduler::new(Mode::InTurn, 0, vec![spec(Kind::Llm, 700), spec(Kind::Stt, 200)], quick());
+        let s = Scheduler::new(Mode::InTurn, 0, vec![spec(LLM, 700), spec(STT, 200)], quick());
         s.reconcile(&*fake).await;
-        let (busy, _) = s.enter(&*fake, Kind::Llm).await.unwrap();
+        let (busy, _) = s.enter(&*fake, LLM).await.unwrap();
         let s2 = s.clone();
         let f2 = fake.clone();
-        let stt = tokio::spawn(async move { s2.enter(&*f2, Kind::Stt).await });
+        let stt = tokio::spawn(async move { s2.enter(&*f2, STT).await });
         tokio::time::sleep(Duration::from_millis(30)).await;
         // the llm has a request in flight: it is never stopped under it, and takes no new request meanwhile
         assert!(fake.is("llmcf-llm.service") && fake.calls().is_empty());
@@ -733,56 +722,71 @@ mod tests {
         let (ticket, waited) = stt.await.unwrap().unwrap();
         assert!(waited >= Duration::from_millis(25), "{waited:?}");
         assert_eq!(fake.calls(), vec!["stop llmcf-llm.service", "start llmcf-stt.service"]);
-        assert!(!s.running(Kind::Llm) && s.running(Kind::Stt));
+        assert!(!s.running(LLM) && s.running(STT));
         assert_eq!(s.metrics.switches.load(Relaxed), 1);
         assert!(s.metrics.switch_wait_micros.load(Relaxed) > 0);
         drop(ticket);
         // and back again for the next llm request
-        let (_t, _) = s.enter(&*fake, Kind::Llm).await.unwrap();
+        let (_t, _) = s.enter(&*fake, LLM).await.unwrap();
         assert_eq!(fake.calls()[2..], ["stop llmcf-stt.service".to_string(), "start llmcf-llm.service".to_string()]);
         assert_eq!(s.metrics.switches.load(Relaxed), 2);
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn an_engine_of_a_kind_of_its_own_takes_turns_like_the_others() {
+        let fake = Fake::with(&["llmcf-llm.service"]);
+        let s = Scheduler::new(Mode::InTurn, 1000, vec![spec(LLM, 700), spec("detect", 200), spec(STT, 250)], quick());
+        s.reconcile(&*fake).await;
+        // the detector fits next to the llm (900 of 1000 MiB): nothing is stopped
+        drop(s.enter(&*fake, "detect").await.unwrap());
+        assert!(s.running(LLM) && s.running("detect"));
+        // speech does not fit next to both: the least recently used (the llm) gives way, the detector stays
+        drop(s.enter(&*fake, STT).await.unwrap());
+        assert!(!s.running(LLM) && s.running("detect") && s.running(STT));
+        assert_eq!(fake.calls(), ["start llmcf-detect.service", "stop llmcf-llm.service", "start llmcf-stt.service"]);
+        assert_eq!(s.states()[1].id, "detect");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn a_busy_engine_or_a_dead_start_ends_in_a_refusal() {
         let fake = Fake::with(&["llmcf-llm.service"]);
-        let s = Scheduler::new(Mode::InTurn, 0, vec![spec(Kind::Llm, 700), spec(Kind::Stt, 200)], quick());
+        let s = Scheduler::new(Mode::InTurn, 0, vec![spec(LLM, 700), spec(STT, 200)], quick());
         s.reconcile(&*fake).await;
-        let (held, _) = s.enter(&*fake, Kind::Llm).await.unwrap();
-        let why = s.enter(&*fake, Kind::Stt).await.err().unwrap();
+        let (held, _) = s.enter(&*fake, LLM).await.unwrap();
+        let why = s.enter(&*fake, STT).await.err().unwrap();
         assert!(why.contains("stayed busy"), "{why}");
         assert!(fake.is("llmcf-llm.service"), "never stopped with a request in flight");
         assert_eq!(s.states()[0].state, "running", "a refused switch leaves the engine as it was");
         drop(held);
         fake.never_up.store(true, Relaxed);
-        let why = s.enter(&*fake, Kind::Stt).await.err().unwrap();
+        let why = s.enter(&*fake, STT).await.err().unwrap();
         assert!(why.contains("does not answer yet"), "{why}");
         assert_eq!(s.metrics.start_failures.load(Relaxed), 1);
         assert!(!fake.is("llmcf-stt.service"), "an engine that does not come up is stopped again");
         fake.never_up.store(false, Relaxed);
         fake.broken.lock().unwrap().push("llmcf-stt.service".into());
-        assert!(s.enter(&*fake, Kind::Stt).await.is_err());
+        assert!(s.enter(&*fake, STT).await.is_err());
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn an_engine_is_held_its_minimum_time_and_idle_ones_are_stopped() {
         let fake = Fake::with(&[]);
         let t = Timing { hold: Duration::from_millis(80), ..quick() };
-        let s = Scheduler::new(Mode::InTurn, 0, vec![spec(Kind::Llm, 700), spec(Kind::Stt, 200)], t);
-        drop(s.enter(&*fake, Kind::Llm).await.unwrap());
+        let s = Scheduler::new(Mode::InTurn, 0, vec![spec(LLM, 700), spec(STT, 200)], t);
+        drop(s.enter(&*fake, LLM).await.unwrap());
         let started = Instant::now();
-        drop(s.enter(&*fake, Kind::Stt).await.unwrap());
+        drop(s.enter(&*fake, STT).await.unwrap());
         assert!(started.elapsed() >= Duration::from_millis(60), "the llm stayed its minimum time");
         // reconcile at the start: two running engines do not fit in turn, the first one is kept
         let fake2 = Fake::with(&["llmcf-llm.service", "llmcf-stt.service"]);
-        let s2 = Scheduler::new(Mode::InTurn, 0, vec![spec(Kind::Llm, 700), spec(Kind::Stt, 200)], quick());
+        let s2 = Scheduler::new(Mode::InTurn, 0, vec![spec(LLM, 700), spec(STT, 200)], quick());
         s2.reconcile(&*fake2).await;
-        assert!(s2.running(Kind::Llm) && !s2.running(Kind::Stt) && !fake2.is("llmcf-stt.service"));
+        assert!(s2.running(LLM) && !s2.running(STT) && !fake2.is("llmcf-stt.service"));
         // idle: stopped, never one with a request in flight
-        let held = s2.enter(&*fake2, Kind::Llm).await.unwrap();
+        let held = s2.enter(&*fake2, LLM).await.unwrap();
         assert!(s2.stop_idle(&*fake2, Duration::ZERO).await.is_empty());
         drop(held);
-        assert_eq!(s2.stop_idle(&*fake2, Duration::ZERO).await, vec![Kind::Llm]);
+        assert_eq!(s2.stop_idle(&*fake2, Duration::ZERO).await, vec![LLM.to_string()]);
         assert!(!fake2.is("llmcf-llm.service"));
     }
 
@@ -853,15 +857,15 @@ mod tests {
             calls: Mutex::new(Vec::new()),
         });
         let specs = vec![
-            Spec { kind: Kind::Llm, unit: "llmcf-llm.service".into(), mib: 700, port: Some(llm_port) },
-            Spec { kind: Kind::Stt, unit: "llmcf-stt.service".into(), mib: 300, port: Some(stt_port) },
+            Spec { id: LLM.into(), unit: "llmcf-llm.service".into(), mib: 700, port: Some(llm_port) },
+            Spec { id: STT.into(), unit: "llmcf-stt.service".into(), mib: 300, port: Some(stt_port) },
         ];
         // 900 MiB for both: they do not fit together, so they take turns
         let s = Scheduler::new(Mode::InTurn, 900, specs, quick());
-        let (llm, _) = s.enter(&*board, Kind::Llm).await.unwrap();
+        let (llm, _) = s.enter(&*board, LLM).await.unwrap();
         assert!(http_up(llm_port).await && !http_up(stt_port).await);
         let (s2, b2) = (s.clone(), board.clone());
-        let speech = tokio::spawn(async move { s2.enter(&*b2, Kind::Stt).await });
+        let speech = tokio::spawn(async move { s2.enter(&*b2, STT).await });
         tokio::time::sleep(Duration::from_millis(40)).await;
         assert!(http_up(llm_port).await, "the llm keeps running while its request is in flight");
         drop(llm);
@@ -869,7 +873,7 @@ mod tests {
         assert!(waited >= Duration::from_millis(30));
         assert!(http_up(stt_port).await && !http_up(llm_port).await, "only the speech engine runs now");
         drop(stt);
-        let (_llm, _) = s.enter(&*board, Kind::Llm).await.unwrap();
+        let (_llm, _) = s.enter(&*board, LLM).await.unwrap();
         assert!(http_up(llm_port).await && !http_up(stt_port).await);
         assert_eq!(
             *board.calls.lock().unwrap(),

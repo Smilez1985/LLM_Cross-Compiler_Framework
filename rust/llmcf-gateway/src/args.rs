@@ -1,7 +1,7 @@
 //! The gateway's command line: `serve` and `probe`, each option with its own bound. Every other option, a value
 //! out of its bounds or an option twice is refused (exit 2); nothing is read from the environment but HOME.
 
-use crate::engines::{self, Kind, Mode, Spec};
+use crate::engines::{self, Mode, Spec, LLM, STT, VISION};
 use std::collections::HashSet;
 
 /// Where the gateway listens: loopback (127.0.0.1, plain HTTP) or the local network (every address, TLS only).
@@ -226,7 +226,7 @@ pub fn parse(args: &[String]) -> Result<Call, String> {
                         if !is_unit(v) {
                             return Err("--llm-unit is a unit llmcf-install wrote (llmcf-<name>.service)".into());
                         }
-                        s.engines.push(Spec { kind: Kind::Llm, unit: v.to_string(), mib: 0, port: None });
+                        s.engines.push(Spec { id: LLM.into(), unit: v.to_string(), mib: 0, port: None });
                     }
                     "--engine" => s.engines.push(engines::parse_spec(v)?),
                     "--engines" => {
@@ -260,34 +260,36 @@ pub fn parse(args: &[String]) -> Result<Call, String> {
                 );
             }
             for (i, e) in s.engines.iter().enumerate() {
-                if s.engines[..i].iter().any(|o| o.kind == e.kind) {
-                    return Err(format!(
-                        "the {} engine is given twice (--llm-unit is --engine llm=UNIT)",
-                        e.kind.word()
-                    ));
+                if s.engines[..i].iter().any(|o| o.id == e.id) {
+                    return Err(format!("the {} engine is given twice (--llm-unit is --engine llm=UNIT)", e.id));
                 }
                 if s.engines[..i].iter().any(|o| o.unit == e.unit) {
                     return Err(format!("{} is given for two engines", e.unit));
                 }
-                match (e.kind, e.port) {
-                    (Kind::Llm, Some(p)) if p != s.upstream_port => {
+                match (e.id.as_str(), e.port) {
+                    (LLM, Some(p)) if p != s.upstream_port => {
                         return Err("the llm engine's port is --upstream-port".into())
                     }
-                    (Kind::Stt | Kind::Vision, Some(p)) if p == s.port || p == s.upstream_port => {
-                        return Err(format!("the {} engine's port is another one's", e.kind.word()))
+                    (_, Some(p)) if e.id != LLM && (p == s.port || p == s.upstream_port) => {
+                        return Err(format!("the {} engine's port is another one's", e.id))
                     }
                     _ => {}
                 }
+                if let Some(p) = e.port {
+                    if s.engines[..i].iter().any(|o| o.port == Some(p)) {
+                        return Err(format!("the {} engine's port is another one's", e.id));
+                    }
+                }
                 // the speech or vision engine's port: from --engine, or the same as --stt-port / --vision-port
-                let given = match e.kind {
-                    Kind::Stt => &mut s.stt_port,
-                    Kind::Vision => &mut s.vision_port,
-                    Kind::Llm => continue,
+                let given = match e.id.as_str() {
+                    STT => &mut s.stt_port,
+                    VISION => &mut s.vision_port,
+                    _ => continue,
                 };
                 match (*given, e.port) {
                     (None, p) => *given = p,
                     (Some(a), Some(b)) if a != b => {
-                        return Err(format!("the {} engine's port is given twice, differently", e.kind.word()))
+                        return Err(format!("the {} engine's port is given twice, differently", e.id))
                     }
                     _ => {}
                 }
@@ -395,11 +397,22 @@ mod tests {
             panic!()
         };
         assert_eq!(s.engines.len(), 2);
-        assert_eq!((s.engines[1].kind, s.engines[1].mib, s.engines[1].port), (Kind::Stt, 300, Some(8090)));
+        assert_eq!((s.engines[1].id.as_str(), s.engines[1].mib, s.engines[1].port), (STT, 300, Some(8090)));
         assert_eq!((s.engines_mode, s.engines_budget_mb, s.engine_hold_seconds), (Mode::InTurn, 1000, 30));
         // --llm-unit stays: the llm engine without its memory
         let Call::Serve(s) = parse(&a(&["serve", "--llm-unit", "llmcf-llm.service"])).unwrap() else { panic!() };
-        assert_eq!(s.engines, vec![Spec { kind: Kind::Llm, unit: "llmcf-llm.service".into(), mib: 0, port: None }]);
+        assert_eq!(s.engines, vec![Spec { id: LLM.into(), unit: "llmcf-llm.service".into(), mib: 0, port: None }]);
+        // an engine of a kind of its own: its id and port, the same rules as the others
+        let Call::Serve(s) = parse(&a(&["serve", "--engine", "detect=llmcf-detect.service:120:8093"])).unwrap() else {
+            panic!()
+        };
+        assert_eq!((s.engines[0].id.as_str(), s.engines[0].port, s.stt_port), ("detect", Some(8093), None));
+        for bad in [
+            &["serve", "--engine", "detect=llmcf-detect.service:1:8088"][..],
+            &["serve", "--engine", "detect=llmcf-detect.service:1:8093", "--engine", "cam=llmcf-cam.service:1:8093"],
+        ] {
+            assert!(parse(&a(bad)).is_err(), "{bad:?}");
+        }
         assert_eq!(s.engines_mode, Mode::Together);
     }
 

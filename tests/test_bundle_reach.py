@@ -77,11 +77,14 @@ def test_the_frameworks_blocks_reach_todays_routes_exactly():
 DETECT = """schema: llmcf-bundle-block/1
 id: detect-demo
 version: 1.0.0
-kind: stt
+kind: detect
 title: Detection (a hypothetical engine)
 status: ready
 variables:
   - {name: port, type: port, default: 8093}
+  - {name: memory_limit_mb, type: memory_mb, default: 512}
+  - {name: user, type: user, default: llmcf}
+  - {name: autostart, type: bool, default: false}
 files:
   - {role: program, from: person, name: detect-server, formats: [elf]}
   - {role: model, from: person, name: model.bin, licence: required}
@@ -105,7 +108,7 @@ reach:
 
 def test_a_block_of_any_kind_says_how_it_is_reached(tmp_path):
     block = blk.parse_block(DETECT, tmp_path)
-    assert block.kind == "stt" and block.reach.port == "port"
+    assert block.kind == "detect" and block.reach.port == "port"
     first, events = block.reach.routes
     assert (first.method, first.protocol, first.max_body_kb, first.timeout_s, first.stream) == \
         ("POST", "http-multipart", 8192, 60, False)
@@ -137,3 +140,55 @@ def test_reach_belongs_to_an_engine_block(tmp_path):
     text = gateway + "reach:\n  routes:\n    - {path: /v1/x, protocol: http-json}\n"
     with pytest.raises(blk.BlockError, match="reach belongs"):
         blk.parse_block(text, tmp_path)
+
+
+# --- open kinds: an engine of a kind of its own is treated like the others -------------------------------------------
+
+def _own_detect(app: Path) -> None:
+    folder = app / "community" / "blocks" / "detect-demo"
+    folder.mkdir(parents=True)
+    (folder / "block.yml").write_text(DETECT, encoding="utf-8")
+    (folder / "README.md").write_text("# Detection\n\n## Models\n\nA detection model.\n", encoding="utf-8")
+
+
+def _detect_plan(tmp_path, engines="together"):
+    from orchestrator.runtime.bundle import generator as gen
+    from tests.test_board_bundle import DEVICE, RK3566, _elf, _files, _runtime_tarball
+    from tests.test_bundle_gateway import _programs
+    app = tmp_path / "app"
+    _own_detect(app)
+    model, _w, _p = _files(tmp_path)
+    prog = tmp_path / "detect-server"
+    prog.write_bytes(_elf(0xB7))
+    weights = tmp_path / "detect.bin"
+    weights.write_bytes(b"\0" * 4096)
+    yes = {"autostart": "yes"}
+    sel = gen.Selection(blocks=["llm-llama-server", "detect-demo", "gateway-llmcf"], engines=engines,
+                        values={"llm": dict(yes), "detect": dict(yes), "gateway": dict(yes)},
+                        files={"llm": {"model": gen.FileChoice(path=str(model), licence="apache-2.0")},
+                               "detect": {"program": gen.FileChoice(path=str(prog)),
+                                          "model": gen.FileChoice(path=str(weights), licence="apache-2.0")}})
+    return gen.plan_bundle(sel, catalog=blk.load_catalog(app), profile=RK3566, device_id=DEVICE, offline=False,
+                           bundle_id="kind-test", runtime=_runtime_tarball(tmp_path), programs=_programs(tmp_path),
+                           allow_own=True, unmeasured_ok=True)
+
+
+def test_an_engine_of_a_kind_of_its_own_is_started_and_stopped_like_the_others(tmp_path):
+    from orchestrator.runtime.bundle.manifest import dump_manifest, is_engine, load_manifest, valid_kind
+    assert valid_kind("detect") and is_engine("detect") and not is_engine("gateway") and not is_engine("harness")
+    assert not valid_kind("Detect") and not valid_kind("d") and not valid_kind("de_tect")
+    plan = _detect_plan(tmp_path, engines="in-turn")
+    assert plan.ok, plan.problems
+    comps = {c.id: c for c in plan.manifest.components}
+    assert comps["detect"].kind == "detect"
+    assert set(plan.engines["engines_mb"]) == {"llm", "detect"}
+    control = next(a for a in plan.manifest.root_actions if a.action == "allow_unit_control")
+    assert control.units == ("llmcf-llm.service", "llmcf-detect.service")
+    units = {a.unit: a for a in plan.manifest.root_actions if a.action == "install_unit"}
+    assert units["llmcf-detect.service"].on_demand and units["llmcf-llm.service"].on_demand
+    cgroup = next(a for a in plan.manifest.root_actions if a.action == "set_cgroup" and a.component == "detect")
+    assert cgroup.oom_score_adj == 500, "the out-of-memory order of every engine"
+    args = list(comps["gateway"].start.args)
+    mb = plan.engines["engines_mb"]["detect"]
+    assert f"detect=llmcf-detect.service:{mb}:8093" in args and args[args.index("--engines") + 1] == "in-turn"
+    assert load_manifest(dump_manifest(plan.manifest)) == plan.manifest

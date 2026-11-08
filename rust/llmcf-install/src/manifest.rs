@@ -23,10 +23,24 @@ pub const ROOT_ACTIONS: [&str; 10] = [
     "run_harness",
     "allow_unit_control",
 ];
-/// The engine kinds whose units the gateway may start and stop (allow_unit_control; manifest.ENGINE_KINDS).
-pub const ENGINE_KINDS: [&str; 3] = ["llm", "stt", "vision"];
-/// At most this many units in one allow_unit_control (one per engine kind).
-pub const MAX_CONTROL_UNITS: usize = 3;
+/// The component kinds that are no engine (manifest.NOT_ENGINES): every other kind is an engine whose unit the
+/// gateway may start and stop (allow_unit_control), whatever the kind is called.
+pub const NOT_ENGINES: [&str; 2] = ["gateway", "harness"];
+/// At most this many units in one allow_unit_control (one per engine component, manifest.MAX_CONTROL_UNITS).
+pub const MAX_CONTROL_UNITS: usize = 15;
+
+/// A component kind (manifest.RE_KIND `^[a-z][a-z0-9-]{1,31}$`): the known ones (llm, stt, tts, vision, gateway,
+/// harness) and any kind of its own.
+pub fn is_kind(s: &str) -> bool {
+    (2..=32).contains(&s.len())
+        && s.as_bytes()[0].is_ascii_lowercase()
+        && s.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+}
+
+/// Whether a component of `kind` is an engine (manifest.is_engine).
+pub fn is_engine(kind: &str) -> bool {
+    is_kind(kind) && !NOT_ENGINES.contains(&kind)
+}
 /// The two files of a harness component (manifest.HARNESS_ARCHIVE, manifest.HARNESS_WATCH).
 pub const HARNESS_ARCHIVE: &str = "harness.tar";
 pub const HARNESS_WATCH: &str = "harness_watch.sh";
@@ -491,7 +505,10 @@ fn component(v: &Value) -> R<Component> {
         return Err("a component id is lower-case letters, digits, '.', '_' and '-'".into());
     }
     let what = format!("component {id}");
-    let kind = one_of(text(m, "kind", &what)?, &["llm", "stt", "tts", "vision", "gateway", "harness"], &what)?;
+    let kind = text(m, "kind", &what)?;
+    if !is_kind(kind) {
+        return Err(format!("{what}: a kind is 2 to 32 lower-case letters, digits and '-', starting with a letter"));
+    }
     if !is_id(text(m, "block", &what)?) {
         return Err(format!("{what}: the block is no block id"));
     }
@@ -728,8 +745,8 @@ fn root_action(v: &Value) -> R<RootAction> {
 
 /// allow_unit_control in its bundle (manifest.py BundleManifest._whole, the same rule): it belongs to the bundle's
 /// gateway component, names the account the gateway's own unit runs as, and each of its units is the unit an
-/// install_unit of this bundle writes for one of its engine components (llm, stt, vision) under the bundle's one
-/// naming rule, `llmcf-<component id>.service`. Nothing else: no other unit, no pattern, no wildcard.
+/// install_unit of this bundle writes for one of its engine components (any kind but gateway and harness) under the
+/// bundle's one naming rule, `llmcf-<component id>.service`. Nothing else: no other unit, no pattern, no wildcard.
 fn control_rule(a: &RootAction, comp: &Component, components: &[Component], actions: &[RootAction]) -> R<()> {
     let what = "root action allow_unit_control";
     if comp.kind != "gateway" {
@@ -743,7 +760,7 @@ fn control_rule(a: &RootAction, comp: &Component, components: &[Component], acti
         let engine = actions
             .iter()
             .filter(|b| b.action == "install_unit" && b.unit.as_deref() == Some(unit))
-            .find_map(|b| components.iter().find(|c| c.id == b.component && ENGINE_KINDS.contains(&c.kind.as_str())));
+            .find_map(|b| components.iter().find(|c| c.id == b.component && is_engine(&c.kind)));
         match engine {
             Some(c) if *unit == format!("llmcf-{}.service", c.id) => {}
             _ => return Err(format!("{what}: {unit} is no engine unit of this bundle")),
@@ -856,9 +873,7 @@ pub fn parse(data: &[u8]) -> R<Manifest> {
         if a.on_demand {
             let control = root_actions.iter().find(|b| b.action == "allow_unit_control");
             let unit = a.unit.as_deref().unwrap_or("");
-            if !ENGINE_KINDS.contains(&comp.kind.as_str())
-                || !control.is_some_and(|c| c.units.iter().any(|u| u == unit))
-            {
+            if !is_engine(&comp.kind) || !control.is_some_and(|c| c.units.iter().any(|u| u == unit)) {
                 return Err(format!(
                     "root action install_unit: {unit} is on demand but no engine unit the bundle's gateway may start"
                 ));

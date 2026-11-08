@@ -16,7 +16,7 @@
 use crate::args::{Bind, Serve};
 use crate::audio;
 use crate::control;
-use crate::engines::{self, Fut, Hooks, Kind, Scheduler, Spec, Ticket, Timing, ROUTES};
+use crate::engines::{self, Fut, Hooks, Scheduler, Spec, Ticket, Timing, LLM, ROUTES, STT, VISION};
 use crate::images::ImageRules;
 use crate::limits::RateLimit;
 use crate::memory::{self, Guard};
@@ -114,11 +114,12 @@ impl State {
     }
 
     /// The loopback port of an engine (None: the board has none the gateway speaks to).
-    fn port_of(&self, kind: Kind) -> Option<u16> {
-        match kind {
-            Kind::Llm => Some(self.cfg.upstream_port),
-            Kind::Stt => self.cfg.stt_port,
-            Kind::Vision => self.cfg.vision_port,
+    fn port_of(&self, id: &str) -> Option<u16> {
+        match id {
+            LLM => Some(self.cfg.upstream_port),
+            STT => self.cfg.stt_port,
+            VISION => self.cfg.vision_port,
+            _ => self.cfg.engines.iter().find(|e| e.id == id).and_then(|e| e.port),
         }
     }
 }
@@ -252,26 +253,26 @@ async fn upstream(port: u16, req: Request<Chunks>) -> Result<Response<Incoming>,
 /// without one (it has none).
 fn upstream_request(
     state: &State,
-    kind: Kind,
+    engine: &str,
     method: Method,
     path: &str,
     body: Chunks,
     ctype: &str,
 ) -> Request<Chunks> {
-    let port = state.port_of(kind).unwrap_or(0);
+    let port = state.port_of(engine).unwrap_or(0);
     let mut b = Request::builder()
         .method(method)
         .uri(path)
         .header(HOST, format!("127.0.0.1:{port}"))
         .header(CONTENT_TYPE, ctype);
-    if let (Some(key), Kind::Llm | Kind::Vision) = (&state.key, kind) {
+    if let (Some(key), LLM | VISION) = (&state.key, engine) {
         b = b.header(AUTHORIZATION, format!("Bearer {key}"));
     }
     b.body(body).unwrap_or_else(|_| Request::new(Chunks::new(Vec::new())))
 }
 
 async fn upstream_json(state: &State, path: &str) -> Option<Value> {
-    let req = upstream_request(state, Kind::Llm, Method::GET, path, Chunks::new(Vec::new()), "application/json");
+    let req = upstream_request(state, LLM, Method::GET, path, Chunks::new(Vec::new()), "application/json");
     let resp = tokio::time::timeout(Duration::from_secs(3), upstream(state.cfg.upstream_port, req)).await.ok()?.ok()?;
     if !resp.status().is_success() {
         return None;
@@ -312,12 +313,12 @@ impl Hooks for State {
     fn up<'a>(&'a self, spec: &'a Spec) -> Fut<'a, bool> {
         Box::pin(async move {
             if let Some(board) = &self.board {
-                if spec.kind != Kind::Llm {
+                if spec.id != LLM {
                     return board.up(spec).await;
                 }
             }
-            match (spec.kind, spec.port) {
-                (Kind::Llm, _) => upstream_up(self).await,
+            match (spec.id.as_str(), spec.port) {
+                (LLM, _) => upstream_up(self).await,
                 (_, Some(port)) => engines::http_up(port).await,
                 (_, None) => matches!(run_systemctl("is-active", spec.unit.clone()).await, Ok(true)),
             }
@@ -325,26 +326,26 @@ impl Hooks for State {
     }
 }
 
-/// The engine `kind` ready for a request: an engine the gateway does not control runs by itself (the llm must answer
+/// The engine `id` ready for a request: an engine the gateway does not control runs by itself (the llm must answer
 /// its /health; the others are asked by the request itself); one it controls gets the scheduler's ticket (the engine
 /// started, in turn the others stopped first) and, for the llm, its answer to /health. Err with the person's words
 /// (the caller answers 503 with Retry-After).
-async fn engine_ready(state: &State, kind: Kind, note: &mut String) -> Result<Option<Ticket>, String> {
-    let Some(sched) = state.engines.as_ref().filter(|s| s.index(kind).is_some()) else {
-        return if kind != Kind::Llm || upstream_up(state).await {
+async fn engine_ready(state: &State, id: &str, note: &mut String) -> Result<Option<Ticket>, String> {
+    let Some(sched) = state.engines.as_ref().filter(|s| s.index(id).is_some()) else {
+        return if id != LLM || upstream_up(state).await {
             Ok(None)
         } else {
             Err("the model server does not answer".into())
         };
     };
-    let (ticket, waited) = sched.enter(state, kind).await.inspect_err(|_| {
-        note.push_str(&format!(" engine={}:not-ready", kind.word()));
+    let (ticket, waited) = sched.enter(state, id).await.inspect_err(|_| {
+        note.push_str(&format!(" engine={id}:not-ready"));
     })?;
     if waited > Duration::ZERO {
-        note.push_str(&format!(" engine={}:{}ms", kind.word(), waited.as_millis()));
+        note.push_str(&format!(" engine={id}:{}ms", waited.as_millis()));
     }
-    if kind == Kind::Llm && !upstream_up(state).await {
-        sched.mark_down(kind);
+    if id == LLM && !upstream_up(state).await {
+        sched.mark_down(id);
         return Err("the model server does not answer".into());
     }
     Ok(Some(ticket))
@@ -362,8 +363,8 @@ pub async fn idle_stopper(state: Arc<State>) {
         if state.queue.queued() > 0 {
             continue;
         }
-        for kind in sched.stop_idle(&*state, Duration::from_secs(minutes as u64 * 60)).await {
-            eprintln!("llmcf-gateway: the {} engine was stopped after {minutes} idle minutes", kind.word());
+        for id in sched.stop_idle(&*state, Duration::from_secs(minutes as u64 * 60)).await {
+            eprintln!("llmcf-gateway: the {id} engine was stopped after {minutes} idle minutes");
         }
     }
 }
@@ -375,14 +376,14 @@ fn engine_facts(state: &State) -> Value {
     let list: Vec<Value> = sched
         .states()
         .into_iter()
-        .map(|e| json!({"name": e.kind.word(), "unit": e.unit, "mib": e.mib, "state": e.state, "inflight": e.inflight}))
+        .map(|e| json!({"name": e.id, "unit": e.unit, "mib": e.mib, "state": e.state, "inflight": e.inflight}))
         .collect();
     json!({"mode": sched.mode.word(), "budget_mib": sched.budget_mib, "list": list})
 }
 
 async fn health(state: &State) -> Response<Body> {
     let up = upstream_up(state).await;
-    let stopped = state.engines.as_ref().is_some_and(|s| s.index(Kind::Llm).is_some() && !s.running(Kind::Llm));
+    let stopped = state.engines.as_ref().is_some_and(|s| s.index(LLM).is_some() && !s.running(LLM));
     let upstream = if up {
         "up"
     } else if stopped {
@@ -421,11 +422,11 @@ fn route_facts(state: &State) -> Value {
     let list: Vec<Value> = ROUTES
         .iter()
         .map(|r| {
-            let mut v = json!({"method": r.method, "path": r.path, "engine": r.engine.word(), "to": r.upstream,
+            let mut v = json!({"method": r.method, "path": r.path, "engine": r.engine, "to": r.upstream,
                                "port": state.port_of(r.engine)});
             if r.path == "/v1/chat/completions" {
                 let images = state.limits().images.is_some();
-                v["with_images"] = if images { json!(Kind::Vision.word()) } else { Value::Null };
+                v["with_images"] = if images { json!(VISION) } else { Value::Null };
                 v["vision_port"] = json!(state.cfg.vision_port);
             }
             v
@@ -451,7 +452,7 @@ fn metrics(state: &State) -> Response<Body> {
     let (llm_starts, llm_stops) = state
         .engines
         .as_ref()
-        .and_then(|s| s.states().into_iter().find(|e| e.kind == Kind::Llm))
+        .and_then(|s| s.states().into_iter().find(|e| e.id == LLM))
         .map(|e| (e.starts, e.stops))
         .unwrap_or((0, 0));
     let em = state.engines.as_ref().map(|s| &s.metrics);
@@ -525,7 +526,7 @@ fn metrics(state: &State) -> Response<Body> {
             text.push_str(&format!("# HELP {name} {help}\n# TYPE {name} gauge\n"));
             for e in sched.states() {
                 let v = if name.ends_with("running") { (e.state == "running") as u64 } else { e.inflight as u64 };
-                text.push_str(&format!("{name}{{engine=\"{}\"}} {v}\n", e.kind.word()));
+                text.push_str(&format!("{name}{{engine=\"{}\"}} {v}\n", e.id));
             }
         }
     }
@@ -556,11 +557,12 @@ enum Answer {
     Speech { text: bool },
 }
 
-fn engine_name(kind: Kind) -> &'static str {
-    match kind {
-        Kind::Llm => "the model server",
-        Kind::Stt => "the speech engine",
-        Kind::Vision => "the vision engine",
+fn engine_name(id: &str) -> String {
+    match id {
+        LLM => "the model server".into(),
+        STT => "the speech engine".into(),
+        VISION => "the vision engine".into(),
+        other => format!("the {other} engine"),
     }
 }
 
@@ -575,29 +577,29 @@ struct Outgoing {
 
 async fn forward(
     state: &State,
-    kind: Kind,
+    engine: &str,
     path: &str,
     out: Outgoing,
     permit: Permit,
     t: &mut Trace,
 ) -> Response<Body> {
     let Outgoing { body, ctype, answer } = out;
-    let ticket = match engine_ready(state, kind, &mut t.note).await {
+    let ticket = match engine_ready(state, engine, &mut t.note).await {
         Ok(ticket) => ticket,
         Err(e) => {
             state.metrics.upstream_errors.fetch_add(1, Relaxed);
             return retry(error(StatusCode::SERVICE_UNAVAILABLE, "upstream_down", &e), 15);
         }
     };
-    let Some(port) = state.port_of(kind) else {
+    let Some(port) = state.port_of(engine) else {
         return error(StatusCode::NOT_IMPLEMENTED, "no_engine", "the board runs no such engine");
     };
-    let req = upstream_request(state, kind, Method::POST, path, body, &ctype);
+    let req = upstream_request(state, engine, Method::POST, path, body, &ctype);
     let resp = match upstream(port, req).await {
         Ok(resp) => resp,
         Err(e) => {
             state.metrics.upstream_errors.fetch_add(1, Relaxed);
-            let msg = if e == "down" { format!("{} does not answer", engine_name(kind)) } else { e };
+            let msg = if e == "down" { format!("{} does not answer", engine_name(engine)) } else { e };
             return retry(error(StatusCode::BAD_GATEWAY, "upstream_error", &msg), 5);
         }
     };
@@ -711,7 +713,7 @@ async fn route(state: &Arc<State>, conn: &Conn, req: Request<Incoming>, t: &mut 
         return error(StatusCode::NOT_FOUND, "not_found", "no such route");
     };
     t.route = Some(idx);
-    let speech = ROUTES[idx].engine == Kind::Stt;
+    let speech = ROUTES[idx].engine == STT;
     if speech && state.cfg.stt_port.is_none() {
         return error(
             StatusCode::NOT_IMPLEMENTED,
@@ -727,12 +729,11 @@ async fn route(state: &Arc<State>, conn: &Conn, req: Request<Incoming>, t: &mut 
         return retry(error(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "too many requests"), seconds);
     }
     if req.method() == Method::GET {
-        let ticket = match engine_ready(state, Kind::Llm, &mut t.note).await {
+        let ticket = match engine_ready(state, LLM, &mut t.note).await {
             Ok(t) => t,
             Err(e) => return retry(error(StatusCode::SERVICE_UNAVAILABLE, "upstream_down", &e), 15),
         };
-        let get =
-            upstream_request(state, Kind::Llm, Method::GET, "/v1/models", Chunks::new(Vec::new()), "application/json");
+        let get = upstream_request(state, LLM, Method::GET, "/v1/models", Chunks::new(Vec::new()), "application/json");
         return match upstream(state.cfg.upstream_port, get).await {
             Ok(resp) => {
                 t.engine_answered = true;
@@ -860,7 +861,7 @@ async fn route(state: &Arc<State>, conn: &Conn, req: Request<Incoming>, t: &mut 
         if o.images > 0 { format!(" images={}", o.images) } else { String::new() },
         if o.stream { " stream" } else { "" }
     );
-    let engine = engines::for_request(&path, o.images > 0).unwrap_or(Kind::Llm);
+    let engine = engines::for_request(&path, o.images > 0).unwrap_or(LLM);
     let out = Chunks::new(vec![Bytes::from(o.body.to_string())]);
     drop(o);
     let out = Outgoing { body: out, ctype: "application/json".into(), answer: Answer::Pass };
@@ -890,8 +891,8 @@ async fn transcribe(
     let answer = Answer::Speech { text: tr.format == "text" };
     drop(tr);
     drop(body);
-    let path = ROUTES.iter().find(|r| r.engine == Kind::Stt).map(|r| r.upstream).unwrap_or("/inference");
-    forward(state, Kind::Stt, path, Outgoing { body: form, ctype, answer }, permit, t).await
+    let path = ROUTES.iter().find(|r| r.engine == STT).map(|r| r.upstream).unwrap_or("/inference");
+    forward(state, STT, path, Outgoing { body: form, ctype, answer }, permit, t).await
 }
 
 // --- listening ---------------------------------------------------------------------------------------------
@@ -987,7 +988,7 @@ pub async fn serve(state: Arc<State>, tls_cfg: Option<Arc<rustls::ServerConfig>>
     if let Some(sched) = state.engines.clone() {
         eprintln!(
             "llmcf-gateway: engines {} ({}){}",
-            sched.specs.iter().map(|e| format!("{}={}MiB", e.kind.word(), e.mib)).collect::<Vec<_>>().join(","),
+            sched.specs.iter().map(|e| format!("{}={}MiB", e.id, e.mib)).collect::<Vec<_>>().join(","),
             sched.mode.word(),
             if sched.budget_mib > 0 { format!(", {} MiB together", sched.budget_mib) } else { String::new() }
         );
@@ -995,8 +996,8 @@ pub async fn serve(state: Arc<State>, tls_cfg: Option<Arc<rustls::ServerConfig>>
         tokio::spawn(async move {
             // which engines run already (in turn, those that do not fit together are stopped), then the llm
             sched.reconcile(&*st).await;
-            if sched.index(Kind::Llm).is_some() && !sched.running(Kind::Llm) {
-                if let Err(e) = sched.prepare(&*st, Kind::Llm).await {
+            if sched.index(LLM).is_some() && !sched.running(LLM) {
+                if let Err(e) = sched.prepare(&*st, LLM).await {
                     eprintln!("llmcf-gateway: the model server could not be started ({e}); it is tried again");
                 }
             }
@@ -1248,8 +1249,8 @@ mod tests {
             memory_floor_mb: 0,
             memory_psi_max: 0,
             engines: vec![
-                Spec { kind: Kind::Llm, unit: "llmcf-llm.service".into(), mib: 700, port: None },
-                Spec { kind: Kind::Stt, unit: "llmcf-stt.service".into(), mib: 300, port: Some(stt_port) },
+                Spec { id: LLM.into(), unit: "llmcf-llm.service".into(), mib: 700, port: None },
+                Spec { id: STT.into(), unit: "llmcf-stt.service".into(), mib: 300, port: Some(stt_port) },
             ],
             engines_mode: Mode::InTurn,
             engine_hold_seconds: 0,
