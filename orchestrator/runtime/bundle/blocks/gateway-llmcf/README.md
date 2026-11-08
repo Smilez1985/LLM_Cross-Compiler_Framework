@@ -51,6 +51,8 @@ Licence: the gateway is the framework's (MIT); the model's licence is named in t
 - `queue_max` (32), `queue_wait_seconds` (120): the queue's length and the longest wait of one request.
 - `memory_floor_mb` (64; set by the bundle to half the board's measured reserve), `memory_psi_max` (50): the memory
   guard (0 turns either check off).
+- `idle_stop_minutes` (0): stops an engine after these minutes without a request, through its unit (needs the
+  gateway's and the engines' units, autostart); the next request starts it again.
 - `upstream_port`, `ctx_size`: set by the bundle from the llm component (its port and context size).
 - `autostart` (no): with yes, the root actions create_user, install_unit and set_cgroup with `user` (llmcf) and
   `memory_limit_mb` (64, or derived from the gateway's measurement on the board); llmcf-install carries them out.

@@ -19,6 +19,7 @@ variables:
   - {name: queue_wait_seconds, type: uint, default: 120, min: 1, max: 3600, help: "Longest wait for a place"}
   - {name: memory_floor_mb, type: uint, default: 64, min: 0, max: 1048576, help: "Free memory below which requests wait (0: off; set by the bundle from the board's measurement)"}
   - {name: memory_psi_max, type: uint, default: 50, min: 0, max: 100, help: "Memory pressure in percent above which requests wait (0: off)"}
+  - {name: idle_stop_minutes, type: uint, default: 0, min: 0, max: 10080, help: "Stop an engine after these minutes without a request (0: never; needs the engines' units)"}
   - {name: upstream_port, type: port, default: 8080, help: "Set by the bundle: the llm component's port"}
   - {name: ctx_size, type: uint, default: 4096, min: 256, max: 262144, help: "Set by the bundle: the llm's context"}
   - {name: memory_limit_mb, type: memory_mb, default: 64, help: "Memory limit of its unit (autostart only)"}
@@ -56,3 +57,5 @@ start:
     - "{memory_floor_mb}"
     - --memory-psi-max
     - "{memory_psi_max}"
+    - --idle-stop-minutes
+    - "{idle_stop_minutes}"

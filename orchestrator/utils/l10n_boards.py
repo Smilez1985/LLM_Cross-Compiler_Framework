@@ -625,17 +625,17 @@ TEXTS = {
         "bundle.var.ok": "{component}.{name} = {value}",
         "bundle.unprivileged": "Nur ohne Sonderrechte (keine Autostart-Unit, keine Root-Aktion)",
         "bundle.unmeasured": "Sprachmodell ohne Vermessung des Boards planen",
-        "bundle.in_turn": "Engines nacheinander laden (eine nach der anderen, wenn sie nicht zusammen passen)",
-        "bundle.engines.together": "Alle Engines zusammen: {engines} MB für die Engines + {rest} MB für den Rest + "
+        "bundle.in_turn": "Programme nacheinander laden (eines nach dem anderen, wenn sie nicht zusammen passen)",
+        "bundle.engines.together": "Alle Programme zusammen: {engines} MB für die Programme + {rest} MB für den Rest + "
                                    "{reserve} MB Reserve = {need} MB von {available} MB frei: {verdict}.",
-        "bundle.engines.in_turn": "Nacheinander: die größte Engine ({largest}, {largest_mb} MB) + {rest} MB + "
+        "bundle.engines.in_turn": "Nacheinander: das größte Programm ({largest}, {largest_mb} MB) + {rest} MB + "
                                   "{reserve} MB = {need} MB von {available} MB frei: {verdict}.",
-        "bundle.engines.unknown": "Alle Engines zusammen etwa {together} MB, nacheinander etwa {one} MB; der freie "
+        "bundle.engines.unknown": "Alle Programme zusammen etwa {together} MB, nacheinander etwa {one} MB; der freie "
                                   "Speicher des Boards ist nicht bekannt.",
         "bundle.engines.fits": "passt",
         "bundle.engines.no_fit": "passt nicht",
-        "bundle.engines.chosen.together": "Gewählt: alle Engines zusammen.",
-        "bundle.engines.chosen.in-turn": "Gewählt: die Engines nacheinander, geladen vom Gateway.",
+        "bundle.engines.chosen.together": "Gewählt: alle Programme zusammen.",
+        "bundle.engines.chosen.in-turn": "Gewählt: die Programme nacheinander, geladen vom Gateway.",
         "bundle.store": "Gespeicherte Bündel:",
         "bundle.col.bundle": "Bündel",
         "bundle.col.board": "Board",

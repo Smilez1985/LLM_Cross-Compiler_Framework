@@ -395,8 +395,8 @@ def test_the_plan_always_shows_whether_the_engines_fit_together_and_in_turn(tmp_
     en = service.engines_lines(plan, "en")
     de = service.engines_lines(plan, "de")
     assert en[0].startswith("All engines together: ") and f"{e['together_mb']} MB of {limits.available_mib}" in en[0]
-    assert de[0].startswith("Alle Engines zusammen: ") and f"{e['together_mb']} MB von" in de[0]
-    assert en[-1] == "Chosen: all engines together." and de[-1] == "Gewählt: alle Engines zusammen."
+    assert de[0].startswith("Alle Programme zusammen: ") and f"{e['together_mb']} MB von" in de[0]
+    assert en[-1] == "Chosen: all engines together." and de[-1] == "Gewählt: alle Programme zusammen."
     # together: the gateway is told its engines and the choice, the llm's port is its own upstream
     gw = next(c for c in plan.manifest.components if c.kind == "gateway")
     args = list(gw.start.args)
@@ -449,3 +449,16 @@ def test_an_ai_cannot_choose_how_the_engines_run():
     from orchestrator.tools.tools_bundle import BundlePlanIn
     with pytest.raises(ValidationError):
         BundlePlanIn(device_id="0123456789abcdef", preset="voice", engines="in-turn")
+
+
+def test_the_idle_stop_reaches_the_gateway_only_with_the_engines_units(tmp_path):
+    plan = _plan(tmp_path, values={"llm": {"autostart": "yes"}, "gateway": {"autostart": "yes",
+                                                                            "idle_stop_minutes": "15"}})
+    assert plan.ok, plan.problems
+    args = list(next(c for c in plan.manifest.components if c.kind == "gateway").start.args)
+    assert args[args.index("--idle-stop-minutes") + 1] == "15" and "--engine" in args
+    alone = _plan(tmp_path, values={"gateway": {"idle_stop_minutes": "15"}})
+    assert any("idle_stop_minutes stops the engines" in p for p in alone.problems)
+    default = _plan(tmp_path)
+    gw = next(c for c in default.manifest.components if c.kind == "gateway")
+    assert list(gw.start.args)[-2:] == ["--idle-stop-minutes", "0"], "0 stops nothing and needs no unit"

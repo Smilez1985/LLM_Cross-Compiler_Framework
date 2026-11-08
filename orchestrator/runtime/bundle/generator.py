@@ -890,10 +890,22 @@ def _engine_control(plan: BundlePlan, components: List[Component], roots: List[R
     and the gateway is told its engines (`--engine KIND=UNIT:MB[:PORT]`, the memory from the plan, the port of a speech
     or vision engine for its health check), the person's choice (`--engines together|in-turn`) and in turn the memory
     the engines may use together (the board's usable memory less the rest of the bundle). The unprivileged-only
-    variant writes no unit, so the gateway is told none. In turn needs all this: without it the plan refuses."""
-    in_turn = selection.engines == "in-turn"
+    variant writes no unit, so the gateway is told none. In turn needs all this: without it the plan refuses; so does
+    an idle stop (`idle_stop_minutes`), which stops the engines through their units."""
     engine_mem = engine_mem or {}
     gateway = next((c for c in components if c.kind == "gateway"), None)
+    told = _tell_engines(plan, components, roots, selection, engine_mem, rest, gateway)
+    if gateway is not None and int(gateway.variables.get("idle_stop_minutes") or 0) > 0 and told is components:
+        plan.problems.append(f"{gateway.id}: idle_stop_minutes stops the engines through their units: it needs the "
+                             "gateway's own unit and the engines' units (autostart)")
+    return told
+
+
+def _tell_engines(plan: BundlePlan, components: List[Component], roots: List[RootAction], selection: Selection,
+                  engine_mem: Dict[str, int], rest: int, gateway: Optional[Component]) -> List[Component]:
+    """_engine_control's root action and the gateway's engine arguments; `components` itself when the gateway is
+    told no engine."""
+    in_turn = selection.engines == "in-turn"
     own = next((a for a in roots if gateway is not None and a.action == "install_unit"
                 and a.component == gateway.id), None)
     engines = engine_units(components, roots)
