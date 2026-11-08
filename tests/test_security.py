@@ -646,6 +646,33 @@ class TestCrawlerPoliteness:
         assert crawler.crawl(url) == []
         assert [(page.url, page.reason) for page in crawler.skipped] == [(url, "PDF support (pypdf) is not installed")]
 
+    def test_a_pdf_gives_its_text_and_title_with_pypdf(self, make_crawler):
+        """pypdf 7 (round 65): the crawler's whole use of it, PdfReader over the bytes, page.extract_text() and the
+        title from reader.metadata, on a PDF that pypdf itself writes."""
+        from pypdf import PdfWriter
+        from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+
+        writer = PdfWriter()
+        page = writer.add_blank_page(300, 200)
+        font = DictionaryObject({NameObject("/Type"): NameObject("/Font"), NameObject("/Subtype"): NameObject("/Type1"),
+                                 NameObject("/BaseFont"): NameObject("/Helvetica")})
+        page[NameObject("/Resources")] = DictionaryObject(
+            {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})})
+        content = DecodedStreamObject()
+        content.set_data(b"BT /F1 12 Tf 20 100 Td (The board guide explains every step of the setup.) Tj ET")
+        page.replace_contents(content)
+        writer.add_metadata({"/Title": "  Board guide  "})
+        data = io.BytesIO()
+        writer.write(data)
+        url = "http://93.184.215.14/guide.pdf"
+        crawler, _ = make_crawler({url: response(content_type="application/pdf", content=data.getvalue())},
+                                  respect_robots=False)
+
+        docs = crawler.crawl(url)
+        assert [d.metadata["source"] for d in docs] == [url], crawler.skipped
+        assert "The board guide explains every step of the setup." in docs[0].page_content
+        assert docs[0].metadata["title"] == "Board guide" and docs[0].metadata["content_type"] == "pdf"
+
 
 SITE = "http://93.184.215.14"
 OTHER_SITE = "http://93.184.215.15"

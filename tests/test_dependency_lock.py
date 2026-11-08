@@ -131,6 +131,24 @@ def test_the_lock_takes_versions_inside_the_ranges():
         assert versions and all(req.specifier.contains(v, prereleases=True) for v in versions), (req, versions)
 
 
+def test_the_cooldown_is_five_days_in_pyproject_and_in_the_lock():
+    """Round 65: uv takes only versions uploaded at least 5 days ago, set once in pyproject.toml ([tool.uv]
+    exclude-newer, a relative value: uv computes now minus 5 days in UTC at every lock), so `uv lock --upgrade`, the
+    scheduled update run, the installers' fresh resolve and `uv lock --check` all keep it. A dated per-package entry
+    is a version taken inside its cooldown on purpose; the lock records the same."""
+    from datetime import datetime
+
+    uv = pyproject()["tool"]["uv"]
+    assert uv["exclude-newer"] == "5 days"
+    options = lock()["options"]
+    assert options["exclude-newer-span"] == "P5D"
+    exceptions = uv.get("exclude-newer-package", {})
+    assert options.get("exclude-newer-package", {}) == exceptions
+    for name, stamp in exceptions.items():
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", stamp), (name, stamp)
+        datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+
+
 def test_uv_lock_was_made_from_this_pyproject():
     """What `uv lock --check` checks, without uv: the lock records the same requirements as pyproject.toml."""
     data, project = lock(), pyproject()

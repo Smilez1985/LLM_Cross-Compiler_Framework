@@ -65,7 +65,7 @@ dependencies = [
 
     # --- 6. Crawler & Ingestion ---
     "beautifulsoup4>=4.15.0,<5",
-    "pypdf>=6.21.4,<7",
+    "pypdf>=7.0.0,<8",
     "langdetect>=1.0.9,<2",
 
     # --- 7. Deployment (SSH) ---
@@ -110,6 +110,23 @@ dev = [
     "shellcheck-py>=0.11.0.1,<0.12",
     "actionlint-py>=1.7.12.25,<2",
 ]
+
+[tool.uv]
+# The cooldown (DECISIONS round 65): uv takes only versions uploaded at least 5 days ago (uv computes now minus 5 days
+# in UTC at every lock). It holds for every `uv lock` and `uv lock --upgrade`, in the scheduled update run
+# (.github/workflows/deps-update.yml), on the machine (install.sh, install.bat through scripts/fresh_deps.py) and for
+# `uv lock --check` in CI. Needs uv 0.9 or newer (relative values).
+exclude-newer = "5 days"
+
+[tool.uv.exclude-newer-package]
+# Versions taken inside their cooldown on purpose, each up to the second after its upload. An entry ends once the
+# cooldown has passed its date (then it would only hold the package back): scripts/fresh_deps.py drops it in the
+# scheduled update run and in every installer run.
+# pypdf 7.0.0 (security fixes, the person's decision in round 65); filelock 4.2.9 (Dependabot); openai 3.45.0 (the
+# version in the lock before, younger than 5 days on the day of this update).
+pypdf = "2026-11-06T12:10:04Z"
+filelock = "2026-11-04T18:37:11Z"
+openai = "2026-11-04T02:24:11Z"
 
 [build-system]
 requires = ["uv_build>=0.11.32,<0.14"]
