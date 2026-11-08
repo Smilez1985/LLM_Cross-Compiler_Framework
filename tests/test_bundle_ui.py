@@ -104,8 +104,20 @@ def test_plan_json_is_labels_only_no_path_no_account(cli_board):
     assert labels["ok"] and labels["root_actions"] == ["create_user", "install_unit", "set_cgroup"]
     text = json.dumps(labels)
     assert str(cli_board.prog.parent) not in text and "llmcfsvc" not in text and "dietpi" not in text
+    # the engines' check is always there with an engine (whether all together fits, and one at a time)
     assert {c["check"] for c in labels["checks"]} == {"architecture", "init system", "sudo", "offline mode", "memory",
-                                                   "component stt"}
+                                                   "component stt", "engines"}
+
+
+def test_the_engines_choice_is_a_flag_and_the_plan_shows_both_numbers(cli_board):
+    res = invoke_plain("bundle", "plan", "ZERO 3W", *cli_board.choice, "--engines", "in-turn")
+    assert res.code == 0, res.out
+    assert "check engines:" in res.out and "in turn changes nothing with one engine" in res.out
+    assert "Chosen: the engines in turn, loaded by the gateway." in res.out
+    plain = invoke_plain("bundle", "plan", "ZERO 3W", *cli_board.choice)
+    assert "Chosen: all engines together." in plain.out
+    bad = invoke_plain("bundle", "plan", "ZERO 3W", *cli_board.choice, "--engines", "sometimes")
+    assert bad.code == 2
 
 
 def test_a_plan_with_problems_exits_1_and_builds_nothing(cli_board):
@@ -315,7 +327,7 @@ def test_the_checks_name_what_the_plan_found_never_a_second_rule(tmp_path):
     checks = {c["check"]: c["result"] for c in plan.checks}
     # one check per component since the components' own probe checks (the test runtime names no architecture)
     assert checks == {"architecture": "passed", "init system": "passed", "sudo": "passed", "offline mode": "passed",
-                      "memory": "passed", "component llm": "unknown", "component stt": "passed"}
+                      "memory": "passed", "component llm": "unknown", "component stt": "passed", "engines": "passed"}
     (tmp_path / "whisper-server").write_bytes(_elf(0x3E))
     bad = _plan(tmp_path, _selection(tmp_path, values={"stt": {"autostart": "yes"}}),
                 profile=_profile(INIT_SYSTEM="openrc", RAM_TOTAL_MB="512"))

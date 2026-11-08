@@ -54,6 +54,10 @@ PRESETS: Dict[str, Tuple[str, ...]] = {
     "stt": ("stt-whisper-cpp",),
 }
 MEMORY_RESERVE_MB = 384
+# How the bundle's engines (llm, stt, vision) share the board's memory: the person's choice, never an AI's. "together":
+# they all run at once and must fit together; "in-turn": the gateway loads them one after another (llmcf-gateway
+# --engines in-turn), so only the largest one must fit next to the rest. The plan always shows both numbers.
+ENGINE_MODES = ("together", "in-turn")
 ROOT_HELPER_RECORD = "llmcf-install.json"
 STORE_DIR = "bundles"
 _MAGIC = {"gguf": (b"GGUF",), "mmproj-gguf": (b"GGUF",), "ggml-whisper": (b"lmgg", b"ggjt", b"ggml"),
@@ -90,6 +94,8 @@ class Selection:
     preset: str = ""
     # the blocks whose licence terms the person read and accepted: block id -> Block.terms_sha256 of the text shown
     accepted_terms: Dict[str, str] = field(default_factory=dict)
+    # ENGINE_MODES: the engines all together, or in turn through the gateway (the person's choice)
+    engines: str = "together"
 
     @classmethod
     def from_preset(cls, name: str, **kw) -> "Selection":
@@ -100,6 +106,7 @@ class Selection:
     def as_json(self) -> Dict[str, Any]:
         return {"blocks": list(self.blocks), "values": self.values, "preset": self.preset,
                 "unprivileged_only": self.unprivileged_only, "accepted_terms": dict(self.accepted_terms),
+                "engines": self.engines,
                 "files": {c: {r: f.as_json() for r, f in roles.items()} for c, roles in self.files.items()}}
 
 
@@ -150,6 +157,9 @@ class BundlePlan:
     missing_runtimes: List[str] = field(default_factory=list)
     # the blocks whose licence terms the person has not accepted yet (block ids; the text: Block.terms_text())
     terms_needed: List[str] = field(default_factory=list)
+    # the engines' memory (engines_check): the choice, MB of each engine, of the rest and the reserve, the board's
+    # free memory, the need all together and in turn and whether each fits ({} without an engine)
+    engines: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -182,7 +192,8 @@ class BundlePlan:
                 "checks":[{k: _scrub(str(v)) for k, v in c.items()} for c in self.checks],
                 "own_blocks": list(self.own_blocks),
                 # built or accepted only by the person (the CLI or the Board bundle window), never through an AI
-                "missing_runtimes": list(self.missing_runtimes), "terms_needed": list(self.terms_needed)}
+                "missing_runtimes": list(self.missing_runtimes), "terms_needed": list(self.terms_needed),
+                "engines": dict(self.engines)}
 
     def lines(self) -> List[str]:
         """The plan in plain words for the person (CLI and window)."""
@@ -394,6 +405,10 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
     ports: Dict[int, str] = {}
     memory = 0
     measured_llm = 0          # MiB the llm servers need by the board's measurement
+    engine_mem: Dict[str, int] = {}   # MiB of each engine component (llm, stt, vision)
+    if selection.engines not in ENGINE_MODES:
+        plan.problems.append(f"the engines run {' or '.join(ENGINE_MODES)}, not {selection.engines!r}"[:200])
+    in_turn = selection.engines == "in-turn"
     has_llm = any(b.kind == "llm" for b in blocks)
     # the memory the board's measurement leaves for the bundle (free at rest less the measured reserve), the same
     # number with and without a language model: every component is checked against it
@@ -565,6 +580,8 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         else:
             comp_memory = int(block.memory_base_mb + block.memory_model_factor * model_bytes / 1048576)
         memory += comp_memory
+        if block.kind in ENGINE_KINDS:
+            engine_mem[comp_id] = comp_memory
         _component_check(plan, comp_id, block, comp_runtime, board_arch, comp_memory, measured_usable)
         if block.kind == "vision" and comp_runtime is not None:
             _vision_checks(plan, comp_id, comp_runtime, picked)
@@ -615,7 +632,9 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         except Exception as e:  # noqa: BLE001 - pydantic's own reason, never pasted into shell text
             plan.problems.append(f"{comp_id}: {str(e).splitlines()[-1][:300]}")
     plan.memory_mb = memory
-    components = _engine_control(plan, components, roots, selection)
+    # in turn only the largest engine runs at a time next to the rest: the memory checks below take that need
+    rest = memory - sum(engine_mem.values())
+    need = rest + max(engine_mem.values()) if in_turn and engine_mem else memory
     _probe_checks(plan, board_arch, init, access, offline, roots)
     ram = profile.int_value("RAM_TOTAL_MB") if hasattr(profile, "int_value") else None
     if not has_llm:
@@ -628,32 +647,32 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
     elif limits is not None and has_llm:
         usable = int(limits.usable_mib)
         plan.board_memory_mb = usable
-        if memory > usable:
-            plan.problems.append(f"the bundle needs about {memory} MB of memory, the board's measurement leaves "
+        if need > usable:
+            plan.problems.append(f"the bundle needs about {need} MB of memory, the board's measurement leaves "
                                  f"{usable} MB for it ({limits.available_mib} MB free at rest less the measured "
                                  f"reserve of {limits.reserve_mib} MB); leave the llm block out to run the model off "
                                  "the board, or choose a smaller model")
-        elif memory > usable * 0.9:
-            plan.warnings.append(f"the bundle takes about {memory} of the {usable} MB the board's measurement leaves: "
+        elif need > usable * 0.9:
+            plan.warnings.append(f"the bundle takes about {need} of the {usable} MB the board's measurement leaves: "
                                  "little room is left")
-        plan.checks.append({"check": "memory", "result": "failed" if memory > usable else
-                            ("warning" if memory > usable * 0.9 else "passed"),
-                            "detail": f"measured: about {memory} MB needed ({measured_llm} MB for the language "
+        plan.checks.append({"check": "memory", "result": "failed" if need > usable else
+                            ("warning" if need > usable * 0.9 else "passed"),
+                            "detail": f"measured: about {need} MB needed ({measured_llm} MB for the language "
                                       f"model as measured on the board), {usable} MB usable"})
     elif limits is not None:
         # no language model on the board: the components fit by the board's measured memory all the same
         usable = int(limits.usable_mib)
         plan.board_memory_mb = usable
-        if memory > usable:
-            plan.problems.append(f"the bundle needs about {memory} MB of memory, the board's measurement leaves "
+        if need > usable:
+            plan.problems.append(f"the bundle needs about {need} MB of memory, the board's measurement leaves "
                                  f"{usable} MB for it ({limits.available_mib} MB free at rest less the measured "
                                  f"reserve of {limits.reserve_mib} MB)")
-        elif memory > usable * 0.9:
-            plan.warnings.append(f"the bundle takes about {memory} of the {usable} MB the board's measurement leaves: "
+        elif need > usable * 0.9:
+            plan.warnings.append(f"the bundle takes about {need} of the {usable} MB the board's measurement leaves: "
                                  "little room is left")
-        plan.checks.append({"check": "memory", "result": "failed" if memory > usable else
-                            ("warning" if memory > usable * 0.9 else "passed"),
-                            "detail": f"measured: about {memory} MB needed, {usable} MB usable"})
+        plan.checks.append({"check": "memory", "result": "failed" if need > usable else
+                            ("warning" if need > usable * 0.9 else "passed"),
+                            "detail": f"measured: about {need} MB needed, {usable} MB usable"})
     elif has_llm and not unmeasured_ok:
         from orchestrator.runtime.device.measure import NOT_MEASURED
         plan.problems.append(f"{NOT_MEASURED}; or plan without the measurement after your own yes (the probe's "
@@ -665,18 +684,20 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
                                  "probe's declared RAM")
         usable = ram - max(MEMORY_RESERVE_MB, ram // 10)
         plan.board_memory_mb = usable
-        if memory > usable:
-            plan.problems.append(f"the bundle needs about {memory} MB of memory, the board has {usable} MB for it "
+        if need > usable:
+            plan.problems.append(f"the bundle needs about {need} MB of memory, the board has {usable} MB for it "
                                  f"({ram} MB with a reserve for the system)")
-        elif memory > usable * 0.8:
-            plan.warnings.append(f"the bundle takes about {memory} of {usable} MB: little room is left")
-        plan.checks.append({"check": "memory", "result": "failed" if memory > usable else
-                            ("warning" if memory > usable * 0.8 else "passed"),
-                            "detail": f"about {memory} MB needed, {usable} MB usable ({ram} MB on the board)"})
+        elif need > usable * 0.8:
+            plan.warnings.append(f"the bundle takes about {need} of {usable} MB: little room is left")
+        plan.checks.append({"check": "memory", "result": "failed" if need > usable else
+                            ("warning" if need > usable * 0.8 else "passed"),
+                            "detail": f"about {need} MB needed, {usable} MB usable ({ram} MB on the board)"})
     else:
         plan.warnings.append("the board's probe does not say its memory; probe it again to check the bundle fits")
         plan.checks.append({"check": "memory", "result": "unknown",
-                            "detail": f"about {memory} MB needed; the probe does not say the board's memory"})
+                            "detail": f"about {need} MB needed; the probe does not say the board's memory"})
+    engines_check(plan, engine_mem, rest, limits, ram, selection)
+    components = _engine_control(plan, components, roots, selection, engine_mem, rest)
     if roots and not selection.unprivileged_only:
         plan.notes.append("the root actions run only through llmcf-install, the framework's root helper the bundle "
                           "carries, after the person's own yes for them in the CLI or the Board bundle window (never "
@@ -811,17 +832,84 @@ def engine_units(components: List[Component], roots: List[RootAction]) -> Dict[s
     return out
 
 
+def engines_check(plan: BundlePlan, engine_mem: Dict[str, int], rest: int, limits: Any, ram: Optional[int],
+                  selection: Selection) -> None:
+    """The check "engines", always shown when the bundle has an engine: whether all engines fit together (the sum of
+    the engines, the rest of the bundle and the reserve against the board's free memory: the measured one, else the
+    probe's declared RAM), and whether one at a time fits (the largest engine with the rest and the reserve); the
+    person's choice (Selection.engines) must fit, in turn refused when even the largest engine alone does not."""
+    if not engine_mem:
+        return
+    in_turn = selection.engines == "in-turn"
+    if limits is not None:
+        available, reserve, how = int(limits.available_mib), int(limits.reserve_mib), "measured free"
+    elif ram:
+        available, reserve, how = ram, max(MEMORY_RESERVE_MB, ram // 10), "declared"
+    else:
+        available, reserve, how = None, None, ""
+    largest = max(engine_mem, key=lambda c: engine_mem[c])
+    together = sum(engine_mem.values()) + rest + (reserve or 0)
+    one = engine_mem[largest] + rest + (reserve or 0)
+    plan.engines = {"mode": selection.engines, "engines_mb": dict(engine_mem), "rest_mb": rest,
+                    "reserve_mb": reserve, "available_mb": available, "together_mb": together,
+                    "in_turn_mb": one, "largest": largest,
+                    "fits_together": None if available is None else together <= available,
+                    "fits_in_turn": None if available is None else one <= available}
+    parts = " + ".join(f"{c} {mb}" for c, mb in engine_mem.items())
+    choice = "in turn" if in_turn else "all together"
+    if available is None:
+        plan.checks.append({"check": "engines", "result": "unknown",
+                            "detail": f"all together about {together} MB ({parts} for the engines, {rest} for the "
+                                      f"rest); in turn about {one} MB; the board's memory is not known; your choice: "
+                                      f"{choice}"})
+        return
+    fits_together, fits_one = together <= available, one <= available
+    detail = (f"all together: {parts} MB for the engines + {rest} MB for the rest + {reserve} MB reserve = "
+              f"{together} MB of {available} MB {how}: " + ("fits" if fits_together else "does not fit")
+              + f"; in turn: the largest engine {largest} {engine_mem[largest]} MB + {rest} + {reserve} = {one} MB: "
+              + ("fits" if fits_one else "does not fit") + f"; your choice: {choice}")
+    ok = fits_one if in_turn else fits_together
+    plan.checks.append({"check": "engines", "result": "passed" if ok else "failed", "detail": detail})
+    if in_turn and not fits_one:
+        plan.problems.append(f"in turn does not fit either: the largest engine, {largest}, needs about "
+                             f"{engine_mem[largest]} MB, with the rest of the bundle ({rest} MB) and the reserve "
+                             f"({reserve} MB) {one} MB of the board's {available} MB; choose a smaller model")
+    elif not in_turn and not fits_together and fits_one and len(engine_mem) > 1:
+        plan.notes.append(f"the engines do not fit all together, but one after another they do ({one} of "
+                          f"{available} MB): choose to load the engines in turn")
+    if in_turn and len(engine_mem) < 2:
+        plan.notes.append("in turn changes nothing with one engine")
+
+
 def _engine_control(plan: BundlePlan, components: List[Component], roots: List[RootAction],
-                    selection: Selection) -> List[Component]:
+                    selection: Selection, engine_mem: Optional[Dict[str, int]] = None,
+                    rest: int = 0) -> List[Component]:
     """The gateway that starts and stops the bundle's engines: with the gateway's own unit and at least one engine
     unit, the root action allow_unit_control (exactly the gateway's account and exactly these units; llmcf-install
     writes a polkit rule, or a sudoers drop-in with the exact systemctl commands on a board without polkit's rules),
-    and the gateway is told the llm's unit (`--llm-unit`: it starts the model on demand). The unprivileged-only
-    variant writes no unit, so the gateway is told none."""
+    and the gateway is told its engines (`--engine KIND=UNIT:MB[:PORT]`, the memory from the plan, the port of a speech
+    or vision engine for its health check), the person's choice (`--engines together|in-turn`) and in turn the memory
+    the engines may use together (the board's usable memory less the rest of the bundle). The unprivileged-only
+    variant writes no unit, so the gateway is told none. In turn needs all this: without it the plan refuses."""
+    in_turn = selection.engines == "in-turn"
+    engine_mem = engine_mem or {}
     gateway = next((c for c in components if c.kind == "gateway"), None)
     own = next((a for a in roots if gateway is not None and a.action == "install_unit"
                 and a.component == gateway.id), None)
     engines = engine_units(components, roots)
+    controlled = gateway is not None and own is not None and bool(engines) and not selection.unprivileged_only
+    if in_turn and len(engine_mem) > 1:
+        if not controlled:
+            plan.problems.append("loading the engines in turn needs the gateway with its own unit and the engines' "
+                                 "units (autostart for the gateway and each engine), not the unprivileged-only "
+                                 "variant")
+        elif len(engines) < len(engine_mem):
+            plan.problems.append("in turn the gateway starts and stops each engine through its own unit: give each "
+                                 "engine autostart, and at most one engine of each kind")
+        elif any(kind != "llm" for kind in engines):
+            plan.warnings.append("in turn: the gateway starts the speech and vision engines only for requests through "
+                                 "itself, and its speech and image routes are not there yet: until then those engines "
+                                 "stay stopped while the language model runs")
     if gateway is None or not engines:
         return components
     if own is None:
@@ -835,10 +923,21 @@ def _engine_control(plan: BundlePlan, components: List[Component], roots: List[R
     plan.notes.append(f"{gateway.id}: its account may start, stop and restart exactly {', '.join(units)} (a polkit "
                       "rule through llmcf-install; on a board without polkit's rules a sudoers file with exactly "
                       "these systemctl commands)")
-    if "llm" not in engines or gateway.start is None:
+    if gateway.start is None:
         return components
-    args = gateway.start.args + ("--llm-unit", engines["llm"][1])
-    started = gateway.model_copy(update={"start": StartSpec(program=gateway.start.program, args=args)})
+    by_id = {c.id: c for c in components}
+    args: List[str] = []
+    for kind, (comp_id, unit) in engines.items():
+        spec = f"{kind}={unit}:{int(engine_mem.get(comp_id, 0))}"
+        port = by_id[comp_id].variables.get("port")
+        if kind != "llm" and isinstance(port, int):
+            spec += f":{port}"
+        args += ["--engine", spec]
+    args += ["--engines", selection.engines]
+    if in_turn and plan.board_memory_mb is not None:
+        args += ["--engines-budget-mb", str(max(0, int(plan.board_memory_mb) - rest))]
+    started = gateway.model_copy(update={"start": StartSpec(program=gateway.start.program,
+                                                            args=gateway.start.args + tuple(args))})
     return [started if c is gateway else c for c in components]
 
 

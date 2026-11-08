@@ -45,6 +45,18 @@ TEXTS = {
         "bundle.var.ok": "{component}.{name} = {value}",
         "bundle.unprivileged": "Unprivileged only (no autostart unit, no root action)",
         "bundle.unmeasured": "Plan the language model without the board's measurement",
+        # the engines all together or in turn (the person's choice; the plan always shows both numbers)
+        "bundle.in_turn": "Load the engines in turn (one after another when they do not fit together)",
+        "bundle.engines.together": "All engines together: {engines} MB for the engines + {rest} MB for the rest + "
+                                   "{reserve} MB reserve = {need} MB of {available} MB free: {verdict}.",
+        "bundle.engines.in_turn": "In turn: the largest engine ({largest}, {largest_mb} MB) + {rest} MB + {reserve} MB "
+                                  "= {need} MB of {available} MB free: {verdict}.",
+        "bundle.engines.unknown": "All engines together about {together} MB, in turn about {one} MB; the board's free "
+                                  "memory is not known.",
+        "bundle.engines.fits": "fits",
+        "bundle.engines.no_fit": "does not fit",
+        "bundle.engines.chosen.together": "Chosen: all engines together.",
+        "bundle.engines.chosen.in-turn": "Chosen: the engines in turn, loaded by the gateway.",
         "bundle.store": "Stored bundles:",
         "bundle.col.bundle": "Bundle",
         "bundle.col.board": "Board",
@@ -613,6 +625,17 @@ TEXTS = {
         "bundle.var.ok": "{component}.{name} = {value}",
         "bundle.unprivileged": "Nur ohne Sonderrechte (keine Autostart-Unit, keine Root-Aktion)",
         "bundle.unmeasured": "Sprachmodell ohne Vermessung des Boards planen",
+        "bundle.in_turn": "Engines nacheinander laden (eine nach der anderen, wenn sie nicht zusammen passen)",
+        "bundle.engines.together": "Alle Engines zusammen: {engines} MB für die Engines + {rest} MB für den Rest + "
+                                   "{reserve} MB Reserve = {need} MB von {available} MB frei: {verdict}.",
+        "bundle.engines.in_turn": "Nacheinander: die größte Engine ({largest}, {largest_mb} MB) + {rest} MB + "
+                                  "{reserve} MB = {need} MB von {available} MB frei: {verdict}.",
+        "bundle.engines.unknown": "Alle Engines zusammen etwa {together} MB, nacheinander etwa {one} MB; der freie "
+                                  "Speicher des Boards ist nicht bekannt.",
+        "bundle.engines.fits": "passt",
+        "bundle.engines.no_fit": "passt nicht",
+        "bundle.engines.chosen.together": "Gewählt: alle Engines zusammen.",
+        "bundle.engines.chosen.in-turn": "Gewählt: die Engines nacheinander, geladen vom Gateway.",
         "bundle.store": "Gespeicherte Bündel:",
         "bundle.col.bundle": "Bündel",
         "bundle.col.board": "Board",

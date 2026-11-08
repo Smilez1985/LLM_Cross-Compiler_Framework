@@ -66,6 +66,9 @@ BUNDLE_PATHS: Dict[str, str] = {
     "bundle build --accept-terms": "btn_bundle_build",
     "bundle plan --without-measurement": "chk_bundle_unmeasured",
     "bundle build --without-measurement": "chk_bundle_unmeasured",
+    # the engines all together or in turn: the person's choice (checked: in turn), never an AI's
+    "bundle plan --engines": "chk_bundle_in_turn",
+    "bundle build --engines": "chk_bundle_in_turn",
     "bundle build": "btn_bundle_build",
     "bundle build --preset": "cmb_bundle_preset",
     "bundle build --block": "lst_bundle_blocks",

@@ -315,7 +315,7 @@ def test_the_label_names_state_model_tls_and_speed_only():
 def test_the_gateway_may_start_and_stop_exactly_the_bundles_engine_units(tmp_path):
     """allow_unit_control: with the gateway's own unit and an engine unit, the plan lets the gateway's account start,
     stop and restart exactly that unit (llmcf-install writes a polkit rule, or a sudoers file without polkit), and the
-    gateway is told the llm's unit; the steps carry the units as one checked value."""
+    gateway is told its engines; the steps carry the units as one checked value."""
     from orchestrator.runtime.bundle import installer as inst
     from orchestrator.runtime.bundle.manifest import dump_manifest, load_manifest
     plan = _plan(tmp_path, values={"llm": {"autostart": "yes"}, "gateway": {"autostart": "yes"}})
@@ -324,7 +324,9 @@ def test_the_gateway_may_start_and_stop_exactly_the_bundles_engine_units(tmp_pat
     assert len(control) == 1 and control[0].component == "gateway" and control[0].user == "llmcf"
     assert control[0].units == ("llmcf-llm.service",)
     gw = next(c for c in plan.manifest.components if c.kind == "gateway")
-    assert list(gw.start.args[-2:]) == ["--llm-unit", "llmcf-llm.service"]
+    args = list(gw.start.args)
+    assert args[args.index("--engine") + 1].startswith("llmcf-llm.service", len("llm="))
+    assert args[-2:] == ["--engines", "together"]
     assert any("polkit" in n and "sudoers" in n for n in plan.notes)
     assert load_manifest(dump_manifest(plan.manifest)) == plan.manifest
     steps = inst.render_steps(plan.manifest, "a" * 64)
@@ -332,7 +334,7 @@ def test_the_gateway_may_start_and_stop_exactly_the_bundles_engine_units(tmp_pat
     # without the engines' units, or without the gateway's own unit, nothing to allow
     only_gw = _plan(tmp_path, values={"gateway": {"autostart": "yes"}})
     assert not [a for a in only_gw.manifest.root_actions if a.action == "allow_unit_control"]
-    assert "--llm-unit" not in only_gw.manifest.components[1].start.args
+    assert "--engine" not in only_gw.manifest.components[1].start.args
     only_llm = _plan(tmp_path, values={"llm": {"autostart": "yes"}})
     assert not [a for a in only_llm.manifest.root_actions if a.action == "allow_unit_control"]
     assert any("without its own unit" in n for n in only_llm.notes)
@@ -345,3 +347,105 @@ def test_the_gateway_may_start_and_stop_exactly_the_bundles_engine_units(tmp_pat
                              unmeasured_ok=True)
     assert unpriv.ok, unpriv.problems
     assert not [a for a in unpriv.manifest.root_actions if a.action == "allow_unit_control"]
+
+
+def _voice(tmp: Path, engines="together", limits=None, autostart=True, gateway=True):
+    """llm, speech (a picked whisper program) and the gateway, each with its unit; the person's engine choice."""
+    from tests.test_board_bundle import _selection
+    yes = {"autostart": "yes"} if autostart else {}
+    blocks = ["llm-llama-server", "stt-whisper-cpp-program"] + (["gateway-llmcf"] if gateway else [])
+    values = {"llm": dict(yes), "stt": dict(yes)}
+    if gateway:
+        values["gateway"] = {"autostart": "yes"}
+    sel = _selection(tmp, blocks=blocks, values=values, engines=engines)
+    return gen.plan_bundle(sel, catalog=blk.load_catalog(), profile=RK3566, device_id=DEVICE, offline=False,
+                           bundle_id="gw-test", runtime=_runtime_tarball(tmp), programs=_programs(tmp),
+                           limits=limits, unmeasured_ok=limits is None)
+
+
+def _squeezed(tmp: Path, fit: str):
+    """The board's measurement with its free memory cut so that the voice bundle fits `fit`: "together", "in-turn"
+    (only one engine at a time) or "none"."""
+    import dataclasses
+    from test_board_measure import record
+    from orchestrator.runtime.device import measure
+    limits = measure.derive(record())
+    e = _voice(tmp, limits=limits).engines
+    available = {"together": e["together_mb"], "in-turn": e["in_turn_mb"], "none": e["in_turn_mb"] - 1}[fit]
+    return dataclasses.replace(limits, available_mib=available, usable_mib=available - limits.reserve_mib)
+
+
+def test_the_plan_always_shows_whether_the_engines_fit_together_and_in_turn(tmp_path):
+    from test_board_measure import record
+    from orchestrator.runtime.device import measure
+    limits = measure.derive(record())
+    plan = _voice(tmp_path, limits=limits)
+    assert plan.ok, plan.problems
+    e = plan.engines
+    assert e["mode"] == "together" and set(e["engines_mb"]) == {"llm", "stt"}
+    assert e["together_mb"] == sum(e["engines_mb"].values()) + e["rest_mb"] + e["reserve_mb"]
+    assert e["in_turn_mb"] == max(e["engines_mb"].values()) + e["rest_mb"] + e["reserve_mb"]
+    assert e["available_mb"] == limits.available_mib and e["reserve_mb"] == limits.reserve_mib
+    assert e["fits_together"] and e["fits_in_turn"] and e["largest"] == "llm"
+    check = next(c for c in plan.checks if c["check"] == "engines")
+    assert check["result"] == "passed" and "all together" in check["detail"] and "in turn" in check["detail"]
+    assert "your choice: all together" in check["detail"]
+    assert plan.labels()["engines"] == e, "an AI reads the numbers too, never a choice it could make"
+    # the person's language: English and German lines with the same numbers
+    en = service.engines_lines(plan, "en")
+    de = service.engines_lines(plan, "de")
+    assert en[0].startswith("All engines together: ") and f"{e['together_mb']} MB of {limits.available_mib}" in en[0]
+    assert de[0].startswith("Alle Engines zusammen: ") and f"{e['together_mb']} MB von" in de[0]
+    assert en[-1] == "Chosen: all engines together." and de[-1] == "Gewählt: alle Engines zusammen."
+    # together: the gateway is told its engines and the choice, the llm's port is its own upstream
+    gw = next(c for c in plan.manifest.components if c.kind == "gateway")
+    args = list(gw.start.args)
+    stt_port = next(c for c in plan.manifest.components if c.kind == "stt").variables["port"]
+    assert f"llm=llmcf-llm.service:{e['engines_mb']['llm']}" in args
+    assert f"stt=llmcf-stt.service:{e['engines_mb']['stt']}:{stt_port}" in args
+    assert args[args.index("--engines") + 1] == "together" and "--engines-budget-mb" not in args
+    assert "--llm-unit" not in args
+    control = next(a for a in plan.manifest.root_actions if a.action == "allow_unit_control")
+    assert control.units == ("llmcf-llm.service", "llmcf-stt.service")
+
+
+def test_in_turn_when_together_does_not_fit_and_refused_when_one_does_not_either(tmp_path):
+    tight = _squeezed(tmp_path, "in-turn")
+    together = _voice(tmp_path, limits=tight)
+    assert not together.ok and any("needs about" in p for p in together.problems)
+    assert next(c for c in together.checks if c["check"] == "engines")["result"] == "failed"
+    assert any("one after another they do" in n and "load the engines in turn" in n for n in together.notes)
+    turn = _voice(tmp_path, engines="in-turn", limits=tight)
+    assert turn.ok, turn.problems
+    assert next(c for c in turn.checks if c["check"] == "engines")["result"] == "passed"
+    assert next(c for c in turn.checks if c["check"] == "memory")["result"] in ("passed", "warning")
+    gw = next(c for c in turn.manifest.components if c.kind == "gateway")
+    args = list(gw.start.args)
+    assert args[args.index("--engines") + 1] == "in-turn"
+    rest = turn.engines["rest_mb"]
+    assert args[args.index("--engines-budget-mb") + 1] == str(tight.usable_mib - rest)
+    assert any("speech and image routes are not there yet" in w for w in turn.warnings)
+    assert service.engines_lines(turn, "en")[-1] == "Chosen: the engines in turn, loaded by the gateway."
+    # even the largest engine alone does not fit: in turn is refused with the numbers
+    none = _voice(tmp_path, engines="in-turn", limits=_squeezed(tmp_path, "none"))
+    assert not none.ok and any("in turn does not fit either" in p for p in none.problems)
+
+
+def test_in_turn_needs_the_gateway_and_the_engines_units(tmp_path):
+    no_units = _voice(tmp_path, engines="in-turn", autostart=False)
+    assert any("needs the gateway with its own unit" in p for p in no_units.problems)
+    no_gateway = _voice(tmp_path, engines="in-turn", gateway=False)
+    assert any("needs the gateway with its own unit" in p for p in no_gateway.problems)
+    with pytest.raises(gen.BundleError):
+        service.selection_from(preset="llm", engines="sometimes")
+    assert service.selection_from(preset="llm", engines="in-turn").engines == "in-turn"
+    assert service.selection_from(preset="llm").engines == "together"
+
+
+def test_an_ai_cannot_choose_how_the_engines_run():
+    """The engines' choice is the person's (CLI flag, the window's checkbox); the read-only bundle_plan tool takes no
+    such field and refuses it."""
+    from pydantic import ValidationError
+    from orchestrator.tools.tools_bundle import BundlePlanIn
+    with pytest.raises(ValidationError):
+        BundlePlanIn(device_id="0123456789abcdef", preset="voice", engines="in-turn")

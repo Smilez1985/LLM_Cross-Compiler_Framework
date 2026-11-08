@@ -110,6 +110,10 @@ class BundleWindow(BoardSteps, QDialog):
         self.chk_unmeasured = QCheckBox(self._t("bundle.unmeasured"), self)
         self.chk_unmeasured.setObjectName("chk_bundle_unmeasured")
         top.addWidget(self.chk_unmeasured)
+        # the engines in turn: the person's choice (never an AI's); the plan always shows whether all together fits
+        self.chk_in_turn = QCheckBox(self._t("bundle.in_turn"), self)
+        self.chk_in_turn.setObjectName("chk_bundle_in_turn")
+        top.addWidget(self.chk_in_turn)
         layout.addLayout(top)
         self.lbl_boards = plain_label("")
         self.lbl_boards.setObjectName("lbl_bundle_boards")
@@ -390,7 +394,8 @@ class BundleWindow(BoardSteps, QDialog):
         return service.selection_from(preset=preset, blocks=self._checked_blocks(), sets=keep(sets),
                                       files=keep(files), online=keep(online), sha256=keep(sha), sizes=keep(sizes),
                                       licences=keep(licences), unprivileged_only=self.chk_unprivileged.isChecked(),
-                                      accepted_terms=self._accepted_terms)
+                                      accepted_terms=self._accepted_terms,
+                                      engines="in-turn" if self.chk_in_turn.isChecked() else "together")
 
     def selected_board(self) -> Optional[str]:
         return self.cmb_board.currentData()
@@ -437,8 +442,9 @@ class BundleWindow(BoardSteps, QDialog):
         return work
 
     def _show_plan(self, plan: Any) -> None:
+        from orchestrator.runtime.bundle import service
         self.output.clear()
-        self._say("\n".join(plan.lines()))
+        self._say("\n".join(plan.lines() + service.engines_lines(plan, self.lang)))
 
     def _on_plan(self) -> None:
         work = self._plan_step()

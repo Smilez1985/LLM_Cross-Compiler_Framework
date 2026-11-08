@@ -7502,6 +7502,11 @@ def bundle_choice_options(func):
         click.option('--without-measurement', is_flag=True,
                      help="Your yes to plan a language model on a board that was not measured yet (the probe's "
                           "declared memory is used then; the benchmark on the board measures it)"),
+        click.option('--engines', type=click.Choice(['together', 'in-turn']), default='together',
+                     show_default=True,
+                     help="The engines (language model, speech, vision) all together, or in turn: the gateway "
+                          "loads them one after another when the board's memory cannot hold them together (the "
+                          "plan always shows whether all together fits)"),
     ]
     for option in reversed(options):
         func = option(func)
@@ -7572,11 +7577,14 @@ def _bundle_offer_components(ctx: FrameworkContext, device_name: str, state_dir,
     return True
 
 
-def _print_bundle_plan(plan) -> None:
+def _print_bundle_plan(plan, lang: Optional[str] = None) -> None:
+    from orchestrator.runtime.bundle import service
     for line in plan.lines():
         style = "red" if line.lstrip().startswith("problem:") else (
             "yellow" if line.lstrip().startswith("warning:") else "")
         console.print(f"[{style}]{escape(line)}[/{style}]" if style else escape(line))
+    for line in service.engines_lines(plan, lang):
+        console.print(escape(line))
 
 
 @cli.group()
@@ -7598,7 +7606,7 @@ def bundle_plan(ctx: FrameworkContext, device_name: str, as_json: bool, **choice
     if as_json:
         click.echo(json.dumps(plan.labels(), indent=2, sort_keys=True))
     else:
-        _print_bundle_plan(plan)
+        _print_bundle_plan(plan, _config_language(ctx))
         from orchestrator.runtime.bundle import service
         _print_bundle_terms(plan, *service.catalog_sources(_bundle_framework(ctx)))
     if not plan.ok:
@@ -7618,7 +7626,7 @@ def bundle_build(ctx: FrameworkContext, device_name: str, allow_own: bool, **cho
     state_dir, device_id, plan = _bundle_plan(ctx, device_name, choice, allow_own)
     if not plan.ok and plan.own_blocks and not allow_own and set(plan.problems) == {
             p for p in plan.problems if "is not signed: it is used only after your yes" in p}:
-        _print_bundle_plan(plan)
+        _print_bundle_plan(plan, _config_language(ctx))
         if not (_interactive() and click.confirm(f"Use your own unsigned blocks {', '.join(plan.own_blocks)}? "
                                                  "Nobody else checked them.", default=False)):
             console.print("Nothing was built.")
@@ -7629,7 +7637,7 @@ def bundle_build(ctx: FrameworkContext, device_name: str, allow_own: bool, **cho
     if plan.terms_needed and _interactive():
         # the person reads each block's terms in full and accepts them, "No" as the default; nothing of the block is
         # built, sent or fetched before
-        _print_bundle_plan(plan)
+        _print_bundle_plan(plan, _config_language(ctx))
         app_root, index = service.catalog_sources(_bundle_framework(ctx))
         _print_bundle_terms(plan, app_root, index)
         for block_id in plan.terms_needed:
@@ -7640,11 +7648,11 @@ def bundle_build(ctx: FrameworkContext, device_name: str, allow_own: bool, **cho
         state_dir, device_id, plan = _bundle_plan(ctx, device_name, choice, allow_own, accepted)
     if plan.missing_runtimes and _interactive():
         # the plan once before the question; after a "No" nothing more is printed (it said "Nothing was built.")
-        _print_bundle_plan(plan)
+        _print_bundle_plan(plan, _config_language(ctx))
         if not _bundle_offer_components(ctx, device_name, state_dir, device_id, plan):
             sys.exit(1)
         state_dir, device_id, plan = _bundle_plan(ctx, device_name, choice, allow_own, accepted)
-    _print_bundle_plan(plan)
+    _print_bundle_plan(plan, _config_language(ctx))
     if not plan.ok:
         console.print("[red]Nothing was built.[/red]")
         sys.exit(1)

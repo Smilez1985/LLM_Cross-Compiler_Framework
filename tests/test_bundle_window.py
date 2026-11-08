@@ -96,6 +96,17 @@ def test_plan_shows_the_full_plan_off_the_gui_thread_and_builds_nothing(qapp, bu
     text = dialog.output.toPlainText()
     assert "stt: block stt-whisper-cpp-program" in text and f"from {board.prog}" in text and "check memory:" in text
     assert dialog.rows == [] and board.logins == []
+    # the engines: whether all together fits, always shown in the person's language, and the person's choice
+    assert "check engines:" in text and "Chosen: all engines together." in text
+
+
+def test_the_engines_in_turn_are_the_persons_checkbox(bundle):
+    dialog, board = bundle
+    _pick_stt(dialog, board)
+    assert not dialog.chk_in_turn.isChecked() and dialog.selection().engines == "together"
+    dialog.chk_in_turn.setChecked(True)
+    assert dialog.selection().engines == "in-turn"
+    assert dialog.chk_in_turn.objectName() == "chk_bundle_in_turn"
 
 
 @POSIX

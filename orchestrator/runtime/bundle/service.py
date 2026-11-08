@@ -232,9 +232,10 @@ def assignments(items: Iterable[str], what: str) -> List[Tuple[str, str, str]]:
 def selection_from(*, preset: Optional[str] = None, blocks: Iterable[str] = (), sets: Iterable[str] = (),
                    files: Iterable[str] = (), online: Iterable[str] = (), sha256: Iterable[str] = (),
                    sizes: Iterable[str] = (), licences: Iterable[str] = (),
-                   unprivileged_only: bool = False, accepted_terms: Optional[Dict[str, str]] = None
-                   ) -> gen.Selection:
-    """The person's choice from the command line's options (the window builds its Selection directly)."""
+                   unprivileged_only: bool = False, accepted_terms: Optional[Dict[str, str]] = None,
+                   engines: Optional[str] = None) -> gen.Selection:
+    """The person's choice from the command line's options and the window's fields (`engines`: the engines all
+    together or in turn, gen.ENGINE_MODES; the person's choice only)."""
     chosen = list(blocks)
     if preset:
         selection = gen.Selection.from_preset(preset, unprivileged_only=unprivileged_only)
@@ -244,6 +245,10 @@ def selection_from(*, preset: Optional[str] = None, blocks: Iterable[str] = (), 
     else:
         raise gen.BundleError("choose a preset or at least one block")
     selection.accepted_terms.update(accepted_terms or {})
+    if engines is not None:
+        if engines not in gen.ENGINE_MODES:
+            raise gen.BundleError(f"the engines run {' or '.join(gen.ENGINE_MODES)}")
+        selection.engines = engines
     for comp, name, value in assignments(sets, "--set"):
         selection.values.setdefault(comp, {})[name] = value
     choices: Dict[Tuple[str, str], gen.FileChoice] = {}
@@ -267,6 +272,26 @@ def selection_from(*, preset: Optional[str] = None, blocks: Iterable[str] = (), 
     for comp, role, value in assignments(licences, "--licence"):
         choice(comp, role).licence = value.strip()
     return selection
+
+
+def engines_lines(plan: gen.BundlePlan, lang: Optional[str] = None) -> List[str]:
+    """The engines' memory of the plan (BundlePlan.engines) in the person's language (utils/l10n_boards.py, keys
+    bundle.engines.*): all together and in turn with their numbers, and the person's choice; [] without an engine."""
+    from orchestrator.utils.localization import ui_text
+    e = plan.engines
+    if not e:
+        return []
+    verdict = (lambda ok: ui_text("bundle.engines.fits" if ok else "bundle.engines.no_fit", lang))
+    if e.get("available_mb") is None:
+        lines = [ui_text("bundle.engines.unknown", lang, together=e["together_mb"], one=e["in_turn_mb"])]
+    else:
+        lines = [ui_text("bundle.engines.together", lang, engines=sum(e["engines_mb"].values()), rest=e["rest_mb"],
+                         reserve=e["reserve_mb"], need=e["together_mb"], available=e["available_mb"],
+                         verdict=verdict(e["fits_together"])),
+                 ui_text("bundle.engines.in_turn", lang, largest=e["largest"],
+                         largest_mb=e["engines_mb"][e["largest"]], rest=e["rest_mb"], reserve=e["reserve_mb"],
+                         need=e["in_turn_mb"], available=e["available_mb"], verdict=verdict(e["fits_in_turn"]))]
+    return lines + [ui_text(f"bundle.engines.chosen.{e['mode']}", lang)]
 
 
 def run_on_board(open_session: Callable[[], Any], built: gen.BuiltBundle, action: str, *,

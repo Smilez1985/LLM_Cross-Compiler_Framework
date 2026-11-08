@@ -30,6 +30,14 @@ Licence: the gateway is the framework's (MIT); the model's licence is named in t
 - A memory guard: while the board's free memory (MemAvailable) is below `memory_floor_mb` or its memory pressure
   (`/proc/pressure/memory`, "some avg10") is above `memory_psi_max`, new requests wait in the queue instead of going
   to the model, until memory recovers or their wait ends; the change is logged with the numbers only.
+- The engines: with its own unit (`autostart`) and the engines' units, the gateway starts and stops the bundle's llm,
+  speech and vision units (the root action allow_unit_control: a polkit rule for exactly its account and these units,
+  or a sudoers file with exactly their `systemctl start|stop|restart` lines on a board without polkit's rules). The
+  bundle passes each engine with its memory from the plan (`--engine llm=llmcf-llm.service:MB`) and the person's
+  choice from the plan: all together (each started on demand), or in turn (`llm-cli bundle plan --engines in-turn`,
+  the Board bundle window's checkbox) when the board's memory cannot hold them together: before a request goes to an
+  engine that is not running, the others finish their requests, are stopped, and the engine is started and its
+  health awaited. The plan always shows whether all together fits. Only the llm's requests pass the gateway so far.
 - Logs: route, status, time and token counts, never prompt text.
 
 ## Variables
