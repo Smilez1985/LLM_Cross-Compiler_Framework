@@ -4,13 +4,15 @@
 //! budget, the savings; server.rs: routes, limits, TLS in the local-network mode); `llmcf-gateway probe --port P
 //! [--tls] [--complete] [--bench N]` checks a running gateway from the board itself (probe.rs). It reads no
 //! environment but HOME (its state folder and the model server's key file live below it), runs no shell and talks
-//! only to llama-server on 127.0.0.1; with --llm-unit it starts and stops exactly that systemd unit (control.rs).
+//! only to the board's engines on 127.0.0.1; with --engine (or --llm-unit) it starts and stops exactly those systemd
+//! units (control.rs), together or in turn when they do not fit together (engines.rs).
 //!
 //! Exit status: 0 done, 1 a check failed or the server stopped with an error, 2 not a call it takes.
 #![forbid(unsafe_code)]
 
 mod args;
 mod control;
+mod engines;
 mod limits;
 mod memory;
 mod peer;

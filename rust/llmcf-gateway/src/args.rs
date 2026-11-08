@@ -1,6 +1,7 @@
 //! The gateway's command line: `serve` and `probe`, each option with its own bound. Every other option, a value
 //! out of its bounds or an option twice is refused (exit 2); nothing is read from the environment but HOME.
 
+use crate::engines::{self, Kind, Mode, Spec};
 use std::collections::HashSet;
 
 /// Where the gateway listens: loopback (127.0.0.1, plain HTTP) or the local network (every address, TLS only).
@@ -42,8 +43,15 @@ pub struct Serve {
     pub memory_floor_mb: u32,
     /// The memory pressure ("some avg10", percent) above which no new request goes in (0: not watched).
     pub memory_psi_max: u32,
-    /// The llm component's systemd unit the gateway starts and stops (None: it controls nothing).
-    pub llm_unit: Option<String>,
+    /// The engines the gateway starts and stops, each its own unit with its measured memory (`--engine`; `--llm-unit
+    /// U` is `--engine llm=U:0`). None: it controls nothing.
+    pub engines: Vec<Spec>,
+    /// together (each started on demand) or in-turn (those that do not fit together take turns; engines.rs)
+    pub engines_mode: Mode,
+    /// MiB the engines may use together in turn (0: one engine at a time)
+    pub engines_budget_mb: u64,
+    /// how long an engine stays loaded at least before it may give way to another one in turn
+    pub engine_hold_seconds: u32,
     pub idle_stop_minutes: u32,
 }
 
@@ -63,7 +71,10 @@ impl Default for Serve {
             queue_wait_seconds: 120,
             memory_floor_mb: 64,
             memory_psi_max: 50,
-            llm_unit: None,
+            engines: Vec::new(),
+            engines_mode: Mode::Together,
+            engines_budget_mb: 0,
+            engine_hold_seconds: 30,
             idle_stop_minutes: 0,
         }
     }
@@ -111,7 +122,8 @@ fn pairs(rest: &[String]) -> Result<Vec<(&str, &str)>, String> {
         if !name.starts_with("--") {
             return Err(format!("{name} is not an option"));
         }
-        if !seen.insert(name) {
+        // --engine is given once per engine
+        if name != "--engine" && !seen.insert(name) {
             return Err(format!("{name} is given twice"));
         }
         if matches!(name, "--tls" | "--complete") {
@@ -162,16 +174,50 @@ pub fn parse(args: &[String]) -> Result<Call, String> {
                         if !is_unit(v) {
                             return Err("--llm-unit is a unit llmcf-install wrote (llmcf-<name>.service)".into());
                         }
-                        s.llm_unit = Some(v.to_string());
+                        s.engines.push(Spec { kind: Kind::Llm, unit: v.to_string(), mib: 0, port: None });
                     }
+                    "--engine" => s.engines.push(engines::parse_spec(v)?),
+                    "--engines" => {
+                        s.engines_mode = match v {
+                            "together" => Mode::Together,
+                            "in-turn" => Mode::InTurn,
+                            _ => return Err("--engines is together or in-turn".into()),
+                        }
+                    }
+                    "--engines-budget-mb" => s.engines_budget_mb = number(name, v, 0, 1 << 20)?,
+                    "--engine-hold-seconds" => s.engine_hold_seconds = number(name, v, 0, 3600)? as u32,
                     _ => return Err(format!("{name} is not an option of serve")),
                 }
             }
             if s.port == s.upstream_port {
                 return Err("--port and --upstream-port must differ".into());
             }
-            if s.idle_stop_minutes > 0 && s.llm_unit.is_none() {
-                return Err("--idle-stop-minutes needs --llm-unit (the gateway stops only its own model server)".into());
+            if s.idle_stop_minutes > 0 && s.engines.is_empty() {
+                return Err(
+                    "--idle-stop-minutes needs an engine (--engine or --llm-unit: the gateway stops only its own \
+                            engines)"
+                        .into(),
+                );
+            }
+            for (i, e) in s.engines.iter().enumerate() {
+                if s.engines[..i].iter().any(|o| o.kind == e.kind) {
+                    return Err(format!(
+                        "the {} engine is given twice (--llm-unit is --engine llm=UNIT)",
+                        e.kind.word()
+                    ));
+                }
+                if s.engines[..i].iter().any(|o| o.unit == e.unit) {
+                    return Err(format!("{} is given for two engines", e.unit));
+                }
+                match (e.kind, e.port) {
+                    (Kind::Llm, Some(p)) if p != s.upstream_port => {
+                        return Err("the llm engine's port is --upstream-port".into())
+                    }
+                    (Kind::Stt | Kind::Vision, Some(p)) if p == s.port || p == s.upstream_port => {
+                        return Err(format!("the {} engine's port is another one's", e.kind.word()))
+                    }
+                    _ => {}
+                }
             }
             Ok(Call::Serve(s))
         }
@@ -225,10 +271,44 @@ mod tests {
             &["serve", "--queue-max", "5000"],
             &["serve", "--queue-wait-seconds", "0"],
             &["serve", "--memory-psi-max", "101"],
+            &["serve", "--engine", "llm=llmcf-llm.service:9", "--llm-unit", "llmcf-x.service"],
+            &["serve", "--engine", "llm=llmcf-llm.service:9", "--engine", "stt=llmcf-llm.service:9"],
+            &["serve", "--engine", "llm=llmcf-llm.service:9:9000"],
+            &["serve", "--engine", "stt=llmcf-stt.service:9:8080"],
+            &["serve", "--engines", "sometimes"],
+            &["serve", "--engines-budget-mb", "-5"],
+            &["serve", "--engine-hold-seconds", "3601"],
             &["bogus"],
         ] {
             assert!(parse(&a(bad)).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn engines_take_their_units_memory_and_mode() {
+        let Call::Serve(s) = parse(&a(&[
+            "serve",
+            "--engine",
+            "llm=llmcf-llm.service:900",
+            "--engine",
+            "stt=llmcf-stt.service:300:8090",
+            "--engines",
+            "in-turn",
+            "--engines-budget-mb",
+            "1000",
+            "--idle-stop-minutes",
+            "10",
+        ]))
+        .unwrap() else {
+            panic!()
+        };
+        assert_eq!(s.engines.len(), 2);
+        assert_eq!((s.engines[1].kind, s.engines[1].mib, s.engines[1].port), (Kind::Stt, 300, Some(8090)));
+        assert_eq!((s.engines_mode, s.engines_budget_mb, s.engine_hold_seconds), (Mode::InTurn, 1000, 30));
+        // --llm-unit stays: the llm engine without its memory
+        let Call::Serve(s) = parse(&a(&["serve", "--llm-unit", "llmcf-llm.service"])).unwrap() else { panic!() };
+        assert_eq!(s.engines, vec![Spec { kind: Kind::Llm, unit: "llmcf-llm.service".into(), mib: 0, port: None }]);
+        assert_eq!(s.engines_mode, Mode::Together);
     }
 
     #[test]

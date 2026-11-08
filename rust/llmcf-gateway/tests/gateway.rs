@@ -456,3 +456,43 @@ fn while_memory_is_low_new_requests_wait_and_are_not_sent_on() {
     let g = gateway("qmem0", s.port, &["--memory-floor-mb", "0", "--memory-psi-max", "0"]);
     assert_eq!(post(g.port, "/v1/chat/completions", CHAT).0, 200);
 }
+
+#[test]
+fn health_and_metrics_list_the_engines_and_a_running_llm_takes_requests() {
+    // the llm stub answers already (as one started by its unit at boot would): the gateway takes it as running
+    // without asking systemctl to start anything; the speech engine's port answers nothing, so it is stopped
+    let s = stub();
+    let stt_port = free_port();
+    let g = gateway(
+        "engines",
+        s.port,
+        &[
+            "--engine",
+            "llm=llmcf-llm.service:900",
+            "--engine",
+            &format!("stt=llmcf-stt.service:300:{stt_port}"),
+            "--engines",
+            "in-turn",
+            "--engines-budget-mb",
+            "1000",
+        ],
+    );
+    let (status, _) = post(g.port, "/v1/chat/completions", CHAT);
+    assert_eq!(status, 200);
+    let (_, body) = http(g.port, "GET", "/health", "", "text/plain");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["control"], "systemd");
+    assert_eq!(v["engines"]["mode"], "in-turn");
+    assert_eq!(v["engines"]["budget_mib"], 1000);
+    assert_eq!(v["engines"]["list"][0]["name"], "llm");
+    assert_eq!(v["engines"]["list"][0]["state"], "running", "{body}");
+    assert_eq!(v["engines"]["list"][1]["name"], "stt");
+    assert_eq!(v["engines"]["list"][1]["state"], "stopped");
+    assert_eq!(v["engines"]["list"][1]["mib"], 300);
+    assert_eq!(metric(g.port, "llmcf_gateway_engine_switches_total"), 0.0);
+    assert_eq!(metric(g.port, "llmcf_gateway_engine_switch_wait_seconds_total"), 0.0);
+    assert_eq!(metric(g.port, "llmcf_gateway_engine_running{engine=\"llm\"}"), 1.0);
+    assert_eq!(metric(g.port, "llmcf_gateway_engine_running{engine=\"stt\"}"), 0.0);
+    let log = g.log.lock().unwrap().clone();
+    assert!(log.contains("engines llm=900MiB,stt=300MiB (in-turn), 1000 MiB together"), "{log}");
+}

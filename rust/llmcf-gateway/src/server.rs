@@ -4,10 +4,13 @@
 //! only (never plain HTTP off loopback), and a client that is not on the board itself must send the gateway's
 //! bearer token. Every request is size-capped, rate-limited per client address and counted against a small number
 //! of requests in flight; a request that finds them all taken waits in a fair queue (queue.rs) with a time limit and
-//! a capped length. The log line of a request holds its route, status, time and token counts, never a prompt.
+//! a capped length. Each route names the engine it needs (engines.rs): with engines given, the request takes its
+//! place in flight first and then its engine, started (and in turn the others stopped) by the scheduler. The log line
+//! of a request holds its route, status, time and token counts, never a prompt.
 
 use crate::args::{Bind, Serve};
 use crate::control;
+use crate::engines::{self, Fut, Hooks, Kind, Scheduler, Spec, Ticket, Timing};
 use crate::limits::RateLimit;
 use crate::memory::{self, Guard};
 use crate::peer;
@@ -33,7 +36,6 @@ pub type Body = UnsyncBoxBody<Bytes, hyper::Error>;
 
 /// The runtime key of llama-server below the home (launcher.KEY_REL).
 pub const KEY_REL: &str = ".config/llm-framework/llama-server.key";
-const START_WAIT: Duration = Duration::from_secs(120);
 const ANSWER_WAIT: Duration = Duration::from_secs(900);
 /// How long a request's body may take once its in-flight permit is taken: a client that sends its headers and then
 /// stalls frees the permit after this time (408), so a few slow clients cannot hold the model away from the others.
@@ -52,8 +54,6 @@ pub struct Metrics {
     pub system_dropped: AtomicU64,
     pub results_pointed: AtomicU64,
     pub clamped: AtomicU64,
-    pub llm_starts: AtomicU64,
-    pub llm_stops: AtomicU64,
 }
 
 pub struct State {
@@ -65,9 +65,9 @@ pub struct State {
     pub queue: Arc<Queue>,
     pub memory: Arc<Guard>,
     pub metrics: Metrics,
-    pub last: Mutex<Instant>,
     pub budget: AtomicU64,
-    pub stopped: Mutex<bool>,
+    /// the engines the gateway starts and stops (None: it controls none)
+    pub engines: Option<Arc<Scheduler>>,
 }
 
 impl State {
@@ -179,61 +179,82 @@ async fn run_systemctl(verb: &'static str, unit: String) -> Result<bool, String>
     tokio::task::spawn_blocking(move || control::systemctl(verb, &unit)).await.map_err(|e| e.to_string())?
 }
 
-/// The model server up, started through its unit when the gateway controls one; Err with the person's words.
-async fn ensure_up(state: &State) -> Result<(), String> {
-    if upstream_up(state).await {
-        return Ok(());
+/// The board as the scheduler sees it: systemctl for exactly the engines' units, and each engine's health (the llm:
+/// llama-server's /health and /props, which also set the context budget; another engine with a port: any HTTP answer
+/// there; without a port: its unit is active).
+impl Hooks for State {
+    fn control<'a>(&'a self, verb: &'static str, unit: &'a str) -> Fut<'a, Result<bool, String>> {
+        Box::pin(run_systemctl(verb, unit.to_string()))
     }
-    let Some(unit) = state.cfg.llm_unit.clone() else { return Err("the model server does not answer".into()) };
-    match run_systemctl("start", unit).await {
-        Ok(true) => {
-            state.metrics.llm_starts.fetch_add(1, Relaxed);
-            if let Ok(mut s) = state.stopped.lock() {
-                *s = false;
+
+    fn up<'a>(&'a self, spec: &'a Spec) -> Fut<'a, bool> {
+        Box::pin(async move {
+            match (spec.kind, spec.port) {
+                (Kind::Llm, _) => upstream_up(self).await,
+                (_, Some(port)) => engines::http_up(port).await,
+                (_, None) => matches!(run_systemctl("is-active", spec.unit.clone()).await, Ok(true)),
             }
-        }
-        Ok(false) => return Err("the model server's unit could not be started".into()),
-        Err(e) => return Err(e),
+        })
     }
-    let until = Instant::now() + START_WAIT;
-    while Instant::now() < until {
-        if upstream_up(state).await {
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-    Err("the model server was started but does not answer yet".into())
 }
 
-/// Stops the model server after `idle_stop_minutes` without a request (only when the gateway controls its unit).
+/// The engine `kind` ready for a request: without engines given, the model server must answer; with them, the
+/// scheduler's ticket (the engine started, in turn the others stopped first) and, for the llm, its answer to
+/// /health. Err with the person's words (the caller answers 503 with Retry-After).
+async fn engine_ready(state: &State, kind: Kind, note: &mut String) -> Result<Option<Ticket>, String> {
+    let Some(sched) = state.engines.as_ref() else {
+        return if upstream_up(state).await { Ok(None) } else { Err("the model server does not answer".into()) };
+    };
+    if sched.index(kind).is_none() && kind == Kind::Llm {
+        // the gateway controls other engines only: the model server runs by itself
+        return if upstream_up(state).await { Ok(None) } else { Err("the model server does not answer".into()) };
+    }
+    let (ticket, waited) = sched.enter(state, kind).await.inspect_err(|_| {
+        note.push_str(&format!(" engine={}:not-ready", kind.word()));
+    })?;
+    if waited > Duration::ZERO {
+        note.push_str(&format!(" engine={}:{}ms", kind.word(), waited.as_millis()));
+    }
+    if kind == Kind::Llm && !upstream_up(state).await {
+        sched.mark_down(kind);
+        return Err("the model server does not answer".into());
+    }
+    Ok(Some(ticket))
+}
+
+/// Stops each engine after `idle_stop_minutes` without a request (only the gateway's own engines; never one with a
+/// request in flight, nothing while requests wait in the queue).
 pub async fn idle_stopper(state: Arc<State>) {
-    let (Some(unit), minutes) = (state.cfg.llm_unit.clone(), state.cfg.idle_stop_minutes) else { return };
+    let (Some(sched), minutes) = (state.engines.clone(), state.cfg.idle_stop_minutes) else { return };
     if minutes == 0 {
         return;
     }
     loop {
         tokio::time::sleep(Duration::from_secs(30)).await;
-        let idle = state.last.lock().map(|t| t.elapsed()).unwrap_or_default();
-        let stopped = state.stopped.lock().map(|s| *s).unwrap_or(false);
-        let busy = state.queue.running() > 0 || state.queue.queued() > 0;
-        if stopped || busy || idle < Duration::from_secs(minutes as u64 * 60) {
+        if state.queue.queued() > 0 {
             continue;
         }
-        if let Ok(true) = run_systemctl("stop", unit.clone()).await {
-            state.metrics.llm_stops.fetch_add(1, Relaxed);
-            if let Ok(mut s) = state.stopped.lock() {
-                *s = true;
-            }
-            eprintln!("llmcf-gateway: the model server was stopped after {minutes} idle minutes");
+        for kind in sched.stop_idle(&*state, Duration::from_secs(minutes as u64 * 60)).await {
+            eprintln!("llmcf-gateway: the {} engine was stopped after {minutes} idle minutes", kind.word());
         }
     }
 }
 
 // --- the routes --------------------------------------------------------------------------------------------
 
+fn engine_facts(state: &State) -> Value {
+    let Some(sched) = state.engines.as_ref() else { return json!({"mode": "none", "list": []}) };
+    let list: Vec<Value> = sched
+        .states()
+        .into_iter()
+        .map(|e| json!({"name": e.kind.word(), "unit": e.unit, "mib": e.mib, "state": e.state, "inflight": e.inflight}))
+        .collect();
+    json!({"mode": sched.mode.word(), "budget_mib": sched.budget_mib, "list": list})
+}
+
 async fn health(state: &State) -> Response<Body> {
     let up = upstream_up(state).await;
-    let stopped = state.stopped.lock().map(|s| *s).unwrap_or(false);
+    let stopped = state.engines.as_ref().is_some_and(|s| s.index(Kind::Llm).is_some() && !s.running(Kind::Llm));
     let upstream = if up {
         "up"
     } else if stopped {
@@ -251,7 +272,8 @@ async fn health(state: &State) -> Response<Body> {
             "tls": state.cfg.bind == Bind::Lan,
             "ctx_budget": state.budget.load(Relaxed),
             "max_tokens": state.cfg.max_tokens,
-            "control": if state.cfg.llm_unit.is_some() { "systemd" } else { "none" },
+            "control": if state.engines.is_some() { "systemd" } else { "none" },
+            "engines": engine_facts(state),
             "memory": memory_facts(&state.memory),
             "queue": {
                 "running": state.queue.running(),
@@ -278,7 +300,15 @@ fn memory_facts(g: &Guard) -> Value {
 fn metrics(state: &State) -> Response<Body> {
     let m = &state.metrics;
     let q = &state.queue.metrics;
-    let rows: [(&str, &str, u64); 18] = [
+    let (llm_starts, llm_stops) = state
+        .engines
+        .as_ref()
+        .and_then(|s| s.states().into_iter().find(|e| e.kind == Kind::Llm))
+        .map(|e| (e.starts, e.stops))
+        .unwrap_or((0, 0));
+    let em = state.engines.as_ref().map(|s| &s.metrics);
+    let switches = em.map(|m| m.switches.load(Relaxed)).unwrap_or(0);
+    let rows: [(&str, &str, u64); 19] = [
         ("llmcf_gateway_requests_total", "requests received", m.requests.load(Relaxed)),
         ("llmcf_gateway_answered_total", "requests the model server answered", m.ok.load(Relaxed)),
         ("llmcf_gateway_refused_total", "requests refused by the strict checks", m.refused.load(Relaxed)),
@@ -303,8 +333,9 @@ fn metrics(state: &State) -> Response<Body> {
             m.results_pointed.load(Relaxed),
         ),
         ("llmcf_gateway_max_tokens_clamped_total", "answers cut to the budget", m.clamped.load(Relaxed)),
-        ("llmcf_gateway_llm_starts_total", "model server starts", m.llm_starts.load(Relaxed)),
-        ("llmcf_gateway_llm_stops_total", "model server stops", m.llm_stops.load(Relaxed)),
+        ("llmcf_gateway_llm_starts_total", "model server starts", llm_starts),
+        ("llmcf_gateway_llm_stops_total", "model server stops", llm_stops),
+        ("llmcf_gateway_engine_switches_total", "engines stopped so another one could run in turn", switches),
     ];
     let mut text = String::new();
     for (name, help, v) in rows {
@@ -321,6 +352,22 @@ fn metrics(state: &State) -> Response<Body> {
         ),
     ] {
         text.push_str(&format!("# HELP {name} {help}\n# TYPE {name} gauge\n{name} {v}\n"));
+    }
+    let wait = em.map(|m| m.switch_wait_micros.load(Relaxed)).unwrap_or(0) as f64 / 1e6;
+    let name = "llmcf_gateway_engine_switch_wait_seconds_total";
+    text.push_str(&format!("# HELP {name} time requests waited for an engine switch\n# TYPE {name} counter\n"));
+    text.push_str(&format!("{name} {wait:.6}\n"));
+    if let Some(sched) = state.engines.as_ref() {
+        for (name, help) in [
+            ("llmcf_gateway_engine_running", "1 while the engine runs (the current engine in turn)"),
+            ("llmcf_gateway_engine_inflight", "requests at the engine"),
+        ] {
+            text.push_str(&format!("# HELP {name} {help}\n# TYPE {name} gauge\n"));
+            for e in sched.states() {
+                let v = if name.ends_with("running") { (e.state == "running") as u64 } else { e.inflight as u64 };
+                text.push_str(&format!("{name}{{engine=\"{}\"}} {v}\n", e.kind.word()));
+            }
+        }
     }
     let name = "llmcf_gateway_queue_wait_seconds";
     text.push_str(&format!("# HELP {name} time a request waited for its place\n# TYPE {name} histogram\n"));
@@ -340,11 +387,21 @@ fn refusal(state: &State, r: Refusal) -> Response<Body> {
     error(StatusCode::from_u16(r.status).unwrap_or(StatusCode::BAD_REQUEST), r.code, &r.message)
 }
 
-async fn forward(state: &State, path: &str, out: Value, permit: Permit) -> Response<Body> {
-    if let Err(e) = ensure_up(state).await {
-        state.metrics.upstream_errors.fetch_add(1, Relaxed);
-        return retry(error(StatusCode::SERVICE_UNAVAILABLE, "upstream_down", &e), 10);
-    }
+async fn forward(
+    state: &State,
+    kind: Kind,
+    path: &str,
+    out: Value,
+    permit: Permit,
+    note: &mut String,
+) -> Response<Body> {
+    let ticket = match engine_ready(state, kind, note).await {
+        Ok(t) => t,
+        Err(e) => {
+            state.metrics.upstream_errors.fetch_add(1, Relaxed);
+            return retry(error(StatusCode::SERVICE_UNAVAILABLE, "upstream_down", &e), 15);
+        }
+    };
     let req = upstream_request(state, Method::POST, path, Bytes::from(out.to_string()));
     match upstream(state, req).await {
         Ok(resp) => {
@@ -354,10 +411,10 @@ async fn forward(state: &State, path: &str, out: Value, permit: Permit) -> Respo
                 state.metrics.upstream_errors.fetch_add(1, Relaxed);
             }
             let (parts, body) = resp.into_parts();
-            // the permit is held until the answer's last byte went out (a streamed answer too)
+            // the permit and the engine's ticket are held until the answer's last byte went out (a stream too)
             let body = body
                 .map_frame(move |f| {
-                    let _held = &permit;
+                    let _held = (&permit, &ticket);
                     f
                 })
                 .boxed_unsync();
@@ -437,9 +494,9 @@ async fn route(state: &Arc<State>, conn: &Conn, req: Request<Incoming>, note: &m
         }
         _ => return error(StatusCode::NOT_FOUND, "not_found", "no such route"),
     }
-    if let Ok(mut t) = state.last.lock() {
-        *t = Instant::now();
-    }
+    let Some(engine) = engines::for_route(&path) else {
+        return error(StatusCode::NOT_FOUND, "not_found", "no such route");
+    };
     let ip: IpAddr = peer.ip();
     let wait = state.rate.lock().map(|mut r| r.take(ip, Instant::now())).unwrap_or(Err(60));
     if let Err(seconds) = wait {
@@ -447,13 +504,18 @@ async fn route(state: &Arc<State>, conn: &Conn, req: Request<Incoming>, note: &m
         return retry(error(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "too many requests"), seconds);
     }
     if req.method() == Method::GET {
-        if let Err(e) = ensure_up(state).await {
-            return retry(error(StatusCode::SERVICE_UNAVAILABLE, "upstream_down", &e), 10);
-        }
+        let ticket = match engine_ready(state, engine, note).await {
+            Ok(t) => t,
+            Err(e) => return retry(error(StatusCode::SERVICE_UNAVAILABLE, "upstream_down", &e), 15),
+        };
         return match upstream(state, upstream_request(state, Method::GET, "/v1/models", Bytes::new())).await {
             Ok(resp) => {
                 let status = resp.status();
-                let mut r = Response::new(resp.into_body().boxed_unsync());
+                let body = resp.into_body().map_frame(move |f| {
+                    let _held = &ticket;
+                    f
+                });
+                let mut r = Response::new(body.boxed_unsync());
                 *r.status_mut() = status;
                 r.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
                 r
@@ -541,7 +603,7 @@ async fn route(state: &Arc<State>, conn: &Conn, req: Request<Incoming>, note: &m
         o.results_pointed,
         if o.stream { " stream" } else { "" }
     );
-    forward(state, &path, o.body, permit).await
+    forward(state, engine, &path, o.body, permit, note).await
 }
 
 // --- listening ---------------------------------------------------------------------------------------------
@@ -584,9 +646,15 @@ pub fn build_state(cfg: Serve) -> Result<(Arc<State>, Option<Arc<rustls::ServerC
         queue,
         memory: guard,
         metrics: Metrics::default(),
-        last: Mutex::new(Instant::now()),
         budget: AtomicU64::new((cfg.ctx_size / cfg.slots) as u64),
-        stopped: Mutex::new(false),
+        engines: (!cfg.engines.is_empty()).then(|| {
+            let timing = Timing {
+                hold: Duration::from_secs(cfg.engine_hold_seconds as u64),
+                switch_wait: Duration::from_secs(cfg.queue_wait_seconds as u64),
+                ..Timing::default()
+            };
+            Scheduler::new(cfg.engines_mode, cfg.engines_budget_mb, cfg.engines.clone(), timing)
+        }),
         key,
         token,
         fingerprint,
@@ -619,15 +687,23 @@ pub async fn serve(state: Arc<State>, tls_cfg: Option<Arc<rustls::ServerConfig>>
         if tls_cfg.is_some() { "TLS 1.3" } else { "loopback HTTP" },
         state.fingerprint.as_ref().map(|f| format!(", certificate sha256 {f}")).unwrap_or_default()
     );
-    if let Some(unit) = state.cfg.llm_unit.clone() {
-        if !upstream_up(&state).await {
-            match run_systemctl("start", unit).await {
-                Ok(true) => {
-                    state.metrics.llm_starts.fetch_add(1, Relaxed);
+    if let Some(sched) = state.engines.clone() {
+        eprintln!(
+            "llmcf-gateway: engines {} ({}){}",
+            sched.specs.iter().map(|e| format!("{}={}MiB", e.kind.word(), e.mib)).collect::<Vec<_>>().join(","),
+            sched.mode.word(),
+            if sched.budget_mib > 0 { format!(", {} MiB together", sched.budget_mib) } else { String::new() }
+        );
+        let st = state.clone();
+        tokio::spawn(async move {
+            // which engines run already (in turn, those that do not fit together are stopped), then the llm
+            sched.reconcile(&*st).await;
+            if sched.index(Kind::Llm).is_some() && !sched.running(Kind::Llm) {
+                if let Err(e) = sched.prepare(&*st, Kind::Llm).await {
+                    eprintln!("llmcf-gateway: the model server could not be started ({e}); it is tried again");
                 }
-                _ => eprintln!("llmcf-gateway: the model server's unit could not be started (it is tried again)"),
             }
-        }
+        });
         tokio::spawn(idle_stopper(state.clone()));
     }
     let ticking = state.clone();
