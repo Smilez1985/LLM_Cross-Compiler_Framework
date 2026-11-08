@@ -148,9 +148,9 @@ NO_TOOL_ACTIONS = [
                            "(Tools > Create Hardware Module..., Deep Ingest) or 'llm-cli tools crawl-notice' (only a "
                            "person reads it)."),
     ("write_bundle_block", "Write, save or sign a bundle building block: only the person, after reviewing the "
-                           "proposal (Boards > Board bundle... > Propose from model... and Save, or 'llm-cli bundle "
-                           "block propose --write' at a terminal); propose_bundle_block only proposes, and a note "
-                           "you give it is shown to the person."),
+                           "proposal (Propose from model... and Save in the framework's Board bundle window, or the "
+                           "command line's block proposal with --write at a terminal); propose_bundle_block only "
+                           "proposes, and a note you give it is shown to the person."),
     ("publish_pull_request", "Publish a community pull request: 'llm-cli zoo export --pr' (not for AI clients)."),
     ("install_pack_from_file", "Install a pack from a file: the Community Hub in the GUI or "
                                "'llm-cli zoo install --file' (unreviewed code an AI could write itself)."),
