@@ -122,15 +122,14 @@ class TestTheRecipeInTheDockerfiles:
             if folder.is_dir():
                 assert scan_target_folder(folder) == [], folder.name
 
-    def test_dependabot_never_proposes_another_ubuntu_release_for_the_pinned_build_base(self):
-        """The GPU template's Ubuntu release is pinned with the CUDA archives (D6); a Dependabot bump to another
-        release (it proposed 25.10) only breaks that pairing, so the release is never bumped by Dependabot."""
+    def test_dependabot_may_propose_every_ubuntu_release(self):
+        """DESIGN round 67: LTS or not no longer matters; Dependabot proposes every Ubuntu release for the templates,
+        and a bump that breaks the GPU template's pairing with CUDA turns CI red and is fixed on its branch first."""
         import yaml
         config = yaml.safe_load((REPO_ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
         docker = next(u for u in config["updates"] if u["package-ecosystem"] == "docker")
         assert "/targets/_template" in docker["directories"]
-        rules = [r for r in docker.get("ignore") or [] if r.get("dependency-name") == "ubuntu"]
-        assert rules and {"version-update:semver-major", "version-update:semver-minor"} <= set(rules[0]["update-types"])
+        assert not [r for r in docker.get("ignore") or [] if r.get("dependency-name") == "ubuntu"]
 
     def test_every_pinned_build_base_in_a_dockerfile_matches_the_catalog(self):
         """Dependabot moves the digest of an image in a Dockerfile but not in configs/llama_runtime.yml, which names
