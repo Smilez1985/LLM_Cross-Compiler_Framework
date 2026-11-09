@@ -28,6 +28,7 @@ import os
 import secrets
 import tempfile
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -171,13 +172,15 @@ class ApprovalStore:
 
     FILE_NAME = "tool_approvals.json"
     LOCK_NAME = ".tool_approvals.lock"
-    READ_WAIT = 2.0  # seconds a reader waits for a writer to finish its replace (see _read_settled)
+    MARKER_NAME = ".tool_approvals.replacing"  # exists only while a writer replaces the file (the done marker)
+    READ_WAIT = 2.0  # seconds at most a reader waits for the done marker to go (see _read_settled)
     KIND = "tool_approvals"
 
     def __init__(self, state_dir: Path, key: Optional[bytes] = None,
                  refuse_unkeyed: Optional[Callable[[], bool]] = None):
         self.path = Path(state_dir) / self.FILE_NAME
         self.lock_path = Path(state_dir) / self.LOCK_NAME
+        self.marker_path = Path(state_dir) / self.MARKER_NAME
         self.key = key
         self.refuse_unkeyed = refuse_unkeyed
         self.problem: Optional[str] = None
@@ -217,8 +220,12 @@ class ApprovalStore:
                 os.fsync(f.fileno())
             os.chmod(tmp, 0o600)
             # Windows: while another window or the approval watcher reads the file, replacing it fails for a moment
-            from orchestrator.utils.atomic import replace_file
-            replace_file(tmp, self.path)
+            from orchestrator.utils.atomic import remove_file, replace_file
+            self.marker_path.touch(mode=0o600)  # the done marker: readers wait until it is gone (_read_settled)
+            try:
+                replace_file(tmp, self.path)
+            finally:
+                remove_file(self.marker_path)
         except BaseException:
             try:
                 os.unlink(tmp)
@@ -239,15 +246,14 @@ class ApprovalStore:
     # --- reading -----------------------------------------------------------------------------------------------
 
     def _read_settled(self) -> List[ApprovalRecord]:
-        """Reads the file once no writer is replacing it: a writer holds the lock file from its read to the replace,
-        so its release is the done marker. A writer that holds it longer than READ_WAIT (or a caller inside a change)
-        does not block the reader; then read_text's retry on Windows is the fallback."""
-        from orchestrator.utils.file_lock import LockTimeout, file_lock
-        try:
-            with file_lock(self.lock_path, timeout=self.READ_WAIT):
-                return self._read()
-        except LockTimeout:
-            return self._read()
+        """Reads the file once no writer is replacing it: the writer puts the done marker (MARKER_NAME) next to the
+        file right before the replace and removes it right after, so a reader waits while it is there, at most
+        READ_WAIT (a marker left by a writer that died does not block anyone). The reader takes no lock: readers never
+        slow the writers or each other down. read_text's retry on Windows is the fallback."""
+        deadline = time.monotonic() + self.READ_WAIT
+        while self.marker_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return self._read()
 
     def list(self) -> List[ApprovalRecord]:
         return self._read_settled()

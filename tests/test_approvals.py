@@ -596,22 +596,20 @@ def test_a_new_warning_asks_again(env):
 
 
 def test_a_reader_waits_until_the_writer_has_replaced_the_file(tmp_path):
-    """The writer holds the lock file from its read to the replace; its release is the done marker. A reader waits
-    for it (on Windows reading during the replace fails for a moment), so it sees the file only once it is whole."""
+    """The writer puts the done marker next to the file right before the replace and removes it right after; a
+    reader waits while it is there (on Windows reading during the replace fails for a moment), so it sees the file
+    only once it is whole. The reader takes no lock."""
     import threading
-
-    from orchestrator.utils.file_lock import file_lock
     store = approvals_module.ApprovalStore(tmp_path)
-    held, order = threading.Event(), []
+    store.marker_path.touch()
+    order = []
 
     def writer():
-        with file_lock(store.lock_path, timeout=5):
-            held.set()
-            time.sleep(0.3)
-            order.append("replaced")
+        time.sleep(0.3)
+        order.append("replaced")
+        store.marker_path.unlink()
     thread = threading.Thread(target=writer)
     thread.start()
-    held.wait(5)
     read = store._read
     store._read = lambda: (order.append("read"), read())[1]
     assert store.list() == []
@@ -619,14 +617,15 @@ def test_a_reader_waits_until_the_writer_has_replaced_the_file(tmp_path):
     assert order == ["replaced", "read"]
 
 
-def test_a_writer_that_holds_on_does_not_block_a_reader(tmp_path, monkeypatch):
-    """A writer that keeps the lock longer than READ_WAIT does not hold the reader up: it reads anyway, with
-    read_text's retry as the fallback."""
+def test_the_writer_leaves_no_marker_and_a_reader_never_waits_for_the_writers_lock(tmp_path):
+    """After a write the marker is gone; a reader does not wait while a writer only holds the lock (the approval
+    watcher, the CLI and the job read while others change the file, also on Windows)."""
     import threading
 
     from orchestrator.utils.file_lock import file_lock
     store = approvals_module.ApprovalStore(tmp_path)
-    monkeypatch.setattr(store, "READ_WAIT", 0.1)
+    store._write([])
+    assert store.path.exists() and not store.marker_path.exists()
     held, done = threading.Event(), threading.Event()
 
     def writer():
@@ -638,7 +637,15 @@ def test_a_writer_that_holds_on_does_not_block_a_reader(tmp_path, monkeypatch):
     held.wait(5)
     started = time.monotonic()
     try:
-        assert store.pending() == [] and time.monotonic() - started < 2
+        assert store.pending() == [] and time.monotonic() - started < 0.5
     finally:
         done.set()
         thread.join()
+
+
+def test_a_marker_left_by_a_writer_that_died_blocks_no_reader_for_long(tmp_path, monkeypatch):
+    store = approvals_module.ApprovalStore(tmp_path)
+    monkeypatch.setattr(store, "READ_WAIT", 0.1)
+    store.marker_path.touch()
+    started = time.monotonic()
+    assert store.list() == [] and time.monotonic() - started < 1
