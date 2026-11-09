@@ -1854,6 +1854,7 @@ One repository with layers enforced by a test; every change extends what exists.
 | What | How | Why |
 |---|---|---|
 | Recon first: look at what exists and what a change touches before designing; use, extend and wire the existing implementation, never build a duplicate; "done" means wired and tested; check every change against the design, the roadmap and the changelog. | Every piece of work starts with a recon; its report names the existing code checked first. | The maintainer's original came first and could have been used. |
+| Work that needs real hardware (a board, a GPU, a camera, the maintainer's tests on devices) waits; until then the assistant works through everything of the roadmap it can do alone, in the order it judges most important and most useful, and finishes each item to the standard of the whole project: not only working but working perfectly, and every model llmcf creates, quantizes and cross-compiles is usable and tuned to its target hardware. | Before building: read the roadmap row and DESIGN, look at what exists in the code, what the work touches and where it connects; write the plan into DESIGN and the roadmap first; build on the existing structures; done means wired and green-tested; then DESIGN, CHANGELOG and roadmap are brought up to date. | The maintainer cannot test on hardware all the time, and an unfinished or merely working result is not good enough for models that must run well on small boards. |
 | One repository; layers enforced by a test with a shrinking allowlist and a cycle ratchet; no separately installable packages for now. | `tests/test_layering.py`. | Layers keep Core free of Qt and the GUI; a test keeps them from eroding. |
 | One disk rule for every free-space check: reserves plus a cross-process reservation ledger; downloads count the space a running build reserved (wait or refuse with a plain reason). | `Core/disk_plan.py` (`reserve_for`, `ReservationLedger`). | Separate checks disagreed and let two jobs fill the same disk. |
 | The removal answers of the unwired audit: one implementation per job, the original one where it is adequate (the duplicate link question, old text keys, duplicate localization keys, menu-name lookups, the legacy Docker build path, the credential check, the old validation module, the smoke-test script, an unused probe worker), each wired to the kept one or removed with proof. | The consolidation chains of 3.1.0 (see the changelog's "One implementation per job" entry). | Two copies of the same job drift apart. |
@@ -3960,6 +3961,18 @@ quiet during a login: keep it as an open false positive (A) or pass the secret o
 (B, recommended)? "B, umbauen" – the trap takes its arguments unnamed (`*args`); the test proves the same.
 
 Now in: [Tests, CI and the Windows hazards](#tests-ci-and-the-windows-hazards)
+
+### Round 72
+
+<a id="decision-round-72"></a>
+Decided 2026-11-09. The maintainer: "alles was echte hardware benötigt muss warten! wir konzentrieren uns erst auf
+alles was du hier alleine machen kannst... bevor du neu baust schaust du was schon da ist, was es berührt oder berühren
+soll und wo du anknüpfen kannst, damit keine parallelen strukturen entstehen. du weißt besser als ich was jetzt das
+wichtigste oder sinnvollste ist. wir müssen die roadmap abarbeiten (fertig bedeutet verdrahtet und grün getestet) und
+ein sehr gutes ergebnis dabei abliefern. Es muss nicht nur funktionieren, es muss perfekt funktionieren und die ki ...
+muss brauchbar / perfekt auf die target hardware abgestimmt sein." Hardware work waits; the assistant chooses the order.
+
+Now in: [Repository, layers and consolidation](#repository-layers-and-consolidation)
 
 ## Versioning and documentation policy
 

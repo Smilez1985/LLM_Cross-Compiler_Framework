@@ -1969,6 +1969,7 @@ Ein Repository mit Schichten, die ein Test durchsetzt; jede Änderung erweitert,
 | Was | Wie | Warum |
 |---|---|---|
 | Zuerst die Bestandsaufnahme: ansehen, was es gibt und was eine Änderung berührt, bevor entworfen wird; die vorhandene Umsetzung nutzen, erweitern und verdrahten, nie eine Doublette bauen; „fertig“ heißt verdrahtet und getestet; jede Änderung gegen Design, Roadmap und Changelog prüfen. | Jede Arbeit beginnt mit einer Bestandsaufnahme; ihr Bericht nennt den vorher geprüften vorhandenen Code. | Das Original des Maintainers war zuerst da und hätte genutzt werden können. |
+| Arbeit, die echte Hardware braucht (ein Board, eine GPU, eine Kamera, die Tests des Maintainers auf Geräten), wartet; bis dahin arbeitet der Assistent alles der Roadmap ab, was er allein kann, in der Reihenfolge, die er für am wichtigsten und sinnvollsten hält, und macht jeden Punkt fertig nach dem Maßstab des ganzen Projekts: nicht nur funktionierend, sondern perfekt funktionierend, und jedes Modell, das llmcf erstellt, quantisiert und cross-kompiliert, ist brauchbar und auf seine Zielhardware abgestimmt. | Vor dem Bau: die Roadmap-Zeile und DESIGN lesen, im Code ansehen, was da ist, was die Arbeit berührt und wo sie anknüpft; den Plan zuerst in DESIGN und die Roadmap schreiben; auf den bestehenden Strukturen bauen; fertig heißt verdrahtet und grün getestet; danach werden DESIGN, CHANGELOG und Roadmap nachgezogen. | Der Maintainer kann nicht ständig auf Hardware testen, und ein unfertiges oder bloß funktionierendes Ergebnis reicht nicht für Modelle, die auf kleinen Boards gut laufen müssen. |
 | Ein Repository; Schichten, die ein Test mit schrumpfender Ausnahmeliste und einer Zyklus-Sperre durchsetzt; vorerst keine getrennt installierbaren Pakete. | `tests/test_layering.py`. | Schichten halten Core frei von Qt und der GUI; ein Test hält sie davon ab zu zerfallen. |
 | Eine Speicherplatz-Regel für jede Prüfung: Reserven plus ein Reservierungsbuch über Prozesse; Downloads rechnen den Platz, den ein laufender Build reserviert hat (warten oder mit klarem Grund ablehnen). | `Core/disk_plan.py` (`reserve_for`, `ReservationLedger`). | Getrennte Prüfungen waren uneins und ließen zwei Aufgaben dieselbe Platte füllen. |
 | Die Antworten zum Entfernen aus der Prüfung auf Unverdrahtetes: eine Umsetzung je Aufgabe, die ursprüngliche, wo sie genügt (die doppelte Link-Frage, alte Textschlüssel, doppelte Übersetzungsschlüssel, Menünamen-Abfragen, der alte Docker-Build-Weg, die Prüfung der Zugangsdaten, das alte Prüfmodul, das Smoke-Test-Skript, ein ungenutzter Probe-Worker), jede mit der behaltenen verdrahtet oder mit Nachweis entfernt. | Die Konsolidierungsketten von 3.1.0 (siehe den Changelog-Eintrag „Eine Umsetzung je Aufgabe“). | Zwei Kopien derselben Aufgabe laufen auseinander. |
@@ -4201,6 +4202,19 @@ weiterreichen, damit CodeQL ihn nicht mehr meldet (B, empfohlen)? „B, umbauen�
 unbenannt (`*args`); der Test beweist dasselbe.
 
 Steht jetzt in: [Tests, CI und die Windows-Fallen](#tests-ci-und-die-windows-fallen)
+
+### Runde 72
+
+<a id="decision-round-72"></a>
+Entschieden am 2026-11-09. Der Maintainer: „alles was echte hardware benötigt muss warten! wir konzentrieren uns erst
+auf alles was du hier alleine machen kannst... bevor du neu baust schaust du was schon da ist, was es berührt oder
+berühren soll und wo du anknüpfen kannst, damit keine parallelen strukturen entstehen. du weißt besser als ich was jetzt
+das wichtigste oder sinnvollste ist. wir müssen die roadmap abarbeiten (fertig bedeutet verdrahtet und grün getestet)
+und ein sehr gutes ergebnis dabei abliefern. Es muss nicht nur funktionieren, es muss perfekt funktionieren und die ki
+... muss brauchbar / perfekt auf die target hardware abgestimmt sein.“ Hardware-Arbeit wartet; die Reihenfolge wählt
+der Assistent.
+
+Steht jetzt in: [Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung)
 
 ## Versionierung und Dokumentationsregeln
 
