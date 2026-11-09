@@ -1,8 +1,9 @@
 version: 2
 updates:
-  # pyproject.toml and uv.lock. Dependabot changes the lock only: export requirements.txt, requirements-gui.txt and
-  # requirements-dev.txt again on its branch (CONTRIBUTING.md, section 2); the CI job "Lock files" fails until they
-  # match uv.lock.
+  # pyproject.toml and uv.lock. Dependabot changes the lock only: export requirements.txt, requirements-gui.txt,
+  # requirements-dev.txt and requirements-resolve.txt again on its branch (CONTRIBUTING.md, section 2); the CI job
+  # "Lock files" fails until they match uv.lock. A 0.x package's range ends before its next minor (uv: >=0.13.7,<0.14),
+  # so a bump past it needs both bounds raised by hand.
   - package-ecosystem: uv
     directory: "/"
     # The hash-pinned exports are made by `uv export` from uv.lock, not edited by Dependabot (its pip-compile updater
@@ -11,6 +12,7 @@ updates:
       - "requirements.txt"
       - "requirements-gui.txt"
       - "requirements-dev.txt"
+      - "requirements-resolve.txt"
     # Pull requests go to development, where the work lands; main only receives development as a whole.
     target-branch: development
     schedule:
