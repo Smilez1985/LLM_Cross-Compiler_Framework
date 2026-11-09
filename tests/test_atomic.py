@@ -297,3 +297,30 @@ def test_write_file_opens_its_temporary_file_in_binary_mode_where_the_system_has
     atomic.write_file(target, "a\nb\n")
     assert flags_seen and all(f & fake_binary for f in flags_seen), "the temporary file is opened with O_BINARY"
     assert target.read_text(encoding="utf-8") == "a\nb\n"
+
+
+def test_read_text_tries_again_while_a_writer_replaces_the_file(tmp_path, monkeypatch):
+    """read_text: on Windows a reader sees PermissionError for a moment while another thread or process replaces the
+    file (the approval store read it as damaged and empty, so a pending approval vanished for an instant); it tries
+    again REPLACE_RETRIES times there, never elsewhere, and a missing file still raises FileNotFoundError."""
+    from orchestrator.utils import atomic
+    monkeypatch.setattr(atomic, "REPLACE_RETRIES", 10)  # what a Windows host uses
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    target = tmp_path / "tool_approvals.json"
+    target.write_text("{}", encoding="utf-8")
+    real_read, refused = Path.read_text, []
+
+    def busy_twice(self, *args, **kwargs):
+        if len(refused) < 2:
+            refused.append(self)
+            raise PermissionError(13, "The process cannot access the file")
+        return real_read(self, *args, **kwargs)
+    monkeypatch.setattr(Path, "read_text", busy_twice)
+    assert atomic.read_text(target) == "{}" and len(refused) == 2
+    refused.clear()
+    monkeypatch.setattr(atomic, "REPLACE_RETRIES", 0)  # Linux and macOS: no retry
+    with pytest.raises(PermissionError):
+        atomic.read_text(target)
+    monkeypatch.setattr(Path, "read_text", real_read)
+    with pytest.raises(FileNotFoundError):
+        atomic.read_text(tmp_path / "missing.json")

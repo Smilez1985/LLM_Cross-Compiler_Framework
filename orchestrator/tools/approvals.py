@@ -184,7 +184,9 @@ class ApprovalStore:
 
     def _read(self) -> List[ApprovalRecord]:
         try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            # Windows: while another window or the approval watcher replaces the file, reading it fails for a moment
+            from orchestrator.utils.atomic import read_text
+            raw = json.loads(read_text(self.path))
             if not isinstance(raw, dict):
                 raise ValueError("not a JSON object")
             data = ApprovalFile.model_validate({k: v for k, v in raw.items() if k != SIGNATURE_FIELD})

@@ -67,6 +67,20 @@ def replace_file(src, dst) -> None:
             time.sleep(0.05 * (attempt + 1))
 
 
+def read_text(path, encoding: str = "utf-8") -> str:
+    """Reads the file at `path`; tried again for a moment on Windows while another process replaces it (the reader
+    then briefly sees PermissionError instead of the old or the new file; REPLACE_RETRIES times there, never
+    elsewhere). FileNotFoundError and every other error pass through."""
+    for attempt in range(REPLACE_RETRIES + 1):
+        try:
+            return Path(path).read_text(encoding=encoding)
+        except PermissionError:
+            if attempt >= REPLACE_RETRIES:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+    raise AssertionError("unreachable")
+
+
 def remove_file(path) -> None:
     """Deletes the file at `path` if it is there (a missing file is fine); tried again for a moment on Windows while
     another process has it open (REPLACE_RETRIES times there, never elsewhere)."""
