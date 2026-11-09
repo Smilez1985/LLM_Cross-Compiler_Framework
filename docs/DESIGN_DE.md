@@ -2058,66 +2058,108 @@ diesem Design steht. Das Protokoll wächst mit jeder Runde; eine neue Runde beko
 der Fragen innerhalb einer Runde. Was entschieden ist, steht immer bei seinem Baustein; weichen beide voneinander ab,
 gilt der Baustein.
 
-Das Gespräch ist bis zum 2026-11-06 18:16:58 UTC zurück ausgewertet: Die Runden 57 bis 59 und 66 und die Entscheidungen
-vom 6. bis 9. November außerhalb einer Runde stammen daraus. Die früheren Runden sind weiter die unten beschriebene
-Rekonstruktion aus dem Repository, bis der frühere Teil des Gesprächs ausgewertet ist. Entscheidungen dieser Tage
-außerhalb einer Runde, alles Arbeitsregeln des Maintainers: main bewegt sich nur auf das Wort des Maintainers und per
-Fast-Forward, nachdem main zuerst ohne Pull Request in `development` gemergt wurde; auf GitHub gibt es nur `main`,
-`development`, ein vorübergehendes `gate` und `deps/update`; das Repository wurde am 2026-11-07 mit seinen Einstellungen
-neu angelegt; kein unnötiger Commit und kein Leck eines Tokens, Passworts oder persönlicher Daten, mit einem Leck-Scan
-vor jedem Push; nichts wird gelöscht, ohne mit der genauen Liste zu fragen, und der Assistent räumt seine eigenen Reste
-selbst auf; offene Dependabot-Pull-Requests werden gemergt, wenn sie grün sind; Testumgebungen entstehen nur aus dem
-Lock; der Codespace wird nur genutzt, wenn er wirklich nötig ist; 3.3.0 wurde eingefroren, nachdem der laufende
-Push-Lauf geendet hatte, und neue Arbeit kommt unter 3.4.0; development wurde vor dem Test auf echter Hardware in main
-übernommen; was außerhalb des Repositorys liegt, ist nicht sicher; Recherche kommt nach `docs/recherche/`; eine eigene
-Datei für Entscheidungen gibt es nicht, und was nicht in diesem Design steht, wurde nie entschieden; dieses Design ist
-der Bauplan und wird vor dem Bau geschrieben und nach ihm nachgezogen; eine Behauptung, die eine Websuche prüfen kann,
-wird recherchiert.
+Woher die Einträge kommen. Das Gespräch, in dem die Runden gefragt und beantwortet wurden, ist bis zum 2026-10-11
+15:57:42 UTC zurück ausgewertet. Die Runden 2 bis 56 und 57 bis 66 stammen daraus: Jeder Eintrag nennt das Datum, jede
+Frage seiner Runde mit ihren Möglichkeiten und der Empfehlung des Assistenten, die Antwort des Maintainers (kurze
+Antworten wörtlich auf Deutsch zitiert, lange zusammengefasst), die Entscheidungen, die daraus folgten, was der
+Assistent selbst ohne Widerspruch entschied (als „nicht widersprochen“ markiert) und was eine spätere Runde ersetzte.
+Alles vor dem 2026-10-11 15:57:42 UTC ist weiter nur das, was das Repository sagt, bis es ausgewertet ist: Das ist
+Runde 1, deren Fragen vor diesem Zeitpunkt beantwortet wurden (ihr Eintrag ist aus den Verweisen in Code und Tests, den
+Commit-Nachrichten und dem Changelog rekonstruiert). Das Arbeitsprotokoll, in dem die Runden zuerst nummeriert wurden,
+lag außerhalb des Repositorys und ist verloren; die Rundennummern hier sind die, die das Gespräch nennt. Wo das
+Gespräch keine Nummer nennt, behält ein Eintrag die Nummer, die ihm das Repository gibt, wenn sein Inhalt passt (Runden
+11, 12 und 17), und Entscheidungen ohne Nummer stehen unter ihrem Datum mit ihren eigenen Kürzeln, als Unterabschnitt
+der Runde davor: die selbst gebaute Laufzeit (R1 bis R9), die Antworten zu Rust und Go (RG1 bis RG5), der
+Paper-Recon, die Maintainer-Aktionen und der Versionsplan (D1 bis D11) und die Sätze, die wahrscheinlich die Runden 45,
+50, 55 und 56 waren. Die Runden 13 und 18 lassen sich im Gespräch nicht auseinanderhalten (die Sätze jener Tage, der
+Paper-Recon und der Versionsplan, stehen unter ihrem Datum); sie haben keinen Eintrag. Kürzel des Arbeitsprotokolls,
+die Verweise statt einer Runde nennen: U9 (Runde 11 und Runde 16), RG5 (die Antworten zu Rust und Go unter Runde 8),
+W1 bis W4 (Runde 8).
+
+Entscheidungen vom 6. bis 9. November außerhalb einer Runde, alles Arbeitsregeln des Maintainers: main bewegt sich nur
+auf das Wort des Maintainers und per Fast-Forward, nachdem main zuerst ohne Pull Request in `development` gemergt wurde;
+auf GitHub gibt es nur `main`, `development`, ein vorübergehendes `gate` und `deps/update`; das Repository wurde am
+2026-11-07 mit seinen Einstellungen neu angelegt; kein unnötiger Commit und kein Leck eines Tokens, Passworts oder
+persönlicher Daten, mit einem Leck-Scan vor jedem Push; nichts wird gelöscht, ohne mit der genauen Liste zu fragen, und
+der Assistent räumt seine eigenen Reste selbst auf; offene Dependabot-Pull-Requests werden gemergt, wenn sie grün sind;
+Testumgebungen entstehen nur aus dem Lock; der Codespace wird nur genutzt, wenn er wirklich nötig ist; 3.3.0 wurde
+eingefroren, nachdem der laufende Push-Lauf geendet hatte, und neue Arbeit kommt unter 3.4.0; development wurde vor dem
+Test auf echter Hardware in main übernommen; was außerhalb des Repositorys liegt, ist nicht sicher; Recherche kommt nach
+`docs/recherche/`; eine eigene Datei für Entscheidungen gibt es nicht, und was nicht in diesem Design steht, wurde nie
+entschieden; dieses Design ist der Bauplan und wird vor dem Bau geschrieben und nach ihm nachgezogen; eine Behauptung,
+die eine Websuche prüfen kann, wird recherchiert.
 
 Steht jetzt in: [Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung),
 [Tests, CI und die Windows-Fallen](#tests-ci-und-die-windows-fallen),
 [Dokumentation und der Bauplan](#dokumentation-und-der-bauplan),
 [Versionierung und Dokumentationsregeln](#versionierung-und-dokumentationsregeln)
 
-Bis Runde 65 wurde das Protokoll außerhalb des Repositorys geführt, und dieses frühere Arbeitsprotokoll ging verloren.
-Die Runden 60 bis 65 wurden aus dem Gespräch selbst wiederhergestellt, in dem sie gefragt und beantwortet wurden: Jeder
-Eintrag nennt die Fragen seiner Runde und die Antworten des Maintainers. Die Einträge davor wurden aus dem
-wiederhergestellt, was das Repository über jede Runde sagt: den Verweisen in Code und Tests, den Commit-Nachrichten, dem
-Changelog und den Entscheidungen in diesem Design; ihre Daten sind die der Commits und Changelog-Einträge, die eine Runde
-umsetzten. Runden, die nichts im Repository nennt (13, 18 bis 21, 28, 30, 31, 37
-bis 39, 41 bis 43, 45 bis 53, 55 und 56), haben keinen Eintrag. Einige Verweise nennen eine Entscheidung mit einem
-Kürzel des früheren Protokolls statt ihrer Runde: U9 (der Build sind die vier Stufenmodule, vom Stufen-Runner des
-Frameworks der Reihe nach ausgeführt; [Build-Pipeline und Target-Module](#build-pipeline-und-target-module)) und RG5
-(die lokale Wissensbasis in Qdrant Edge, ihr alter Speicher bleibt, bis die Person ihn löscht;
-[Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest)).
-
 ### Runde 1
 
 <a id="decision-round-1"></a>
-Umgesetzt am 2026-10-12. Punkt 1: Deep Ingest erreicht KI-Aufrufer nur über das Tool `crawl_docs_site`, als Job, jedes
-Mal mit jeder Startadresse gefragt und abgelehnt, solange der Crawl-Hinweis ungelesen ist. Punkt 3: Der Community-Zoo
-für KI-Aufrufer listet und installiert Pakete nur aus dem signierten Index; es gibt kein Tool, das ein Paket hochlädt
-oder einen Pull Request öffnet. Punkt 4: Status, Einstellungen und ehrliche Grenzen für KI-Aufrufer (`get_status`).
-Punkt 5: Ein externer KI-Client darf Dittos Aufgabe übernehmen: Er bekommt Dittos Aufgabentexte als Prompts und
-denselben Wissenskontext, schlägt Heilungen selbst vor (`propose_healing_fix`) und legt Target-Module über die Prüfung
-des Modulgenerators an. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist,
-steht in den verlinkten Abschnitten)
+Die erste Fragerunde zum MCP-Server, beantwortet vor dem 2026-10-11 15:57:42 UTC; das ausgewertete Gespräch verweist
+nur auf ihre sechs Antworten. Aus dem Repository rekonstruiert (umgesetzt am 2026-10-12). Punkt 1: Deep Ingest erreicht
+KI-Aufrufer nur über das Tool `crawl_docs_site`, als Job, jedes Mal mit jeder Startadresse gefragt und abgelehnt,
+solange der Crawl-Hinweis ungelesen ist. Punkt 3: Der Community-Zoo für KI-Aufrufer listet und installiert Pakete nur
+aus dem signierten Index; es gibt kein Tool, das ein Paket hochlädt oder einen Pull Request öffnet. Punkt 4: Status,
+Einstellungen und ehrliche Grenzen für KI-Aufrufer (`get_status`). Punkt 5: Ein externer KI-Client darf Dittos Aufgabe
+übernehmen: Er bekommt Dittos Aufgabentexte als Prompts und denselben Wissenskontext, schlägt Heilungen selbst vor
+(`propose_healing_fix`) und legt Target-Module über die Prüfung des Modulgenerators an.
 
 Steht jetzt in: [MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
 [Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest),
 [Community, Rezepte und Pakete](#community-rezepte-und-pakete),
 [Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht)
 
+#### 2026-10-11 · Vor Runde 2 (ohne Rundennummer)
+
+- Der Push war durch GitHubs Secret Scanning blockiert (ein Fake-Token in einem Test). Möglichkeiten: 1) der Maintainer
+  gibt den Fake-Wert auf GitHub frei, 2) der Assistent darf nur die nie gepushte Historie umschreiben. Antwort: „2“. In
+  den nicht gepushten Commits änderte sich nur diese eine Testzeile; gepushte Historie wird nie umgeschrieben.
+- Nicht widersprochen: MCP-Server und Tools zuerst, die selbst gebaute Laufzeit wird parallel entworfen, ihre MCP-Tools
+  folgen; der eigene Secret-Scan meldet einen Wert im genauen Format eines Anbieter-Tokens auch dann, wenn er wie ein
+  Fake aussieht, und die Markierung `secret-scan: allow` nimmt ihn nicht mehr aus.
+
+Steht jetzt in: [Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung),
+[Sicherheitsmodell](#sicherheitsmodell)
+
 ### Runde 2
 
 <a id="decision-round-2"></a>
-Umgesetzt am 2026-10-11 und 2026-10-12. Punkt 4: Daueranweisungen („ja, und nicht mehr fragen“) für Pakete des
-Community-Zoos; die Runden 2 bis 4 haben die Daueranweisungen zusammen geformt: nur von einer Person im eigenen Fenster
-des Frameworks angelegt, begrenzt auf Fakten, die das Framework nachgeschlagen hat. Punkte 7 und 8: die
-Hugging-Face-Tools für KI-Aufrufer; keine feste Größengrenze für einen Modell-Download (ein 72B-Modell muss möglich
-sein, wenn die Platte es fasst): Es entscheiden die Plattenregel und eine Hardware-Schätzung. Punkt 9: gemeinsamer
-Build-Zustand, damit jeder Prozess des Frameworks die Build-Aufträge der anderen sieht. (Frage und Antwort standen im
-früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten Abschnitten)
+2026-10-11, gefragt 16:37, beantwortet 16:47 UTC (die zweite Runde zum MCP-Server, 34 Kern-Tools geplant).
+
+- Q1 Wenn ein Client der Person keine Rückfrage zeigen kann: die Freigabe im Framework zeigen (GUI-Hinweis oder CLI),
+  statt den Aufruf abzulehnen? Empfohlen ja. Antwort: „1. Ja“. Sie wird eine offene Freigabe in GUI und CLI.
+- Q2 Ditto direkt über die Registry im eigenen Prozess oder über den eigenen MCP-Server wie jeder Client? Empfohlen
+  der MCP-Server, nach Phase S. Antwort: „2. beides / hybrid“. Zuerst gebaut als im Prozess plus MCP-Client eines
+  Frameworks auf einem anderen Rechner; Runde 8 klärte „hybrid“ (die Tools sind Dittos Hände, kein anderer Rechner),
+  und der Fernmodus wurde entfernt.
+- Q3 Eigene Freigaben für Ditto, die lokalen Clients und jedes benannte HTTP-Token; ein neues Token startet nur lesend;
+  Tokens nur in GUI oder CLI verwaltet? Empfohlen ja. Antwort: „3. ja“.
+- Q4 Target- und Rezept-Pakete aus dem signierten Index über MCP, jedes Mal mit Rückfrage; Pakete aus Dateien nie über
+  MCP? Empfohlen ja. Antwort: „4. ja Optional einmal rückfrage für immer bestätigen (ja und nie wieder fragen inkl.
+  warung...)“. Entschieden: dazu ein optionales „Ja, und nicht mehr fragen“ mit Warnung, das nur ein Mensch im eigenen
+  Freigabe-Fenster des Frameworks gibt, je Aufrufer und Paketart, nie für zurückgezogene oder lokale Pakete, Deployment
+  oder Einstellungen.
+- Q5 Ein kleinerer Tool-Satz (etwa 15 von 34) für Dittos kleine lokale Modelle, entschieden per `ditto eval`? Empfohlen
+  ja. Antwort: nein, auch kleine Modelle müssen die Aufgaben erfüllen und ehrlich sagen, wenn sie etwas wirklich nicht
+  können; die Tools müssen für kleine Modelle idiotensicher sein, wie der Adapter von rag4ll. Entschieden: ein
+  Tool-Satz für jedes Modell, idiotensicher gemacht (verzeihende Eingaben, Vorschläge, Standardwerte, nächste Schritte
+  in Fehlern, Schleifenerkennung); eine reparierte Eingabe erlaubt nie mehr als der ursprüngliche Aufruf.
+- Q6 Nur offizielle Docker-Basis-Images für Module, die eine KI anlegt? Der Maintainer fragte zurück, welche Module
+  gemeint sind; beantwortet in Runde 3.
+- Q7 Einzelne GGUF-Dateien von Hugging Face als optionales Tool, standardmäßig gesperrt? Empfohlen ja. Antwort: ja, und
+  auch lokale, vorab geladene Dateien und Gated-Dateien mit passender Prüfung; der Filter „ungated“ ist wichtig.
+  Entschieden: wie beantwortet; der Token wird vor dem Download geprüft und geht nie über MCP.
+- Q8 Grenzen pro Sitzung (höchstens 30 GB Downloads, Obergrenzen für Builds und Jobs)? Empfohlen ja. Antwort: ja,
+  aber eine Download-Grenze für Gewichte wäre ein Blocker: ein 72B-Gewicht muss machbar sein, wenn Person und Hardware
+  es schaffen. Entschieden: Aufruf- und Job-Grenzen je Client; keine feste Grenze für Gewichte, der freie Platz mit
+  Reserve und eine Hardware-Schätzung entscheiden.
+- Punkt 9 (die technischen Punkte, die der Assistent wie empfohlen übernehmen wollte) blieb leer; nicht widersprochen:
+  Das Audit wird vor jeder Änderung geschrieben und blockiert bei Fehlern, die Builds eines Clients, der sich trennt,
+  werden abgebrochen (in Runde 16 ersetzt: sie laufen weiter), gemeinsamer Build-Status über Prozesse, eigene Builds
+  und Jobs ohne Rückfrage abbrechbar, gesperrte Tools unsichtbar, neue Tools starten mit „fragen“, Board-Probes mit
+  `llm-cli scan --import` übernommen.
 
 Steht jetzt in: [MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
 [Hugging Face](#hugging-face), [Community, Rezepte und Pakete](#community-rezepte-und-pakete)
@@ -2125,220 +2167,777 @@ Steht jetzt in: [MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-ber
 ### Runde 3
 
 <a id="decision-round-3"></a>
-Umgesetzt am 2026-10-12. Basis-Images von Target-Modulen, die eine KI vorschlägt: Jede Registry ist erlaubt; das Image
-wird vor der Frage an die Person auf den Digest festgelegt, auf den sein Tag gerade zeigt, und schlicht gezeigt
-(Registry, Image, Tag, Digest, ob es ein Docker Official Image ist); jedes `FROM` eines Dockerfiles wird gezeigt, nicht
-nur das erste (c); ein Image, das kein Docker Official Image ist, braucht die Begründung der KI, die die Person vor der
-Zustimmung liest (d). Jeder Aufgabentext trägt die Regel des ehrlichen „kann nicht“: Ein Modell, das eine Aufgabe nicht
-kann, sagt das mit dem genauen Grund. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was
-entschieden ist, steht in den verlinkten Abschnitten)
+2026-10-11, gefragt 16:49, beantwortet 16:53 UTC. Der Assistent erklärte Q6 aus Runde 2 (Target-Module mit ihrem
+Dockerfile für den Cross-Compiling-Container) und schlug vor: Module, die eine KI anlegt, nutzen nur offizielle
+Basis-Images, fest per Digest, Hersteller-SDKs aus den Paketquellen der Hersteller. Frage: Passt diese Regel?
+
+- Antwort, zusammengefasst: Das ehrliche „das kann ich nicht“ braucht eine ehrliche Begründung, warum; und die Regel
+  passt nicht, sie darf Ditto nicht an seiner Arbeit hindern, denn Module für Hardware, die der Maintainer nicht testen
+  kann, mit Ditto anlegen zu lassen, ist genau der Zweck des Modul-Assistenten.
+- Entschieden (die überarbeitete Regel des Assistenten von 16:54, nicht widersprochen): Nichts wird blockiert, alles
+  wird gezeigt. Jede Registry ist erlaubt; das Image wird vor der Rückfrage auf den Digest festgelegt, auf den sein Tag
+  zeigt, und klar gezeigt (Registry, Image, Tag, Digest, ob es ein Docker Official Image ist); jedes `FROM` wird gezeigt
+  (c); ein nicht offizielles Image braucht die Begründung der KI, die die Person vor der Freigabe liest (d); neue Module
+  bleiben als ungetestet markiert. Jeder Aufgabentext trägt die Regel, dass ein Modell, das etwas nicht kann, das mit
+  dem konkreten Grund sagt.
 
 Steht jetzt in: [Targets, Hardware und Vorlagen](#targets-hardware-und-vorlagen),
 [MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
 [Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht)
 
+#### 2026-10-11 · Die selbst gebaute Laufzeit, R1 bis R9 (ohne Rundennummer)
+
+Beantwortet um 17:41 UTC, zum Plan für einen selbst gebauten, auf die Hardware abgestimmten llama.cpp-Server.
+
+- R1 Das offizielle fertige llama.cpp nur als ausdrückliches `--prebuilt`, beschriftet „nicht selbst gebaut“?
+  Antwort: „1. Ja“.
+- R2 CUDA aus NVIDIAs festgelegten Einzelarchiven statt `nvidia/cuda`-Images? Antwort: „2. Ja, aber fertige images
+  als option (opt-in)“. NVIDIAs fertige Images sind nur ein Opt-in.
+- R3 Die Board-Laufzeit standardmäßig im Home-Ordner mit Startskript, ein systemd-Dienst nur nach bestätigtem sudo?
+  Antwort: ja, optional, aber von der Person vor dem Deploy festgelegt, nie erst zur Laufzeit gefragt.
+- R4 Die Lesart des Assistenten zum Konvertieren beim Cross-Compiling. Antwort: Die Hardware-Probe läuft auf dem
+  Target, und der Cross-Compile-Container wird aus ihrem Ergebnis gebaut, damit die Architektur zum Ziel passt.
+- R5 Die Reihenfolge (Linux zuerst in 3.1, Windows gleich danach). Antwort: „5. ja“.
+- R6 Warnen statt blockieren, wenn ein Community- oder erzeugtes Target fertiges llama.cpp zieht? Empfohlen warnen.
+  Antwort: nie das fertige llama.cpp ziehen, nur das Rezept für den Build; geteilt wird das Rezept, nie das kompilierte
+  Image. Entschieden: Targets bauen llama.cpp aus dem Quelltext über das geteilte Rezept; ein fertiges wird abgelehnt.
+- R7 Benchmarks fremder Modelle nativ nach Zustimmung im Audit-Log? Antwort: ja, Docker als Opt-in. In Runde 7 (2')
+  ersetzt: Ein Modell, das für ein Board gebaut ist, wird auf dem Board gemessen.
+- R8 Welches System das Board hat. Antwort: Das Framework ist betriebssystemunabhängig; die Probe liest das
+  Betriebssystem und die Architektur. Entschieden: Die Probe liest Betriebssystem, Architektur und C-Bibliothek, und
+  der Bauplan folgt ihnen.
+- R9 Die alte Historie im Secret-Scan: eine Ausnahmeliste (empfohlen), Strenge nur für neue Commits oder Historie
+  umschreiben? Antwort: nur genau die Mock-Strings kommen in die Ausnahme; kein echter Token, kein Passwort, keine IP
+  und nichts anderes Geheime oder Persönliche darf durchrutschen. Entschieden: die zwei bekannten Mocks über ihren
+  sha256, nur im Historien-Modus.
+- Nicht widersprochen (17:44): Startschwellen gemessen per `ditto eval`, ein fester Bewertungstext, ein winziges
+  Testmodell für Prüfungen nach dem Build, Clang für den Windows-CPU-Build, ein Neubau bei neuem Commit oder neuer GPU,
+  `LLAMA_SUBPROCESS=OFF` und eine Liste verbotener Server-Optionen.
+
+Steht jetzt in: [Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht),
+[Targets, Hardware und Vorlagen](#targets-hardware-und-vorlagen),
+[Community, Rezepte und Pakete](#community-rezepte-und-pakete), [Sicherheitsmodell](#sicherheitsmodell)
+
 ### Runde 4
 
 <a id="decision-round-4"></a>
-Umgesetzt am 2026-10-11 und 2026-10-12. Punkt 1: sprechende Namen für die Person, IDs und Bezeichnungen gegenüber einer
-KI, nie die echten Pfade der Person. Punkt 3: Ein Target-Paket aus der Community fragt immer. Punkt 4: Die Zahl der
-Herstellerquellen, pip-Pakete und Downloads eines Moduls sind weiche Grenzen; eine Überschreitung ist eine Warnung, die
-die Zustimmung aufhebt, nie eine harte Sperre. Punkt 5: Die lokalen stdio-Clients teilen sich einen Aufrufer, daher
-bekommt er keine unbefristete Daueranweisung. In derselben Runde: Jedes registrierte Tool lehnt ein Argument ab, das es
-nicht kennt, mit einem Vorschlag; erklärte Aliasse sind die einzige Zuordnung. (Frage und Antwort standen im früheren
-Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten Abschnitten)
+2026-10-11, gefragt 18:15, beantwortet 18:48 UTC (die MCP-Runde 4).
+
+- Befund vor den Fragen: Über MCP fiel ein falsch geschriebenes Argument (`quant`) still weg, und der Build lief mit dem
+  Standardwert. Antwort: „bitte an der wurzel fixen! sowas darf garnicht erst passieren!“ Entschieden: Jede
+  Tool-Eingabe verbietet unbekannte Felder auf jedem Weg, die rohen Argumente werden vor dem SDK geprüft, erklärte
+  Aliase sind die einzige Zuordnung (gezeigt und protokolliert), ein Wächtertest deckt jedes registrierte Tool ab.
+- Q1 Zur KI nur IDs und Pfade relativ zu den Framework-Ordnern, Benutzernamen und Adressen je nach Datenschutzstufe
+  maskiert? Empfohlen ja. Antwort: ja, aber solche Angaben bringen der Person nichts, sie braucht sprechende Namen.
+  Entschieden: IDs und Bezeichnungen zur KI, nie die echten Pfade der Person; was die Person sieht, wird in sprechende
+  Namen zurückübersetzt.
+- Q2 Das Exportieren eines Pakets fragt immer, ohne „nicht mehr fragen“, weil der Schlüssel der Person es signiert?
+  Empfohlen ja. Antwort: „2. ja“.
+- Q3 „Nicht mehr fragen“ für Wissens- und Rezept-Pakete und geprüfte Target-Pakete, nicht für Community-Target-Pakete?
+  Empfohlen ja. Antwort: „3. ja, so eingeschränkt und sicher“. Ein Community-Target-Paket fragt immer; Runde 7 Q13
+  engte „Rezept-Pakete“ später auf getestete Einstellungen ein, nie Code.
+- Q4 KI-gemachte Module dürfen festgelegte pip-Pakete und bis zu fünf https-Downloads mit sha256 und Größe nennen?
+  Empfohlen ja. Antwort: nicht künstlich oder zu starr begrenzen, die Person muss ihre eigenen Projekte mit dem
+  Framework umsetzen können; aus Sicherheitssicht ja, aber als Soft-Cap, das bewusst mit Warnhinweis ausgehebelt werden
+  darf. Entschieden: Soft-Caps; https, sha256, Größe, feste Versionen und alles in der Rückfrage zeigen bleiben Pflicht.
+- Q5 „Nicht mehr fragen“ für die lokalen stdio-Clients, die sich einen Aufrufer teilen: mit Warnung oder nur für
+  Token-Clients und Ditto? Empfohlen mit Warnung. Antwort: „5. mit warnung anbieten, aber dann nur mit eingeschränktem
+  zugriff auf das nötigste...“. Entschieden: mit einer Warnung, die jeden betroffenen Client nennt, nur im engsten
+  Umfang.
 
 Steht jetzt in: [MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
 [Community, Rezepte und Pakete](#community-rezepte-und-pakete),
 [Targets, Hardware und Vorlagen](#targets-hardware-und-vorlagen)
 
+#### 2026-10-11 bis 2026-10-12 · Zwischen Runde 4 und 5 (ohne Rundennummer)
+
+- Ein Test hatte vier Platzhalter-Dateien in den echten Home-Ordner geschrieben; dürfen sie gelöscht werden? Antwort:
+  „1 ja“. Tests bekamen einen eigenen Home-Ordner mit einem Wächter für den echten (nicht widersprochen).
+- Der Assistent sagte, ein Test mit einem echten Client sei hier unmöglich. Antwort: „?? DU bist Claude Code...“.
+  Entschieden: ein wiederholbarer Rauchtest mit echtem Client in einer abgeschotteten, verschachtelten Sitzung, bewertet
+  über das Audit-Log.
+
+Steht jetzt in: [Tests, CI und die Windows-Fallen](#tests-ci-und-die-windows-fallen),
+[Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung)
+
 ### Runde 5
 
 <a id="decision-round-5"></a>
-Umgesetzt vom 2026-10-12 bis 2026-10-16. a: Drei Arten von Befunden entscheiden, wer eine Frage beantwortet (Blocker
-lehnen vor jeder Frage ab, für KI und Person gleich); rechtliche Warnungen bleiben bei der Person. b: Eine
-Wiederherstellung sichert das aktuelle Wissen vorher als Snapshot. f: Löschen, was die Person sehen kann, ist allein
-Sache der Person, mit der vollständigen Liste (Name, voller Pfad, Größe, was es ist) im eigenen Fenster des Frameworks,
-nie über das Formular eines Clients, eine Daueranweisung oder eine Delegation; eine KI sieht nur Bezeichnungen; das
-Framework löscht keinen älteren Build von sich aus. h: Es wird kein Framework-Image veröffentlicht oder gezogen. Die
-eigene Buchführung des Frameworks (temporäre und halbe Dateien, Staging- und Quarantäneordner) ist von der Löschregel
-ausgenommen. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in
-den verlinkten Abschnitten)
+2026-10-12, in mehreren Nachrichten von 09:43 bis 14:00 UTC (Vollmacht, das Chat-Panel, Ditto; die Buchstaben a bis k
+des Arbeitsprotokolls).
+
+- a (09:43) Ein Client ohne Person (etwa `claude -p`) lehnt Rückfragen selbst ab: sie als offene Freigaben im Framework
+  sammeln? Empfohlen ja. Antwort: ja, und mit Freigabe der Person soll die KI sie auch selbst mit ja oder nein
+  beantworten, je nach Lage; „trotzdem weiter“ bei voller Platte bringt nichts. Entschieden: Je Client legt die Person
+  fest, wohin Rückfragen gehen; mit einer Vollmacht beantwortet die KI ihre eigenen offenen Rückfragen mit Begründung
+  und frischen Fakten; Blocker lehnen vor jeder Rückfrage ab, für KI und Person gleich.
+- Q1 (11:21) Situationswarnungen entscheidet eine KI mit Vollmacht, Sicherheits- und Rechtswarnungen immer die Person?
+  Antwort: „1. Ja“. Lizenzen nimmt nie eine KI an.
+- Q2 Was eine Vollmacht abdeckt; der Vorschlag ließ Board-Prüfung, Geräte-Benchmarks, Einstellungen und Deep Ingest
+  bei der Person. Antwort: genau das will der Mensch nicht machen; alles, was wirklich Arbeit ist, soll die KI machen
+  können, damit auch ein Laie die Software KI-gestützt bedienen kann. Entschieden: echte Arbeit ist delegierbar (Builds,
+  Downloads, Board-Prüfungen, Geräte-Benchmarks, Einstellungen, Deep Ingest, Deployment, Module, Heilung, Export); die
+  harten Regeln bleiben bei der Person.
+- Q3 Wie die Person erfährt, was die KI entschied: ein sammelnder Hinweis? Antwort: ja, über Nachrichten in der GUI,
+  am besten ein Chatfenster rechts mit Bubbles, in dem man auch fragen, Aufträge geben und Entscheidungen hinterfragen
+  kann. Entschieden: das Chat-Panel rechts im Hauptfenster; der alte Tab „KI-Chat“ zieht hinein.
+- (11:21) Eine Cache-Datei, die eine Bibliothek in den echten Home-Ordner geschrieben hatte: „bitte diese datei aus dem
+  rpo löschen“. Sie wurde gelöscht, und der Rauchtest schottet den ganzen Home-Ordner ab.
+- Q4 Dittos Fernmodus gegen ein anderes Framework lehnt ein Modul ab, das es nur lokal gibt. Antwort: Der Maintainer
+  fragte, wieso Ditto überhaupt mit einem anderen Framework und mit Docker arbeitet; die lokale Arbeit darf nie
+  abreißen. Damals entschieden (nicht widersprochen): Docker nur zum Cross-Compiling, lokale Dateien immer erreichbar.
+  In Runde 8 ersetzt: Es gibt keinen Fernmodus.
+- f (11:54) Die Liste dessen, was bei der Person bleibt (harte Regeln, Sicherheits- und Rechtswarnungen, erstes
+  Vertrauen in einen Host-Schlüssel, Lizenzen, fremde Arbeit stoppen, Papierkorb leeren). Antwort: die Vorlagen passen;
+  löschen nie ohne vorherige Rückfrage mit Auflistung, was genau (Pfad, Dateiname usw.). Entschieden: Löschen ist allein
+  Sache der Person, mit der vollen Liste (Name, voller Pfad, Größe, was es ist), nie per Vollmacht oder dauerhafter
+  Freigabe (b: eine Wiederherstellung sichert das aktuelle Wissen zuerst als Snapshot).
+- g Eine Entscheidung hinterfragen: an den entscheidenden Client, solange er verbunden ist, sonst erklärt Ditto aus
+  gespeicherten Fakten. Antwort: einverstanden, sofern ein lokaler Ditto installiert ist, und warum den Cloud-Kanal
+  nicht für jede Anfrage neu öffnen, die KI ist ohnehin zustandslos. Entschieden: Ditto schickt die gespeicherten
+  Fakten, die ursprüngliche Begründung und die Frage pro Anfrage an sein Modell; das Framework startet nie den
+  Abo-Client einer Person.
+- h Das Image ohne Oberfläche als Option behalten oder nur auf die Roadmap? Antwort: Wer das Framework in einem
+  Container auf einem Server will, bekommt eine Bauanleitung oder einen Builder, der darin dieselbe Installation
+  ausführt; fertige Images werden keine herausgegeben, sie müssten mit jedem Update neu gebaut werden. Entschieden:
+  Kein Framework-Image wird veröffentlicht oder geladen.
+- Nicht widersprochen: `registry:` in `target.yml` als lokaler Image-Name dokumentiert (Runde 6 entfernte dann die
+  Registry-Vorgaben).
+- j, k (12:03) Antwort: Das Framework muss Claude Code nicht selbst starten, solange es im Hintergrund läuft; jeder
+  Harness, der MCP spricht, darf das Framework bedienen. Entschieden: harness-unabhängig; das Framework ruft nie selbst
+  ein Client-Programm auf.
+- (12:54 und 13:59) Drei Wege zu KI-Apps: ein Postfach für jeden MCP-Client, optional ein Channel für Claude Code,
+  optional ein Weckruf, den die Person einrichtet. Antwort: 1 bis 3 ja; der Weckruf als kleiner MQTT-Broker, den das
+  Modell abonniert, mit einer Nachricht nur, wenn sich der Status eines Feeds ändert („working“ zu „done“); MQTT im
+  MCP-Server, der Abruf ein MCP-Tool. Entschieden: das Postfach für jeden Client; MQTT ist eine Türklingel mit festen
+  Wörtern, nie ein Befehlsweg; der Ort des Brokers wurde am 2026-10-16 ersetzt (er sitzt im Rust-Gateway).
+- (13:59) Der Rezept-Build nutzt genau den geprüften Datensatz? Antwort: Ein Template gilt nur der Hardware; wer es
+  lädt, wählt Gewicht, Quantisierung, Format und Deployment und ist nicht an die Wahl des Erstellers gebunden.
+- (13:59) Gerätebenutzernamen in Pfaden erreichen die KI? Antwort: Der Installer legt einen eigenen Benutzer `llmcf`
+  an und alles in dessen Home mit passenden Rechten, dann ist ein geleakter Pfad immer gleich, auch unter Windows.
+- Die acht Folgefragen (13:59): Q1 der erste Build von KI-gemachtem Build-Code wird der Person einmal gezeigt: „1. Ja“.
+  Q2 Laufzeiten einer Vollmacht: 8 Stunden, 24 Stunden, 30 Tage oder bis zum Widerruf, Verfall nach doppelter Zeit
+  ohne Nutzung (in Runde 6 ersetzt). Q3 „für diese Version nicht mehr fragen“ bei einer Sicherheits- oder
+  Rechtswarnung: „3. Ja, kästechen "nicht mehr fragen"“. Q4 Rückfragen einer beendeten Headless-Sitzung 60 Minuten
+  parken? „4. Ja, parken, aber nicht 60 min, sodnern bis user interagiert“. Q5 das Postfach jetzt; der Maintainer bot
+  sein eigenes Weckruf-Projekt und den Bus von rag4ll als Vorbilder an (in Runde 6 Q6 geklärt). Q6 die eigene
+  Buchführung des Frameworks (abgelaufene Einträge, Teil-Downloads, Quarantäne-Kopien, Sperrdateien) ohne Rückfrage
+  entfernt: „6. ja“. Q7 den anderen Rechner wie ein Board koppeln: „7. ja“ (hinfällig, seit Runde 8 den Fernmodus
+  entfernte). Q8 die restliche echte Arbeit als Tools, Doctor-Reparaturen wie Mojo bei rag4ll: „8. ja,
+  Doctor-Reparaturen, > siehe Rag4ll "mojo"“.
+- Nicht widersprochen (14:48): Der Doctor fasst nur die eigenen Objekte des Frameworks an und listet sie vorher; eine
+  KI bekommt Platzhalter statt echter Pfade und „Gerätekonto“ statt Benutzernamen.
 
 Steht jetzt in: [Löschen und der Papierkorb](#löschen-und-der-papierkorb),
 [MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
+[Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht),
+[GUI und der Weg der Person](#gui-und-der-weg-der-person), [Community, Rezepte und Pakete](#community-rezepte-und-pakete),
+[Secrets, Anmeldung und Konten](#secrets-anmeldung-und-konten),
 [Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten)
 
 ### Runde 6
 
 <a id="decision-round-6"></a>
-Umgesetzt am 2026-10-15 und 2026-10-16. Entscheidung 9: Aus dem Doctor wird Mojo (Mojo Oracle schaut, Mojo Miracle
-repariert), mit seinem Design in Abschnitt 7 dieser Runde: Ohne Terminal laufen nur harmlose Reparaturen (Q11), die
-Ja-Schaltfläche des Löschdialogs reagiert erst nach 600 ms, Dockers Build-Cache wird nie geleert. Entscheidung 14: uv
-ersetzt Poetry für den Abhängigkeits-Lock. Wissens-Snapshots haben keine Grenze: so viele, wie die Platte fasst, keiner
-wird von selbst gelöscht, keine Zahl erinnert oder warnt. Keine Voreinstellung nennt ein Image aus einer Registry. 10.4:
-Die Person hakt eine Teilmenge einer Löschliste an (Mehrfachauswahl, anfangs nichts angehakt). H1: die geplante Ordnung
-auf dem Rechner mit einem Ordner `Data`. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was
-entschieden ist, steht in den verlinkten Abschnitten)
+2026-10-12, beantwortet 18:15 UTC; Entscheidung 14 um 18:29 UTC.
+
+- Laufzeiten einer Vollmacht: a) fest, nur „bis zum Widerruf“ verfällt bei Nichtnutzung, oder b) ein Leerlauf-Fenster?
+  Antwort: „1. Ja, denkfehler, klar, nur unbefristet verfällt bei nicht nutzung nach sagen wir 90 Tagen, dann sind es
+  ein Quartal / 3 Monate“ und „1. a“. Feste Laufzeiten von 8 Stunden, 24 Stunden oder 30 Tagen; „bis zum Widerruf“
+  verfällt nach 90 Tagen ohne Nutzung.
+- Für welche Rechner das Konto `llmcf` gilt und wie ein Gerät vorbereitet wird. Antwort, zusammengefasst: Der Installer
+  legt den Benutzer mit den nötigen Ordnerrechten an und nutzt ihn für alles ohne Admin-Rechte, unter Windows und
+  Linux; für ein Gerät gibt die Person das Root- oder Admin-Passwort einmal ein und legt Name und Passwort des
+  Gerätekontos fest; danach wird ein Schlüssel angelegt und im Keyring unter dem Hostnamen des Targets gespeichert, nie
+  ein Passwort.
+- Q2 Wo `llmcf` mit dem nächsten Installer liegt. Antwort: ein fester Benutzer `llmcf`, unter Windows die Ordner
+  source, logs, Data und Modules im Profil dieses Benutzers (in Runde 7 Q1 durch den Programmordner ersetzt; der eine
+  Ordner `Data` blieb).
+- Q4 Inhalte nur im Postfach des Frameworks, eine gemeinsame Türklingel-Schnittstelle? Antwort: „4. ja MQTT soll
+  abonierbar und ansprechbar sein durch externe anwendungen, damit wir dem broker noch mehrere feeds geben können“.
+- Q5 Die Türklingel trägt nur feste Wörter? Antwort: „5. ja, nur feste Schlagwörter, die KI soll ja nur wissen "Build
+  ready" oder "Error while building" oder "success"“.
+- Q6 Das Weckruf-Projekt des Maintainers ändern, damit das Framework es nutzen kann? Antwort: Das Projekt kommt nicht
+  ins Framework; übernehmen, was brauchbar ist, und einen eigenen Mechanismus bauen.
+- Q7 Ein Handy erreicht das Framework über SSH? Antwort: „7. direkt per mcp server anbindung, oAuth, Token oder PSK“.
+- Q8 Eine spätere Sitzung des geteilten stdio-Aufrufers bekommt die Rückfrage der Person erst nach einem Klick? Antwort:
+  ja, und ist stdio nicht veraltet? Nicht widersprochen: stdio und Streamable HTTP sind die zwei Standard-Transporte,
+  nur HTTP+SSE ist veraltet.
+- Q9 Harmlose Probleme automatisch reparieren, als Option standardmäßig aus? Antwort: Standard ist Mojo Oracle, das
+  nur schaut; findet es einen Fehler, fragt es, ob Miracle laufen soll, und die Person sagt ja oder nein. Der Doctor
+  wird Mojo, wie bei rag4ll, mit ähnlichen Funktionen (Entscheidung 9).
+- Q10 Builder-Tags und ungenutzte Images in die Buchführung, die ohne Rückfrage aufgeräumt wird? Antwort: „10. nein,
+  nicht ohne rückfrage...“.
+- Q11 Rezepte als Build-Vorschläge behalten? Antwort: immer behalten, aber nur aus einem erfolgreichen Build; ein
+  fehlgeschlagener wird analysiert und ein Fix vorgeschlagen; die Maske leert sich nie selbst, Leeren ist ein eigener
+  Knopf mit „Sind Sie sicher“.
+- Q12 Die Prüfung beim ersten Build nur für Target-Module? Antwort: Rezepte enthalten sehr wohl den Bau-Code, mit den
+  Wahlstellen der Person (Modell, Quantisierung, Zielformat) als Variablen im Build-Menü, wie die bestehenden Templates,
+  nie fertige Images. Rezepte sind Target-Templates mit Code und bekommen die Prüfung beim ersten Build auch.
+- Befunde, in derselben Nachricht beantwortet: keine Snapshot-Grenze, die Person löscht per Mehrfachauswahl oder
+  exportiert („keine historie, der user darf soviele snapshots haben wie er platz auf der platte hat“); das
+  Docker-Aufräumen nennt Pfad, Name und Größe; „Chatverlauf löschen“ listet, was es löscht, mit „Nein“ vorausgewählt;
+  keine `ghcr.io`-Images in den Vorgaben; Trivy ohne Docker-Socket (nicht widersprochen: es liest ein gespeichertes
+  Image-Archiv); der Installer nimmt immer den neuesten Stand des Frameworks („der installer soll immer latest laden“).
+- Entscheidung 14 (18:29): uv ersetzt Poetry, und die veraltete Kopie von `pyproject.toml` wird gelöscht. Antwort:
+  „1. ja 2. ja“.
+- Vom Repository aus dem Entwurfsdokument dieser Runde genannt, im Gespräch nicht gefragt: Der Ja-Knopf des
+  Löschdialogs reagiert erst nach 600 ms, Dockers Build-Cache wird nie geleert, die Person kreuzt einen Teil einer
+  Löschliste an (10.4, zuerst nichts angekreuzt), H1 die geplante Ordnung auf dem Rechner mit einem Ordner `Data`.
 
 Steht jetzt in: [Mojo, der Gesundheitscheck](#mojo-der-gesundheitscheck),
 [Löschen und der Papierkorb](#löschen-und-der-papierkorb),
 [Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten),
-[Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest)
+[Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest),
+[MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
+[Secrets, Anmeldung und Konten](#secrets-anmeldung-und-konten),
+[Build-Pipeline und Target-Module](#build-pipeline-und-target-module)
 
 ### Runde 7
 
 <a id="decision-round-7"></a>
-Umgesetzt vom 2026-10-15 bis 2026-10-22. Punkt 2': Ein für ein Board gebautes Modell wird auf diesem Board gemessen
-(oder in der Docker-Sandbox), nie nativ auf diesem Rechner; nativ laufen nur Dittos eigene Katalogmodelle. Punkt 6:
-`install.sh` nimmt die Person in die Gruppe `docker` auf und sagt klar, was das bedeutet (der Standard ohne Root-Rechte
-ersetzte das am 2026-10-31). Punkt 11: `llmcf` ist der neue Name der Kommandozeile, `llm-cli` bleibt; 11': die
-Mojo-Tools für KI-Clients; M' und T: Jede Warnung und jeder Fehler sagt, wo, warum und was Mojo Miracle dagegen tun
-kann. Punkt 12: Der Builder löscht nie ein Image; wo Docker seine Images ablegt, wird gezeigt. D: Dittos lokaler Server
-läuft direkt auf dem Rechner oder in Docker, sein Image wird auf diesem Rechner gebaut und nie gezogen oder hochgeladen;
-die Objekte des alten Modus gehen nach einem Ja in einer Liste endgültig. Der eigene Linux-Schlüsselbunddienst dieser
-Runde steht in der Roadmap. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden
-ist, steht in den verlinkten Abschnitten)
+2026-10-15, 14 Fragen um 17:29 gestellt (aus dem Entwurfsdokument zu Runde 6), beantwortet 18:25 UTC; Nachträge um
+18:40 und 18:43 UTC.
 
-Steht jetzt in: [Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht),
+- Q1 Wo die Dateien liegen: Programm nur für Admins, Linux-Daten im Home von `llmcf`, Windows-Daten im
+  Programmdaten-Ordner hinter einer Junction? Antwort: ja, aber die Windows-Daten unter dem Programmordner
+  `LLM-Conversion-Framework`, dem Standardort für Software unter Windows. Entschieden: Code nur für Admins, die
+  Datenordner für `llmcf` beschreibbar.
+- Q2 Ein machtloses Konto `llmcf-run` für Benchmarks fremder Modelle? Antwort: laufen Benchmarks nicht ohnehin im
+  Docker? 2' (18:40): im Docker kompilierte Modelle für Benchmarks auf Bare Metal zu holen, ist Quatsch; Benchmarks
+  gehören nach dem Deploy auf das Target, für echte Werte, oder wahlweise in den Docker, wenn das goldene Artefakt
+  bereitsteht. Entschieden: Ein Modell, das für ein Board gebaut ist, wird auf dem Board oder in der Sandbox gemessen,
+  nie nativ auf diesem Rechner; nur Dittos eigenes Modell läuft nativ, sein Server unter einer machtlosen Identität
+  (nicht widersprochen).
+- Q3 Das Betriebssystem fragt bei Löschen und harten Regeln jedes Mal nach Passwort, PIN oder Windows Hello? Antwort:
+  jedes Mal nervt unnötig; ein Klick muss reichen, PIN, Passwort oder Fingerabdruck als Opt-in.
+- Q4 Geräteschlüssel: Windows-Anmeldeinformationsverwaltung, unter Linux der Tresor des Frameworks? Antwort: „4. wir
+  sollten unter linux einen dienst mitbringen als keyring, unter windows nehmenw ir die windowseigene verwaltung“. Auf
+  der Roadmap.
+- Q5 Nur registrierte Personen dürfen es nutzen? Antwort: jeder, der das Programm starten kann; es wird für alle
+  installiert und braucht keinen Schutz; Zugriffskontrolle und Kontenverwaltung als Opt-in.
+- Q6 Der Installer fragt „docker-Gruppe verlassen?“ und „systemweiten Docker-Dienst stoppen?“, Mojo warnt, solange man
+  in der Gruppe ist? Antwort: „6. gleiche antwort wie bei frage 5, jedes mal grupee joinen / leaven ist total nervig.“
+  Entschieden: keine Fragen zum Ein- oder Austreten aus der docker-Gruppe. Den Vorrang ohne Root vom 2026-10-31
+  (wahrscheinlich Runde 45) klärte die Gruppe selbst.
+- Q7 Reihenfolge: zuerst Mojo, Rezepte, Gerätekonten, Türklingel und MCP übers Netz, dann der Dienst unter `llmcf`,
+  Linux zuerst? Antwort: „7. ja“.
+- Q8 amqtt fester Bestandteil, der Broker standardmäßig aus, Passwörter der Abonnenten als Hash? Antwort: Der Broker ist
+  dazu da, dem LLM zu sagen, dass ein Build fertig ist, und einen Turn anzustoßen; er wird automatisch aktiviert, wenn
+  er gebraucht wird. Sein Ort wurde am 2026-10-16 ersetzt (das Rust-Gateway).
+- Q9 Ein 256-Bit-Pre-Shared-Key signiert jede Anfrage, ein Token für Apps, die nur einen festen Header schicken?
+  Antwort: „9. ja“.
+- Q10 Genau ein sudo-Recht auf dem Board (der eigene Dienst)? Antwort: „10. was zum build / deploy benötigt wird...“.
+  Entschieden (nicht widersprochen): ein root-eigener Helfer mit festen Unterbefehlen und einer sudoers-Regel, kein
+  allgemeines sudo.
+- Q11 Tool-Namen `run_mojo_oracle` und `run_mojo_miracle`, harmlose Reparaturen ohne Terminal? Antwort: `llmcf mojo
+  --oracle`, `llmcf mojo --miracle` und so weiter; eine KI muss sie nutzen können, auch per MCP. 11' (18:40): findet
+  Oracle etwas, wird Miracle vorgeschlagen, und ein Ja führt es aus, ohne den Befehl neu einzugeben; Oracle sagt, was es
+  fand, Miracle, was es reparieren konnte, was nicht und warum. Entschieden: `llmcf` ist der neue Name der
+  Kommandozeile, `llm-cli` bleibt.
+- Q12 Ein Tag `last-build` je Target, ältere Images markiert, Mojo listet sie? Antwort: „12. user kann speicherpfad
+  auswählen, aber images werden NIEMALS gelöscht ausser der user tut es selbst!“. Wo Docker Images ablegt, wird
+  gezeigt.
+- Q13 „Rezept“ heißt Template mit Code; reine Werte-Pakete heißen „getestete Einstellungen“, und das „nicht mehr
+  fragen“ aus Runde 4 für Rezept-Pakete gilt nur für sie? Antwort: „13. ja“.
+- Q14 Einstellungen ablehnen, die ein Rezept nicht nutzt? Antwort: Was im Rezept steht, muss der Builder auch
+  verwenden, sonst hat es dort nichts zu suchen; die bestehenden Templates werden repariert und verbessert, das Rad wird
+  nicht neu erfunden.
+- 18:40: „Transparenz ist wichtig! (nur nicht bei secrets wie passwörtern, tokens, api keys etc...)“. Jede Warnung und
+  jeder Fehler sagt, wo, warum und was Mojo Miracle tun kann (M', T).
+- D (18:43): Dittos lokaler Server wird automatisch bare metal oder im Docker installiert, als idempotentes Modul des
+  Installers; eine vorhandene Installation wird übersprungen, außer die Person erzwingt den anderen Modus, der dann den
+  alten ersetzt. Nicht widersprochen: standardmäßig bare metal, das Image auf diesem Rechner gebaut und nie geladen oder
+  gepusht. In Runde 8 verfeinert (W2): Der alte Modus geht vollständig, erst nachdem der neue geprüft ist.
+
+Steht jetzt in: [Secrets, Anmeldung und Konten](#secrets-anmeldung-und-konten),
+[Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht),
 [Mojo, der Gesundheitscheck](#mojo-der-gesundheitscheck),
 [Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
 [Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten),
-[Deployment auf Boards](#deployment-auf-boards)
+[Deployment auf Boards](#deployment-auf-boards), [Community, Rezepte und Pakete](#community-rezepte-und-pakete),
+[MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen)
 
 ### Runde 8
 
 <a id="decision-round-8"></a>
-Umgesetzt am 2026-10-16. Antwort 2: Vor jedem Wissens-Snapshot wird seine Größe geschätzt; passt er nicht, wird die
-Änderung, die ihn braucht, abgelehnt, und nichts wird von selbst gelöscht. Antwort 3: Fertige Modelle (Golden Artifacts)
-kommen über einen Speichern-Dialog in den Ausgabeordner der Person (`~/llmcf/output`); der Build einer KI kommt ohne
-Dialog dorthin. Q-1 und Q-1': Lizenz und Urheberrecht jeder gecrawlten Seite werden festgehalten, und ein Wissenspaket
-trägt den vollen Text einer Seite nur, wo ihre Lizenz es erlaubt. Q-2: Ditto bleibt optional und wird als experimentell
-markiert. Q-3: Builds in der Cloud oder auf gemieteten Maschinen wurden gestrichen. „HYBRID CLARIFIED“: Der Remote-Modus
-ist weg, Dittos Hände sind die eigenen Tools des Frameworks auf diesem Rechner; W4: Das GUI-Tool gibt KI-Apps dieselben
-Hände. N3: „getestet auf Board X“; N4 bis N7: Deployment auf Boards über ein Netz, das abbricht (Hostnamen, Gründe,
-warum ein Board nicht erreichbar ist, die Art des KV-Caches); N8: Build-Fortschritt; N9, N9', N9'': Das Board, auf das
-eine Messung zeigt, ist nur eine Empfehlung; N10: die Dokumentationslinks eines Boards für Deep Ingest; N11: Gleiche
-Builds werden vor dem Bauen genannt; N12: Die eigenen Dokumente des Frameworks werden nur auf Wunsch indiziert; N13: ein
-Snapshot vor jedem Import eines Wissenspakets; N15: Reste einzeln entschieden.
+2026-10-15, Antworten von 21:10 bis 23:14 UTC (die Lückenprüfung der alten Notizen des Maintainers, N1 bis N15, und
+Q-1 bis Q-5); W1 bis W4 am 2026-10-16 um 13:34 UTC, die das Arbeitsprotokoll unter dieser Runde führte.
+
+- Antwort 2 Eine Speicherplatz-Warnung für Snapshots statt der Anzahl? „2. ja, speicherplatz warnung bitte“. Die Größe
+  wird vor jedem Snapshot geschätzt; passt er nicht, wird die Änderung abgelehnt, bei wenig Platz kommt eine Warnung.
+- Antwort 3 Wohin fertige Modelle gehen. Antwort: ein Standardpfad, den die Person einmal festlegt, und bei jedem
+  goldenen Artefakt ein Speichern-Dialog, der dort aufgeht, wie der Standard-Speichern-Dialog. Standard
+  `~/llmcf/output`; der Build einer KI geht ohne Dialog dorthin.
+- HYBRID GEKLÄRT (21:12): „mcp tools sind die hände des llm, das hat nichts mit einem entfernten rechner zutun...“. Der
+  Fernmodus wird ganz entfernt („der rest ist okay für mich“, 22:57); das Deployment goldener Artefakte auf Boards per
+  SSH bleibt. Die GUI-Tools lassen Ditto die Eingaben der Person sichtbar lesen und füllen (nicht widersprochen).
+- Ein entfernter MCP-Client erreicht den Server direkt unter seiner Adresse, per OAuth, Token oder PSK, ohne SSH-Tunnel.
+- N1 Rotation (SpinQuant) vor der Quantisierung: ein festes externes Tool im Target-Image, nur wo das Format es
+  mitmacht; Llama, ONNX und weitere Formate folgen. N2 Ein generisches ARM64-Target mit Raspberry-Pi-Vorgaben auf die
+  Roadmap: „vorschlag angenommen“. N3 Targets entstehen aus der Hardware-Probe (air-gapped oder Ditto per SSH), der
+  Benchmark ist der Beweis. N4 „4. ja aber beides unterstützen, hostname oder ip, user kann angeben was er weis“. N5
+  „5. ja, eine while ping schleife...“. N6 „6. ja“ (SSH-Grundcodes). N7 „7. immer opt-in anbieten, wo nötig als
+  standart (mit opt-out)“ (KV-Cache-Quantisierung). N8 „8. genau, bitte anzeigen lassen“ (Build-Fortschritt). N9 „9.
+  ja“ (kein passendes Target: der Assistent oder Ditto). N10 „10. ok“ (Doku-Links für Assistenten, Ditto und Deep
+  Ingest). N11 „11. identisch bedeuetet zu 100% gleiche optionen gewählt, wenn anderes llm gewicht, oder andere
+  quantisierung ist es NICHT identisch“. N12 „12. bitte verdrahten“: Der Code- und Doku-Index des Frameworks wird für
+  Ditto verdrahtet (dass er auf Anfrage läuft, war der Entwurf des Assistenten, nicht widersprochen). N13 „13. ja“ (ein
+  Snapshot vor jedem Paket-Import). N14 „"Später, brauchbar" > Roadmap“. N15 Reste: entfernt, wenn wirklich unnötig,
+  genutzt, wenn brauchbar.
+- Q-1 Wissens-Pakete und Urheberrecht: nur öffentlich zugängliches Wissen, robots.txt beachtet, die Gesetze
+  eingehalten. Q-1' (22:57): erkennbares Urheberrecht wird gewahrt und Lizenzen beachtet, auch bei Code von GitHub. Q-2
+  „2. ja, mit hinweis auf eigene gefahr und verantwortung, der ersteller von llmcf haftet nicht!“ (Ditto optional und
+  experimentell). Q-3 „3. streichen, wenn machen wir es selbst, aws/azure waren nur die vorlagen dafür...“ (keine
+  Cloud-Builds). Q-5 „5. ja, von mir aus“ (Rotation und das ARM64-Target gleich nach den Rezepten).
+- N9' und N9'' (22:57, 23:14): Die Board-Vorauswahl kommt aus der Probe; wenn unsicher, fragen statt raten; sie ist nur
+  eine Empfehlung, die die Person ändern kann.
+- W1 Warum verbindet sich Mojo mit Boards? Nur wo es dort ein Problem zu finden gibt: standardmäßig kein Kontakt zu
+  Boards, ein Board nur auf Wunsch oder wenn ein festgehaltenes Problem darauf zeigt. W2 Dittos Modus wechseln: A wird
+  erst restlos entfernt, nachdem geprüft ist, dass B einwandfrei läuft, mit dem Platz für beide vorher geprüft. W3 „3.
+  Lizenztexte in Wissens-Packs: ja“. W4 „4. ja, auf die selbe weise wie ditto, mit dem gleichen harness..“: externe
+  KI-Apps bekommen dieselben GUI-Tools wie Ditto. W1' (13:43): Was eine Person in der CLI starten kann, muss auch per
+  Maus in der GUI startbar sein.
+- Nicht widersprochen: die GUI-Tools zu einem Tool `gui` über eine private lokale Brücke zusammengefasst (2026-10-16
+  13:37); die neue Menüordnung (19:49, in Runde 10 Q2 umgeordnet); ein Test für die Gleichheit von CLI und GUI;
+  Repository-Adressen mit eingebetteten Zugangsdaten abgelehnt (23:56).
 
 Steht jetzt in: [Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest),
 [Build-Pipeline und Target-Module](#build-pipeline-und-target-module), [Deployment auf Boards](#deployment-auf-boards),
 [Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht),
 [MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
+[GUI und der Weg der Person](#gui-und-der-weg-der-person), [Mojo, der Gesundheitscheck](#mojo-der-gesundheitscheck),
 [Wichtige Entscheidungen](#wichtige-entscheidungen)
+
+#### 2026-10-16 · Rust und Go, RG1 bis RG5 (ohne Rundennummer)
+
+Beantwortet um 13:40 UTC, nachdem der Assistent Startzeiten gemessen und Python für den Kern und Rust nur für noch
+nicht gebaute eigenständige Teile empfohlen hatte.
+
+- RG1 Startzeiten: „lazy loading einführen!“. CLI, MCP-Server und GUI laden schwere Module erst bei Bedarf.
+- RG2 Das Netzwerk-Gateway für MCP, der MQTT-Broker und der Root-Helfer auf dem Board in Rust (Roadmap): „1. ja“.
+  Rust-Teile kommen fertig gebaut als signierte Binärdateien, Selbstbau als Opt-in; keine fertigen Docker-Images für
+  Targets.
+- RG3 „3. ja, : rumqttd im Rust-Gateway“, anstelle von amqtt im Python-Prozess.
+- RG4 „Go bleibt also draussen, ok“ und „4. ja“: kein Go; die GUI bleibt Qt.
+- RG5 Warum ist der Qdrant-Client Python, wenn Qdrant Rust ist? Nicht widersprochen: Die lokale Wissensbasis zieht auf
+  Qdrant Edge um; der alte Speicher wird ohne neue Embeddings übernommen und bleibt, bis die Person ihn löscht.
+
+Steht jetzt in: [Wichtige Entscheidungen](#wichtige-entscheidungen),
+[Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest),
+[MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen)
 
 ### Runde 9
 
 <a id="decision-round-9"></a>
-Umgesetzt am 2026-10-17. U1 und Folge b: Was Ditto oder eine KI-App über die Tools des Frameworks tut, erscheint als
-Zeile im Chat-Verlauf und in den eigenen Fenstern des Frameworks. U2: Der Mausweg ist für die Person, denn viele
-Menschen benutzen nie ein Terminal: Die GUI sagt einer Person nie, sie solle einen Befehl tippen. (Frage und Antwort
-standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten Abschnitten)
+2026-10-16 um 22:00 und 22:02 UTC (M1 bis M4) und 2026-10-17 um 00:09 UTC (U1, U2).
+
+- M1 bis M3 Wann, wie und mit welcher Beschreibung PR #6 nach main gemergt wird: „1 nach Welle 5, 2 Merge-Commit, 3
+  ja“. M4: weitere Arbeit kommt auf einen neuen Branch `development`, der nach main gemergt wird, wenn er stabil ist.
+  Der Merge-Commit wurde später ersetzt: main bewegt sich nur per Fast-Forward, auf das Wort des Maintainers.
+- U1, U2 (ohne Frage gesagt): Ditto darf nicht die Maus der Person steuern; Ditto nutzt die CLI und die Funktionen des
+  Frameworks, und die Person sieht die Felder sich in der GUI füllen; der Mausweg ist für die Person, weil nicht jeder
+  die CLI kennt und eine GUI für Laien entscheidet, ob die Software genutzt wird. Entschieden: Was Ditto oder eine
+  KI-App tut, erscheint als Zeilen im Chat-Feed und in den Fenstern des Frameworks; die GUI sagt einer Person nie, sie
+  solle einen Befehl tippen.
+- Nicht widersprochen (00:10, Welle 6): jeder nächste Schritt je Publikum dargestellt (Befehl, Mausweg, Tool); ein
+  Einsteiger-Durchgang durch jedes Fenster; KI-Aktivität als signierte Feed-Zeilen nur mit Bezeichnungen, nie Pfaden.
+  Der Hinweis „Anzeigen“ ohne Fokus-Diebstahl wurde durch Runde 10 V4 ersetzt.
 
 Steht jetzt in: [GUI und der Weg der Person](#gui-und-der-weg-der-person),
-[MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen)
+[MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
+[Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung)
 
 ### Runde 10
 
 <a id="decision-round-10"></a>
-Umgesetzt am 2026-10-17. Q1: Deutsche Texte sagen „du“, „Sie“ wählt die Person. Q2: der Aufbau der Menüleiste (die
-KI-Verwaltung zog ins Menü Ditto). Q5: Nur die eigenen Wege der Person (GUI und CLI) schreiben das Vertrauen in ein
-Board. Q7: Das Fehlerfenster sagt in einfachen Worten, was geschah, warum, wenn es bekannt ist, und einen nächsten
-Schritt. V1 und V2: Nächste Schritte sind Daten statt handgeschriebener Befehle, je Zielgruppe dargestellt, mit
-Mauswegen aus der Menütabelle. V6: Fachbegriffe werden beim Überfahren mit der Maus aus einem Glossar erklärt. Verweise
-nennen auch einen Teil 10b mit der Umbenennung des Repositorys in LLM_Cross-Compiler_Framework. (Frage und Antwort
-standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten Abschnitten)
+2026-10-17, beantwortet 10:18 UTC (Welle 6: Befunde V1 bis V6 und Fragen Q1 bis Q7); 10b um 10:25 UTC.
+
+- V1 Der Chat zeigt Befehle, die für die KI gedacht sind: Die KI muss sie an die Person durchreichen, sodass der Befehl
+  im Hintergrund schon bereitsteht und „zulassen ...?“ mit kurzer Erklärung ihn bei Ja ausführt; „gleiches für das mojo
+  fenster“. Nicht widersprochen: nur aus einem geschlossenen Katalog, Löschungen listen weiter alles, Passwörter in
+  einem verdeckten Feld, „Nein“ vorausgewählt.
+- V2 „52 von Hand geschriebene Menüpfade bitte umsetzen nach best practise...“: Pfade kommen aus den echten
+  Menübeschriftungen.
+- V3 „Start ohne Terminal soll normalfall sein, terminal nur wenn benötigt.“: Starter ohne Konsole, ein Absturzdialog.
+- V4 Was externe KI-Apps tun, erscheint in einem eigenen Bereich desselben Fensters: der Chat und eine eigene
+  Ditto-Konsole, jeder Bereich ein- und ausblendbar und mit der Maus in der Größe veränderbar; der vorhandene Weg wird
+  angeschlossen.
+- V5 „Alles was vorhanden ist und nicht verdrahtet bitte verdrahten und prüfen ob es funktionsfähig / vollständiog
+  oder verbesserungbedürftig ist“.
+- V6 Fachbegriffe bekommen beim Darüberfahren einen Tooltip mit Erklärung und einem Link zur besten Quelle.
+- Q1 „du“ oder „Sie“? Empfohlen „du“. Antwort: „DU/ Sie beim ersten start der Software abfragen (in den optionen
+  änderbar)“.
+- Q2 Die KI-Verwaltung ins Ditto-Menü mit „Ditto einrichten...“ zuerst, Werkzeuge mit Untermenüs? Empfohlen ja.
+  Antwort: „ja“.
+- Q3 Der Dialog für Tool-Freigaben in „Ditto einrichten...“ und bei der ersten Verbindung einer KI-App, nicht beim
+  ersten Start? Empfohlen ja. Antwort: „ja“.
+- Q4 Der Tab „Modelle“ eine echte Liste, Auto-Tuning als geplant markiert? Antwort: ja, es ist geplant und gehört auf
+  die Roadmap; die Doku muss bereinigt werden (Keep a Changelog, Roadmap).
+- Q5 Einen geänderten Host-Schlüssel in GUI und CLI ersetzen, alter und neuer Fingerabdruck gezeigt, nie durch eine KI?
+  Empfohlen ja. Antwort: Die Zuordnung von Hostname oder IP zum SSH-Schlüssel muss von Hand bearbeitbar sein, mit
+  Kopieren und Einfügen („niemand will so einen key tippen!“). Nur die eigenen Kanäle der Person schreiben das Vertrauen
+  in ein Board.
+- Q6 Einstellungen ohne Mausweg bearbeitbar, dazu `llmcf config set`? Antwort: „ja!“.
+- Q7 Wie vollständig Deutsch wird: Rahmen und nächste Schritte deutsch, tiefe Ursachen englisch (empfohlen), oder alles
+  deutsch? Antwort: Best Practice; Fachbegriffe müssen englisch sein, Fehlerberichte deutsch, und die KI kann englische
+  Berichte auf Deutsch erklären. Entschieden: Die Fehlerbox sagt in einfachen Worten, was geschah, warum und einen
+  nächsten Schritt, die englischen Details eingeklappt.
+- 10b: „bitte das repo umbennen (und alle stellen die damit in verbindung stehen) Neuer Name:
+  "LLM_Cross-Compiler_Framework"“. Nicht widersprochen: Eine alte Installation wird gefunden und nie selbst entfernt,
+  der alte Bot-Name gilt weiter.
 
 Steht jetzt in: [GUI und der Weg der Person](#gui-und-der-weg-der-person),
 [SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote),
-[Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten)
+[Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten),
+[Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung)
 
 ### Runde 11
 
 <a id="decision-round-11"></a>
-Umgesetzt vom 2026-10-17 bis 2026-10-23. A2: ein Repository, seine Schichten durch einen Test erzwungen. A3: PySide6 ist
-das optionale Extra `gui`; Kern, Kommandozeile und MCP-Server laufen ohne Qt (Installationen ohne Bildschirm und auf
-Servern). A5: Der OpenSSH-Rückfall ist ein zweiter Transport, kein zweites Deployment. A6: Die Downloads der Person im
-Hugging-Face-Browser der GUI gehen wie die einer KI durch den geprüften Abrufer des Frameworks, mit einer optionalen
-einmaligen Übernahme des alten Download-Caches. D-del: Von den aufgeführten Entfernungen geht nur Punkt 1; andere
-ersetzte Helfer bleiben als Delegaten. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was
-entschieden ist, steht in den verlinkten Abschnitten)
+2026-10-17, 15:06 bis 15:11 UTC: die Architektur-Durchsicht des Maintainers (der Monolith, zwei SSH-Klassen, ein
+selbst gebauter SSH-Rückfall, mehrfach geschriebenes Hashing, Platz-Helfer in `BuildEngine`) und die sechs Fragen A1
+bis A6 danach. Das Gespräch nummeriert diese Runde nicht; das Repository gibt ihr die 11. Alle sechs wurden mit „ja“
+beantwortet.
+
+- A1 Die Konsolidierung vor den Bereichsketten von Welle 6? „zu 1. reihenfiolge: ja“.
+- A2 Ein Repository, die Schichten durch einen Test gesichert, vorerst keine eigenen Pakete? „zu 2. repo und pakete:
+  ja“.
+- A3 PySide6 ein optionales Extra `gui`, die Desktop-Installer installieren es weiter? „3. ja“.
+- A4 Eine Platzregel für jede Prüfung, mit Reserven und laufenden Builds mitgezählt? „4. ja“.
+- A5 Der System-SSH-Rückfall ein voller zweiter Transport (warten, fortsetzen, losgelöste Installation)? „5. ja“.
+- A6 Die Hugging-Face-Downloads der GUI über den geprüften Fetcher, der alte Cache mit optionaler Übernahme nutzbar?
+  „6. ja“.
+- Im selben Austausch, außerhalb der A-Fragen: Punkt 7 (U7) der nie eingeschaltete Enterprise-Modus: „Punkt 7:
+  geplant“; Punkt 9 (U9) die Vier-Modul-Pipeline, die niemand mehr ausführt: „meine 4 modulk architektur war gut, warum
+  soll die jetzt weg?“ und „build.sh MUSS die3 4 templates nutzen ... build. sh ist ein orchestrator“. Entschieden: Die
+  vier Stufenmodule sind der Build und tragen seine Anweisungen; der Runner orchestriert sie nur, je Stufe
+  fortsetzbar, mit einem Platz für die Rotation; Benchmarks laufen auf dem Board.
+- Nicht widersprochen: Jeder Umbau behält das Verhalten und wird vorher durch Charakterisierungstests festgehalten.
+  Welche der gelisteten Entfernungen gehen, entschied Runde 12.
 
 Steht jetzt in: [Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung),
 [Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten),
-[SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote), [Hugging Face](#hugging-face)
+[SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote), [Hugging Face](#hugging-face),
+[Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
+[Build-Dienst, Warteschlange und Modi (geplant)](#build-dienst-warteschlange-und-modi-geplant)
 
 ### Runde 12
 
 <a id="decision-round-12"></a>
-Umgesetzt am 2026-10-17. Aufräumen mit Erkundung zuerst und einer Umsetzung: Neuerer Code nutzt das Original, wo beide
-dasselbe tun. Punkt 1: Der eigene Mess-Worker der GUI geht, das Ersatz-Messskript hat einen Ausführer. Punkt 6: Builds
-laufen über einen Weg (BuildService, Orchestrator, BuildEngine), und der Builder zeigt CPU und Speicher des laufenden
-Build-Containers. Punkte 10 und 11: doppelte Prüfhelfer und eine ungenutzte Download-Funktion gehen. Eine Docker-Prüfung
-und ein Ausführer für kurze Befehle. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was
-entschieden ist, steht in den verlinkten Abschnitten)
+2026-10-17, 15:11 bis 15:18 UTC: die Liste der Entfernungen. Das Gespräch nummeriert diese Runde nicht; das Repository
+gibt ihr die 12. Die Bitte, „1–6, 8, 10–13“ nur nach Nummer zu löschen, wurde abgelehnt: „ich kannd as nicht feigeben
+wenn ich nicht sehen kannw as du da löschen willst...“, also zeigt jede Löschanfrage die genaue Liste.
+
+- Punkt 1 der eigene Probe-Worker der GUI: „1. löschen“. Punkt 2 die doppelte Link-Rückfrage: „2. nicht doppeln,
+  löschen wenn nicht verdrahtbar“. Punkt 3 alte Textschlüssel: „3. löschen“.
+- Punkt 4 und die Regel R0: Warum wurde etwas neu gebaut, das es schon gab? Immer erst Recon, was schon da ist, bevor
+  das Gleiche daneben gebaut wird, schauen, was eine Änderung berührt und was verdrahtet werden muss; fertig heißt
+  verdrahtet und funktional (getestet). Die älteren Schlüssel gewinnen.
+- Punkte 5, 6, 7, 8 und 10: „siehe 4“: die Menü-Konstanten bleiben; ein Build-Weg (BuildService, Orchestrator,
+  BuildEngine), und der Builder zeigt CPU und Speicher des laufenden Containers; das Enterprise-Gerüst bleibt als
+  geplant; eine Prüfung der Zugangsdaten; neuer Code nutzt die ursprünglichen Prüf-Helfer, nur echte Dubletten gehen.
+- Punkt 9: „9. gibte s nicht ind einer auflistung“ (die vier Module wurden als U9 entschieden).
+- Punkt 11 `NetworkGuard`: „verdahten falls brauchbar, wenn nicht muss etwas neueres das bereits mit erledigen,
+  erstazlos streichen geht agrnicht!“; entfernt mit dem Nachweis, dass der festgelegte Downloader seine Aufgabe
+  übernimmt.
+- Punkt 12 das Rauchtest-Skript: „12. mit aktuellem plan (blaupause) abgleichen,d ann löschen“. Punkt 13 kleine
+  Helfer: „13. anpassen und verdrahten was brauchbar ist, was nicht> löschen“.
 
 Steht jetzt in: [Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung),
 [Build-Pipeline und Target-Module](#build-pipeline-und-target-module)
 
-### Runden 14 und 15
+#### 2026-10-17 · Der Paper-Recon (ohne Rundennummer)
 
-<a id="decision-round-14"></a><a id="decision-round-15"></a>
-Am 2026-10-22 in die Roadmap geschrieben: ein Build-Dienst, den GUI, CLI und MCP-Server als Clients nutzen (Fortsetzen
-an der letzten fertigen Stufe), eine Warteschlange über alle Programme mit Zulassung nach RAM, CPU und Platte, privater
-und Unternehmensmodus, Secret-Backends, Kubernetes und Nomad als wählbare Orte für Builds und die neuesten passenden
-Versionen. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den
-verlinkten Abschnitten)
+Beantwortet um 16:18 UTC; das Arbeitsprotokoll hatte hier eine Runde 13, aber das Gespräch sagt nicht, welcher Satz
+das war.
 
-Steht jetzt in: [Build-Dienst, Warteschlange und Modi (geplant)](#build-dienst-warteschlange-und-modi-geplant)
+- Q1 Versteckten HTML-Text (`display:none`, `hidden`, `aria-hidden`, Schriftgröße null, außerhalb des Bildes) beim
+  Ingest jetzt entfernen, als eigene Kette? Q2 Die Empfehlungen 2 bis 9 des Recons (Eval-Fingerabdrücke, eine Regel für
+  verunreinigte Turns, Herkunftsmarken und mehr) als Welle „Ditto: Sicherheit und Messbarkeit“, 10 bis 17 auf die
+  Roadmap? Antwort: „fragen 1 und 2: ja“.
+- Nicht widersprochen: die entfernten Mengen nur für die Person, nie für eine KI; lokale Fehler bekommen einen eigenen
+  Grund statt „das Board antwortet nicht“; der entfernte Scan prüft den SSH-Benutzer wie jeder Weg; Pfade in
+  `file:///`-Links werden vor einer KI verborgen.
+
+Steht jetzt in: [Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest),
+[Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht),
+[SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote)
+
+### Runde 14
+
+<a id="decision-round-14"></a>
+2026-10-22, gefragt 13:27, beantwortet 13:39 UTC, nach der Kritik des Maintainers vom 2026-10-21 (der Monolith als
+Single Point of Failure, keine Cluster-Planung, keine zentralen Secrets). Die Sicht des Assistenten: Die echte
+Schwachstelle ist, dass die Build-Steuerung im startenden Programm läuft, sodass ein GUI-Absturz einen Build beendet;
+vorgeschlagen ein eigener Build-Worker mit GUI, CLI und MCP als Clients, keine Microservices.
+
+- Zum Monolithen: „Die echte Schwachstelle > bitte beheben!“ und „deine vorschläge sind angenommen“. Was fehlt, wird in
+  das Bestehende eingebaut, nie eine parallele Struktur; Kubernetes oder Nomad nur als Opt-in, der eigene erste MVP ist
+  SSH und SCP („Celery bleibt ganz draussen!“); Secrets: „3. was fehlt implementieren dein vorschlag ist angenommen.“
+  (Vault und CyberArk als Quellen im Enterprise-Modus, Werte nur im Speicher, jeder Abruf protokolliert).
+- Q1 Eine Person und ein PC als Hauptfall mit Enterprise als zusätzlichem Modus, oder Enterprise als gleichwertiges
+  Ziel? Antwort: „1. ja, standart = privat modus, optional enterprise modus, in den optionen umstellbar, aber auch im
+  installer bereits vorab wählbar sollte es sein...“.
+- Q2 Der Build-Worker gleich nach Stufe C, nach Welle 6 oder nur auf die Roadmap? Antwort: „2. direkt nach stufe c“.
+- Q3 Eine Warteschlange mit Zulassung nach RAM, CPU und Platz im Worker, ohne Celery, Kubernetes oder Nomad als
+  optionale Ausführer auf der Roadmap? Antwort: „3. ja“.
+- Q4 Eine Firma baut die Cluster-Images selbst aus den Dockerfiles in ihre eigene Registry, fest per Digest; das
+  Projekt veröffentlicht keine Images? Antwort: „4. ja“ (Runde 15 engte ein, was „keine Images“ heißt).
+- Q5 Zuerst Vault, CyberArk danach; CyberArk über die Conjur-API oder den vorhandenen Helfer-Weg? Antwort: „5. CyberArk
+  über Conjur Api als enterprise lösung (für privat als opt-in anbieten), unsere keyring lösung für privat“.
+- Q6 Ein nur lesender Recon- und Entwurfslauf vor dem Bau? Antwort: „6. ja, immer erst recon vorher!“.
+- Die täglichen Mails über fehlgeschlagene CI: behoben (der nächtliche Lauf hält Secrets nur im Speicher, ein
+  Wächtertest).
+
+Steht jetzt in: [Build-Dienst, Warteschlange und Modi (geplant)](#build-dienst-warteschlange-und-modi-geplant),
+[Secrets, Anmeldung und Konten](#secrets-anmeldung-und-konten),
+[Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung)
+
+### Runde 15
+
+<a id="decision-round-15"></a>
+2026-10-22, beantwortet 17:26 und 17:48 UTC, zu drei Fragen und den 28 Detailfragen des Assistenten zu Build-Dienst,
+Build-Hosts und Secrets.
+
+- Dependabot-Pull-Requests werden angesehen und gemergt oder geschlossen, und die gefundenen Fehler von Hand behoben.
+  Jede Abhängigkeit, CUDA eingeschlossen, ist die höchste passende Version, ohne dass beim Update etwas bricht.
+- Images: „veröffentlichen“ hieß, dass keine Images in den gemeinsamen Hub kommen, in den Leute ihre Targets laden; wer
+  sein eigenes Artefakt in ein Image packt, veröffentlicht es nicht, und das ist nicht verboten, sondern soll einfacher
+  werden. 17:48: „images: Ja, so stimmt es“.
+- Q1 `development` nach main mergen, sobald die CI grün ist? Antwort: „1. Ja (ich schliesse keinen PR, mach du das
+  bitte!)“. Die Merge-Art wurde später durch Fast-Forward auf das Wort des Maintainers ersetzt.
+- Q2 Das umbenannte Repository zur Sitzung hinzufügen: Der Maintainer wollte es prüfen.
+- Q3 „MVP ist SSH und SCP“ gelesen als Bauen auf einem anderen Rechner über SSH? Antwort: „3. NEIN!“: Das Artefakt,
+  das die Person im Docker-Build erzeugt hat, der das Target nachbildet, geht per SCP auf das Board und wird per SSH
+  installiert, mit dem llama.cpp-Server. Entschieden: keine Build-Hosts; die Fragen dazu (14 bis 20, 22) wurden
+  gestrichen.
+- Q14 Modell und Datensatz auf einen Build-Host hochladen? Antwort: von Hugging Face herunterladen, nie hoch; geteilt
+  werden die Hardware-Templates, die Leute erstellen, in einem öffentlichen Git-Repository, damit andere dort zuerst
+  nachsehen.
+- 17:48: Das Community-Repository ist die Edge-LLM-Knowledge-Base des Projekts; die übrigen Fragen gebündelt, wenige auf
+  einmal, und was auf die Roadmap wandert, darf dort nicht verwaisen („die roadmap ist eine todo liste, keine
+  müllhalde“).
+- Nicht widersprochen: die Schritte 1 bis 7 auf der Roadmap (Build-Dienst, Warteschlange, Modi, Vault und Conjur,
+  Kubernetes und Nomad, ein eigener Linux-Keyring-Dienst, die neuesten passenden Versionen), jeder mit seinen offenen
+  Entscheidungen; Pillow 13 über die Grenze von fastembed und Installationen mit `--no-deps`.
+
+Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module), [Hugging Face](#hugging-face),
+[Community, Rezepte und Pakete](#community-rezepte-und-pakete),
+[Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten),
+[Tests, CI und die Windows-Fallen](#tests-ci-und-die-windows-fallen),
+[Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung),
+[Build-Dienst, Warteschlange und Modi (geplant)](#build-dienst-warteschlange-und-modi-geplant)
 
 ### Runde 16
 
 <a id="decision-round-16"></a>
-Umgesetzt am 2026-10-22. G4: Arbeit auf einem Board läuft weiter, wenn die Verbindung abbricht, und wird danach wieder
-verfolgt. Nachtrag zu U9: was das Konvertierungsmodul der Version 1.x im ursprünglichen Design des Maintainers versprach
-und nie hatte (Formaterkennung, Integritätsprüfungen, Statistik, ein Funktionstest), und jedes der vier Stufenmodule
-läuft wieder für sich mit seinen Optionen. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging;
-was entschieden ist, steht in den verlinkten Abschnitten)
+2026-10-22, gefragt 17:52, beantwortet 17:58 UTC (die gebündelten Fragen aus Runde 15); der U9-Nachtrag um 18:00 UTC.
 
-Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
-[Deployment auf Boards](#deployment-auf-boards)
+- Q1 Stufe B und die laufende Stufe C als Sicherungs-Branches pushen? „1. Ja“. (Später ersetzt: Auf GitHub liegt kein
+  Branch je Arbeitspaket.)
+- Q2 Die gelisteten alten Scratch-Ordner löschen, um Platz zu schaffen? „2. Ja“.
+- Q3 Der Build-Dienst startet bei Bedarf, endet nach 10 Minuten ohne Arbeit, Autostart nur auf Wunsch; kann er nicht
+  starten, wird der Build mit Grund abgelehnt, ohne Rückfall; eine laufende Konvertierung übersteht Stopp oder Update;
+  künftig die Heimat des lokalen API-Servers? „3. ja“.
+- Q4 Ctrl+C beendet nur das Zuschauen; das Schließen der GUI lässt Builds weiterlaufen; die Builds einer KI-App werden
+  abgebrochen, wenn sie sich trennt; Dittos Builds laufen weiter? Empfohlen ja. Antwort: „4. Ja, nicht abbrechen wenn
+  getrennt wird, sondern erneut verbinden ermöglichen, die zeit des users ist kostbar, wenn der lauf kurz vor ende
+  abbricht ist das ärgerlich...“. Entschieden: Der Build einer KI-App läuft weiter, wenn sie sich trennt oder abstürzt,
+  und die App oder die Person verbindet sich neu und verfolgt ihn (das ersetzte den Abbruch beim Trennen aus Runde 2;
+  das Kürzel G4 des Arbeitsprotokolls).
+- Q5 Ein gesperrter Tresor wartet auf die Person, eine KI entsperrt nie; GUI und CLI geben ihre Einstellungen weiter,
+  ein Dienst, den eine KI-App startet, bekommt die Grundwerte? „5. ja“.
+- Q6 Zuerst nur Modell-Builds in der Warteschlange; eigene Builds warten bei knappen Mitteln, werden nie abgelehnt;
+  bei gleicher Priorität die Person vor der KI? „6. ja“.
+- Q7 Jede Person darf den Modus umstellen; eine Auswahl im Installer, `--mode=` headless; die Sprache zuerst gefragt;
+  Enterprise legt die alten „Advanced“-Ordner nicht mehr an? Antwort: „7. ja zwischen privat und enterprise muss man
+  umstellen können... (evtl wird das später mit einem lizenz key gated, das man die enterprise quasi aktivieren muss,
+  aber das kommt später)“.
+- Q8 Das Community-Repository einrichten (README in beiden Sprachen, `contributions/`, ein Prüf-Workflow; der
+  Index-Schlüssel auf dem PC des Maintainers erzeugt)? „8. ja“.
+- 9 (der eigene Punkt des Maintainers): Ein Model-Zoo für Targets war geplant, der die Liste fertiger Templates aus dem
+  Repository holt; die meisten Targets müssen aus der Community kommen, da Module nur für Hardware gebaut werden, die
+  sich testen lässt.
+- U9-Nachtrag (18:00): „altes file aus alter version GANZ LESEN! so hatten wir uns das vorgestellt und angeblich war es
+  auch mal bereits so...“. Entschieden: Der ursprüngliche Entwurf ist bindend: Jedes der vier Module läuft wieder
+  allein mit seinen Optionen; das Konvertier-Modul bekommt, was Version 1.x versprach (Formaterkennung,
+  Integritätsprüfungen, Statistik, ein Funktionstest); was es gab, wird aus der git-Historie zurückgeholt, nicht neu
+  gebaut.
+
+Steht jetzt in: [Build-Dienst, Warteschlange und Modi (geplant)](#build-dienst-warteschlange-und-modi-geplant),
+[MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
+[Secrets, Anmeldung und Konten](#secrets-anmeldung-und-konten),
+[Community, Rezepte und Pakete](#community-rezepte-und-pakete),
+[Build-Pipeline und Target-Module](#build-pipeline-und-target-module)
 
 ### Runde 17
 
 <a id="decision-round-17"></a>
-Umgesetzt am 2026-10-23. ONNX nach GGUF wird mit dem klaren Grund abgelehnt (llama.cpp hat keinen Konverter aus ONNX)
-und nennt stattdessen das Format rknn für die NPU. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren
-ging; was entschieden ist, steht in den verlinkten Abschnitten)
+2026-10-22, 18:15 und 18:18 UTC. Das Gespräch nummeriert diese Runde nicht; das Repository nennt sie 17 für die
+Ablehnung von ONNX-Modellen, die aus ihr folgte.
 
-Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module)
+- Der Maintainer gab ein Dokument zu einer Ausnahme: Der RK3566 braucht ein eigenes Template; jeder andere
+  Rockchip-SoC nutzt das Standard-Template für RKLLM und RKNN, angepasst und auf das neueste Toolkit gebracht. Nicht
+  widersprochen: Auf dem RK3566 läuft das LLM auf der CPU (GGUF), RKNN nur als optionaler Schritt für Sprach- und
+  Bildmodelle, der den LLM-Build nie blockiert.
+- Q1 Der RK3568 ins RK3566-Template, wenn die offizielle Liste von RKLLM bestätigt, dass er nicht unterstützt wird? Q2
+  Die Konverter für Sprachmodelle (piper, vosk, whisper) jetzt, oder zuerst nur der Platz und die Konverter als nächster
+  Roadmap-Schritt? Antwort: Wenn ein Template für alle Rockchip reicht und funktioniert, bleibt es und wird nur
+  aktualisiert, sauberer wäre eine Trennung; „1. ja 2. ja 3.“. Nicht widersprochen (18:21): die Trennung, nach U9.
+- Nicht widersprochen (22:17): Ein ONNX-Modell für GGUF wird mit dem schlichten Grund abgelehnt (llama.cpp hat keinen
+  Konverter aus ONNX) und nennt stattdessen das Format rknn für die NPU (`ONNX_NEXT`).
+
+Steht jetzt in: [Targets, Hardware und Vorlagen](#targets-hardware-und-vorlagen),
+[Build-Pipeline und Target-Module](#build-pipeline-und-target-module)
+
+#### 2026-10-22 · Maintainer-Aktionen, der Versionsplan und der Update-Orchestrator (ohne Rundennummer)
+
+Von 18:25 bis 19:37 UTC; das Arbeitsprotokoll hatte zwischen Runde 17 und 19 eine Runde 18, aber das Gespräch sagt
+nicht, welcher dieser Sätze das war.
+
+- 18:25: Hat der Maintainer freigegeben, mergt der Assistent selbst.
+- 18:31 Q1 Die Community-Arbeit des Maintainers als Aktionen des Frameworks (Signierschlüssel anlegen, prüfen und
+  veröffentlichen mit jeder Datei gezeigt) und MAINTAINERS.md eine kurze Seite? „1. ja“. Q2 `main` des
+  Community-Repositorys schützen (kein direkter Push, nur Pull Requests mit grüner Prüfung, für alle)? „2. ja“; der
+  Maintainer legte das Ruleset an.
+- 19:27 Der Versionsplan D1 bis D11 (CUDA je erkannter GPU mit strenger Treibergrenze, das GPU-Template auf Ubuntu 24.04
+  LTS, das Rockchip-Image und das CPU-Template auf Debian 12 per Digest, Wartezeiten für neue Versionen, llama.cpp nach
+  seinen Releases, Mojos Aktualitätsprüfung standardmäßig offline). Antwort: alle Empfehlungen angenommen, und den
+  eigenen Update-Orchestrator des Maintainers ansehen, über ein Modul zu nutzen. Die Wartezeit ist seit Runde 65 5 Tage.
+- 19:32 bis 19:37 Der Update-Orchestrator ist für jeden Rechner, auch für das Framework selbst; seine Lizenz MIT und
+  nur veröffentlicht, wenn er frei von Secrets, Tokens, Passwörtern, Adressen, Hostnamen und persönlichen Daten ist;
+  der Installer nimmt sein neuestes Release; eine private Beispieladresse in seinen Tests in einem neuen Commit
+  ersetzt, die Historie unverändert. In Runde 19 durch den nativen Import ersetzt.
+
+Steht jetzt in: [Community-Pakete: Format, Vertrauen und Austausch](#community-pakete-format-vertrauen-und-austausch),
+[Targets, Hardware und Vorlagen](#targets-hardware-und-vorlagen),
+[Mojo, der Gesundheitscheck](#mojo-der-gesundheitscheck),
+[Updates, Sicherungen und Board-Images (geplant)](#updates-sicherungen-und-board-images-geplant)
+
+### Runde 19
+
+<a id="decision-round-19"></a>
+2026-10-22, beantwortet 20:43 UTC, zum Plan für den Update-Orchestrator.
+
+- Q1 Das erste Release nach den geplanten Ketten und einem echten Lauf auf einem Board, „neuestes“ heißt das neueste
+  Release im Bereich, den llmcf erlaubt, geprüft über Prüfsummen und eine Signatur? „1. ja“.
+- Q2 Eine neue Form für den Orchestrator (Module rufen eine gemeinsame Bibliothek)? Antwort: Ihn zu ändern würde die
+  Update-Routine brechen, die schon anderswo läuft; das bräuchte einen eigenen Branch oder Fork, also kann er gleich
+  nativ importiert und dort umgearbeitet werden, ohne zwei Repositorys. Q6 Die Katalog-Pflege als Module in der CI?
+  Antwort: Mit dem nativen Import bleibt das bestehende Repository, wie es ist. Entschieden: nativ importiert, seine
+  Herkunft festgehalten; das eigene signierte Release von llmcf ist die geprüfte Quelle; seine Beispielmodule werden
+  nicht übernommen (nicht widersprochen).
+- Q3 Auf Boards Root nur über cron, `llmcf` nur genaue sudo-Zeilen, Updates auf einem Board nur durch die Person mit dem
+  Root-Passwort bis zum Rust-Root-Helfer, auf PCs kein Root? „3. ja“.
+- Q4 Betriebssystem-Updates auf Boards angeboten und mit einem klaren Satz eingeschaltet; eine volle Sicherung nur auf
+  ein NAS oder USB, nie dieselbe Karte; kein PiShrink auf Boards? „4. ja“ (das Sicherungsziel wurde in Runde 21
+  ersetzt).
+- Q5 Windows folgt denselben Schritten? Antwort: ja, aber unter Windows keine Windows-Updates über den Orchestrator.
+
+Steht jetzt in: [Updates, Sicherungen und Board-Images (geplant)](#updates-sicherungen-und-board-images-geplant)
+
+### Runde 20
+
+<a id="decision-round-20"></a>
+2026-10-22, 20:47 bis 20:48 UTC (N5, N6), die Korrekturen des Maintainers am Plan.
+
+- N5 PiShrink verkleinert die Sicherungen der Boards, nie auf dem Board, sondern im Framework, in einem eigenen
+  gebauten Container (auch unter Windows), damit ein 32-GB-Kartenabbild einer Karte mit 4 GB Belegung nicht das NAS
+  füllt. Nicht widersprochen: derselbe Container unter Linux, PiShrink mit Prüfsumme festgelegt.
+- N6 Nach dem Deploy geht eine volle Sicherung des Boards auf den PC, wird dort verkleinert und ergibt ein kleines
+  Image zum Flashen auf eine Flotte (oder zum Verteilen auf anderem Weg); nach dem Verkleinern wird es dorthin
+  exportiert, wo die Person will. Nicht widersprochen: Die NAS-Anmeldung kommt aus dem Tresor; ein k3s-Agent im Image
+  ist eine Sache der Roadmap.
+- Runde 22 P4 engte PiShrink auf Kartenabbilder ein, die von außen kommen.
+
+Steht jetzt in: [Updates, Sicherungen und Board-Images (geplant)](#updates-sicherungen-und-board-images-geplant)
+
+### Runde 21
+
+<a id="decision-round-21"></a>
+2026-10-22, 20:54 UTC (N7 bis N9).
+
+- N7 Das Flotten-Image verallgemeinern (neue Host-Schlüssel, Machine-ID beim ersten Start)? Antwort: Es kommt darauf
+  an, ob es eine Flotte betankt (namenlos, wie vorgeschlagen) oder genau dieses Gerät ist, denn ein Privatnutzer hat
+  höchstens wenige Geräte einer Art; für dieses Gerät bleiben Hostname und Adresse, für eine Flotte sind sie Variablen:
+  also beides. Nicht widersprochen: beide Arten in beiden Modi, die Gerätesicherung im privaten Modus vorausgewählt, das
+  Flotten-Image im Enterprise-Modus, ein Zwilling wird benannt, wenn er auffällt.
+- N8 Die eigene regelmäßige Sicherung des Boards auf das NAS behalten? Antwort: Das Image darf nie auf die eigene Karte
+  des Boards geschrieben werden; ein NAS ist eine Möglichkeit, keine Voraussetzung, jeder Ort außer der Karte des
+  Boards; der PC macht die Sicherung und holt sie über das Netz, wie ein Sicherungsserver. Nicht widersprochen: Das
+  Board liest und streamt nur über SSH.
+- N9 „zu 2. ja beides“: die regelmäßige Sicherung neben dem Flotten-Image; das unverkleinerte Image wird gelöscht,
+  sobald das kleine geprüft ist.
+- Nicht widersprochen am selben Abend: Die Pflichtprüfung des Community-Repositorys kommt immer aus `main`, die Dateien
+  eines Pull Requests werden nur gelesen; Dependabot öffnet seine Pull Requests gegen `development`; Workflows aus Forks
+  brauchen eine Freigabe für jeden externen Beitragenden (der Maintainer stellte das am 2026-10-23 ein).
+
+Steht jetzt in: [Updates, Sicherungen und Board-Images (geplant)](#updates-sicherungen-und-board-images-geplant),
+[Community-Pakete: Format, Vertrauen und Austausch](#community-pakete-format-vertrauen-und-austausch),
+[Community, Rezepte und Pakete](#community-rezepte-und-pakete)
 
 ### Runde 22
 
 <a id="decision-round-22"></a>
-Umgesetzt am 2026-10-23. P5: Der alte Schreiber eines bestätigten Host-Schlüssels ist veraltet und ein dünner Delegat
-auf den einen Schreiber, nur für die Person; nichts wird ohne das Wort des Maintainers entfernt. P6: Bestätigt die
-Person einen neuen Host-Schlüssel eines Boards, ziehen die Daten des Boards zu seiner neuen Geräte-ID um. (Frage und
-Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten
-Abschnitten)
+2026-10-23, gefragt am 2026-10-22 um 22:34, beantwortet 04:48 UTC.
 
-Steht jetzt in: [SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote)
+- P1 Wo Name und Adresse je Board eines Flotten-Images eingetragen werden: a) eine Datei je Karte, b) eine Liste im
+  Framework, c) beides? Empfohlen c. Antwort: „1. c“. Die Liste ist der Standard, die Datei auf der Boot-Partition für
+  Boards, die beim ersten Start eine feste Adresse brauchen.
+- P2 Betriebssystem-Updates ohne geprüfte Sicherung: a) mit Warnung laufen, b) warten, c) warten, außer die Person setzt
+  je Board einen Haken; höchstes Alter der Sicherung 8 Tage? Empfohlen c. Antwort: „2. c und x Tage (kann der user
+  einstellen, standard 14 Tage)“. Nur die Person setzt den Haken.
+- P3 Welcher eigene Code des Maintainers gehen darf: der git-Update-Weg, das geordnete Herunterfahren, die Kurzbefehle,
+  PiShrink? Antwort: „3. a, b, c, behalten, pishjrink kann raus wenn es keinen nutzen mehr hat“. Nicht widersprochen:
+  Die Kurzbefehle sind ein Opt-in bei der Einrichtung.
+- P4 Aus dieser Antwort entschieden: Die eigenen Images des Frameworks entstehen in einem Bauer ohne Rechte; das
+  festgelegte PiShrink bleibt nur für rohe Kartenabbilder, die von außen kommen.
+- P5 `DeploymentManager.trust_host` entfernen, das Vertrauen ohne Audit-Eintrag schreibt? Empfohlen ja. Antwort: „4. a:
+  nur entfernen wenn komplett 7unbrauchbar, ansonsten verdrahten“. Es ist ein Delegat nur für die Person an den
+  protokollierenden Schreiber.
+- P6 Nach einem bestätigten neuen Host-Schlüssel ziehen die Daten des Boards zu seiner neuen Geräte-ID um? Antwort:
+  „4. b: ja“.
+
+Steht jetzt in: [Updates, Sicherungen und Board-Images (geplant)](#updates-sicherungen-und-board-images-geplant),
+[SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote)
 
 ### Runde 23
 
 <a id="decision-round-23"></a>
-Umgesetzt am 2026-10-23 und 2026-10-24. Punkte 1, 2 und 8: Wissen gehört immer zu einem Thema oder einem Target: Eine
-lose Datei wird nie importiert, bevor die Person sie einsortiert, die neue Version eines Pakets ersetzt seine alten
-Auszüge, der Snapshot eines Target-Pakets wird beim Empfänger unter seinem Target importiert. Punkt 3: Die Installer
-laden nichts ungeprüft herunter (Docker aus seinem apt-Repository mit geprüftem Schlüssel, kein ungeprüftes
-pip-Upgrade). Punkt 4: Die Ergebnisse von hadolint werden unterschieden. Punkt 5: Die Hardware-Messung des Boards geht
-in jeden Build. Punkt 6: die Container-Tabelle des Deployment-Tabs. Punkt 7: Ein Build bietet genau die Formate an, die
-sein Target erklärt. Punkt 9: „Verwenden“ kopiert einen gleichen früheren Build. Punkt 10: Die Optimierungsprofile,
-Benchmark-Zeilen und Modellvorschläge sind nutzbare Daten, ungemessene Werte markiert. Punkt 11: die neuen Schlüssel der
-Messung (Level-2-Cache, Vulkan, OpenCL). Punkt 12: Der Modell-Download zeigt einen Prozentwert. Punkt 14: das
-Rockchip-Image in zwei Stufen. Punkt 15: ein NPU-Format nur mit dieser NPU in der Messung, RKLLM nur auf einem
-x86_64-Build-Rechner. Punkt 16: die Temperatur des Boards während der Prüfungen auf ihm.
+2026-10-23, beantwortet 08:42 UTC (die Befunde 1 bis 17 des Abgleichs mit den alten Konzeptdateien und die Fragen Q1
+bis Q4); Punkt 15 um 09:05 UTC geklärt.
+
+- NVIDIA-GPU-Targets unter Windows und Linux mit CUDA sind geplant und werden mit dem Assistenten getestet, wenn llmcf
+  fertig ist; Jetson, TensorRT, OpenVINO und ROCm werden für Leute vorbereitet, die Targets dafür bauen; Hailo-8 und 8L
+  nutzen ebenfalls Gewichte (Bildmodelle, in `.hef` umgewandelt und wo nötig quantisiert), die Probe liest die
+  Hailo-Architektur, damit ein Server für den Chip gebaut wird, und Hailo-10 wird auch unterstützt. Poetry wurde schon
+  durch uv ersetzt.
+- 1 „Lose Wissensdateien: sollte es nicht geben,. sollen thematisch in ordner sortiert werden. wissen ist immer einem
+  thema / target zugeordnet!“. 2 Veraltetes Wissen wird per Upsert ersetzt; gecrawlte Dokumente landen direkt im
+  lokalen RAG.
+- 3 Docker per Skript aus dem Internet ohne Prüfsumme installiert: „bitte mit prüfsumme!“ (Dockers Paketquelle mit
+  geprüftem Schlüssel). 4 Ein Fehlschlag von hadolint als übersprungen gemeldet: „bitte beheben“.
+- 5 llama.cpp ohne festen Stand geklont: „llama.cpp klonen, ja, aber vor dem bau auf die hardwareflags anpassen (sollte
+  builder.py machen anhand der hardware_probe ergebniss file...)“. Die Probe des Boards geht in jeden Build.
+- 6 bis 9 „beheben“: Das Deployment-Fenster liest die Container-Tabelle; ein Build bietet die Formate an, die sein
+  Target erklärt; das Board-Wissen eines Target-Pakets erreicht den Empfänger; „Verwenden“ kopiert einen gleichen
+  früheren Build.
+- 10 und Q2 Ungelesene Optimierungsprofile und Benchmark-Zeilen und eine veraltete Modellliste: entfernen (empfohlen)
+  oder behalten? Antwort: nicht entfernen, sondern brauchbar machen und verdrahten, die Modellliste aktualisieren und in
+  die Vorschläge des Builders einbauen; b) ja. Ungemessene Werte werden markiert.
+- 11 weitere Probe-Werte (Level-2-Cache, Vulkan, OpenCL): „beheben“; 12 die Prozentanzeige beim Download:
+  „prozentanagbe einfügen“; 13 ruff und ShellCheck auf Warnstufe: „beheben“; 14 das Rockchip-Image: „das bessere
+  nehmen, mehrstufig hatte einen hintergund (und einen namen... multi stage build)“.
+- 15 Ein ARM-Bau-Rechner kann das Rockchip-Image nicht bauen. Erste Antwort: Ein Radxa-Target mit NPU und ARM-CPU
+  braucht ein eigenes Modul. 09:05: „Auf einem ARM-Bau-Rechner läuft der GGUF-Weg nativ, RKLLM und RKNN werden nur
+  verwendet wenn benötigt, also eine npu vorhanden ist.“ Ein NPU-Format nur mit dieser NPU in der Probe; RKLLM nur auf
+  einem x86_64-Bau-Rechner (nicht widersprochen).
+- 16 Ein teilbarer Eintrag „Problem und Lösung“ je Board? Antwort: Was hat das mit llmcf zu tun; aber wo das Board
+  messbar zu heiß wird, warnen mit einer Empfehlung. 17 und Q4 Ein Bot, der neue Modelle vorschlägt: „Bei 17 ja, aber
+  nur als Bot“, als getesteter Pull Request.
+- Q1 und Q3 Die Befunde in eigenen Ketten: „1. ja“, „3. siehe oben“.
+- Nicht widersprochen (10:10): die Probe-Version 3.1.0, ein lokaler Hailo-Modellserver nur erkannt, zwei Targets
+  `Hailo8` und `Hailo10`.
 
 Steht jetzt in: [Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest),
 [Community, Rezepte und Pakete](#community-rezepte-und-pakete),
@@ -2349,139 +2948,635 @@ Steht jetzt in: [Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest),
 ### Runde 24
 
 <a id="decision-round-24"></a>
-Umgesetzt am 2026-10-23. L-NET: Der Offline-Modus erreicht nur diesen Rechner und das eigene Netz der Person, nach einer
-Regel für die Netz-Nähe, und jeder Zugriff nach außen wird nach ihr beurteilt (Docker-Images, der Qdrant-Server, die
-Anmeldeprüfung, der Ersatz des llama.cpp-Repositorys, der Sicherheits-Scan). „L-NET final“: Die Person darf ein VPN,
-einen Host oder einen Adressbereich als lokal zählen; nur die Person schreibt diese Ausnahmen, nie eine KI. PKG:
-`install.sh` installiert auf jeder Linux-Familie über den eigenen Paketmanager der Familie.
+2026-10-23, beantwortet 12:31 und 12:39 UTC.
+
+- Hailo: Der Dataflow Compiler ist gated und wird nie eingebaut; llmcf sucht nur nach einem installierten, fragt nach
+  seinem Pfad, wenn keiner gefunden wird, und sperrt mit Grund, was ihn braucht, bis er da ist. Q1 Welche
+  Hailo-Hardware zuerst: das Target `Hailo8` zuerst, wo es sich testen lässt, `Hailo10` experimentell. Q2 Das
+  Bau-Image des Compilers: a) die Datei der Person im eigenen Image von llmcf, b) Hailos Suite-Image? Antwort: „2. b
+  (nur weils einfacher ist, am liebsten wäre mir nur das was auch in dem einzelfall jeweils benötigt wird zu verwenden
+  / kompailieren...)“. Q3 Jetzt keine GPU für die Optimierung: „3. vorschlag angenommen, jetzt nein, später ja“. Q4
+  Hailo-Messungen bleiben lokal, Pakete sagen nur „getestet auf“: „4. ja, angenommen“.
+- L-NET Namen im Heimnetz im Offline-Modus: a) auflösen und nach der Adresse beurteilen, Tailscale bleibt nicht lokal
+  (empfohlen), b) wie a mit Tailscale lokal, c) so lassen? Antwort: b, aber Headscale läuft lokal im Heimnetz, während
+  Tailscale über Tailscales Server im Internet geht, und das muss man unterscheiden.
+- PKG Fedora, RHEL und SLES haben kein apt: a) mit einem Link stoppen (empfohlen), b) ein eigener Weg? Antwort: Alle
+  Distributionen sollen unterstützt werden, also kein Umweg: die nativen Paketmanager und die Quellen der
+  Distributionen.
+- „L-NET final“ (12:39) Eine Headscale-Adresse nur ohne öffentliche Relays lokal? Antwort: Ein Relay im eigenen Netz
+  ist in Ordnung, sonst ist es eine Verbindung von außen; der Person muss die Wahl bleiben, was ihr Netz zulässt, ohne
+  sie zu bevormunden; Standard wie vorgeschlagen, mit Opt-out. Entschieden: Nur die Person schreibt diese Ausnahmen,
+  nie eine KI; jeder Zugriff nach außen (Docker-Images, der Qdrant-Server, die Anmelde-Prüfung, die llama.cpp-Umleitung,
+  der Sicherheits-Scan) wird nach der einen Regel für Lokalität beurteilt.
 
 Steht jetzt in: [Offline-Modus und das eigene Netz](#offline-modus-und-das-eigene-netz),
-[Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten)
+[Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten),
+[Targets, Hardware und Vorlagen](#targets-hardware-und-vorlagen)
 
 ### Runde 25
 
 <a id="decision-round-25"></a>
-Umgesetzt am 2026-10-23. Q1: Ein Offline-Build lädt sein Modell nie herunter; er nimmt die Kopie auf diesem Rechner oder
-ein Modell, das schon hier ist. Q2: Ein Hugging-Face-Token geht nur dorthin, wo Hugging Face eines braucht (ein
-zugangsbeschränktes oder privates Repository), kein stillschweigendes Token und keine Telemetrie für irgendeine
-Bibliothek, und die Modelle der Wissensbasis kommen über den eigenen Abrufer des Frameworks. Q3: eine Audit-Senke für
-die Board-Entscheidungen der Person. Q4: die eigene OpenSSH-Einstellungsdatei des Frameworks, mit `-F` übergeben, mit
-dem Import der Person aus `~/.ssh/config`. Q5: Ein '%' in einem Pfad wird für OpenSSH als '%%' geschrieben. Q6: Die
-CMake-Optionen eines Moduls folgen einer Zulassungsliste, und eine gültige Option außerhalb davon entscheidet die
-Person, gemerkt je Modulversion; Nachtrag: Was eine Download-Option holen würde, wird vor dem Build geholt, festgelegt,
-geprüft und schreibgeschützt eingebunden. Q7: x86 wird für eine andere Maschine mit ausdrücklichen Flags geplant,
-`-march=native` nur für diese Maschine. Q8: keine harte Zeitgrenze für einen Build-Schritt: eine weiche Grenze, die nur
-einen von einer KI gestarteten Build stoppt, eine Leerlaufgrenze und Schleifenschutz, und die Statistik des Builds in
-seinem Manifest. Mit Runde 24: Der Offline-Modus nutzt nur Docker-Images auf diesem Rechner oder in einer lokalen
-Registry.
+2026-10-23, beantwortet 17:32 UTC; der Nachtrag zu Q6 um 17:54 UTC.
 
-Steht jetzt in: [Offline-Modus und das eigene Netz](#offline-modus-und-das-eigene-netz), [Hugging Face](#hugging-face),
+- Q1 Der Build einer Person lädt im Offline-Modus von Hugging Face: vor dem Download stoppen? Antwort: Offline kann
+  niemand von Hugging Face laden, also muss ein Öffnen-Dialog die Person eine lokale Datei nehmen lassen (vorab geladen,
+  nachgeladen oder aus einem früheren Build). Die CLI zeigt dieselbe Liste; eine KI wählt nur unter Modellen, die schon
+  da sind.
+- Q2 „Tokens dürefen nie das gerät verlassen, wenn hf einen token will, gehte s den offiziellen (verschlüsselten) weg
+  den HF als standart nutzt. wir senden nix mit was nicht unbedingt sein muss.“ Kein impliziter Token und keine
+  Telemetrie für irgendeine Bibliothek.
+- Q3 „alle schreiben in registry UND/ODER in audit.db, damit wir eine ssot basis haben“: eine Audit-Senke für
+  Board-Entscheidungen.
+- Q4 Muss `~/.ssh/config` genutzt werden, oder kann llmcf eine eigene Datei haben? Eine eigene Datei, mit `-F`
+  übergeben, die Einträge der Person nach dem Zeigen übernommen.
+- Q5 '%' für OpenSSH als '%%' geschrieben, gemeinsame Verbindungen später: „5. ok“.
+- Q6 CMake-Optionen auf eine Erlaubt-Liste begrenzt? Antwort: ja, aber wenn die erlaubten Flags nicht zu den nötigen
+  passen, bei einem gültigen Flag außerhalb warnen und die Person entscheiden lassen, mit einer Empfehlung passend zu
+  Modell und Quantisierung. Je Modulversion gemerkt. Nachtrag (17:54): Was eine Download-Option holen würde, wird vorab
+  geladen (nie im Offline-Modus) und dem Container bereitgestellt, sodass der Build ohne Netz klappt; „ok“ zum Entwurf
+  (festgelegt, geprüft, nur lesend eingehängt).
+- Q7 Das Template plant x86 wie das Rezept: „7. ja“.
+- Q8 Der Funktionstest fest auf 120 s: eine Einstellung? Antwort: kein hartes Zeitlimit, ein Soft-Cap, das übergangen
+  werden kann, ein Schleifenschutz und ein Leerlauf-Timeout; ins MANIFEST kommen Dauer, Größe vorher und nachher, die
+  Quantisierung und die Tool-Versionen.
+
+Steht jetzt in: [Offline-Modus und das eigene Netz](#offline-modus-und-das-eigene-netz),
+[Hugging Face](#hugging-face),
 [SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote),
 [Build-Pipeline und Target-Module](#build-pipeline-und-target-module)
 
 ### Runde 26
 
 <a id="decision-round-26"></a>
-Umgesetzt am 2026-10-23. Q1: Docker CE ist die Standard-Container-Engine (auch auf den RHEL-Nachbauten), Podman der
-Rückfall (der Standard ohne Root-Rechte ersetzte das am 2026-10-31); ein Build, den die Engine nicht wie verlangt
-ausführen kann (eine GPU unter Podman), wird abgelehnt, bevor er eingereiht wird. Q3: Die Ausnahmen der Person zählen
-nur dafür, was der Offline-Modus erreichen darf, nie für die Einstufung eines Anbieters als lokal oder Cloud. Q4: Ein
-Name mit lokalen und öffentlichen Adressen zählt nur über seine lokalen Adressen als lokal, und eine Verbindung geht nur
-zu diesen. Q5: Im Offline-Modus liest ein Crawl, den die Person startet, das eigene Netz, nie einen Metadatendienst
-einer Cloud oder eine link-lokale Adresse. f: Der Ersatz des llama.cpp-Repositorys muss ein Spiegel im eigenen Netz
-sein. g: Ein internationaler Hostname im Offline-Modus nur in seiner Form `xn--`. h: Eine VPN-Adresse zählt nur für ein
-Gerät des Tailnets.
+2026-10-23, gefragt 20:11, beantwortet 20:35 und 20:36 UTC.
+
+- Q1 Rocky, Alma und Oracle bringen nur Podman mit: Docker CE aus Dockers RHEL-Quelle (empfohlen) oder podman-docker?
+  Antwort: „1. Können wir beides ermöglichen?“ und „zu 1. also standart dockerCE, podman als fallback“. Ein Build, den
+  die Engine nicht wie verlangt ausführen kann, wird vor der Warteschlange abgelehnt. Der Vorrang ohne Root vom
+  2026-10-31 ersetzte die Reihenfolge.
+- Q2 Die nicht beauftragte Zeile „Hailo:“ von `llm-cli scan` behalten und mit der Hailo-Welle in die GUI bringen?
+  „2. ok“.
+- Q3 Die „lokal“-Ausnahme einer Person: a) überall gleich, Datenschutz-Filter für diesen Server aus (empfohlen), b) nur
+  für den Offline-Modus, der Filter bleibt an? „3. b“.
+- Q4 Ein Name mit privater IPv4 und öffentlicher IPv6 zählt als lokal, verbunden nur über die lokalen Adressen? „4. ja,
+  vorschlag angenommen“.
+- Q5 Ein Crawl, den die Person startet, darf offline das eigene Netz erreichen, außer Link-Local- und
+  Cloud-Metadaten-Adressen? „5. ja“.
+- Nicht widersprochen (um 20:11 angekündigt): Die Umleitung des llama.cpp-Repositorys folgt der Offline-Regel, muss also
+  ein Spiegel im eigenen Netz sein (f); eine VPN-Adresse zählt nur für ein Gerät des eigenen Tailnets (h). Vom
+  Repository genannt, im Gespräch nicht als Frage gesehen: ein internationaler Hostname im Offline-Modus nur in seiner
+  `xn--`-Form (g).
+- 22:25: Die eigenen Dokumente des Maintainers zur Kontext-Kompression werden ausgewertet und bleiben privat, bis er
+  zustimmt; Code eines fremden Projekts wird erst nach geprüfter Lizenz genutzt.
 
 Steht jetzt in: [Offline-Modus und das eigene Netz](#offline-modus-und-das-eigene-netz),
 [Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten),
-[Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest)
+[Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest),
+[Targets, Hardware und Vorlagen](#targets-hardware-und-vorlagen)
 
 ### Runde 27
 
 <a id="decision-round-27"></a>
-Umgesetzt am 2026-10-24. Mojo schließt den Kreis: Endet Mojo Miracle nach Mojo Oracle an einem Terminal, zeigt die
-Konsole Mojos Kristallkugel und eine Zeile, die sagt, wie es lief; ein Nachtrag derselben Runde legte den Wortlaut der
-Zeile fest. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in
-den verlinkten Abschnitten)
+2026-10-23 23:39 bis 2026-10-24 00:06 UTC, der eigene Wunsch des Maintainers.
+
+- Endet Mojo Miracle erfolgreich nach Mojo Oracle, zeigt die Konsole ein passendes ASCII-Logo und „[Mojo] Miracle
+  managed. The oracle is pleased.“, um den Kreis zum Orakel-Modus zu schließen.
+- Nachtrag (23:46, 23:47): gezeichnet wie die Vorlagebilder des Maintainers, in Farbe, wo die Konsole es kann; hatte
+  Miracle nichts zu reparieren, kommt das Logo trotzdem, mit einem anderen Text, „404 - miracle not found“.
+- 00:06: „ja, gefällt mir“ zum Entwurf. Nicht widersprochen: Beide Zeilen tragen `[Mojo]`; kein Logo, wenn ein Problem
+  übrig bleibt; nur an einem Terminal, nie mit `--json`, für KI-Tools oder in der GUI.
 
 Steht jetzt in: [Mojo, der Gesundheitscheck](#mojo-der-gesundheitscheck)
 
-### Runden 29, 32 und 33
+### Runde 28
 
-<a id="decision-round-29"></a><a id="decision-round-32"></a><a id="decision-round-33"></a>
-Dittos Kontext: geringere Kosten bei Cloud-Anbietern und ein lokaler KV-Cache, der nicht so schnell überläuft; die
-Kontextgrenze und das Verdichten hängen vom Modell ab. Die Arbeit steht in der Roadmap. (Frage und Antwort standen im
-früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten Abschnitten)
+<a id="decision-round-28"></a>
+2026-10-24, beantwortet 00:41 UTC.
 
-Steht jetzt in: [Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht)
+- Q1 Fedora, RHEL und CentOS Stream installieren Docker CE mit `dnf install -y`, das ein Paket ohne Liste ersetzen
+  kann; dieselbe Regel wie bei Rocky, Alma und Oracle (zuerst die genaue Liste und eine Frage, bei Nein Podman)?
+  Antwort: „zu frage 1. ok, genau so“. Seit dem Vorrang ohne Root gilt diese Regel mit `--rootful` oder
+  `--engine=docker`.
+- 00:57: Vor dem Wochenlimit wird laufende Arbeit sauber angehalten, committet und gesichert, mit Notizen zum
+  Fortsetzen.
+
+Steht jetzt in: [Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten)
+
+### Runde 29
+
+<a id="decision-round-29"></a>
+2026-10-29, beantwortet 15:33 UTC, zum Bericht über die Dokumente des Maintainers zur Kontext-Kompression.
+
+- Q1 Das Hauptziel: weniger Cloud-Kosten, oder ein kleines lokales Modell, das nicht überläuft? Antwort: „1. weniger
+  kosten bei cloud anbietern und das der ditto lokale kv cache (bei lokalem modell) nicht sos chnell überläuft“.
+- Q2 Soll Ditto alte Gespräche als Archiv behalten, wie lange, wer darf lesen? Antwort: Jeder, der den Ditto-Harness
+  nutzt, darf darin lesen; behalten wird nur, was llmcf und das Erstellen von Projekten, Templates und den Assistenten
+  betrifft, nie private Gespräche der Person; durchsuchbar, behalten, bis die Person es löscht oder neueres Wissen es
+  ersetzt.
+- Q3 Kontextgrenze und Kompaktierung je Modell? „3. ja, je nach modell“.
+- Q4 Die Cache-Lebensdauer eine Einstellung? „4. ja, einstellbar, aber soll sich nach den verfügbaren hardware
+  ressourcen richten und ein soft cab anlegen“.
+- Q5 LLMLingua-2? „5. ja, wenn es möglich ist, aber nicht ins repo legen, sondern bei bedarf aus der originalquelle
+  nachladen (idempotent, if not exist)“.
+- Q6 Die Idee token-shield verfolgen? Antwort: übernehmen, was dem Framework hilft, und vielleicht etwas nach dem
+  Deploy auf dem Target nutzen: eine tokensparende Middleware für das Modell, das llmcf gebaut hat, angeboten als
+  fertiges Deployment mit einem Harness (Chimera als Beispiel), Sprache und vielleicht Bild.
+
+Steht jetzt in: [Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht),
+[Auf dem Board: Gateway, Sprache und MCP (geplant)](#auf-dem-board-gateway-sprache-und-mcp-geplant)
+
+### Runde 30
+
+<a id="decision-round-30"></a>
+2026-10-29, beantwortet 15:43 UTC (die erste Antwort um 15:41 war als Antwort zu Chimera gelesen und wurde wiederholt).
+
+- Mojos Notiz zu einem offenen Oracle-Lauf: (1) sie verfällt nach einer Stunde, (2) `--miracle --json` und `doctor
+  --fix` löschen sie ohne Logo, (3) ebenso ein Miracle in der GUI, (4) ihre Funktionen werfen nie. Antwort: „1. Ja,
+  ablauf nach einer std 2. ja 3. ja 4. ja“.
+
+Steht jetzt in: [Mojo, der Gesundheitscheck](#mojo-der-gesundheitscheck)
+
+### Runde 31
+
+<a id="decision-round-31"></a>
+2026-10-29, 15:52 UTC, der eigene Vorschlag des Maintainers.
+
+- „für die middleware auf dem target lohnt sich sicher auch ein mcp server? ... (mcp bridge mode)“. Die Aufteilung des
+  Assistenten: Board-Tools (Status, Gesundheit, Benchmark, Logs, Modellwechsel, Sprache und Bild an oder aus), ein
+  Bridge-Modus, der die Tools anderer MCP-Server an einer Stelle sammelt, und llmcf auf dem PC, das sich mit dem Board
+  verbindet; fremde Tools nicht vertrauenswürdig, Zugangsdaten nie weitergegeben, das eigene Netz nur mit Schlüssel,
+  klein auf kleinen Boards. Antwort: „ok, passt so, danke und weiter“.
+- Nicht widersprochen (17:52 und 18:10, die Entwürfe des Gateways und seines MCP-Servers): Das Gateway sitzt vor dem
+  Modellserver, der nur auf dem Board erreichbar bleibt; nichts wird still abgeschnitten; es spricht die
+  Ollama-Schnittstelle, damit ein Harness keine Änderung braucht; MCP standardmäßig auf Loopback; die Bridge
+  standardmäßig aus, mit Opt-in je Tool; llmcf auf dem PC erreicht das Board über den vorhandenen SSH-Weg.
+
+Steht jetzt in: [Auf dem Board: Gateway, Sprache und MCP (geplant)](#auf-dem-board-gateway-sprache-und-mcp-geplant)
+
+### Runde 32
+
+<a id="decision-round-32"></a>
+2026-10-29, beantwortet 18:31 UTC, zu den Entwürfen des Board-Gateways (Fragen 1 bis 8) und von Dittos Kontext.
+
+- Spracherkennung und Wakeword: „(Tiny-) Whisper.ccp (auch für Hailo später spezielle -hef version verfügbar)“; die
+  lizenzgebundenen Modelle sind keine Vorgabe mehr.
+- Board Q1 Wie das Gateway gebaut wird: a) im Docker-Build der Person, b) fertig gebaut und signiert, c) C++ im
+  llama.cpp-Build? „1. b“. Heute baut und signiert es das Framework; die fertig gebaute Lieferung steht auf der Roadmap.
+- Board Q2 Netz: a) Loopback, b) das eigene Netz mit TLS? „2. a + b“: zuerst Loopback, das eigene Netz nur mit TLS,
+  einem eigenen Zertifikat und festem Fingerabdruck.
+- Board Q3 Weniger Speicherreserve auf einem Board ohne GUI? Antwort: je nach Board, es muss gemessen werden. Die
+  Grenzen des Boards kommen aus einer Messung, nie aus einer Schätzung.
+- Board Q4 Darf llmcf die lizenzgebundenen Sprachmodelle, die Daten von eSpeak NG und die fertige onnxruntime nutzen?
+  „4. alles, der user entscheided was er nutzen WILL“. Lizenzen werden vor Download und Nutzung gezeigt.
+- Board Q5 Ob das LLM auf dem Board läuft? „5. der user entscheided zuerst, dann entscheiden die hardware grenzen...“.
+- Board Q6 Ein Pull Request mit dem Fix für einen in Chimera gefundenen Fehler: Die Sitzung konnte dort nicht pushen,
+  also spielte der Maintainer den Patch selbst ein (außerhalb von llmcf).
+- Kontext Q1 Rund 150 Zeilen von LLMLingua-2 portieren: „1. LLMLingua-2: nur 150 zeilen sind kein fertiges llm das ins
+  repo gelegt wird, ist okay, kannst du so machen“. Kontext Q2 „2. Archiv: wir haben ein RAG (Qdrant Edge...)“: das
+  Archiv im Speicher der Wissensbasis. Kontext Q3 „3. Neueres Wissen: Echtes Upsert“. Kontext Q4 das Kontextfenster:
+  lokal aus der gemessenen Hardware, API-Modelle je Modell, wo möglich beim Server abgefragt. Kontext Q5 Cloud-Caching
+  folgt dem eigenen Caching jedes Anbieters und seinen veröffentlichten Vorlagen. Kontext Q6 „6. RUST wenn möglich immer
+  bevorzugen“ (nicht widersprochen: alles auf dem Board ist Rust, llmcf auf dem PC bleibt Python).
+- „Bridge-Modus: autodiscover der tools einbauen“: gefundene Tools werden gelistet, jedes nur von der Person
+  eingeschaltet (nicht widersprochen). Eigene Linux-Benutzer: `llmcf` für seine Prozesse, jeder Harness seinen eigenen,
+  eingerichtet vom Repository des Harness.
+- MCP Q6 Das Gateway spricht nur mit Tool-Servern, die schon laufen, ein Harness unter eigenem Benutzer: „6. Ja“. MCP Q7
+  Darf ein Harness seine eigene Person fragen? Antwort: ja, aber nicht bei Programmen, die den Raum mithören, denn auch
+  ein Fernseher kann „ja“ sagen; dauerhafte Freigaben nur als Empfehlung mit Soft-Cap. MCP Q8 Das Gateway startet und
+  stoppt den Modellserver: „8. Ja“ (nicht widersprochen: der Modellserver in eigener Unit mit eigener Speichergrenze).
+- Nicht widersprochen (19:15): Das Archiv behält eine Kopie eines ersetzten Eintrags, den die Person geprüft hat, mit
+  Rückgängig; ein Vertragstest für Harnesses ohne Harness-Code in llmcf; Sprache über die eigene Komponente von llmcf
+  statt über den mitgelieferten Server von whisper.cpp.
+
+Steht jetzt in: [Auf dem Board: Gateway, Sprache und MCP (geplant)](#auf-dem-board-gateway-sprache-und-mcp-geplant),
+[Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht),
+[Deployment auf Boards](#deployment-auf-boards)
+
+### Runde 33
+
+<a id="decision-round-33"></a>
+2026-10-29, beantwortet 19:37 UTC, bestätigt 19:41 UTC.
+
+- Q1 Das Archiv speichert zuerst Fakten aus Tool-Ergebnissen, Fakten aus Dittos Antworten später? „1. ja“.
+- Q2 Ein bezahlter Testaufruf bei OpenAI mit dem Schlüssel des Maintainers, um Cache und Token-Zählung zu klären?
+  „2. ja“ (die Person startet ihn in ihrem eigenen llmcf; der Schlüssel verlässt nie ihren Rechner).
+- Q3 Boards ohne sudo oder Benutzerdienste: das Paket ablehnen, oder unter dem vorhandenen Benutzer mit Warnung
+  installieren? Antwort: zwei Wege: Die Person legt die Benutzer vorher an, oder der Board-Installer muss als root
+  laufen; das Paket geht per SSH mit einem Installer, der alles nachlädt und einrichtet, idempotent; jedes Modell (LLM,
+  whisper, Sprache, Bild) wird in einem eigenen Schritt cross-kompiliert und zusammen mit dem Harness und der Middleware
+  von einem Installer auf dem Gerät ausgerollt. 19:41, zur Lesart des Assistenten (offline ist das Paket vollständig,
+  online nur, was das Manifest festlegt, der Harness mit eigenem Installer unter eigenem Benutzer): „ja, so meinte ichd
+  as“, als neue Funktion oder Erweiterung des Bestehenden; zuerst Recon, nie ein Duplikat, und immer gegen den Bauplan
+  gebaut.
+
+Steht jetzt in: [Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht),
+[Deployment auf Boards](#deployment-auf-boards),
+[Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung)
 
 ### Runde 34
 
 <a id="decision-round-34"></a>
-Entschieden und umgesetzt am 2026-10-29. Der Bauplan besteht aus drei Dateien mit deutschen Zwillingen: dem Design, der
-Roadmap und dem Changelog; `docs/BLUEPRINT_DE.md` ist ihr kurzes Verzeichnis. Der Changelog hat keinen Abschnitt
-Unreleased und führt nur fertige Arbeit; jeder Eintrag trägt Zeitstempel und Version, der deutsche Eintrag den Stempel
-seines englischen Zwillings. Die Roadmap kennt kein „fertig“: Ein fertiger Punkt verlässt sie im Commit, der seinen
-Changelog-Eintrag schreibt. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden
-ist, steht in den verlinkten Abschnitten)
+2026-10-29, 19:44 und 19:47 UTC.
+
+- „Blueprint ist eine sammlung aus 3 dateien!“: DESIGN beschreibt das Projekt, jedes Bauteil und jede Entscheidung mit
+  Begründung (was, wie, warum); ROADMAP, was kommt; CHANGELOG, was war, nach keepachangelog.com, mit Zeitstempel und
+  Version bei jedem Eintrag. Alle drei haben deutsche Zwillinge; `docs/BLUEPRINT.md` ist ihr kurzer Index.
+- Zu den vorgeschlagenen `3.1.0-dev`-Einträgen unter „Unreleased“: „unreleased gehört nicht ind en changelog sondern in
+  die roadmap! auf den changelog kommt nur was fertig ist, also verdrahtet und getestet und comittet (changelog und code
+  mpssen zusammen comittet werden)“. Ein fertiger Punkt verlässt die Roadmap im Commit, der seinen Changelog-Eintrag
+  schreibt.
+- Nicht widersprochen: Das neu aufgebaute Changelog beginnt bei 3.1.0, mit der Version im selben Commit angehoben.
 
 Steht jetzt in: [Dokumentation und der Bauplan](#dokumentation-und-der-bauplan)
 
 ### Runde 35
 
 <a id="decision-round-35"></a>
-Umgesetzt am 2026-10-29. Der Bauplan ist bereinigt: keine Host-Adresse außerhalb der Dokumentationsbereiche, keine
-E-Mail-Adresse, kein Home-Ordner einer Person, kein Token und nichts, was sagt, welche Hardware der Maintainer besitzt;
-jeder Baustein des Designs hat seine Entscheidungen mit was, wie und warum. (Frage und Antwort standen im früheren
-Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten Abschnitten)
+2026-10-29, 19:52 UTC, zum Plan für das Board-Paket, der das goldene Artefakt (ein ZIP mit `deploy.sh`, root als
+SSH-Benutzer erlaubt) und das Laufzeit-Paket zu einem Weg zusammenlegte und root beim ersten abgelehnt hätte.
 
-Steht jetzt in: [Dokumentation und der Bauplan](#dokumentation-und-der-bauplan)
+- „zwei getrennte Wege aufs Board: ist okay, können wir beide behalten, der user enstcheided, vielleicht gibt es ja
+  unterschiedliche usecases?“ Beide Wege bleiben, wie sie sind; root beim goldenen Artefakt bleibt erlaubt, höchstens
+  mit einem Hinweis.
+- Der zusammengelegte Weg wird Option 3, ein hybrider Weg, der den Code beider Wege mitnutzt, zur Wahl der Person.
+- Q1 Darf llmcf den eigenen Installer des Harness nach einem zweiten Ja als root starten, obwohl er außerhalb des
+  Manifests von llmcf nachlädt? Antwort: Was der Installer nachlädt, wird nur auf verdächtige Aktivitäten geprüft und
+  berichtet, nie unterbunden; der Harness braucht, was er braucht; das liegt in der Verantwortung der Person und muss
+  offen gesagt werden. llmcf sagt vor dem Lauf, was der Installer darf, beobachtet Netzziele, Pakete, Dateien und
+  Prozesse und berichtet danach.
+- 19:52: „alle diese entscheidungen sind genau das was in design.md gehört!“. Jede Entscheidung kommt in DESIGN zu
+  ihrem Baustein, mit was, wie und warum, vorher bereinigt (keine Zugangsdaten, Adressen, Hostnamen, E-Mail-Adressen,
+  Kontonamen, welche Hardware der Maintainer besitzt); jedes Arbeitspaket schreibt seine Entscheidungen im selben Commit
+  wie seinen Code.
+
+Steht jetzt in: [Deployment auf Boards](#deployment-auf-boards),
+[Dokumentation und der Bauplan](#dokumentation-und-der-bauplan)
 
 ### Runde 36
 
 <a id="decision-round-36"></a>
-Umgesetzt am 2026-10-30. Offline-Modus heißt kein Internet; das eigene Netz darf da sein. Deshalb darf der Offline-Modus
-das Build-Container-Image bauen, wenn jede Quelle lokal ist (apt und pip über die Spiegel der Person im eigenen Netz,
-jeder andere Paketmanager wird genannt); sonst hält er früh an und nennt die fehlende Quelle. Images lassen sich als
-geprüfte Dateien exportieren und importieren (Build > Build-Container-Images..., `llm-cli build image`). (Frage und
-Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten
-Abschnitten)
+2026-10-29, 20:36 UTC, gegen die Aussage des Assistenten, der Offline-Modus baue und lade kein Ziel-Image.
+
+- Antwort: Offline kann man nichts ziehen, aber offline heißt kein Internet, ein Netz kann da sein; liegen die Dateien
+  air-gapped vor, warum dann nicht cross-kompilieren und das Image erstellen, um es zu speichern und später oder per SSH
+  im eigenen Netz zu deployen. Entschieden: Der Offline-Modus baut das Build-Container-Image, wenn jede Quelle lokal
+  ist (Basis-Images hier oder in einer lokalen Registry, apt und pip über die Spiegel der Person, die die Regel für
+  Lokalität annimmt); eine fehlende Quelle stoppt früh und wird genannt; Images werden als geprüfte Dateien exportiert
+  und importiert (Build > Build-Container-Images..., `llm-cli build image`). „Build-Container-Image“ und „Artefakt,
+  Paket, Bundle“ werden auseinandergehalten.
+- Nicht widersprochen (23:21): `ProxyJump` und `ProxyCommand` brauchen das Ja der Person, Zeilen, die Schlüssel oder
+  Umgebung weitergeben, werden abgelehnt, `LogLevel` bleibt; ein Auszug, den mehrere Pakete tragen, behält seine ID;
+  ältere Auszüge werden nur über Mojo mit dem Ja der Person neu importiert.
 
 Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
-[Offline-Modus und das eigene Netz](#offline-modus-und-das-eigene-netz)
+[Offline-Modus und das eigene Netz](#offline-modus-und-das-eigene-netz),
+[SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote),
+[Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest)
+
+### Runde 37
+
+<a id="decision-round-37"></a>
+2026-10-30, 03:37 UTC, vom Assistenten nach der Regel „ein Planer“ entschieden und vom Maintainer in Runde 38
+bestätigt.
+
+- Die Config-Stufe von Rockchip plante ihr eigenes `-march=armv8-a`, sodass llama.cpp für diese Boards dotprod und fp16
+  verlor. Nur das Build-Rezept plant ARM-CPU-Flags aus der Probe; die Config-Stufe spiegelt es.
+
+Steht jetzt in: [Targets, Hardware und Vorlagen](#targets-hardware-und-vorlagen)
+
+### Runde 38
+
+<a id="decision-round-38"></a>
+2026-10-30, 06:15 UTC.
+
+- „zu den Flags: alle bestehenden flags müssen erkannt werden, und es muss das passende verwendet erden können... wenn
+  llama.cpp fürs Board wichtige Beschleunigungen (wie dotprod und fp16) fehlen würden, wäre das ein failure by design...
+  danke fürs finden und beheben!“ Jede CPU-Eigenschaft, die das festgelegte llama.cpp nutzen kann, wird von allen drei
+  Probes erkannt und von einem Planer geplant; ein Abdeckungstest schlägt bei einer unbekannten neuen Option fehl; Plan
+  und Manifest nennen die genutzten Eigenschaften und die, die das Board hat, der Build aber nicht nutzen kann, mit
+  Grund.
+
+Steht jetzt in: [Targets, Hardware und Vorlagen](#targets-hardware-und-vorlagen)
+
+### Runde 39
+
+<a id="decision-round-39"></a>
+2026-10-30, 09:18 UTC, zwei offene Entwurfsfragen, die der Assistent selbst entschied, nicht widersprochen.
+
+- Laufzeit-Builds lesen die Einstellung des Leerlauf-Timeouts wie die Build-Container; Leerlauf-Timeout und
+  KV-Cache-Einstellungen sind allein Sache der Person, nie einer KI.
+
+Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module)
 
 ### Runde 40
 
 <a id="decision-round-40"></a>
-Umgesetzt am 2026-10-30. Ein Build endet an seiner Fertig-Marke: Der Stufen-Runner schreibt als allerletzten Schritt
-einen Abschlussdatensatz mit einem Endgrund aus festem Wortschatz, und ein fertiger Build wird nie von einer Uhr
-gestoppt (ein Container, der „done“ schrieb, bekommt 30 Sekunden zum Beenden). Jeder Build bekommt genau eine Zeile im
-Chat-Verlauf, und das Fortschrittsfeld des Builders nennt den Endgrund in einfachen Worten. Die MQTT-Türklingel schickt
-das Ende jedes Builds an einen Broker, den die Person angibt; nur die Person stellt sie ein. (Frage und Antwort standen
-im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten Abschnitten)
+2026-10-30, 09:51 UTC.
+
+- „wir müssen durch einen marker oder ein flag abfangen können wenn ein build angeschlossen ist (muss dann stppen wenn
+  fertig, nicht wegen timeout oder leerlauf timeout) und möglich sein es über mqtt zu melden damit das llm und der user
+  die darauf warten auch die benachrichtigung bekommt (und beim llm ein turn ausgelöst wird, zB überprüfung, oder
+  nächster step, zB verpacken / deployen...)“ („angeschlossen“ als „abgeschlossen“ gelesen, nicht widersprochen).
+  Entschieden: Der Stufen-Runner schreibt als letzten Schritt einen Abschlussdatensatz mit einem Endgrund (done,
+  failed, cancelled, soft_cap, idle); ein fertiger Build wird nie von einer Uhr gestoppt; eine Chat-Feed-Zeile je Build;
+  eine MQTT-Türklingel an den Broker der Person, nur von der Person eingestellt; Ditto bekommt einen Turn, um das
+  Ergebnis zu prüfen und den nächsten Schritt vorzuschlagen, im Rahmen der Freigaben der Person.
+- Nicht widersprochen (12:10, 12:21): Das Eingabe-Label des Images enthält nichts Rechnerspezifisches;
+  MQTT-Topics und die Client-Bibliothek, Exit-Codes 0 fertig, 1 fehlgeschlagen, 2 abgebrochen; andere Architekturen
+  werden erkannt, aber für Builds abgelehnt.
+- 13:59 (Arbeitsregel): Nach jedem Push werden die CI- und Sicherheitsläufe bis zum Ende beobachtet; ein roter Lauf ist
+  ein Alarm, sofort gelesen, gemeldet und richtig behoben, nie durch Überspringen oder Abschwächen eines Tests.
 
 Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
-[MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen)
+[MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
+[Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht),
+[Tests, CI und die Windows-Fallen](#tests-ci-und-die-windows-fallen)
+
+### Runde 41
+
+<a id="decision-round-41"></a>
+2026-10-30, beantwortet 18:04 UTC; davor „bitte auf deutsch weiter...“ (der Assistent spricht mit dem Maintainer
+Deutsch).
+
+- Q1 Jeder Integrations-Branch bekommt einen eigenen CI-Lauf (Linux, Windows, Sicherheit), nur Grünes erreicht
+  `development`, ein roter Lauf blockiert den Merge, ein Lauf je Integration? Q2 Ein Testwächter für den Platzverbrauch
+  und eine Entfernen-Funktion statt 38 stiller `rmtree`-Aufrufe, jetzt als Kette? Antwort: „1 und 2 ja“.
+- Nicht widersprochen: pytest entfernt den temporären Ordner eines bestandenen Tests; die Linux-Testjobs bekommen 60
+  Minuten, Windows 90.
+
+Steht jetzt in: [Tests, CI und die Windows-Fallen](#tests-ci-und-die-windows-fallen)
+
+### Runde 42
+
+<a id="decision-round-42"></a>
+2026-10-31, beantwortet 01:30 UTC.
+
+- Q1 `build start --follow` endet mit Code 2, wenn jemand anderes den Build abbricht? „1. Bricht jemand anderes einen
+  Build ab > ja richtig“.
+- Q2 Nur der Stufen-Runner schreibt den Abschlussdatensatz, geprüft gegen den echten Exit-Code? „2. ja, bitte
+  absichern“. Zuerst als versiegelter Datensatz gebaut; Runde 46 ersetzte das Siegel (kein Schlüssel im Container).
+- Q3 Mojos Türklingel-Zeile ohne die Broker-Adresse für eine KI? „3. mit adresse, transparenz hilft hier dem menschen
+  fehler zu beheben“ (nie Benutzername oder Passwort, nicht widersprochen).
+- Q4 Jetzt 3.3.0, 3.4.0 LoRA und große Modelle, 3.5.0 Lieferkette? „4. passt“ (3.3.0 wurde später eingefroren, und
+  neue Arbeit kam unter 3.4.0).
+- Q5 GitHubs Cache-Kontingent war erschöpft: den pip-Cache abschalten oder das Kontingent erhöhen? „5. pip-cache
+  temporär abschalten“.
+- Q6, Q7 Eine Löschung meldet „erledigt“, obwohl etwas übrig blieb? „6. ist keine frage 7. nur erledigt melden wenne s
+  der wahrheit entspricht. transparent und ehrliche meldung inkl dem pfad zum manuell löschen!“.
+
+Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
+[MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
+[Tests, CI und die Windows-Fallen](#tests-ci-und-die-windows-fallen),
+[Löschen und der Papierkorb](#löschen-und-der-papierkorb)
+
+### Runde 43
+
+<a id="decision-round-43"></a>
+2026-10-31, beantwortet 06:57 UTC.
+
+- Q1 Ein Modul konnte den Schlüssel des Siegels aus dem Speicher des Runners lesen: die Modul-Skripte unter einem
+  eigenen Benutzer ausführen (braucht das Recht zum Benutzerwechsel im Container), oder die dokumentierte Grenze
+  behalten? Antwort: „1. Ja, eigener benutzer für runner, nur die rechte die er wirklich rbaucht, aber es muss sicher
+  gestellt seind as er die auch hat! gleiches gilt für den container...“. Der Runner behält nur die zwei
+  Wechselrechte und prüft sie beim Start, ohne stillen Rückfall; der Host prüft den Container, bevor er „fertig“
+  vertraut.
+
+Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module)
 
 ### Runde 44
 
 <a id="decision-round-44"></a>
-Umgesetzt am 2026-10-31. Punkt 1: Der Helfer des Stufenkontos ist in jedem Build-Kontext der eigene des Frameworks; ein
-Target kann keinen eigenen mitbringen. Punkt 2: eine gemeinsame Gruppe für den Stufen-Runner und das Stufenkonto. (Frage
-und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten
-Abschnitten)
+2026-10-31, beantwortet 10:47 UTC.
+
+- Punkt 1 Das Framework legt immer seinen eigenen Helfer für den Benutzerwechsel ins Image, damit ein Target ihn nicht
+  ersetzen kann? „1. ja“.
+- Punkt 2 Dateien, die ein Build schreibt, gehören auf dem Host einer fremden ID: nach jedem Build zurückgeben?
+  Antwort: gleich unter beiden Kennungen anlegen, damit nichts hin und her geschoben wird; besser noch ein
+  Rechte-Orchestrator, der Rechte nur gibt und wieder nimmt, solange sie gebraucht werden. Entschieden: eine gemeinsame
+  Gruppe für den Stufen-Runner und das Stufenkonto; der Orchestrator wurde im nächsten Satz abgewogen und nicht gebaut.
 
 Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module)
+
+#### 2026-10-31 · Rechte, Engines ohne Root und der Board-Schlüssel (ohne Rundennummer, wahrscheinlich Runde 45)
+
+Beantwortet um 10:51 UTC; das Gespräch nummeriert diesen Satz nicht.
+
+- Der Assistent riet von einem allgemeinen Rechte-Orchestrator ab (er bräuchte dauerhafte Admin-Rechte, sieht aus wie
+  Schadsoftware, `proot` ist keine Sicherheitsgrenze). Q1 ihn fallen lassen und den Grundsatz festhalten; Q2
+  standardmäßig Podman ohne Root (Docker ohne Root als Rückfall), mit Root nur auf Wunsch mit Warnung, Mojo nennt eine
+  Gruppe mit Root-Wirkung; Q3 der Board-Schlüssel auf ein Befehlstor mit festen Operationen beschränkt, genaue
+  sudo-Regeln, keine Weiterleitungen. Antwort: „1-3 ja“. Grundsatz: keine dauerhaften Rechte, die mehr können als nötig.
+
+Steht jetzt in: [Zweck und Grundsätze](#zweck-und-grundsätze),
+[Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten),
+[SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote),
+[Mojo, der Gesundheitscheck](#mojo-der-gesundheitscheck)
+
+### Runde 46
+
+<a id="decision-round-46"></a>
+2026-10-31, beantwortet 12:55 UTC; Nachträge um 13:03, 13:04 und 13:09 UTC.
+
+- Q1 Ein Target kann den Benutzerwechsel weiter über sein eigenes Dockerfile oder `build.sh` umgehen: „1. Ein Ziel,
+  das den Benutzerwechsel gezielt umgehen will, schafft das weiterhin > bitte mach das unmöglich!“. Nicht
+  widersprochen: eine nur lesbare Laufzeitschicht des Frameworks, vom Host eingehängt, Einstiegspunkt und Benutzer vom
+  Host gesetzt, das `build.sh` eines Targets nie ausgeführt, die Reihenfolge der Stufen aus `target.yml`, kein
+  Schlüssel im Container (der Abschlussdatensatz in einem Ordner, den nur der Runner schreiben kann).
+- Q2 Ein mitten in einem Modul abgebrochener Build: Die Person wird gefragt „fortsetzen oder fehlgeschlagenes
+  Artefakt löschen?“, und Löschen muss sauber entfernen; ein Build, der nicht fortsetzbar ist, wird gleich verworfen.
+- 13:03: Die Person muss per Design eigene Target-Module (die vier Skripte) erstellen können, mit Hilfe des
+  Assistenten, für andere veröffentlichbar; zuerst mit dem Bauplan abgleichen. Nur die Laufzeitschicht gehört dem
+  Framework.
+- 13:03: Ditto darf nicht ausgesperrt werden, Mojo erst recht nicht, aber es muss sicher und transparent sein. Nicht
+  widersprochen: Ditto schreibt Targets weiter über den Assistenten mit denselben Prüfungen, nie die
+  Laufzeitschicht; jede Ablehnung und Prüfung wird gezeigt und protokolliert.
+- 13:09: Mojo stellt eine veränderte Laufzeitschicht wieder her: „1. Mojo: Ja, im Modus "miracle"“ und „ja, sind die
+  modi oracle und miracle gedacht“.
+
+Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
+[Targets, Hardware und Vorlagen](#targets-hardware-und-vorlagen),
+[Mojo, der Gesundheitscheck](#mojo-der-gesundheitscheck)
+
+### Runde 47
+
+<a id="decision-round-47"></a>
+2026-10-31, beantwortet 13:11 UTC.
+
+- Q1 Ein gestohlener Board-Schlüssel könnte ein Paket hochladen und ausführen und seine Schlüsselzeile umschreiben:
+  eine Schlüsselzeile, die root gehört, und nur signierte Pakete auf dem Board? „1. ja, bitte lücken schliessen“.
+- Q2 Der eigene Runner eines Pakets wird mit einem Hinweis ignoriert statt abgelehnt; der Schritt „alle Dateien
+  bearbeiten“ des Assistenten umfasst Module, `target.yml` und das Dockerfile, nie den Runner; zusätzliche Stufen kommen
+  in drei feste Plätze in `target.yml`? „2. ja, alle orschläge anmgenommen solange sie in die designvorlage passen“.
+- 14:30 Ein Dependabot-Pull-Request gegen main schlug fehl: a) nur pypdf auf main anheben und ihn schließen
+  (empfohlen), b) main vorspulen, c) so lassen? „a“. Nicht widersprochen: Dependabot öffnet seine Pull Requests gegen
+  `development`. 14:41: Grüne Dependabot-Pull-Requests mergt der Assistent vor neuer Arbeit, rote werden auf ihrem
+  Branch behoben.
+
+Steht jetzt in: [SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote),
+[Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
+[Tests, CI und die Windows-Fallen](#tests-ci-und-die-windows-fallen)
+
+### Runde 48
+
+<a id="decision-round-48"></a>
+2026-10-31, beantwortet 18:37 UTC; Nachträge um 18:38, 18:39, 18:41 und 18:43 UTC.
+
+- Q1 busybox kann keine IDs wechseln: a) ein statisches `setpriv` von util-linux aus festen Quellen gebaut, das die
+  GPU-Gruppen behält (empfohlen), b) `nsenter` von busybox? „1. a“.
+- Q2 Woher es kommt: a) lokal gebaut und zwischengespeichert (empfohlen), b) ein fertiger Download mit fester
+  Prüfsumme? „2. a und / oder b, beides ermöglichen“. Die Antwort von Runde 50 beschränkte b auf ein kompiliertes
+  Rust-Programm dieses Projekts.
+- Q3 Docker Desktop behält bei Einhängungen keinen Eigentümer: a) den Build ausführen und als „Endordner ungeschützt“
+  markieren, b) ablehnen? „3. a“.
+- Q4 Darf die CI das Tool wirklich bauen und auf einem echten Kernel ausführen? „4. ja“.
+- Q5 Dropbear-Boards, Boards ohne sudo oder mit altem ssh-keygen bekommen keinen Framework-Schlüssel: a) den Wechsel zu
+  OpenSSH anbieten, sonst den eingeschränkten Home-Schlüssel mit Warnung, nur die Person entscheidet, b) jedes Mal ein
+  Passwort? „5. a, warum können wir dropbear eigentlich nicht einfach optional mit supporten?, passwort nur als
+  fallback...“. Schlüsselstufen, die die Person wählt; Passwort-Anmeldung als Rückfall.
+- 18:38: „dropbear nur im privatmodus erlauben mit warnung, im enterprise modus gilt es als zu unsicher...“.
+- 18:39: Stimmt die Person zu, OpenSSH zu installieren, wird es wie eine Abhängigkeit des Installers eingerichtet,
+  wenn es fehlt. Nicht widersprochen: zuerst der Plan gezeigt, die Sitzung bleibt offen, bis der neue sshd antwortet,
+  Dropbear erst nach einem eigenen Ja entfernt.
+- 18:41: ein Generator für Installationsskripte, der je Target aus Bausteinen mit Variablen (LLM, whisper, Audio, Bild,
+  Middleware) einen idempotenten Ein-Klick-Installer für das Board baut.
+- 18:43: Die meisten privaten DietPi-Boards haben Dropbear, also soll die Hardware-Probe das schon klären: Die Probe
+  hält die Zugangsfakten des Boards fest (SSH-Server und Version, sudo ohne Passwort, ssh-keygen, Init-System,
+  Paketmanager).
+
+Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
+[SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote),
+[Targets, Hardware und Vorlagen](#targets-hardware-und-vorlagen), [Deployment auf Boards](#deployment-auf-boards)
+
+### Runde 49
+
+<a id="decision-round-49"></a>
+2026-10-31, beantwortet 18:49 UTC, zu drei Fragen zum Installer-Generator.
+
+- Q1 Was auf dem Board läuft: a) zuerst ein erzeugter POSIX-sh-Installer, später das Rust-Programm `llmcf-install`
+  (empfohlen), b) gleich Rust? „1. POSIX-sh-Installer, falls der sicher und enterprise konform ist, sonst muss es rust
+  sein“. Nicht widersprochen: Jeder Root-Schritt ist eine typisierte Aktion, die nur `llmcf-install` in Rust ausführt;
+  die Schritte ohne Rechte sind ein erzeugtes, signiertes, idempotentes sh-Programm.
+- Q2 Bausteine mit dem Assistenten erstellt und wie Target-Module als Pakete veröffentlicht? „2. ja, als paket mit
+  anleitung welche llms usw genau benötigt werden (stt modell mit besodnern anforderurngen, vision modell, tts modell
+  das ein besonderes format brauch (sherpa oder wa andres))“.
+- Q3 Nach den laufenden Ketten oder gleich parallel? Beantwortet als „4. a, ssh / scp wird ja bereits zum übertragend
+  es installers benötigt...“: danach.
+- „problem: dropbear kann kein scp, dazu MÜSSEN wir openssh nehmen...“. Nicht widersprochen: llmcf nutzt kein scp,
+  Dateien gehen über die eigenen Dateioperationen des Tors; Dropbear bleibt im privaten Modus mit Warnung erlaubt, der
+  Enterprise-Modus braucht OpenSSH.
+- Nicht widersprochen (2026-10-31 21:11 bis 2026-11-01 07:17): kein `prune` über die ganze Engine und ein eigener
+  Ordner je Kette; der Assistent veröffentlicht kein Release; beim Wechsel zu OpenSSH gehen die alten Board-Daten erst,
+  wenn die neuen gespeichert sind; die Einzelheiten des Bundle-Generators (typisierte Werte, Root-Schritte nur als feste
+  Aktionen, `bundle_deploy` für die Person, nur signierte Bausteine im Enterprise-Modus).
+
+Steht jetzt in: [Deployment auf Boards](#deployment-auf-boards),
+[SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote)
+
+#### 2026-11-01 · Fragen 1 bis 4 (ohne Rundennummer, wahrscheinlich Runde 50)
+
+Beantwortet um 09:20 UTC; das Gespräch nummeriert diesen Satz nicht.
+
+- Q1 Enter bei der Modus-Frage des Installers behält den aktuellen Modus? „1. ich versetehe die frage nicht, wie meinst
+  du enter im installer? enter? ist für mich eine taste auf dem keyboard...“ (in Runde 51 neu gefragt).
+- Q2 Das fertige `setpriv` aus einem Release dieses Repositorys, von der CI gebaut? „2. ja, wenn es ein rust binary ist
+  und somit kompiliert und sicher“. Das Framework schreibt `llmcf-setpriv` in Rust; das setpriv in C wird nur lokal
+  gebaut.
+- Q3 Hat Dropbear im Software-Store von DietPi die Kennung 104? „3. bitte keine diepi store kennungen, wir nehmen es aus
+  dem paketmanager (apt, pacman, etc)“. Nicht widersprochen: `dropbear-initramfs` bleibt immer.
+- Q4 Ein fortgesetzter Build zeigt den Fortschritt wie `build start`? „4. ja, immer wenn möglich“.
+
+Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
+[SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote)
+
+### Runde 51
+
+<a id="decision-round-51"></a>
+2026-11-01, beantwortet 15:57 UTC.
+
+- Q1 Bei einem Update setzt Enter allein bei „privat oder enterprise? [P/e]“ privat, auch über Enterprise: stattdessen
+  den aktuellen Modus behalten (empfohlen; eine neue Installation bleibt privat)? „1. ja“.
+- Q2 Unter Alpine entfernt `apk del` auch Bibliotheken, die nur Dropbear mitbrachte: a) nur stoppen und abschalten
+  (empfohlen), b) mit den gelisteten Bibliotheken entfernen? „2. a“.
+- Q3 `bundle deploy` endet mit 1, wenn ein Board die Root-Schritte nicht ausführen kann: 1 behalten oder 0 mit Hinweis?
+  Antwort: „3. das board muss die root schritte ausführen können, das was dafür nötig ist muss llmcf / der
+  on-target-installer herstellen wie die deps...“. Die Root-Bereitschaft wird wie eine Abhängigkeit nach dem Ja der
+  Person eingerichtet, mit gezeigtem Plan (Standard „Nein“).
+- 15:57: Keine Mails über fehlgeschlagene CI mehr: Fehler werden gefunden und behoben oder ein nicht behebbarer Test
+  abgeschaltet; Ketten folgen vor jedem Push einer festen Windows-Regel (nicht widersprochen).
+
+Steht jetzt in: [Build-Dienst, Warteschlange und Modi (geplant)](#build-dienst-warteschlange-und-modi-geplant),
+[SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote),
+[Deployment auf Boards](#deployment-auf-boards), [Tests, CI und die Windows-Fallen](#tests-ci-und-die-windows-fallen)
+
+### Runde 52
+
+<a id="decision-round-52"></a>
+2026-11-01, beantwortet 16:35 UTC, nach der Frage, wie die Board-Seite unter Windows funktioniert.
+
+- Q1 Wann die Portierung auf Windows: gleich nach der Root-Bereitschaft (empfohlen)? Q2 Welche Geräte zuerst: a) x64
+  mit RTX-GPU (empfohlen), b) ein Ryzen-Z1-Handheld, c) Windows on ARM, d) alle drei? Q3 Soll das Befehlstor in Rust
+  später auch unter Linux das sh-Tor ersetzen? Antwort: „1. erst die übrigen Linux-Punkte fertig machen, dann ist es
+  später nur noch ein port... 2. d, aber später, siehe 1 3. später einmal ja“. Nicht widersprochen: Jetson bleibt bei
+  Linux.
+- Nicht widersprochen (16:36): zuerst die übrigen Linux-Punkte: `llmcf-gateway` in Rust, whisper.cpp vom Framework
+  gebaut, Bild als echter Baustein, die Grenzen auf dem Board gemessen.
+
+Steht jetzt in: [Deployment auf Boards](#deployment-auf-boards),
+[Auf dem Board: Gateway, Sprache und MCP (geplant)](#auf-dem-board-gateway-sprache-und-mcp-geplant)
+
+### Runde 53
+
+<a id="decision-round-53"></a>
+2026-11-01, beantwortet 19:05 UTC.
+
+- Q1 Die Root-Bereitschaft schreibt die root-eigenen Signer-Dateien nicht: a) so lassen, das Deploy stößt die Kopplung
+  neu an (empfohlen), b) die Einrichtung schreibt sie? Antwort: Die Hardware-Probe läuft ohnehin auf dem Target, warum
+  also nicht im selben Zug koppeln, air-gapped, mit der Ergebnisdatei der Probe als Schlüssel. Der Gegenplan des
+  Assistenten (kein Geheimnis in der Datei, eine Einmal-Nonce, die Fingerabdrücke der Host-Schlüssel im Ergebnis) blieb
+  hier offen und wurde in Runde 57 umgesetzt; die Signer-Dateien bleiben bei der Kopplung.
+- Q2 Im Enterprise-Modus fragt die Einrichtung einmal nach dem sudo-Passwort, danach nur `sudo -n`: a) so lassen
+  (empfohlen), b) nie fragen, ein Admin legt die Regel an? „2. a“.
+- Nicht widersprochen (19:06, 19:11): Ein ungemessenes Board wird nicht in einer Schleife neu gestartet; das Gateway
+  hört nach etwa 30 Sekunden auf, den Körper einer Anfrage zu lesen.
+
+Steht jetzt in: [Deployment auf Boards](#deployment-auf-boards),
+[SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote)
 
 ### Runde 54
 
 <a id="decision-round-54"></a>
-Umgesetzt am 2026-11-02. Das Agent Client Protocol: Ditto als ACP-Agent für Editoren und llmcf als ACP-Client, der
-Agenten ausführt, die die Person auswählt, mit den Tools des Frameworks. (Frage und Antwort standen im früheren
-Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten Abschnitten)
+2026-11-02, beantwortet 07:17 UTC, nach dem Auftrag von 06:31: „llmcfs mcp server muss jetzt auch ACÜ (Agent
+cpontext protokoll) können.“ mit Recherche zu ACP und einem Vergleich mit MCP (gelesen als Agent Client Protocol,
+bestätigt durch die Links des Maintainers).
+
+- Q1 Soll llmcf ACP als Agent sprechen (`llm-cli acp`, dieselben Freigaben, kein „immer erlauben“, keine Pfade oder
+  Konten zur KI)? „1. ja, zusätzlich als option zu dem was ditto heute tut... ein neues feature, kein kompletter
+  umbau!“.
+- Q2 Eine getestete Anleitung, um den MCP-Server von llmcf aus Editoren zu nutzen? „2. ja, aber erst ANCHDEM das
+  feature gebaut ist! knüpfe es an bestehendes an, bnaue nur neu was nicht da ist.“
+- Q3 Die umgekehrte Rolle widerspricht „llmcf startet keine Client-Programme“; weglassen (empfohlen)? Antwort: Es geht
+  darum, llmcf von anderen Agenten steuern zu lassen, oder Ditto für andere Agenten, wie ein Editor es zulässt; die
+  Funktion in llmcf übernehmen, keine 1-zu-1-Kopie (Lizenzen), wo sinnvoll und so, dass es sicher bleibt (OAuth, zwei
+  Faktoren, Tokens). Entschieden: llmcf ist auch ein ACP-Client für Agenten, die die Person hinzufügt und startet, nur
+  mit seinen eigenen Tools; die alte Regel fällt für diese.
 
 Steht jetzt in: [ACP-Agent (Ditto in Editoren)](#acp-agent-ditto-in-editoren),
-[ACP-Client: Agenten, die die Person auswählt](#acp-client-agenten-die-die-person-auswählt)
+[ACP-Client: Agenten, die die Person auswählt](#acp-client-agenten-die-die-person-auswählt),
+[MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen)
+
+#### 2026-11-02 und 2026-11-06 · Caddy und Unbound, der MCP-Eintrag des Agenten (ohne Rundennummer, wahrscheinlich Runden 55 und 56)
+
+Das Gespräch nummeriert diese Sätze nicht.
+
+- 2026-11-02 07:30: Soll llmcf ein eigenes Caddy oder Unbound mitbringen? Der Assistent riet von beidem ab (doppeltes
+  TLS, Port 53, tiefe Eingriffe) und schlug eine spätere Roadmap-Zeile „Build-Ausgang mit erlaubten Zielen“ vor (ein
+  kleiner DNS-Filter in Rust neben dem Build). Antwort: „ja“.
+- 2026-11-06 18:00: Q1 darf der Assistent `/dev/null` in seinem Container neu anlegen, Q2 die gelisteten Worktrees
+  löschen: „1. Ja 2. ja“. Q3 Der stdio-MCP-Eintrag, den llmcf einem fremden Agenten gibt, nennt lokale Pfade, sichtbar
+  für die KI des Agenten, keine Konten oder Secrets; so annehmen (empfohlen) oder HTTP mit Token? „3. ja“.
+
+Steht jetzt in: [ACP-Client: Agenten, die die Person auswählt](#acp-client-agenten-die-die-person-auswählt),
+[Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung)
 
 ### Runde 57
 
