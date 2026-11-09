@@ -552,6 +552,15 @@ every mode (exit code 2), so a typo cannot allow more; a control, format or line
 return, a byte order mark, a zero-width space) makes a line malformed too, so a comment cannot hide an entry. Never
 list a real credential, however old: rotate it and rewrite the history ([section 12](#12-if-a-secret-leaked)).
 
+**Personal data on the lines you add:** the pre-commit and pre-push scans (`--staged`, `--push`) also check every
+line a commit adds, and only those, so the examples already in the repository are not reported again. They report
+host addresses outside the documentation, private and other non-routable ranges, e-mail addresses outside the domains
+reserved for examples (`example.com`, `.example`, `.invalid`, `.test`, `.local`, ...), home folders whose account is
+not one of the example names the documents and tests use (Jane, alice, bob, user, pi, radxa, ...; placeholders such
+as `<name>` pass), and always the paths of an AI session's sandbox. Use those examples in code, tests and documents;
+a documented example that still looks real may carry the marker `secret-scan: allow` (never a sandbox path). The
+rules are in `orchestrator/security/personal_data.py`; the tracked-files mode and `--history` do not run them.
+
 **Personal strings** such as your e-mail address, your user name or host names must not be in the repository
 either, but they cannot be in a public pattern list. Put them into `.git/info/secret-patterns`, which git never
 commits:

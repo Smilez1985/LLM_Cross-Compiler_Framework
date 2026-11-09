@@ -5,6 +5,7 @@ import ast
 import hashlib
 import importlib.util
 import io
+import ipaddress
 import json
 import random
 import shutil
@@ -825,8 +826,10 @@ def test_the_pre_commit_hook_refuses_a_commit_with_a_key(repo):
     (repo / "orchestrator" / "security").mkdir(parents=True)
     shutil.copy(REPO_ROOT / "scripts" / "secret_scan.py", repo / "scripts" / "secret_scan.py")
     shutil.copy(secret_scan.PATTERN_TABLE, repo / "orchestrator" / "security" / "secret_patterns.py")
+    shutil.copy(secret_scan.PERSONAL_DATA_RULES, repo / "orchestrator" / "security" / "personal_data.py")
     (repo / "config.py").write_text(f'API_KEY = "{SAMPLES["OpenAI key"]}"\n')
-    git(repo, "add", "config.py", "scripts/secret_scan.py", "orchestrator/security/secret_patterns.py")
+    git(repo, "add", "config.py", "scripts/secret_scan.py", "orchestrator/security/secret_patterns.py",
+        "orchestrator/security/personal_data.py")
     hooks = f"core.hooksPath={REPO_ROOT / '.githooks'}"
     refused = subprocess.run(["git", "-C", str(repo), "-c", hooks, "-c", "user.name=t", "-c", "user.email=t@t.invalid",
                               "commit", "-qm", "leak"], capture_output=True, text=True)
@@ -834,3 +837,204 @@ def test_the_pre_commit_hook_refuses_a_commit_with_a_key(repo):
     (repo / "config.py").write_text("import os\nAPI_KEY = os.environ.get('OPENAI_API_KEY')\n")
     git(repo, "add", "config.py")
     git(repo, "-c", hooks, "commit", "-qm", "clean")
+
+
+# --- Personal data on the lines a commit adds (orchestrator/security/personal_data.py, code level) ------------------
+
+personal_data = secret_scan._personal
+
+
+def public_ipv4(seed):
+    """A public IPv4 address that is no example, made at runtime."""
+    rng = random.Random(seed)
+    while True:
+        value = ".".join(str(rng.randint(1, 223)) for _ in range(4))
+        address = ipaddress.ip_address(value)
+        if address.is_global and value not in personal_data.CODE_WELL_KNOWN_ADDRESSES and not any(
+                address in ipaddress.ip_network(n) for n in personal_data.CODE_NETWORKS if ":" not in n):
+            return value
+
+
+def word(seed, n=7):
+    return body(n, string.ascii_lowercase, seed)
+
+
+# Generated samples per kind of the code level: each must be reported; none is a literal of this file.
+PERSONAL_SAMPLES = {
+    "address": [public_ipv4(1), public_ipv4(2), f"host {public_ipv4(3)}:8080", f"http://{public_ipv4(4)}/x",
+                "2a01" + ":4f8:c0c:" + "1a2b::2", "::ffff" + ":" + public_ipv4(5)],
+    "e-mail address": [word(1) + "." + word(2) + "@" + word(3) + "-mail" + ".de",
+                       word(4) + "@" + word(5) + ".com", "git" + "@" + "git." + word(6) + ".io",
+                       word(7) + "@" + "example" + ".company.org"],
+    "home folder": ["/home/" + word(8) + "/models", "/Users/" + word(9), "C:\\Users\\" + word(10) + "\\x",
+                    "C:\\\\Users\\\\" + word(11), "C:/Users/" + word(12) + "/x", "/home/" + word(13) + "%20Smith"],
+    "AI sandbox path": ["/tmp/" + "claude-0/" + word(14), "/tmp/" + "claude/" + word(15) + ".py",
+                        "/root/" + ".ccr/" + "ca-bundle.crt"],
+}
+# What the repository's code, tests and documents use as examples: none is reported.
+PERSONAL_EXAMPLES = [
+    "doc 192.0.2.10, 198.51.100.7, 203.0.113.9 and 2001:db8::1", "lan 10.0.0.5 172.16.4.2 192.168.1.20",
+    "loopback 127.0.0.1 ::1, any 0.0.0.0 ::, link-local 169.254.169.254 fe80::1, shared 100.64.0.1",
+    "multicast 224.0.0.251 ff02::fb, broadcast 255.255.255.255, ula fd00::1, mapped ::ffff:192.0.2.1",
+    "resolvers 8.8.8.8 8.8.4.4 1.1.1.1 1.0.0.1 9.9.9.9, example.com 93.184.215.14", "range 8.0.0.0/8",
+    "alice" + "@" + "example.com", "someone" + "@" + "docs.example.org", "t" + "@" + "t.invalid",
+    "root" + "@" + "board.example.test", "radxa" + "@" + "zero3w.local", "x" + "@" + "localhost.localhost",
+    "Co-Authored-By: Claude <noreply" + "@" + "anthropic.com>", "git" + "@" + "github.com:owner/repo.git",
+    "+@click.option('--x')", "/home/Jane/models /home/u/x /home/pi /home/radxa /home/dietpi /home/llmcf/x",
+    "/Users/erin/x /Users/dave C:\\Users\\Jane\\x C:\\\\Users\\\\Bob\\\\x C:/Users/alice/x /home/runner/work",
+    "/home/<name>/x /home/{ACCOUNT}/x C:\\Users\\<USER_NAME>\\x /home/$USER /home/... /home/*/x %USERPROFILE%",
+    "C:\\Users\\O'Brien\\x /home/Bob%20Smith/a.bin C:\\Users\\x%y\\known_hosts /home/.llm-framework",
+    "torch==2.4.0.1 pkg>=1.2.3.4 version 3.1.0.2 release 5.6.7.8 v 9.10.11.12 RFC 9309 2.3.1.4 § 4.5.6.7",
+    "the sandbox folders `/tmp/" + "claude…` and `/root/" + ".ccr` are named, not given",
+]
+
+
+def test_every_kind_of_personal_data_has_samples():
+    assert set(PERSONAL_SAMPLES) == set(personal_data.CODE_KINDS)
+    assert all(len(samples) >= 3 for samples in PERSONAL_SAMPLES.values())
+
+
+@pytest.mark.parametrize("kind, sample", [(k, s) for k, samples in PERSONAL_SAMPLES.items() for s in samples])
+def test_each_personal_rule_catches_its_samples(kind, sample):
+    found = personal_data.find_personal_data(f"see {sample} here", personal_data.CODE)
+    assert [k for k, _ in found] == [kind], f"{kind} misses its sample or reports another kind: {found}"
+    findings = secret_scan.personal_findings("f.md", "f.md", {3: f"see {sample} here"})
+    assert [(f.line, f.kind) for f in findings] == [(3, f"personal data: {kind}")]
+    assert sample not in str(findings[0]) or len(sample) <= 10  # reported redacted
+
+
+@pytest.mark.parametrize("line", PERSONAL_EXAMPLES)
+def test_the_examples_of_the_repository_pass(line):
+    assert personal_data.find_personal_data(line, personal_data.CODE) == []
+
+
+@pytest.mark.parametrize("path", ["requirements.txt", "requirements-dev.txt", "uv.lock", "rust/Cargo.lock",
+                                  "web/package-lock.json"])
+def test_four_dotted_numbers_in_a_requirements_or_lock_file_are_versions(path):
+    line = f'version = "{public_ipv4(6)}"'.replace("version", "pinned")
+    assert personal_data.find_personal_data(line, personal_data.CODE, path) == []
+    assert personal_data.find_personal_data(line, personal_data.CODE, "notes.md") != []
+
+
+def test_the_blueprint_level_is_stricter_than_the_code_level():
+    private, example_mail = "192.168.1.20", "someone" + "@" + "example.org"
+    for value in (private, example_mail):
+        assert personal_data.find_personal_data(value, personal_data.CODE) == []
+        assert personal_data.find_personal_data(value, personal_data.BLUEPRINT) != []
+    with pytest.raises(ValueError):
+        personal_data.find_personal_data("x", "lenient")
+
+
+def test_the_marker_spares_an_example_but_never_a_sandbox_path():
+    line = f"ip = '{public_ipv4(7)}'  # {secret_scan.ALLOW_PRAGMA}"
+    assert secret_scan.personal_findings("f.py", "f.py", {1: line}) == []
+    line = f"p = '{PERSONAL_SAMPLES['AI sandbox path'][0]}'  # {secret_scan.ALLOW_PRAGMA}"
+    assert [f.kind for f in secret_scan.personal_findings("f.py", "f.py", {1: line})] == [
+        "personal data: AI sandbox path"]
+
+
+def test_the_rule_modules_hold_nothing_their_own_rules_flag():
+    for path in (secret_scan.PERSONAL_DATA_RULES, REPO_ROOT / "scripts" / "secret_scan.py"):
+        text = path.read_text(encoding="utf-8")
+        lines = dict(enumerate(text.splitlines(), 1))
+        assert secret_scan.personal_findings(path.name, path.name, lines) == []
+        assert secret_scan.scan_text(path.name, text) == []
+    tree = ast.parse(secret_scan.PERSONAL_DATA_RULES.read_text(encoding="utf-8"))
+    imported = {alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
+    imported |= {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+    assert {name.split(".")[0] for name in imported} <= sys.stdlib_module_names
+
+
+def test_the_scan_refuses_to_run_without_the_personal_data_rules(tmp_path):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "orchestrator" / "security").mkdir(parents=True)
+    shutil.copy(REPO_ROOT / "scripts" / "secret_scan.py", tmp_path / "scripts" / "secret_scan.py")
+    shutil.copy(secret_scan.PATTERN_TABLE, tmp_path / "orchestrator" / "security" / "secret_patterns.py")
+    run = subprocess.run([sys.executable, "-I", "-S", str(tmp_path / "scripts" / "secret_scan.py"),
+                          "--repo", str(tmp_path)], capture_output=True, text=True)
+    assert run.returncode == 2 and "cannot load the personal-data rules" in run.stderr
+    assert "Traceback" not in run.stderr
+
+
+EXISTING_LINES = ["# examples already in the repository", "ADMIN = '" + PERSONAL_SAMPLES["e-mail address"][0] + "'",
+                  "HOST = '" + public_ipv4(8) + "'", "CACHE = '/home/" + word(16) + "/cache'"]
+
+
+def test_only_the_lines_a_commit_adds_are_checked_for_personal_data(repo, capsys, monkeypatch):
+    target = repo / "settings.py"
+    target.write_text("\n".join(EXISTING_LINES) + "\n")
+    git(repo, "add", "settings.py")
+    assert len(secret_scan.scan_staged(repo, [])) == 3, "a new file: every line is added"
+    git(repo, "commit", "-qm", "old", "--no-verify")
+    old = git(repo, "rev-parse", "HEAD").stdout.strip()
+    git(repo, "update-ref", "refs/remotes/origin/main", old)  # already published
+
+    # The examples next to the old lines pass, and the old lines are not reported again.
+    lines = EXISTING_LINES[:2] + ["DOC = '192.0.2.10'  # an example"] + EXISTING_LINES[2:] + ["HOME = '/home/pi'"]
+    target.write_text("\n".join(lines) + "\n")
+    git(repo, "add", "settings.py")
+    assert secret_scan.scan_staged(repo, []) == []
+    assert secret_scan.main(["--repo", str(repo), "--staged"]) == 0
+    git(repo, "commit", "-qm", "examples", "--no-verify")
+
+    # One added line with an address that is no example: reported in the index and in the push, at its line.
+    leak = public_ipv4(9)
+    lines.insert(3, f"MIRROR = 'http://{leak}/x'")
+    target.write_text("\n".join(lines) + "\n")
+    git(repo, "add", "settings.py")
+    assert [(f.where, f.line, f.kind) for f in secret_scan.scan_staged(repo, [])] == [
+        ("settings.py (staged)", 4, "personal data: address")]
+    assert secret_scan.main(["--repo", str(repo), "--staged"]) == 1
+    err = capsys.readouterr().err
+    assert "settings.py (staged):4: personal data: address" in err and leak not in err
+    git(repo, "commit", "-qm", "leak", "--no-verify")
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    monkeypatch.setattr(sys, "stdin", io.StringIO(f"refs/heads/main {head} refs/heads/main {old}\n"))
+    assert secret_scan.main(["--repo", str(repo), "--push"]) == 1
+    err = capsys.readouterr().err
+    assert f"settings.py (commit {head[:10]}):4: personal data: address" in err and leak not in err
+    assert err.count(": personal data:") == 1, "the lines of earlier commits are not reported again"
+
+    # The tracked files and the history are not checked for personal data (old commits cannot be fixed).
+    assert secret_scan.main(["--repo", str(repo)]) == 0
+    assert secret_scan.main(["--repo", str(repo), "--history"]) == 0
+
+
+def test_a_merge_adds_only_its_own_resolution(repo, monkeypatch):
+    (repo / "a.txt").write_text("base\n")
+    git(repo, "add", "a.txt")
+    git(repo, "commit", "-qm", "base", "--no-verify")
+    main = git(repo, "symbolic-ref", "--short", "HEAD").stdout.strip()
+    git(repo, "checkout", "-qb", "side")
+    (repo / "b.txt").write_text(f"host {public_ipv4(10)}\n")
+    git(repo, "add", "b.txt")
+    git(repo, "commit", "-qm", "side", "--no-verify")
+    git(repo, "update-ref", "refs/remotes/origin/side", "HEAD")  # published with its branch
+    git(repo, "checkout", "-q", main)
+    (repo / "a.txt").write_text("base\nmain\n")
+    git(repo, "commit", "-qam", "main", "--no-verify")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "merge", "-q", "--no-edit", "--no-verify", "side")
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    monkeypatch.setattr(sys, "stdin", io.StringIO(f"refs/heads/main {head} refs/heads/main {'0' * 40}\n"))
+    assert secret_scan.main(["--repo", str(repo), "--push"]) == 0
+    assert secret_scan.push_added(repo, [head, "--not", "--remotes"]) == []
+
+    # A merge that writes a new line of its own (an evil merge) is checked.
+    (repo / "a.txt").write_text(f"base\nmain\nmail {PERSONAL_SAMPLES['e-mail address'][1]}\n")
+    git(repo, "add", "a.txt")
+    git(repo, "commit", "-q", "--amend", "--no-edit", "--no-verify")
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    assert [(f.line, f.kind) for f in secret_scan.push_added(repo, [head, "--not", "--remotes"])] == [
+        (3, "personal data: e-mail address")]
+
+
+def test_local_patterns_keep_working_on_staged_lines(repo, capsys):
+    personal = word(17) + "-" + word(18)  # e.g. the maintainer's host name, given only locally
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "secret-patterns").write_text(f"{personal}\n")
+    (repo / "notes.md").write_text(f"ssh {personal}\n")
+    git(repo, "add", "notes.md")
+    assert secret_scan.main(["--repo", str(repo), "--staged"]) == 1
+    err = capsys.readouterr().err
+    assert "notes.md (staged):1: local pattern #1" in err and personal not in err

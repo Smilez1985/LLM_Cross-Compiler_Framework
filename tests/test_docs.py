@@ -766,50 +766,17 @@ def test_nothing_of_the_old_blueprint_is_lost(index):
 # --- (3c) The blueprint is scrubbed, and every component of the design has its decisions (DESIGN round 35) ------
 
 BLUEPRINT_TEXTS = [rel for pair in BLUEPRINT_FILES for rel in pair]
-# Addresses that may appear: the documentation ranges (RFC 5737, RFC 3849) and the well-known special addresses; a
-# range written with its prefix (10.0.0.0/8) names a class of addresses, not a host. Public resolvers are named
-# where the text explains that the framework no longer contacts them.
-DOC_NETWORKS = ["192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32"]
-WELL_KNOWN_ADDRESSES = {"8.8.8.8", "1.1.1.1"}
-# Account names in home paths that are no person's: defaults of CI runners and board images, the framework's own
-# account, and placeholders.
-DEFAULT_ACCOUNTS = {"runner", "pi", "dietpi", "ubuntu", "llmcf", "...", "<name>", "<user>"}
-# E-mail addresses the project lists itself (none today).
-PROJECT_EMAILS: Set[str] = set()
-_V4 = re.compile(r"(?<![\w.])(\d{1,3}(?:\.\d{1,3}){3})(/\d{1,2})?(?![\w.]*\d)")
-_V6 = re.compile(r"(?<![\w:.])((?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4})(/\d{1,3})?(?![\w:])")
-_MAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}")
-_HOME = re.compile(r"/home/([^/\s`)\]]+)|[A-Za-z]:\\\\?Users\\\\?([^\\\s`)\]]+)")
+# The blueprint level of the personal-data rules (orchestrator/security/personal_data.py, which the repository's
+# secret scan runs at its code level on every line a commit adds): only the documentation ranges, a few special
+# addresses and the default accounts of CI runners and board images pass, and no e-mail address.
 
 
 def scrub_findings(text: str) -> List[str]:
     """What in a text looks like private data: a host address, an e-mail address, a person's home folder or a
     secret (the patterns of the repository's secret scan)."""
-    import ipaddress
-
+    from orchestrator.security import personal_data
     from orchestrator.security.secret_patterns import find_secrets
-    networks = [ipaddress.ip_network(n) for n in DOC_NETWORKS]
-    found = []
-    for number, line in enumerate(text.splitlines(), 1):
-        for pattern in (_V4, _V6):
-            for m in pattern.finditer(line):
-                try:
-                    address = ipaddress.ip_address(m.group(1))
-                except ValueError:
-                    continue
-                if m.group(2) or str(address) in WELL_KNOWN_ADDRESSES or any(address in n for n in networks if
-                                                                             n.version == address.version):
-                    continue
-                if address.is_loopback or address.is_unspecified or address.is_link_local or address.is_multicast:
-                    continue
-                found.append(f"{number}: address {m.group(1)}")
-        found += [f"{number}: e-mail {m.group(0)}" for m in _MAIL.finditer(line) if m.group(0) not in PROJECT_EMAILS]
-        for m in _HOME.finditer(line):
-            account = m.group(1) or m.group(2)
-            if account not in DEFAULT_ACCOUNTS and not account.startswith(("<", "$", "%")):
-                found.append(f"{number}: home folder {m.group(0)}")
-        found += [f"{number}: {kind}" for kind, _ in find_secrets(line)]
-    return found
+    return personal_data.scrub_findings(text, personal_data.BLUEPRINT, secrets=find_secrets)
 
 
 @pytest.mark.parametrize("rel", BLUEPRINT_TEXTS)

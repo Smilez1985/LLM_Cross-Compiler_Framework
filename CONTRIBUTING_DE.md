@@ -586,6 +586,16 @@ Carriage Return, eine Byte Order Mark, ein Leerzeichen der Breite null) macht ei
 ein Kommentar keinen Eintrag verstecken kann. Trage nie echte Zugangsdaten ein, so alt sie auch sind: Tausche sie aus
 und schreibe die Historie um ([Abschnitt 12](#12-wenn-ein-secret-offengelegt-wurde)).
 
+**Persönliche Daten in den Zeilen, die du hinzufügst:** Die Scans vor Commit und Push (`--staged`, `--push`) prüfen
+außerdem jede Zeile, die ein Commit hinzufügt, und nur diese, damit die Beispiele, die schon im Repository stehen,
+nicht erneut gemeldet werden. Sie melden Host-Adressen außerhalb der Dokumentations-, privaten und anderen nicht
+routbaren Bereiche, E-Mail-Adressen außerhalb der für Beispiele reservierten Domains (`example.com`, `.example`,
+`.invalid`, `.test`, `.local`, ...), Home-Ordner, deren Konto keiner der Beispielnamen ist, die Dokumente und Tests
+verwenden (Jane, alice, bob, user, pi, radxa, ...; Platzhalter wie `<name>` gehen durch), und immer die Pfade der
+Sandbox einer KI-Sitzung. Verwende diese Beispiele in Code, Tests und Dokumenten; ein dokumentiertes Beispiel, das
+trotzdem echt aussieht, darf die Markierung `secret-scan: allow` tragen (nie ein Sandbox-Pfad). Die Regeln stehen in
+`orchestrator/security/personal_data.py`; der Modus für versionierte Dateien und `--history` führen sie nicht aus.
+
 **Persönliche Zeichenfolgen** wie deine E-Mail-Adresse, dein Benutzername oder Hostnamen gehören ebenfalls nicht ins
 Repository, können aber nicht in einer öffentlichen Musterliste stehen. Trage sie in `.git/info/secret-patterns`
 ein; git committet diese Datei nie:

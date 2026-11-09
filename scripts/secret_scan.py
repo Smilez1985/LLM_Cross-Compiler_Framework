@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Secret scan for this repository: provider API keys, tokens, private keys, certificates and files that
-hold credentials must never be committed.
+hold credentials must never be committed, and no commit may add personal data.
 
     python scripts/secret_scan.py              # tracked files of the working tree
     python scripts/secret_scan.py --staged     # what the next commit would contain (pre-commit hook)
@@ -12,6 +12,13 @@ hold credentials must never be committed.
 
 The key formats live in orchestrator/security/secret_patterns.py, the table runtime redaction uses too; add new
 formats there. This script loads it by path, so it needs nothing but the checkout.
+
+Personal data: in --staged and --push mode every line a commit adds (not the whole file, so the examples already in
+the repository are not reported again) is also checked with the "code" level of
+orchestrator/security/personal_data.py, loaded by path too: host addresses outside the documentation, private and
+other non-routable ranges, e-mail addresses outside the domains reserved for examples, home folders of an account
+that is no example name, and always the paths of an AI session's sandbox. The tracked-files, --history and FILE
+modes do not run it (old commits cannot be fixed); the blueprint's scrub test checks the blueprint at its own level.
 
 Personal strings (your e-mail address, user name, host names) belong in a pattern file that is never
 committed: .git/info/secret-patterns (one literal per line, or "re:<regex>"; "#" starts a comment), or the
@@ -54,17 +61,23 @@ ALLOWLIST = ".secret-scan-allow"  # at the repository root; for --history only
 # "<sha256 of the exact value, 64 lowercase hex digits><two spaces><note>": nothing looser, so a typo is an error.
 ALLOWLIST_ENTRY = re.compile(r"(?P<digest>[0-9a-f]{64})  (?P<note>\S.*)")
 PATTERN_TABLE = Path(__file__).resolve().parent.parent / "orchestrator" / "security" / "secret_patterns.py"
+PERSONAL_DATA_RULES = PATTERN_TABLE.with_name("personal_data.py")
 
 
-def _load_patterns():
-    """The pattern table shared with runtime redaction, loaded by path: the scan runs from a bare checkout and in
-    git hooks, without the framework's dependencies. A process that imported it already uses that module."""
-    module = sys.modules.get("orchestrator.security.secret_patterns")
+def _load_module(path: Path, name: str):
+    """A rule module of orchestrator/security, loaded by path: the scan runs from a bare checkout and in git hooks,
+    without the framework's dependencies. A process that imported it already uses that module."""
+    module = sys.modules.get(f"orchestrator.security.{name}")
     if module is None:
-        spec = importlib.util.spec_from_file_location("_secret_patterns", PATTERN_TABLE)
+        spec = importlib.util.spec_from_file_location(f"_{name}", path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
     return module
+
+
+def _load_patterns():
+    """The pattern table shared with runtime redaction."""
+    return _load_module(PATTERN_TABLE, "secret_patterns")
 
 
 try:
@@ -76,6 +89,16 @@ try:
     find_exact_formats = _patterns.find_exact_formats
 except Exception as e:  # never scan without the table (missing, mid-merge, broken): the commit would pass unchecked
     print(f"secret-scan: cannot load the pattern table {PATTERN_TABLE}: {type(e).__name__}: {e}", file=sys.stderr)
+    sys.exit(2)
+
+try:
+    _personal = _load_module(PERSONAL_DATA_RULES, "personal_data")
+    find_personal_data = _personal.find_personal_data
+    PERSONAL_DATA_LEVEL = _personal.CODE
+    find_personal_data("", PERSONAL_DATA_LEVEL)  # fails now, not after the first added line, if the module is broken
+except Exception as e:  # the same: never let a commit pass with half the checks
+    print(f"secret-scan: cannot load the personal-data rules {PERSONAL_DATA_RULES}: {type(e).__name__}: {e}",
+          file=sys.stderr)
     sys.exit(2)
 
 # Files that hold credentials or per-user state, whatever their content.
@@ -338,7 +361,108 @@ def scan_staged(repo: Path, local) -> List[Finding]:
     for sha, data in _read_blobs(repo, list(staged)):
         for path in staged[sha]:
             findings += scan_blob(path + " (staged)", data, local)
+    pairs = [(meta.split()[2], meta.split()[3], path) for meta, path in entries]
+    findings += scan_added(repo, [(old, new, path, path + " (staged)") for old, new, path in pairs])
     return findings
+
+
+# --- Personal data on the lines a commit adds ------------------------------------------------------------------------
+
+_HUNK = re.compile(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+def _null(sha: str) -> bool:
+    return set(sha) == {"0"}
+
+
+def added_lines(repo: Path, old: str, new: str, data: bytes) -> Dict[int, str]:
+    """{line number in the new blob: text} of the lines the change from blob `old` to blob `new` adds (every line
+    of a new file). data: the new blob's content."""
+    lines = data.decode("utf-8", "replace").splitlines()
+    if _null(old):
+        return dict(enumerate(lines, 1))
+    patch = _git(repo, "diff", "--no-color", "--no-ext-diff", "--no-textconv", "-a", "-U0", old, new)
+    added: Dict[int, str] = {}
+    number = None
+    for row in patch.splitlines():
+        hunk = _HUNK.match(row)
+        if hunk:
+            number = int(hunk.group(1))
+        elif number is not None and row.startswith("+"):
+            if 0 < number <= len(lines):
+                added[number] = lines[number - 1]  # the blob's own text, whatever the patch encoding did
+            number += 1
+    return added
+
+
+def personal_findings(where: str, path: str, lines: Dict[int, str]) -> List[Finding]:
+    """Personal data on the given lines of one file, reported redacted. The marker spares a documented example,
+    never the path of an AI session's sandbox."""
+    findings = []
+    for number, line in sorted(lines.items()):
+        for kind, value in find_personal_data(line, PERSONAL_DATA_LEVEL, path):
+            if ALLOW_PRAGMA in line and kind != "AI sandbox path":
+                continue
+            findings.append(Finding(where, number, f"personal data: {kind}", redact(value)))
+    return findings
+
+
+def scan_added(repo: Path, changes: Sequence[Tuple[str, str, str, str]]) -> List[Finding]:
+    """Personal data on the lines each change adds; changes: (old blob, new blob, path, where to report)."""
+    findings = []
+    contents = dict(_read_blobs(repo, sorted({new for _, new, _, _ in changes})))
+    for old, new, path, where in changes:
+        data = contents.get(new)
+        if data is None or b"\0" in data[:8192] or len(data) > MAX_BYTES:
+            continue
+        findings += personal_findings(where, path, added_lines(repo, old, new, data))
+    return findings
+
+
+def _changes(repo: Path, *args: str) -> List[Tuple[str, str, str]]:
+    """(old blob, new blob, path) of every added or changed file between two trees (git diff-tree args)."""
+    fields = _git(repo, "diff-tree", "-r", "-z", "--raw", "--no-abbrev", "--no-renames", "--diff-filter=ACMT",
+                  *args).split("\0")
+    if fields and fields[0] and not fields[0].startswith(":"):
+        fields = fields[1:]  # the commit id diff-tree prints for a single commit
+    return [(meta.split()[2], meta.split()[3], path) for meta, path in zip(fields[0::2], fields[1::2])
+            if meta.startswith(":") and meta.split()[1] != "160000"]
+
+
+def push_added(repo: Path, rev_args: Sequence[str]) -> List[Finding]:
+    """Personal data on the lines each commit of rev_args adds. A merge adds a line only where it differs from
+    every parent (its own resolution), as git's combined diff shows it."""
+    changes: List[Tuple[str, str, str, str]] = []
+    merges: List[Tuple[str, List[str]]] = []
+    for row in _git(repo, "rev-list", "--parents", *rev_args).splitlines():
+        commit, *parents = row.split()
+        if len(parents) > 1:
+            merges.append((commit, parents))
+            continue
+        tag = f" (commit {commit[:10]})"
+        diff = _changes(repo, "--root", commit) if not parents else _changes(repo, parents[0], commit)
+        changes += [(old, new, path, path + tag) for old, new, path in diff]
+    findings = scan_added(repo, changes)
+    for commit, parents in merges:
+        per_parent = [{path: (old, new) for old, new, path in _changes(repo, parent, commit)} for parent in parents]
+        paths = set.intersection(*(set(p) for p in per_parent))
+        contents = dict(_read_blobs(repo, sorted({per_parent[0][p][1] for p in paths})))
+        for path in sorted(paths):
+            new = per_parent[0][path][1]
+            data = contents.get(new)
+            if data is None or b"\0" in data[:8192] or len(data) > MAX_BYTES:
+                continue
+            numbers = set.intersection(*(set(added_lines(repo, p[path][0], new, data)) for p in per_parent))
+            lines = data.decode("utf-8", "replace").splitlines()
+            findings += personal_findings(f"{path} (commit {commit[:10]})", path,
+                                          {n: lines[n - 1] for n in numbers})
+    seen, unique = set(), []
+    for f in findings:  # the same line added by two commits of one push (a cherry-pick) is reported once
+        key = (f.where.rsplit(" (commit", 1)[0], f.kind, f.sample, f.line)
+        if key not in seen:
+            seen.add(key)
+            unique.append(f)
+    return unique
 
 
 def scan_revs(repo: Path, rev_args: Sequence[str], local, allowed: AbstractSet[str] = frozenset()) -> List[Finding]:
@@ -398,7 +522,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             findings = scan_staged(repo, local)
         elif args.push:
             revs = push_revs(sys.stdin) or pre_commit_push_revs(os.environ)
-            findings = scan_revs(repo, revs, local) if revs else []
+            findings = scan_revs(repo, revs, local) + push_added(repo, revs) if revs else []
         elif args.history:
             # Only here: old commits keep the documented test mocks; anything new must not contain them.
             findings = scan_revs(repo, ["--all"], local, allowed)
@@ -415,8 +539,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               f"{ALLOWLIST}", file=sys.stderr)
     if not findings:
         return 0
-    print("secret-scan: possible credentials found - remove them (and rotate the key) before committing:",
-          file=sys.stderr)
+    print("secret-scan: possible credentials or personal data found - remove them (and rotate a key) before "
+          "committing:", file=sys.stderr)
     for f in findings:
         print(f"  {f}", file=sys.stderr)
     if not all(f.exact for f in findings):
