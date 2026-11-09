@@ -3,7 +3,7 @@
   "name": "LLM Cross-Compiler Framework",
   "image": "mcr.microsoft.com/devcontainers/python:3.13",
   "features": {
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": { "moby": false },  // Debian trixie has no moby packages: Docker CE instead
     "ghcr.io/devcontainers/features/rust:1": {}
   },
   "postCreateCommand": "pip install --user uv==0.11.32 && uv sync --frozen --extra gui --group dev",
