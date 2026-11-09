@@ -1,4 +1,4 @@
-Version 3.4.0 · Last updated 2026-11-08
+Version 3.4.0 · Last updated 2026-11-09
 
 **English** · [Deutsch](CONTRIBUTING_DE.md)
 
@@ -1046,8 +1046,9 @@ text:
 - Both files link to each other at the top. Every document starts with a line like
   `Version 3.1.0 · Last updated 2026-10-29` (German: `Version 3.1.0 · Stand 2026-10-29`); update it when you change
   the document.
-- Describe only what exists on the current branch; planned features go to the roadmap. Check every command,
-  option, path and configuration key against the code or the `--help` output before you write it down.
+- In the user documents describe only what exists on the current branch; planned features go to the roadmap, and
+  the design, which is the build plan, holds them too, marked planned. Check every command, option, path and
+  configuration key against the code or the `--help` output before you write it down.
 - Write for newcomers first, then add the details. No marketing language.
 - Never put real keys, e-mail addresses or other personal data into examples; use placeholders such as
   `<your key>`.

@@ -176,6 +176,7 @@ OLD_BLUEPRINT_ANCHORS: Dict[str, List[str]] = {
 ROADMAP_STATUS_DE: Dict[str, str] = {
     "in progress": "in Arbeit",
     "planned": "geplant",
+    "open question": "offene Frage",
 }
 DONE_STATUSES = {"done", "fertig"}
 

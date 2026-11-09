@@ -1,4 +1,4 @@
-Version 3.4.0 · Stand 2026-11-08
+Version 3.4.0 · Stand 2026-11-09
 
 [English](CONTRIBUTING.md) · **Deutsch**
 
@@ -1122,9 +1122,10 @@ Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
 - Beide Dateien verlinken oben aufeinander. Jedes Dokument beginnt mit einer Zeile wie
   `Version 3.1.0 · Stand 2026-10-29` (Englisch: `Version 3.1.0 · Last updated 2026-10-29`); aktualisiere sie, wenn
   du das Dokument änderst.
-- Beschreibe nur, was es auf dem aktuellen Zweig gibt; geplante Funktionen kommen in die Roadmap. Prüfe jeden
-  Befehl, jede Option, jeden Pfad und jeden Konfigurationsschlüssel am Code oder an der Ausgabe von `--help`, bevor
-  du ihn aufschreibst.
+- Beschreibe in den Dokumenten für Nutzer nur, was es auf dem aktuellen Zweig gibt; geplante Funktionen kommen in
+  die Roadmap, und das Design, das der Bauplan ist, hält sie auch, als geplant markiert. Prüfe jeden Befehl, jede
+  Option, jeden Pfad und jeden Konfigurationsschlüssel am Code oder an der Ausgabe von `--help`, bevor du ihn
+  aufschreibst.
 - Schreib zuerst für Einsteiger, dann ergänze die Einzelheiten. Keine Werbesprache.
 - Schreib nie echte Schlüssel, E-Mail-Adressen oder andere persönliche Daten in Beispiele; nutze Platzhalter wie
   `<dein Schlüssel>`.

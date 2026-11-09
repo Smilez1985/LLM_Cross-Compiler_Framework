@@ -8,14 +8,14 @@ The blueprint of the LLM Cross-Compiler Framework is three files, each in Englis
 
 | File | What it holds |
 |---|---|
-| [docs/DESIGN.md](DESIGN.md) | What the framework is, every component in detail, and every decision with what it says, how the code does it and why |
+| [docs/DESIGN.md](DESIGN.md) | The build plan: what the framework is and is meant to be, every component in detail, and every decision with what it says, how the code does it or will do it (marked planned) and why |
 | [docs/ROADMAP.md](ROADMAP.md) | What comes: planned work and work in progress, nothing that is finished |
 | [CHANGELOG.md](../CHANGELOG.md) | What was: only finished, wired, tested and committed work, one section per version (Keep a Changelog 1.1.0), every entry with its time stamp and version |
 
-A change is built against all three and updates all three in the same commit: its changelog entry under the version it
-lands in, its decision in the design, and the roadmap row it finishes removed. Each round of decisions is recorded in
-the design's [Decision log](DESIGN.md#decision-log), which grows with every round. There is no "Unreleased" section;
-upcoming work is in the roadmap only.
+Before a change is built, its decision goes into the design (planned) and its row into the roadmap; after it is built,
+the design shows it built, the changelog gets its entry and the roadmap row goes. Each round of decisions is recorded
+in the design's [Decision log](DESIGN.md#decision-log); what is not in the design was never decided. There is no
+"Unreleased" section.
 
 ## Where the old sections went
 

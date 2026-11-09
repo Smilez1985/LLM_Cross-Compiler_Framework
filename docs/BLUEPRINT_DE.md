@@ -8,14 +8,14 @@ Der Bauplan des LLM Cross-Compiler Frameworks besteht aus drei Dateien, jede auf
 
 | Datei | Was sie enthält |
 |---|---|
-| [docs/DESIGN_DE.md](DESIGN_DE.md) | Was das Framework ist, jeder Baustein im Detail und jede Entscheidung mit dem, was sie sagt, wie der Code sie umsetzt und warum |
+| [docs/DESIGN_DE.md](DESIGN_DE.md) | Der Bauplan: was das Framework ist und sein soll, jeder Baustein im Detail und jede Entscheidung mit dem, was sie sagt, wie der Code sie umsetzt oder umsetzen wird (als geplant markiert) und warum |
 | [docs/ROADMAP_DE.md](ROADMAP_DE.md) | Was kommt: geplante Arbeit und Arbeit in Arbeit, nichts Fertiges |
 | [CHANGELOG_DE.md](../CHANGELOG_DE.md) | Was war: nur fertige, verdrahtete, getestete und committete Arbeit, ein Abschnitt je Version (Keep a Changelog 1.1.0), jeder Eintrag mit Zeitstempel und Version |
 
-Eine Änderung wird gegen alle drei gebaut und aktualisiert alle drei im selben Commit: ihren Changelog-Eintrag unter der
-Version, in der sie landet, ihre Entscheidung im Design und die Roadmap-Zeile, die sie abschließt, entfernt. Jede
-Entscheidungsrunde ist im [Entscheidungsprotokoll](DESIGN_DE.md#entscheidungsprotokoll) des Designs festgehalten, das mit
-jeder Runde wächst. Es gibt keinen Abschnitt „Unreleased“; Kommendes steht nur in der Roadmap.
+Bevor eine Änderung gebaut wird, kommt ihre Entscheidung ins Design (geplant) und ihre Zeile in die Roadmap; nach dem
+Bau zeigt das Design sie gebaut, der Changelog bekommt ihren Eintrag, und die Roadmap-Zeile geht. Jede
+Entscheidungsrunde ist im [Entscheidungsprotokoll](DESIGN_DE.md#entscheidungsprotokoll) des Designs festgehalten; was
+nicht im Design steht, wurde nie entschieden. Es gibt keinen Abschnitt „Unreleased“.
 
 ## Wohin die alten Abschnitte gezogen sind
 

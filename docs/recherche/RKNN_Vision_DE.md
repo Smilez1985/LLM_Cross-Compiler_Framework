@@ -183,9 +183,9 @@ das Entscheidungsprotokoll ab [seinem Eintrag vom 2026-11-09](../DESIGN_DE.md#de
   Toolkit-Version des Modells geprüft.
 - Die Engine ist Rust für aarch64 mit glibc und lädt die Runtime beim Start über ihren absoluten Pfad.
 - Jede Modellvariante über eine Modellkarte und die Nachverarbeitungsarten aus 2.3.
-- Jede Kamera, die das Board als ISP- oder USB-Videogerät zeigt, dazu RTSP, Dateien und Bilder; der Board-Installer
-  richtet Overlays, den 3A-Dienst und die IQ-Datei mit der Freigabe der Person ein, nach der Anleitung des
-  Kameraherstellers.
+- Jede Kamera, die ein Raspberry-Pi- oder Radxa-Board nutzen kann, dazu RTSP, Dateien und Bilder; der Board-Installer
+  richtet Treiber, Overlays (`rsetup`), den 3A-Dienst und die IQ-Datei mit der Freigabe der Person ein, nach der
+  offiziellen Anleitung des Kameraherstellers, und startet das Board neu.
 - V4L2, MPP und RGA direkt; GStreamer nur als Rückfall, wo er nötig ist.
 - Die Ausgaben folgen dem, was das Modell kann: Boxen, Masken, Keypoints, Text oder Embeddings als JSON und Ereignisse,
   und Video mit eingezeichneten Ergebnissen.

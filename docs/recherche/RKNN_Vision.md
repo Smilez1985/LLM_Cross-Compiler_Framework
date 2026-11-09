@@ -173,8 +173,9 @@ from [its entry of 2026-11-09](../DESIGN.md#decision-round-66) on):
   the person's consent and Rockchip's licence shown; the runtime is checked against the model's toolkit version.
 - The engine is Rust for aarch64 with glibc and loads the runtime by its absolute path at start.
 - Every model variant through a model card and the post-processing kinds of 2.3.
-- Every camera the board shows as an ISP or USB video device, plus RTSP, files and images; the board installer sets up
-  overlays, the 3A service and the IQ file with the person's approval, following the camera maker's instructions.
+- Every camera a Raspberry Pi or Radxa board can use, plus RTSP, files and images; the board installer sets up the
+  driver, the overlays (`rsetup`), the 3A service and the IQ file with the person's approval, following the camera
+  maker's official instructions, and restarts the board.
 - V4L2, MPP and RGA directly; GStreamer only as a fallback where it is needed.
 - Outputs follow what the model can do: boxes, masks, keypoints, text or embeddings as JSON and events, and video with
   the results drawn in.
