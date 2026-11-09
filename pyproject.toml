@@ -115,7 +115,7 @@ dev = [
 # requirements-resolve.txt into a temporary tool environment, never into the framework's own.
 resolve = [
     # uv treats a minor release as breaking while it is 0.x
-    "uv>=0.11.32,<0.14",
+    "uv>=0.13.7,<0.14",
     "pip-audit>=2.10.1,<3",
 ]
 
