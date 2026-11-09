@@ -171,6 +171,7 @@ class ApprovalStore:
 
     FILE_NAME = "tool_approvals.json"
     LOCK_NAME = ".tool_approvals.lock"
+    READ_WAIT = 2.0  # seconds a reader waits for a writer to finish its replace (see _read_settled)
     KIND = "tool_approvals"
 
     def __init__(self, state_dir: Path, key: Optional[bytes] = None,
@@ -237,11 +238,22 @@ class ApprovalStore:
 
     # --- reading -----------------------------------------------------------------------------------------------
 
+    def _read_settled(self) -> List[ApprovalRecord]:
+        """Reads the file once no writer is replacing it: a writer holds the lock file from its read to the replace,
+        so its release is the done marker. A writer that holds it longer than READ_WAIT (or a caller inside a change)
+        does not block the reader; then read_text's retry on Windows is the fallback."""
+        from orchestrator.utils.file_lock import LockTimeout, file_lock
+        try:
+            with file_lock(self.lock_path, timeout=self.READ_WAIT):
+                return self._read()
+        except LockTimeout:
+            return self._read()
+
     def list(self) -> List[ApprovalRecord]:
-        return self._read()
+        return self._read_settled()
 
     def get(self, approval_id: str) -> Optional[ApprovalRecord]:
-        return next((r for r in self._read() if r.id == approval_id), None)
+        return next((r for r in self._read_settled() if r.id == approval_id), None)
 
     def fingerprint(self) -> Optional[Tuple[int, int, int]]:
         """Changes whenever the file is replaced; a cheap check before reading it again."""
@@ -254,7 +266,7 @@ class ApprovalStore:
     def pending(self) -> List[ApprovalRecord]:
         """Approvals the person can still decide (pending, not expired, their session still running)."""
         now = _now()
-        return [r for r in self._read() if r.state == "pending" and not r.expired(now) and r.holder_alive()]
+        return [r for r in self._read_settled() if r.state == "pending" and not r.expired(now) and r.holder_alive()]
 
     # --- changing ----------------------------------------------------------------------------------------------
 

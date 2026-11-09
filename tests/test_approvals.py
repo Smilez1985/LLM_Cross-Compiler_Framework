@@ -593,3 +593,52 @@ def test_a_new_warning_asks_again(env):
     record, asked_again = _approve_after(env, server, lambda: state.update(free=30, tight=True))
     assert asked_again.state == "pending" and asked_again.question_sha256 != record.question_sha256
     assert "tight" in asked_again.question and ran == []
+
+
+def test_a_reader_waits_until_the_writer_has_replaced_the_file(tmp_path):
+    """The writer holds the lock file from its read to the replace; its release is the done marker. A reader waits
+    for it (on Windows reading during the replace fails for a moment), so it sees the file only once it is whole."""
+    import threading
+
+    from orchestrator.utils.file_lock import file_lock
+    store = approvals_module.ApprovalStore(tmp_path)
+    held, order = threading.Event(), []
+
+    def writer():
+        with file_lock(store.lock_path, timeout=5):
+            held.set()
+            time.sleep(0.3)
+            order.append("replaced")
+    thread = threading.Thread(target=writer)
+    thread.start()
+    held.wait(5)
+    read = store._read
+    store._read = lambda: (order.append("read"), read())[1]
+    assert store.list() == []
+    thread.join()
+    assert order == ["replaced", "read"]
+
+
+def test_a_writer_that_holds_on_does_not_block_a_reader(tmp_path, monkeypatch):
+    """A writer that keeps the lock longer than READ_WAIT does not hold the reader up: it reads anyway, with
+    read_text's retry as the fallback."""
+    import threading
+
+    from orchestrator.utils.file_lock import file_lock
+    store = approvals_module.ApprovalStore(tmp_path)
+    monkeypatch.setattr(store, "READ_WAIT", 0.1)
+    held, done = threading.Event(), threading.Event()
+
+    def writer():
+        with file_lock(store.lock_path, timeout=5):
+            held.set()
+            done.wait(5)
+    thread = threading.Thread(target=writer)
+    thread.start()
+    held.wait(5)
+    started = time.monotonic()
+    try:
+        assert store.pending() == [] and time.monotonic() - started < 2
+    finally:
+        done.set()
+        thread.join()
