@@ -183,7 +183,6 @@ belongs.
 | Item | Status |
 |---|---|
 
-| **Remove the disk-image reader of the harness take-in, which has no use case any more?** A harness is always set up cleanly from its repository, so reading a `.img`, `.bin` or other standard disk image has no use; the built reader (`utils/ext4_read.py`) stays until the maintainer decides ([design](DESIGN.md#deployment-to-boards)). | open question |
 
 ## Next - build service, queue and modes (planned; starts right after the architecture consolidation)
 

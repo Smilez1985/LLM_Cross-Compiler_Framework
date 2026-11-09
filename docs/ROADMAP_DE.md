@@ -185,7 +185,6 @@ nennt jede dort, wo sie hingehört.
 | Punkt | Status |
 |---|---|
 
-| **Den Leser für Disk-Images der Harness-Übernahme entfernen, der keinen Anwendungsfall mehr hat?** Ein Harness wird immer sauber aus seinem Repository aufgesetzt, also hat das Lesen einer `.img`-, `.bin`- oder anderen Standard-Image-Datei keinen Nutzen; der gebaute Leser (`utils/ext4_read.py`) bleibt, bis der Maintainer entscheidet ([Design](DESIGN_DE.md#deployment-auf-boards)). | offene Frage |
 
 ## Als Nächstes - Build-Dienst, Warteschlange und Modi (geplant; beginnt direkt nach der Architektur-Konsolidierung)
 
