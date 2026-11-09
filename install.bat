@@ -165,6 +165,8 @@ function Copy-Robust ($Src, $Dst, $Exclude) {
 
 # Code kopieren (ohne git, venv, cache und ohne Build-Ergebnisse oder Modelle einer Entwicklungskopie)
 Copy-Robust $ScriptPath $InstallDir -Exclude ".git", ".venv", "__pycache__", "build", "dist", ".installer_venv", "output", "cache", "models", "logs"
+# Fuer den Updater (orchestrator/utils/updater.py, llm-cli update): der Checkout, aus dem installiert wurde
+if (Test-Path (Join-Path $ScriptPath ".git")) { Set-Content -LiteralPath (Join-Path $InstallDir ".install_source") -Value $ScriptPath -Encoding UTF8 }
 
 # 4. VENV SETUP
 Write-Host "[3/5] Erstelle Python Environment..." -ForegroundColor Yellow

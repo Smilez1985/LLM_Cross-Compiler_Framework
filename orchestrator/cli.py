@@ -4087,6 +4087,41 @@ DOCTOR_NOTE = ("Note: the health check is Mojo now: 'llmcf mojo' checks (Mojo Or
                "repairs (Mojo Miracle); 'llm-cli doctor' keeps working.")
 
 
+@cli.command('update')
+@click.option('--check', 'check_only', is_flag=True, help='Only say how many new commits the checkout has; change nothing')
+@click.option('--offline', is_flag=True, help='Install the tested dependency set (uv.lock) without resolving anew')
+@click.option('--yes', is_flag=True, help='Do not ask before the update starts (the installer still asks its own questions)')
+def update(check_only: bool, offline: bool, yes: bool):
+    """Update the framework: the checkout you installed from moves forward (git, fast-forward only), then its
+    installer runs again and installs the newest compatible dependencies, checked, with a way back"""
+    from orchestrator.Core.framework import APP_ROOT
+    from orchestrator.utils.updater import UpdateError, UpdateManager
+    manager = UpdateManager(APP_ROOT)
+    source = manager.source_root()
+    if source is None:
+        click.echo(f"No git checkout to update from ({APP_ROOT} is none and names none). Update from the folder "
+                   "you installed from: git pull, then run its installer again.", err=True)
+        sys.exit(1)
+    new = manager.check_for_updates()
+    click.echo(f"{source}: {new} new commit(s) upstream." if new else
+               f"{source}: no new commits upstream; the installer still takes the newest dependencies.")
+    if check_only:
+        return
+    flags = ("--offline",) if offline else ()
+    if not yes and not click.confirm(f"Run the installer {' '.join(manager.installer_command(*flags))} now?",
+                                     default=False, err=True):
+        click.echo("Nothing changed.")
+        return
+    try:
+        code = manager.run(*flags)
+    except UpdateError as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
+    if code:
+        click.echo(f"The installer ended with exit code {code}; its messages above say why.", err=True)
+    sys.exit(code)
+
+
 @cli.command('doctor')
 @click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
 @click.option('--fix', is_flag=True, help='Apply automatic fixes up to --tier, then check again')

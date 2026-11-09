@@ -52,6 +52,7 @@ from orchestrator.gui.menus import ditto_models as menu_ditto_models
 from orchestrator.gui.menus import ditto_runtime as menu_ditto_runtime
 from orchestrator.gui.menus import knowledge as menu_knowledge
 from orchestrator.gui.menus import mojo as menu_mojo
+from orchestrator.gui.menus import update as menu_update
 from orchestrator.gui.menus import place as menu_place
 from orchestrator.gui.menus import signin as menu_signin
 from orchestrator.gui.menus import tools_mcp as menu_tools_mcp
@@ -256,6 +257,7 @@ class MainOrchestrator(QMainWindow):
         menu_tools_mcp.install(self, menubar)  # Security > Audit Log..., AI App Connections...; Deep Ingest Notice...
         menu_knowledge.install(self, menubar)  # Tools > Knowledge > Knowledge Sources...
         menu_mojo.install(self, menubar)  # Tools > Maintenance > Mojo Health Check...
+        menu_update.install(self, menubar)  # Tools > Maintenance > Update Framework...
         # Optional install hooks of later chains (no shared list to edit): Set up Ditto's guide and the Help menu.
         for optional in ("ditto_setup", "help", "acp_agents"):
             module = menu_place.optional_module(optional)

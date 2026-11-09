@@ -76,6 +76,7 @@ MENU_LAYOUT = (
         ("menu_tools_maintenance", "main.menu.tools_maintenance", (
             ("act_framework_images", "main.tools.images"),
             ("act_mojo_health", "mojo.menu"),
+            ("act_tools_update", "update.menu"),
         )),
         "-",
         ("act_tools_audio", "main.tools.audio"),

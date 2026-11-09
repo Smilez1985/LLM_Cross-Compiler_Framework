@@ -1480,7 +1480,8 @@ class TestMainWindowWiring:
                                                      "Knowledge Sources...",   # wave 5 (W1'): knowledge sources
                                                      "Index the Framework's Documentation...",
                                                      "Deep Ingest Notice..."]
-            assert menus["menu_tools_maintenance"] == ["Framework Build Images...", "Mojo Health Check..."]
+            assert menus["menu_tools_maintenance"] == ["Framework Build Images...", "Mojo Health Check...",
+                                                          "Update Framework..."]
             # File > Settings... (GUI parity, wave 5: config show / config repos by mouse) sits above Exit
             assert menus["menu_file"] == ["Trash...", "Output Folder...", "Settings...", "Exit"]
             assert menus["menu_build"] == ["Targets...", "Build History...", "Build Container Images...",

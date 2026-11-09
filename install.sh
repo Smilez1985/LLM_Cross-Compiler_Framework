@@ -1658,6 +1658,8 @@ deploy_files() {
         fi
         cp "$list" "$INSTALL_DIR/$MANIFEST_NAME"
         rm -f "$list"
+        # Für den Updater (orchestrator/utils/updater.py, llm-cli update): der Checkout, aus dem installiert wurde.
+        if [ -d "$REPO_ROOT/.git" ]; then printf '%s\n' "$REPO_ROOT" > "$INSTALL_DIR/.install_source"; fi
     fi
 
     # Rechte anpassen (Der normale User soll den Code besitzen, um ohne sudo auszuführen)

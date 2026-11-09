@@ -20,6 +20,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [Overview of all commands](#overview-of-all-commands)
 - [mojo](#mojo): health check (Mojo Oracle) and repairs (Mojo Miracle)
 - [doctor](#doctor): the old name of `mojo`
+- [update](#update): update the framework (git fast-forward, then the installer again)
 - [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
 - [build](#build): `start`, `save`, `deps`, `status`
@@ -124,6 +125,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 |---|---|
 | `mojo` | Check the installation (Mojo Oracle) and repair what can be repaired safely (Mojo Miracle) |
 | `doctor` | The old name of `mojo`, with its options of 3.0.0 |
+| `update` | Update the framework: the checkout you installed from moves forward, then its installer runs again with the newest compatible dependencies |
 | `knowledge snapshots` | List the knowledge base's snapshots with full path, name, size and what each is; delete the ones you pick, or export them |
 | `knowledge index-docs` | Add the framework's own documentation (and with `--with-code` its code) to the knowledge base |
 | `knowledge storage` | Where the knowledge base is stored (Qdrant Edge), the conversion of an older one, and its old folder: `convert`, `delete-old` |
@@ -271,6 +273,37 @@ llm-cli doctor --fix --tier 2
 
 In the GUI: **Tools > Mojo Health Check...** (the check; **Run Mojo Miracle...** makes the repairs of `--fix`) and
 **Tools > Framework Build Images...** (the list of `--tier 2`).
+
+---
+
+## update
+
+```
+llm-cli update [--check] [--offline] [--yes]
+```
+
+Updates the framework: the git checkout you installed from moves forward (fast-forward only; a checkout with
+commits of its own stays as it is and the command says why), then its installer runs again (`install.sh` with sudo,
+`install.bat` on Windows). The installer resolves the newest compatible dependencies on every run, audits and checks
+them and keeps a way back, so an update is one more run of it. The installed copy has no `.git`; the installer
+writes the checkout it ran from into `.install_source` there, and `update` starts from that checkout. On Windows the
+installer starts in a console of its own and the command ends at once, since the installer replaces the environment
+it runs from.
+
+| Option | Meaning |
+|---|---|
+| `--check` | Only say how many new commits the checkout's upstream has; nothing changes. |
+| `--offline` | Passed to the installer: install the tested dependency set (`uv.lock`) without resolving anew. |
+| `--yes` | Do not ask before the update starts (the default answer is no). The installer still asks its own questions. |
+
+```bash
+llm-cli update --check
+llm-cli update
+llm-cli update --offline
+```
+
+In the GUI: **Tools > Maintenance > Update Framework...** (checks, asks with "No" as the default, then runs the
+update in a terminal; on Windows in the installer's console, and the framework closes). An AI never starts an update.
 
 ---
 
