@@ -457,15 +457,15 @@ class SecretsManager:
         ({"kind": "api_key|oauth|local_key|aws_static|google_sa", "secret"/"access_token"/... }), up to 64 KB."""
         name = canonical_name(name) if isinstance(name, str) else ""
         if not CRED_NAME.match(name) or not isinstance(record, dict) or record.get("kind") not in RECORD_KINDS:
-            self.logger.error(f"Invalid credential record or name: {name!r}")
+            self.logger.error("Invalid credential record or name.")
             return False
         try:
             plain = json.dumps({**record, "v": 1}, ensure_ascii=True, allow_nan=False)
         except (TypeError, ValueError, RecursionError) as e:
-            self.logger.error(f"Credential record {name} is not JSON: {type(e).__name__}")
+            self.logger.error(f"A credential record is not JSON: {type(e).__name__}")
             return False
         if len(plain) > MAX_RECORD_BYTES:
-            self.logger.error(f"Credential record {name} is larger than {MAX_RECORD_BYTES} bytes.")
+            self.logger.error(f"A credential record is larger than {MAX_RECORD_BYTES} bytes.")
             return False
         return self._put(name, plain)
 
@@ -670,7 +670,7 @@ class SecretsManager:
             try:
                 plain[name] = self._decrypt(entry)
             except (InvalidToken, ValueError, UnicodeError):
-                self.logger.error(f"Entry {name} cannot be decrypted; nothing was changed.")
+                self.logger.error("An entry cannot be decrypted; nothing was changed.")
                 return None
         return plain
 
@@ -695,7 +695,7 @@ class SecretsManager:
         try:
             plain = self._decrypt(entry)
         except (InvalidToken, ValueError, UnicodeError):
-            self.logger.error(f"Decryption failed for {name}")
+            self.logger.error("Decryption of a stored entry failed.")
             self._audit_log("READ", name, "DECRYPTION_FAIL - POSSIBLE TAMPERING")
             return None
         self._audit_read(name)
@@ -707,7 +707,7 @@ class SecretsManager:
         except (ValueError, RecursionError):
             record = None
         if not isinstance(record, dict):
-            self.logger.error(f"Credential record {name} is damaged.")
+            self.logger.error("A credential record is damaged.")
             return None
         return record
 
