@@ -495,10 +495,17 @@ def test_a_long_per_user_folder_puts_the_socket_into_a_private_temporary_folder(
 
 
 @POSIX_ONLY
-def test_only_a_stale_socket_is_replaced(tmp_path):
-    state = tmp_path / "s"
+def test_only_a_stale_socket_is_replaced():
+    # A short folder of its own, so the socket goes into the bridge folder: below a long tmp_path (pytest -n adds a
+    # segment per worker) it would go to a temporary folder instead and pass the planted file by.
+    with tempfile.TemporaryDirectory(prefix="b") as short:
+        _only_a_stale_socket_is_replaced(Path(short) / "s")
+
+
+def _only_a_stale_socket_is_replaced(state):
     folder = gui_bridge.bridge_folder(state)
     planted = folder / gui_bridge.SOCKET_NAME
+    assert gui_bridge.new_endpoint(folder, False)[1] == str(planted), "the socket goes into the bridge folder"
     planted.write_text("not a socket", encoding="utf-8")
     server = gui_bridge.BridgeServer(state, lambda request: {"ok": True})
     assert not server.start() and planted.read_text(encoding="utf-8") == "not a socket", "never deleted"

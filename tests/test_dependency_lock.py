@@ -82,7 +82,7 @@ def test_pyproject_is_pep621_and_poetry_is_gone():
     assert project["scripts"] == {"llm-gui": "orchestrator.main:main", "llm-cli": "orchestrator.cli:cli",
                                   "llmcf": "orchestrator.cli:cli"}
     assert {norm(Requirement(r).name) for r in data["dependency-groups"]["dev"]} == {
-        "pytest", "ruff", "bandit", "pip-audit", "shellcheck-py", "actionlint-py"}
+        "pytest", "pytest-xdist", "ruff", "bandit", "pip-audit", "shellcheck-py", "actionlint-py"}
     # PySide6 is the optional extra 'gui' (A3): the base install, the CLI and the MCP server run without Qt
     assert {norm(Requirement(r).name) for r in project["optional-dependencies"]["gui"]} == {"pyside6-essentials"}
     assert not [r for r in project["dependencies"] if norm(Requirement(r).name).startswith(("pyside6", "shiboken6"))]

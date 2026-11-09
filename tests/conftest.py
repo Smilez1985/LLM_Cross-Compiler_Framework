@@ -423,6 +423,18 @@ def isolated_environment(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def fresh_cli_console(monkeypatch):
+    """Each test gets the CLI's shared console new, made at its first print: rich fixes a console's width when it
+    makes it (from COLUMNS, else the terminal, else 80), so a console made by an earlier test would carry that test's
+    width into this one, and a result would depend on which test ran first in the same process (pytest -n shows
+    it). The width is wide unless the test sets COLUMNS itself, so a table's cells are never cut."""
+    monkeypatch.setenv("COLUMNS", "400")
+    cli = sys.modules.get("orchestrator.cli")
+    if cli is not None and isinstance(cli.console, cli._SharedConsole):
+        monkeypatch.setattr(cli, "console", cli._SharedConsole())
+
+
+@pytest.fixture(autouse=True)
 def hermetic_locality(monkeypatch):
     """Offline mode's locality rule (utils/locality.py) never asks the real resolver or the real tailscale command in
     a test: a name does not resolve (a test gives its own answers), and the VPN cannot be read. The run's cache starts
