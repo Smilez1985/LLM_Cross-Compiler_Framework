@@ -197,6 +197,30 @@ fn raw(port: u16, path: &str, body: &str) -> String {
     out
 }
 
+/// What a test shows of a text the gateway or a stub sent (an answer, a log, a probe's output) when it fails: one line,
+/// every byte outside printable ASCII escaped (\n, \r, \t, \\, \xNN), so the text cannot forge or hide lines of the test
+/// output, and nothing of it is lost.
+fn shown(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        match byte {
+            b'\\' => out.push_str("\\\\"),
+            b'\n' => out.push_str("\\n"),
+            b'\r' => out.push_str("\\r"),
+            b'\t' => out.push_str("\\t"),
+            b' '..=b'~' => out.push(char::from(byte)),
+            _ => out.push_str(&format!("\\x{byte:02x}")),
+        }
+    }
+    out
+}
+
+#[test]
+fn a_shown_text_is_one_line_with_every_byte_kept() {
+    assert_eq!(shown("HTTP/1.1 200 OK\r\nA: b\n\tc\\d"), "HTTP/1.1 200 OK\\r\\nA: b\\n\\tc\\\\d");
+    assert_eq!(shown("Gr\u{fc}\u{df}e\u{1b}[2J"), "Gr\\xc3\\xbc\\xc3\\x9fe\\x1b[2J");
+}
+
 fn status_of(answer: &str) -> u16 {
     answer.split_whitespace().nth(1).and_then(|c| c.parse().ok()).unwrap_or(0)
 }
@@ -206,7 +230,7 @@ fn metric(port: u16, name: &str) -> f64 {
     text.lines()
         .find_map(|l| l.strip_prefix(name).and_then(|r| r.strip_prefix(' ')))
         .and_then(|v| v.trim().parse().ok())
-        .unwrap_or_else(|| panic!("no {name} in {text}"))
+        .unwrap_or_else(|| panic!("no {name} in {}", shown(&text)))
 }
 
 const CHAT: &str = r#"{"messages":[{"role":"user","content":"x"}]}"#;
@@ -220,7 +244,7 @@ fn health_reports_the_model_server_and_the_budget_from_its_props() {
     let s = stub();
     let g = gateway("health", s.port, &["--ctx-size", "4096"]);
     let (status, body) = http(g.port, "GET", "/health", "", "text/plain");
-    assert_eq!(status, 200, "{body}");
+    assert_eq!(status, 200, "{}", shown(&body));
     let v: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(v["upstream"], "up");
     assert_eq!(v["ctx_budget"], 2048);
@@ -242,8 +266,8 @@ fn a_busy_model_queues_requests_and_a_full_queue_answers_429() {
     thread::sleep(Duration::from_millis(250));
     assert_eq!(metric(port, "llmcf_gateway_queued"), 1.0);
     let third = raw(port, "/v1/chat/completions", CHAT);
-    assert_eq!(status_of(&third), 429, "{third}");
-    assert!(third.contains("queue_full") && third.to_ascii_lowercase().contains("retry-after: 5"), "{third}");
+    assert_eq!(status_of(&third), 429, "{}", shown(&third));
+    assert!(third.contains("queue_full") && third.to_ascii_lowercase().contains("retry-after: 5"), "{}", shown(&third));
     assert_eq!(first.join().unwrap(), 200);
     assert_eq!(second.join().unwrap(), 200, "the queued request is answered once the first is done");
     assert_eq!(metric(port, "llmcf_gateway_queue_full_total"), 1.0);
@@ -251,7 +275,7 @@ fn a_busy_model_queues_requests_and_a_full_queue_answers_429() {
     assert_eq!(metric(port, "llmcf_gateway_queue_wait_seconds_count"), 2.0);
     assert!(metric(port, "llmcf_gateway_queue_wait_seconds_sum") > 0.3);
     let log = g.log.lock().unwrap().clone();
-    assert!(log.contains(" queued=") && (log.contains("by=account") || log.contains("by=address")), "{log}");
+    assert!(log.contains(" queued=") && (log.contains("by=account") || log.contains("by=address")), "{}", shown(&log));
 }
 
 #[test]
@@ -263,8 +287,12 @@ fn a_request_that_waits_too_long_gets_503_with_retry_after() {
     thread::sleep(Duration::from_millis(250));
     let started = Instant::now();
     let second = raw(port, "/v1/chat/completions", CHAT);
-    assert_eq!(status_of(&second), 503, "{second}");
-    assert!(second.contains("queue_timeout") && second.to_ascii_lowercase().contains("retry-after: 15"), "{second}");
+    assert_eq!(status_of(&second), 503, "{}", shown(&second));
+    assert!(
+        second.contains("queue_timeout") && second.to_ascii_lowercase().contains("retry-after: 15"),
+        "{}",
+        shown(&second)
+    );
     assert!(started.elapsed() >= Duration::from_millis(900) && started.elapsed() < Duration::from_secs(2));
     assert_eq!(first.join().unwrap(), 200);
     assert_eq!(metric(port, "llmcf_gateway_queue_timeouts_total"), 1.0);
@@ -309,7 +337,7 @@ fn a_streamed_answer_holds_its_place_until_its_end() {
     thread::sleep(Duration::from_millis(200));
     let second = thread::spawn(move || raw(port, "/v1/chat/completions", body));
     let (a, b) = (first.join().unwrap(), second.join().unwrap());
-    assert!(a.contains("[DONE]") && b.contains("[DONE]"), "{a}\n{b}");
+    assert!(a.contains("[DONE]") && b.contains("[DONE]"), "{}\n{}", shown(&a), shown(&b));
     let times = s.times.lock().unwrap().clone();
     assert_eq!(times.len(), 2);
     assert!(times[1].0 >= times[0].1, "the second request reached the model only after the first stream ended");
@@ -322,7 +350,7 @@ fn a_chat_request_reaches_the_model_server_rewritten_and_with_its_key() {
     let body = r#"{"messages":[{"role":"system","content":"Be brief."},{"role":"user","content":"zebra-violet"},
                   {"role":"system","content":"Be brief."}],"max_tokens":500}"#;
     let (status, answer) = post(g.port, "/v1/chat/completions", body);
-    assert_eq!(status, 200, "{answer}");
+    assert_eq!(status, 200, "{}", shown(&answer));
     assert!(answer.contains("\"OK\""));
     let seen = s.seen.lock().unwrap().clone();
     let (_, auth, sent) = seen.iter().find(|(p, _, _)| p == "/v1/chat/completions").expect("the request").clone();
@@ -333,11 +361,11 @@ fn a_chat_request_reaches_the_model_server_rewritten_and_with_its_key() {
     assert_eq!(v["messages"].as_array().unwrap().len(), 2);
     thread::sleep(Duration::from_millis(200));
     let log = g.log.lock().unwrap().clone();
-    assert!(log.contains("POST /v1/chat/completions 200"), "{log}");
-    assert!(!log.contains("zebra-violet"), "the log holds prompt text: {log}");
+    assert!(log.contains("POST /v1/chat/completions 200"), "{}", shown(&log));
+    assert!(!log.contains("zebra-violet"), "the log holds prompt text: {}", shown(&log));
     let (_, metrics) = http(g.port, "GET", "/metrics", "", "text/plain");
-    assert!(metrics.contains("llmcf_gateway_system_prompts_dropped_total 1"), "{metrics}");
-    assert!(metrics.contains("llmcf_gateway_max_tokens_clamped_total 1"), "{metrics}");
+    assert!(metrics.contains("llmcf_gateway_system_prompts_dropped_total 1"), "{}", shown(&metrics));
+    assert!(metrics.contains("llmcf_gateway_max_tokens_clamped_total 1"), "{}", shown(&metrics));
 }
 
 #[test]
@@ -345,7 +373,7 @@ fn what_the_strict_checks_refuse_never_reaches_the_model_server() {
     let s = stub();
     let g = gateway("strict", s.port, &["--max-body-kb", "4"]);
     let (status, body) = post(g.port, "/v1/chat/completions", "{not json");
-    assert_eq!(status, 400, "{body}");
+    assert_eq!(status, 400, "{}", shown(&body));
     assert!(body.contains("invalid_json"));
     let (status, _) = post(g.port, "/v1/chat/completions", r#"{"messages":[{"role":"user","content":"x"}],"x":1}"#);
     assert_eq!(status, 400);
@@ -367,7 +395,7 @@ fn the_rate_limit_answers_429_with_retry_after() {
     assert_eq!(post(g.port, "/v1/chat/completions", body).0, 200);
     assert_eq!(post(g.port, "/v1/chat/completions", body).0, 200);
     let (status, answer) = post(g.port, "/v1/chat/completions", body);
-    assert_eq!(status, 429, "{answer}");
+    assert_eq!(status, 429, "{}", shown(&answer));
     assert!(answer.contains("rate_limited"));
 }
 
@@ -376,10 +404,10 @@ fn a_model_server_that_is_down_gives_503() {
     let down = free_port();
     let g = gateway("down", down, &[]);
     let (status, body) = post(g.port, "/v1/chat/completions", r#"{"messages":[{"role":"user","content":"x"}]}"#);
-    assert_eq!(status, 503, "{body}");
+    assert_eq!(status, 503, "{}", shown(&body));
     assert!(body.contains("upstream_down"));
     let (_, health) = http(g.port, "GET", "/health", "", "text/plain");
-    assert!(health.contains("\"upstream\":\"down\""), "{health}");
+    assert!(health.contains("\"upstream\":\"down\""), "{}", shown(&health));
 }
 
 fn probe(port: u16, extra: &[&str]) -> (i32, String) {
@@ -394,11 +422,11 @@ fn the_probe_checks_health_one_completion_and_a_short_bench() {
     let s = stub();
     let g = gateway("probe", s.port, &[]);
     let (code, out) = probe(g.port, &["--complete", "--bench", "2"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(out.contains("llmcf-gateway: health=ok upstream=up bind=loopback tls=no"), "{out}");
-    assert!(out.contains("complete=ok"), "{out}");
-    assert!(out.contains("bench=ok runs=2"), "{out}");
-    assert!(!out.contains("OK\""), "the probe prints no answer text: {out}");
+    assert_eq!(code, 0, "{}", shown(&out));
+    assert!(out.contains("llmcf-gateway: health=ok upstream=up bind=loopback tls=no"), "{}", shown(&out));
+    assert!(out.contains("complete=ok"), "{}", shown(&out));
+    assert!(out.contains("bench=ok runs=2"), "{}", shown(&out));
+    assert!(!out.contains("OK\""), "the probe prints no answer text: {}", shown(&out));
 }
 
 #[test]
@@ -413,11 +441,11 @@ fn the_lan_mode_speaks_only_tls_and_reports_its_pinned_fingerprint() {
     let (status, _) = http(g.port, "GET", "/health", "", "text/plain");
     assert_eq!(status, 0);
     let (code, out) = probe(g.port, &["--tls", "--complete"]);
-    assert_eq!(code, 0, "{out}");
+    assert_eq!(code, 0, "{}", shown(&out));
     let fp =
         out.lines().find_map(|l| l.strip_prefix("llmcf-gateway: fingerprint=")).expect("a fingerprint").to_string();
     assert_eq!(fp.len(), 64);
-    assert!(out.contains("tls=yes") && out.contains("bind=lan"), "{out}");
+    assert!(out.contains("tls=yes") && out.contains("bind=lan"), "{}", shown(&out));
     assert!(g.log.lock().unwrap().contains(&fp), "the start line names the certificate's fingerprint");
     // the probe without TLS gets nothing from the TLS port
     assert_ne!(probe(g.port, &[]).0, 0);
@@ -441,17 +469,17 @@ fn while_memory_is_low_new_requests_wait_and_are_not_sent_on() {
     let s = stub();
     let g = gateway("qmem", s.port, &["--memory-floor-mb", "1048576", "--queue-wait-seconds", "1"]);
     let (status, body) = post(g.port, "/v1/chat/completions", CHAT);
-    assert_eq!(status, 503, "{body}");
-    assert!(body.contains("queue_timeout"), "{body}");
+    assert_eq!(status, 503, "{}", shown(&body));
+    assert!(body.contains("queue_timeout"), "{}", shown(&body));
     assert!(s.times.lock().unwrap().is_empty(), "nothing reached the model");
     let (_, health) = http(g.port, "GET", "/health", "", "text/plain");
     let v: serde_json::Value = serde_json::from_str(&health).unwrap();
-    assert_eq!(v["memory"]["low"], true, "{health}");
+    assert_eq!(v["memory"]["low"], true, "{}", shown(&health));
     assert_eq!(v["memory"]["floor_mib"], 1048576);
     assert_eq!(metric(g.port, "llmcf_gateway_memory_low"), 1.0);
     assert!(metric(g.port, "llmcf_gateway_admission_held_total") >= 1.0);
     let log = g.log.lock().unwrap().clone();
-    assert!(log.contains("memory low (MemAvailable ") && log.contains("new requests wait"), "{log}");
+    assert!(log.contains("memory low (MemAvailable ") && log.contains("new requests wait"), "{}", shown(&log));
     // the guard off: the same request goes through
     let g = gateway("qmem0", s.port, &["--memory-floor-mb", "0", "--memory-psi-max", "0"]);
     assert_eq!(post(g.port, "/v1/chat/completions", CHAT).0, 200);
@@ -485,7 +513,7 @@ fn health_and_metrics_list_the_engines_and_a_running_llm_takes_requests() {
     assert_eq!(v["engines"]["mode"], "in-turn");
     assert_eq!(v["engines"]["budget_mib"], 1000);
     assert_eq!(v["engines"]["list"][0]["name"], "llm");
-    assert_eq!(v["engines"]["list"][0]["state"], "running", "{body}");
+    assert_eq!(v["engines"]["list"][0]["state"], "running", "{}", shown(&body));
     assert_eq!(v["engines"]["list"][1]["name"], "stt");
     assert_eq!(v["engines"]["list"][1]["state"], "stopped");
     assert_eq!(v["engines"]["list"][1]["mib"], 300);
@@ -494,7 +522,7 @@ fn health_and_metrics_list_the_engines_and_a_running_llm_takes_requests() {
     assert_eq!(metric(g.port, "llmcf_gateway_engine_running{engine=\"llm\"}"), 1.0);
     assert_eq!(metric(g.port, "llmcf_gateway_engine_running{engine=\"stt\"}"), 0.0);
     let log = g.log.lock().unwrap().clone();
-    assert!(log.contains("engines llm=900MiB,stt=300MiB (in-turn), 1000 MiB together"), "{log}");
+    assert!(log.contains("engines llm=900MiB,stt=300MiB (in-turn), 1000 MiB together"), "{}", shown(&log));
 }
 
 /// What a recording stub saw of one request: path, Content-Type, Authorization and the body's bytes.
@@ -610,9 +638,9 @@ fn an_audio_upload_reaches_whisper_as_its_own_form() {
     ]);
     let ctype = format!("multipart/form-data; boundary={BOUNDARY}");
     let (status, answer) = http_bytes(g.port, "/v1/audio/transcriptions", &ctype, &body);
-    assert_eq!(status, 200, "{answer}");
-    assert!(answer.to_ascii_lowercase().contains("content-type: text/plain; charset=utf-8"), "{answer}");
-    assert!(answer.contains("\r\nHallo Welt\n\r\n"), "{answer}");
+    assert_eq!(status, 200, "{}", shown(&answer));
+    assert!(answer.to_ascii_lowercase().contains("content-type: text/plain; charset=utf-8"), "{}", shown(&answer));
+    assert!(answer.contains("\r\nHallo Welt\n\r\n"), "{}", shown(&answer));
     let got = seen.lock().unwrap().clone();
     assert_eq!(got.len(), 1);
     let (path, ct, auth, sent) = &got[0];
@@ -627,15 +655,15 @@ fn an_audio_upload_reaches_whisper_as_its_own_form() {
         "name=\"temperature\"\r\n\r\n0\r\n",
         "name=\"file\"; filename=\"audio.wav\"",
     ] {
-        assert!(text.contains(field), "{field} in {text:.400}");
+        assert!(text.contains(field), "{field} in {:.400}", shown(&text));
     }
     assert!(!text.contains("secret") && !text.contains("whisper-1"), "neither the client's file name nor its model");
     let at = sent.windows(audio.len()).position(|w| w == audio.as_slice());
     assert!(at.is_some(), "the audio arrives byte for byte");
     // the log has the route, the type and the size, never the prompt or the transcript
     let log = g.log.lock().unwrap().clone();
-    assert!(log.contains("POST /v1/audio/transcriptions 200") && log.contains("audio=wav"), "{log}");
-    assert!(!log.contains("Gruss") && !log.contains("Hallo"), "{log}");
+    assert!(log.contains("POST /v1/audio/transcriptions 200") && log.contains("audio=wav"), "{}", shown(&log));
+    assert!(!log.contains("Gruss") && !log.contains("Hallo"), "{}", shown(&log));
     assert_eq!(metric(g.port, "llmcf_gateway_route_requests_total{route=\"/v1/audio/transcriptions\"}"), 1.0);
     assert_eq!(
         metric(g.port, "llmcf_gateway_route_bytes_in_total{route=\"/v1/audio/transcriptions\"}"),
@@ -661,15 +689,15 @@ fn audio_the_gateway_does_not_take_never_reaches_whisper() {
     ];
     for (ct, body, want) in cases {
         let (status, answer) = http_bytes(g.port, "/v1/audio/transcriptions", &ct, &body);
-        assert_eq!(status, want, "{answer}");
+        assert_eq!(status, want, "{}", shown(&answer));
     }
     assert!(seen.lock().unwrap().is_empty());
     assert_eq!(metric(g.port, "llmcf_gateway_route_refused_total{route=\"/v1/audio/transcriptions\"}"), 6.0);
     // a gateway without a speech engine says so
     let g2 = gateway("stt-none", s.port, &[]);
     let (status, answer) = http_bytes(g2.port, "/v1/audio/transcriptions", &ctype, &upload(&[]));
-    assert_eq!(status, 501, "{answer}");
-    assert!(answer.contains("stt-whisper-cpp"), "{answer}");
+    assert_eq!(status, 501, "{}", shown(&answer));
+    assert!(answer.contains("stt-whisper-cpp"), "{}", shown(&answer));
 }
 
 fn png_url(size: usize) -> String {
@@ -698,7 +726,7 @@ fn a_chat_with_an_image_goes_to_the_vision_engine_unchanged() {
     let text = body.to_string();
     assert!(text.len() > 256 * 1024, "larger than the JSON cap alone");
     let (status, out) = post(g.port, "/v1/chat/completions", &text);
-    assert_eq!(status, 200, "{out}");
+    assert_eq!(status, 200, "{}", shown(&out));
     assert!(out.contains("a cat"));
     let got = seen.lock().unwrap().clone();
     assert_eq!(got.len(), 1);
@@ -718,7 +746,7 @@ fn a_chat_with_an_image_goes_to_the_vision_engine_unchanged() {
         {"type": "image_url", "image_url": {"url": "https://example.invalid/cat.png"}}]}]});
     let (status, out) = post(g.port, "/v1/chat/completions", &remote.to_string());
     assert_eq!(status, 400);
-    assert!(out.contains("remote_image"), "{out}");
+    assert!(out.contains("remote_image"), "{}", shown(&out));
     assert_eq!(seen.lock().unwrap().len(), 1);
     let (_, health) = http(g.port, "GET", "/health", "", "text/plain");
     let h: serde_json::Value = serde_json::from_str(&health).unwrap();
@@ -730,7 +758,7 @@ fn a_chat_with_an_image_goes_to_the_vision_engine_unchanged() {
         {"type": "image_url", "image_url": {"url": png_url(100)}}]}]});
     let (status, out) = post(g2.port, "/v1/chat/completions", &small.to_string());
     assert_eq!(status, 400);
-    assert!(out.contains("unsupported_content"), "{out}");
+    assert!(out.contains("unsupported_content"), "{}", shown(&out));
 }
 
 /// The route table of a bundle (`--routes`): an engine of a kind of its own, reached only through what its block
@@ -771,7 +799,7 @@ fn a_route_table_reaches_a_new_engine_through_the_generic_adapters() {
     let form = upload(&[("image", Some("../holiday photo.jpg"), jpeg), ("threshold", None, b"0.5")]);
     let ctype = format!("multipart/form-data; boundary={BOUNDARY}");
     let (status, answer) = http_bytes(g.port, "/api/detect", &ctype, &form);
-    assert_eq!(status, 200, "{answer}");
+    assert_eq!(status, 200, "{}", shown(&answer));
     assert!(answer.contains(r#"{"boxes":[{"label":"cat""#) && answer.contains("application/json"));
     {
         let seen = seen.lock().unwrap();
@@ -805,12 +833,12 @@ fn a_route_table_reaches_a_new_engine_through_the_generic_adapters() {
     // an event stream passes through on its stream route, is refused on a route that declares none
     let stream = raw(g.port, "/api/events", r#"{"go":true}"#);
     assert_eq!(status_of(&stream), 200);
-    assert!(stream.contains("text/event-stream") && stream.contains("data: [DONE]"), "{stream}");
+    assert!(stream.contains("text/event-stream") && stream.contains("data: [DONE]"), "{}", shown(&stream));
     let plain = raw(g.port, "/api/events/plain", r#"{"go":true}"#);
-    assert_eq!(status_of(&plain), 502, "{plain}");
+    assert_eq!(status_of(&plain), 502, "{}", shown(&plain));
     // an engine silent for longer than its route's timeout: the stream ends there, its place is free again
     let cut = raw(g.port, "/api/stall", r#"{"go":true}"#);
-    assert!(cut.contains("\"O\"") && !cut.contains("[DONE]"), "{cut}");
+    assert!(cut.contains("\"O\"") && !cut.contains("[DONE]"), "{}", shown(&cut));
     // counted per route, never the content
     assert_eq!(metric(g.port, "llmcf_gateway_route_requests_total{route=\"/api/detect\"}"), 3.0);
     assert_eq!(metric(g.port, "llmcf_gateway_route_refused_total{route=\"/api/detect\"}"), 2.0);
@@ -827,7 +855,7 @@ fn a_route_table_reaches_a_new_engine_through_the_generic_adapters() {
         (Some("detect.detect"), Some(detect as u64))
     );
     let log = g.log.lock().unwrap().clone();
-    assert!(!log.contains("holiday") && !log.contains("image-bytes") && !log.contains("labels"), "{log}");
+    assert!(!log.contains("holiday") && !log.contains("image-bytes") && !log.contains("labels"), "{}", shown(&log));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

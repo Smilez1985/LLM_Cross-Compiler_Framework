@@ -94,10 +94,11 @@ impl Keys {
         t.update(msg_b);
         let transcript: [u8; 32] = t.finalize().into();
         let hk = Hkdf::<Sha256>::new(Some(SALT), k);
-        let take = |info: &[u8]| {
-            let mut out = [0u8; 32];
+        // Each key is HKDF's output for its label, written into a key-sized buffer of the cipher's own key type.
+        let take = |info: &[u8]| -> [u8; 32] {
+            let mut out = Key::default();
             hk.expand(info, &mut out).expect("32 bytes are a valid HKDF length");
-            out
+            out.into()
         };
         Keys {
             transcript,
@@ -131,17 +132,17 @@ impl Keys {
         Self::mac(&self.confirm_board, b"board", &self.transcript).verify_slice(tag).is_ok()
     }
 
-    fn nonce(counter: u64) -> [u8; 12] {
-        let mut n = [0u8; 12];
-        n[4..].copy_from_slice(&counter.to_be_bytes());
-        n
+    /// The 96-bit nonce of frame `counter`: the counter big-endian in the low 64 bits, the high 32 bits zero, which
+    /// are the low 12 bytes of the counter as a big-endian 128-bit number. Every frame of a direction has its own.
+    fn nonce(counter: u64) -> Nonce {
+        Nonce::clone_from_slice(&u128::from(counter).to_be_bytes()[4..])
     }
 
     fn seal(&self, key: &[u8; 32], counter: u64, plain: &[u8]) -> Vec<u8> {
         let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
         let nonce = Self::nonce(counter);
         cipher
-            .encrypt(Nonce::from_slice(&nonce), Payload { msg: plain, aad: &self.transcript })
+            .encrypt(&nonce, Payload { msg: plain, aad: &self.transcript })
             .expect("ChaCha20-Poly1305 seals any message of a frame's size")
     }
 
@@ -149,7 +150,7 @@ impl Keys {
         let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
         let nonce = Self::nonce(counter);
         cipher
-            .decrypt(Nonce::from_slice(&nonce), Payload { msg: sealed, aad: &self.transcript })
+            .decrypt(&nonce, Payload { msg: sealed, aad: &self.transcript })
             .map_err(|_| Failure::Protocol("a sealed frame does not open"))
     }
 
@@ -281,6 +282,24 @@ mod tests {
         assert!(b.open_host(0, &sealed).is_err());
         assert_eq!(a.open_host(0, &sealed).unwrap(), b"x");
         assert!(a.open_host(1, &sealed).is_err());
+    }
+
+    #[test]
+    fn the_nonce_is_the_counter_in_its_low_eight_bytes() {
+        assert_eq!(Keys::nonce(0x0102_0304_0506_0708).as_slice(), &[0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(Keys::nonce(u64::MAX).as_slice(), &[0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255]);
+        assert_ne!(Keys::nonce(1), Keys::nonce(2));
+    }
+
+    #[test]
+    fn the_derived_keys_and_sealed_frames_stay_the_same() {
+        // Known answers: a change of the key derivation or the nonce would break pairing with an older board.
+        let a = Keys::derive(&[7u8; 32], &[1u8; 33], &[2u8; 33]);
+        let h = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+        assert_eq!(h(&a.host_confirmation()), "234b05f5aa37b3e7fa4dae3afb58abb453c3a41d25d9f16f150d057c5d700737");
+        assert_eq!(h(&a.board_confirmation()), "d8def5264752604257e64c6c5f67e1b4c818c3e951c29d1622b91a4bfb0d0e68");
+        assert_eq!(h(&a.seal_host(0x0102_0304_0506_0708, b"frame")), "0a73db471ff6283667f2b8115ea00be01ebeb5a2c9");
+        assert_eq!(h(&a.seal_board(5, b"frame")), "be9f9c5e75866a1c12620b9a93bf66e3a4c87b04a3");
     }
 
     #[test]
