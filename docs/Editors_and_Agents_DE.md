@@ -281,7 +281,7 @@ Alle abgerufen am 2026-11-06.
 - [as-byoa]: Android Developers Blog, "Build your way: Use any AI agent of your choice in Android Studio"
   (2026-09-24): https://developer.android.com/blog/posts/build-your-way-use-any-ai-agent-of-your-choice-in-android-studio
 - [ag-acp]: Google Antigravity, andere Editoren (ACP): https://antigravity.google/docs/ide/extensions/acp
-- Die Recherche des Frameworks zu ACP: [ACP-Recherche](research/ACP_DE.md).
+- Die Recherche des Frameworks zu ACP: [ACP-Recherche](recherche/ACP_DE.md).
 
 [acp-session]: https://agentclientprotocol.com/protocol/v1/session-setup.md
 [zed-agents]: https://zed.dev/docs/ai/external-agents

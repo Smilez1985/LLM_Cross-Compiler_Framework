@@ -51,8 +51,10 @@ EXPECTED_PAIRS: List[Tuple[str, str]] = [
     ("docs/Mojo.md", "docs/Mojo_DE.md"),  # the health check (Mojo Oracle and Mojo Miracle)
     # the setup guide: the MCP server in editors' ACP agents, Ditto as their agent, the framework as ACP client
     ("docs/Editors_and_Agents.md", "docs/Editors_and_Agents_DE.md"),
-    ("docs/research/ACP.md", "docs/research/ACP_DE.md"),  # research: the Agent Client Protocol and other ACPs
-    ("docs/research/MCP_vs_ACP.md", "docs/research/MCP_vs_ACP_DE.md"),  # research: MCP, ACP and A2A side by side
+    ("docs/recherche/ACP.md", "docs/recherche/ACP_DE.md"),  # research: the Agent Client Protocol and other ACPs
+    ("docs/recherche/MCP_vs_ACP.md", "docs/recherche/MCP_vs_ACP_DE.md"),  # research: MCP, ACP and A2A side by side
+    # research: Rockchip's NPU runtime, vision models and cameras for the board's vision engine
+    ("docs/recherche/RKNN_Vision.md", "docs/recherche/RKNN_Vision_DE.md"),
     ("configs/SSOT_ARCHITECTURE.md", "configs/SSOT_ARCHITECTURE_DE.md"),
     ("data/calibration/README.md", "data/calibration/README_DE.md"),
 ]
