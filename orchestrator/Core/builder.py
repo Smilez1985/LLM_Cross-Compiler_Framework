@@ -91,7 +91,7 @@ CONTAINER_WAIT_POLL = 30.0   # the longest single wait for a stage container bet
 END_RECORD_POLL = 5.0        # the same while the stage runner's end record is watched for (Core/build_end.py)
 RESOURCES_EVERY = 5.0        # seconds between two CPU and memory samples of a running stage container
 
-# The line the stage runner (targets/*/modules/build.sh, DECISIONS U9) prints for each of its stages: started
+# The line the stage runner (targets/*/modules/build.sh, DESIGN U9) prints for each of its stages: started
 # ("=== Stage 3/4: convert ==="), finished ("... done in 41 s ==="), finished earlier ("... resumed ===") or stopped
 # ("... failed (exit 1) ==="). It reaches the build's step and percent like every other step.
 STAGE_LINE = re.compile(r"^=== Stage (\d{1,2})/(\d{1,2}): ([a-z][a-z0-9_-]{0,31})"

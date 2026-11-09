@@ -18,7 +18,7 @@ now of the framework itself), and the AEAD, HKDF and HMAC come from `cryptograph
 byte equal to RustCrypto's spake2 0.4 (Ed25519 group, its M and N, its HKDF password scalar and its transcript hash);
 tests/test_pair_pake.py runs this module against the Rust program when CI built it.
 
-Local links only (DECISIONS: no internet relay): browse() asks only over this computer's private and link-local
+Local links only (DESIGN: no internet relay): browse() asks only over this computer's private and link-local
 addresses (utils/locality.py local_links: a direct cable without router, the computer's own hotspot, a board as access
 point, a LAN) and keeps only answers from such addresses; exchange() refuses any other address before it connects.
 

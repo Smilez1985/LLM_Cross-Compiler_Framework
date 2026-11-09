@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Identical builds (DECISIONS, eighth round, N11)
+LLM Cross-Compiler Framework - Identical builds (DESIGN round 8, N11)
 
 An earlier build counts as identical only when 100 % of the chosen options are the same: the model and its exact
 revision (the Hugging Face commit; for a local model every weights file by name, size and modification time), the

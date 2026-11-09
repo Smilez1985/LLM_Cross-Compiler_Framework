@@ -1168,7 +1168,7 @@ class BuildService:
                 board = None
         return optimization_for(self.board_profile(target, board))
 
-    # --- identical builds (DECISIONS, eighth round, N11) -------------------------------------------------------
+    # --- identical builds (DESIGN round 8, N11) -------------------------------------------------------
 
     def request_options(self, req: BuildRequestIn, inputs: Optional[LocalInputs] = None, *,
                         revision: Optional[str] = None, optimization: Optional[str] = None,

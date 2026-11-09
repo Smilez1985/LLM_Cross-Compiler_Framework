@@ -9,7 +9,7 @@ Every place in the repository that names the llama.cpp version, checked against 
 - reference: the catalogue of upstream projects (not read while the framework runs); compared as well.
 - legacy: a target whose modules/source_module.sh still has the LLAMA_CPP_COMMIT default of version 1.x (an older
   community target; decision D20): reported, never a failure. In a build the shipped stage modules use the pin of the
-  image (DECISIONS U9); their LLAMA_CPP_PIN_TAG and LLAMA_CPP_PIN_COMMIT, the default of
+  image (DESIGN U9); their LLAMA_CPP_PIN_TAG and LLAMA_CPP_PIN_COMMIT, the default of
   `source_module.sh --clone-llama-cpp`, are derived places.
 
 tests/test_build_recipe.py fails on any derived or reference mismatch; scripts/llama_cpp_pin.py prints the table.

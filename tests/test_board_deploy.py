@@ -490,7 +490,7 @@ class TestWaitingForTheBoard:
         board_dir.mkdir()
         counter = tmp_path / "runs"
         with zipfile.ZipFile(board_dir / "pkg.zip", "w") as z:
-            # deploy.sh runs in a folder of its own since the package is signed (DECISIONS 2026-10-31); the upload
+            # deploy.sh runs in a folder of its own since the package is signed (DESIGN, decision of 2026-10-31); the upload
             # folder it came from is $LLMCF_UPLOAD_DIR
             z.writestr("deploy.sh", 'echo run >> "$LLMCF_UPLOAD_DIR/../runs"\necho installed\n')
         cmd = DeploymentManager._remote_start_cmd(str(board_dir), "pkg.zip")

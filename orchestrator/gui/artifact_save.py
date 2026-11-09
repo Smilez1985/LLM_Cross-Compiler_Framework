@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Saving golden artifacts in the GUI (DECISIONS, eighth round, answer 3), and the question about an identical earlier
+Saving golden artifacts in the GUI (DESIGN round 8, answer 3), and the question about an identical earlier
 build (N11).
 
 - `ask_and_save`: a native folder dialog opens at the output folder for a finished build the person started; OK saves

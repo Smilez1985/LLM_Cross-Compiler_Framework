@@ -23,7 +23,7 @@ from orchestrator.tools.registry import ToolError
 HF_REPO = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
 PREFLIGHT_NOTE = ("The pre-flight check and measured quantization recommendations are not part of this framework "
                   "version yet; fit values are estimates.")
-# Where an AI caller's finished build goes (DECISIONS, eighth round, answer 3): no dialog, the person's output folder
+# Where an AI caller's finished build goes (DESIGN round 8, answer 3): no dialog, the person's output folder
 SAVED_NOTE = ("When it has finished, the model is saved in the person's output folder; get_build_status names it by "
               "label (output:<target>/<model>/<quantization>, with -2 when an earlier build has that name).")
 
@@ -132,7 +132,7 @@ class FitPairOut(BaseModel):
 
 
 class EarlierBuildOut(BaseModel):
-    """A finished build with 100 % the same options (DECISIONS, eighth round, N11)."""
+    """A finished build with 100 % the same options (DESIGN round 8, N11)."""
     artifact_id: str
     label: untrusted_text(1000)
     created: Optional[untrusted_text(64)] = None

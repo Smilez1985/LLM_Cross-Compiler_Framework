@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The licence files a pack ships with the pages it carries in full (DECISIONS, answers of 2026-10-16, W3).
+The licence files a pack ships with the pages it carries in full (DESIGN, answers of 2026-10-16, W3).
 
 A knowledge pack, and a target's knowledge snapshot, carry a page's full text only where its licence allows it
 (licences.py). When a page carried in full is under a licence that asks for its text or permission notice (MIT, BSD,

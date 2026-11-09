@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Conversion of the local knowledge base from the old storage to Qdrant Edge (DECISIONS RG5).
+Conversion of the local knowledge base from the old storage to Qdrant Edge (DESIGN RG5).
 
 Earlier versions kept the local knowledge base in qdrant-client's local mode (`<state>/qdrant`): a pure-Python
 re-implementation of Qdrant meant for development. This version keeps it in Qdrant Edge (`<state>/qdrant_edge`,
@@ -60,7 +60,7 @@ DISK_FACTOR = 1.3
 DISK_FIXED = 64 * 1024 * 1024
 # Failures of the moment, tried again on the next start; every other failure waits for a change or for the person.
 TRANSIENT = ("disk_space", "busy")
-# Where the person tries a failed conversion again: the GUI (DECISIONS W1': never the CLI only) and the terminal.
+# Where the person tries a failed conversion again: the GUI (DESIGN W1': never the CLI only) and the terminal.
 GUI_RETRY = "Tools > Knowledge Snapshots... > Try the conversion again in the GUI"
 CLI_RETRY = "'llm-cli knowledge storage convert' in a terminal"
 

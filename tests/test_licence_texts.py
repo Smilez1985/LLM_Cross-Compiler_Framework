@@ -1,4 +1,4 @@
-"""Licence texts in knowledge packs (DECISIONS, answers of 2026-10-16, W3): a pack that carries pages in full under a
+"""Licence texts in knowledge packs (DESIGN, answers of 2026-10-16, W3): a pack that carries pages in full under a
 licence that asks for its text or permission notice ships the canonical text of each such licence (LICENSES/, from the
 SPDX License List at a pinned version, each text checked by its sha256) and a NOTICE that lists every page with its
 source address, its copyright line as found and its SPDX id. The install, `zoo verify` and the community check verify
@@ -223,7 +223,7 @@ def test_a_knowledge_pack_ships_each_licence_text_and_a_notice_of_every_page(wor
 
 
 def test_a_knowledge_pack_from_the_qdrant_edge_knowledge_base_ships_the_licence_texts(world, make_rag):  # noqa: F811
-    """The export reads the pages from the knowledge base itself, which keeps them in Qdrant Edge (DECISIONS RG5):
+    """The export reads the pages from the knowledge base itself, which keeps them in Qdrant Edge (DESIGN RG5):
     the licence, copyright line, licence-file flag and repository of each page come back from the Edge store, and the
     pack ships the same licence texts and NOTICE as from any other store."""
     pytest.importorskip("qdrant_edge")

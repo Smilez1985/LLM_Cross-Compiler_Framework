@@ -1,4 +1,4 @@
-"""The core functions behind the knowledge and Community Hub mouse paths (DECISIONS W1', wave 5 chain "knowledge").
+"""The core functions behind the knowledge and Community Hub mouse paths (DESIGN W1', wave 5 chain "knowledge").
 
 Logic the command line kept inline moved into core functions; the CLI calls them with its output unchanged, and the
 GUI calls the same functions:

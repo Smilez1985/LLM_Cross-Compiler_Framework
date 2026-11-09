@@ -8,7 +8,7 @@
 2. `run_doctor` gave AI clients absolute host paths (the per-user folder, the audit log, pack folders, a crashed
    check's message). An AI now reads folder labels and file names; the person's own output keeps the full paths.
 3. A new knowledge snapshot deleted the oldest ones beyond five, on every channel. Now there is no limit at all
-   (DECISIONS, sixth round): no snapshot is deleted by itself, no count reminds or warns, and `llm-cli knowledge
+   (DESIGN round 6): no snapshot is deleted by itself, no count reminds or warns, and `llm-cli knowledge
    snapshots` (GUI: Tools > Knowledge Snapshots...) lists them for the person, who deletes or exports them.
 """
 

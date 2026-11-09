@@ -4,7 +4,7 @@ The bundle's on-board installer of the unprivileged steps: one fixed POSIX sh pr
 for every bundle) and the bundle's compiled steps (render_steps: one tab-separated, typed step per line, made from the
 manifest). Nothing a variable holds is ever pasted into shell text: the generator checked each value against its type,
 the steps carry them as data, and the installer checks every field again with its own patterns before it acts and
-quotes what it writes (DECISIONS: POSIX sh only where it is safe; every root step goes through the Rust helper
+quotes what it writes (DESIGN: POSIX sh only where it is safe; every root step goes through the Rust helper
 llmcf-install, not this program).
 
 The framework's signing key signs install.sh, steps.tsv and manifest.json; the board's gate (board.py, operations

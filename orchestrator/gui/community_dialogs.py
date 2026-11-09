@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The Community Hub's smaller windows (DECISIONS W1': every `llmcf zoo` action also by mouse). Each shows or collects
+The Community Hub's smaller windows (DESIGN W1': every `llmcf zoo` action also by mouse). Each shows or collects
 what one CLI command shows or takes; the Community Hub calls the same core function as the CLI with it:
 
 - PackDetailsDialog (`llm-cli zoo show`): licence, trust and revocation, installed version and folder, download address,

@@ -58,7 +58,7 @@ def check_storage(state_dir) -> List[Finding]:
 
 def check_knowledge(framework) -> List[Finding]:
     """Knowledge-base snapshots: how many there are, their size against the free space of their disk and where, for
-    the person's overview. There is no limit (DECISIONS, sixth round: as many as the disk holds), so no count of them
+    the person's overview. There is no limit (DESIGN round 6: as many as the disk holds), so no count of them
     is a finding, a reminder or a warning, and none is deleted by itself (round 5 f). What matters is the disk (eighth
     round, answer 2): when the next snapshot (about the size of the newest) would not fit, Deep Ingest, restores and
     knowledge pack imports are refused until there is room, which is a warning with the person's list; when it fits

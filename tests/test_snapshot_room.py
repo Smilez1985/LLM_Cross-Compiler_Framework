@@ -1,4 +1,4 @@
-"""The disk check before a knowledge snapshot (DECISIONS, eighth round, answer 2) and the snapshot before a knowledge
+"""The disk check before a knowledge snapshot (DESIGN round 8, answer 2) and the snapshot before a knowledge
 pack import (N13).
 
 Before a snapshot is made, its size is estimated. When it does not fit on the disk (beside the reserve that always

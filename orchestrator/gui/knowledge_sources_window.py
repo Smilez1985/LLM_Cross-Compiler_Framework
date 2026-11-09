@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-What the knowledge base holds, as the person sees it (Tools > Knowledge Sources...; DECISIONS W1', round 8 Q-1/Q-1').
+What the knowledge base holds, as the person sees it (Tools > Knowledge Sources...; DESIGN W1', round 8 Q-1/Q-1').
 
 Every source with its kind (a web page, a page of an installed knowledge pack, the framework's own documents, other),
 how much hidden text was left out of it before it was stored (knowledge_sources.removed_text, recon P1), the licence

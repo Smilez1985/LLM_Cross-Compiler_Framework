@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-llmcf's command gate on a board (DECISIONS: no standing rights that can do more than needed; the framework's key on a
+llmcf's command gate on a board (DESIGN: no standing rights that can do more than needed; the framework's key on a
 board may run only what llmcf needs, so a stolen key can do nothing else, also while llmcf is not running).
 
 Every command the framework runs on a board is one of llmcf's OPERATIONS: a fixed verb with validated arguments,
@@ -456,7 +456,7 @@ def verify_sh() -> str:
 
 
 def signed_sh(signers: str = SIGNERS, root_uid: int = ROOT_UID) -> str:
-    """The sh functions that check a file against the framework's signature on the board (DECISIONS 2026-10-31: a
+    """The sh functions that check a file against the framework's signature on the board (DESIGN, decision of 2026-10-31: a
     board runs only runtime tarballs and packages signed with the framework's key). Part of the gate's head and put in
     front of every script-form body that checks a signature (runtime-check, the package's install job):
 
@@ -848,7 +848,7 @@ def install_root(run: Callable[..., object], user: str, helper_text: str, sudoer
     return _answer(getattr(result, "out", ""), "root")
 
 
-# --- the root step of a board: llmcf's key line and signing key in root-owned places (DECISIONS 2026-10-31) -----------
+# --- the root step of a board: llmcf's key line and signing key in root-owned places (DESIGN, decision of 2026-10-31) -----------
 
 SELFTEST_DATA = b"llmcf-board-selftest\n"
 MATCH_BEGIN = "# llmcf-begin board account"
@@ -1037,7 +1037,7 @@ DROPBEAR_LATER_OPTIONS = ("permitopen", "restrict", "no-touch-required")
 
 def dropbear_board_script(paths: BoardPaths = BoardPaths()) -> str:
     """The Dropbear tier's setup step (dropbear-board, run once by an unrestricted login of the board account with
-    sudo; DECISIONS 2026-10-31, Dropbear tiers): stdin is a line with the person's one-time password (empty: sudo -n),
+    sudo; DESIGN, decision of 2026-10-31, Dropbear tiers): stdin is a line with the person's one-time password (empty: sudo -n),
     then the gate program; LLMCF_SIGNERS, LLMCF_PEM and LLMCF_SELFTEST come before it as plain assignments. It checks
     first (the account, sudo, the board's own tools check the self-test signature: ssh-keygen, else openssl; the gate
     reads), then installs root:root the gate (0755) at the root-owned place of the OpenSSH tier and the signing key

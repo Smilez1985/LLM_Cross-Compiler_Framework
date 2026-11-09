@@ -1,4 +1,4 @@
-"""The Rockchip build inside its image, run with stub toolchains (DECISIONS U9, consolidation stage C).
+"""The Rockchip build inside its image, run with stub toolchains (DESIGN U9, consolidation stage C).
 
 Characterization first: these tests pin what a Rockchip build does today, so the build keeps doing exactly that when
 build.sh becomes the stage runner over the four modules (source -> config -> convert -> target). For the GGUF, RKLLM
@@ -661,7 +661,7 @@ def test_the_build_reads_the_same_environment_variables():
 
 
 # ---------------------------------------------------------------------------------------------------------------
-# The stage runner: stages in order, progress lines, resume markers, the rotate hook (DECISIONS U9)
+# The stage runner: stages in order, progress lines, resume markers, the rotate hook (DESIGN U9)
 # ---------------------------------------------------------------------------------------------------------------
 
 STAGE_LINE = re.compile(r"^=== Stage (\d+)/(\d+): (\w+)(?: (done in \d+ s|resumed|failed \(exit \d+\)))? ===$")

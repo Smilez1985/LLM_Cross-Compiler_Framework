@@ -479,7 +479,7 @@ def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str, probe_f
         console.print(f"Location: {output_path}")
         console.print("\nNext steps:")
         console.print(f"1. Edit {output_path}/target.yml to add supported boards")
-        # The build is the four stage modules, which modules/build.sh (the stage runner) runs in order (DECISIONS U9).
+        # The build is the four stage modules, which modules/build.sh (the stage runner) runs in order (DESIGN U9).
         console.print(f"2. Customize {output_path}/modules/convert_module.sh and target_module.sh (the convert and "
                       f"target stages of the build, which build.sh runs after source and config; the Dockerfile "
                       f"installs the tools they use)")

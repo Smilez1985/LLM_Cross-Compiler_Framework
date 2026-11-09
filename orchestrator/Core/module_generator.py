@@ -10,7 +10,7 @@ Enthält Templates für Dockerfile, target.yml und die vier Stufen-Module.
 
 The build of a generated target is the template's four stage modules (source, config, convert, target), which
 the framework's stage runner (the runtime layer, orchestrator/runtime_layer/runner.sh) runs in this order, with the
-modules of target.yml's stages: slots (DECISIONS U9); the generator fills in the wizard's setup
+modules of target.yml's stages: slots (DESIGN U9); the generator fills in the wizard's setup
 commands (source), quantization logic (convert) and packaging commands (target).
 The generated target.yml carries a capabilities block (support level community) and no template placeholder.
 A knowledge snapshot is attached only on request and holds only the pages crawled for this target, as the licences
@@ -86,7 +86,7 @@ TEMPLATE_PLACEHOLDERS = re.compile(  # not after a name: COMPILER_CONFIG[CMAKE_F
     r"|SDK_SETUP_COMMANDS|PACKAGING_COMMANDS|ihr-target-name|VENDOR_SOURCES|PIP_PACKAGES|PINNED_DOWNLOADS"
     r"|PINNED_DOWNLOADS_COPY)\]|\{packages_str\}|YYYY-MM-DD")
 GGUF_DEFAULT_QUANTS = ["Q4_K_M", "Q4_0", "Q5_K_M", "Q6_K", "Q8_0", "F16"]
-# The four stages of a target's build, in the order the runtime layer's stage runner runs them (DECISIONS U9).
+# The four stages of a target's build, in the order the runtime layer's stage runner runs them (DESIGN U9).
 STAGE_MODULES = ("source", "config", "convert", "target")
 STAGE_FALLBACK = ('#!/bin/bash\n# {stage}_module.sh - the {stage} stage (no template for it was found when this target '
                   'was generated)\necho "ERROR: the {stage} stage of this target has no script yet: write '
@@ -784,7 +784,7 @@ class ModuleGenerator:
             else:
                 self._process_template("Dockerfile", target_dir, data)
             
-            # The four stage modules of the build (DECISIONS U9): source -> config -> convert -> target, each with the
+            # The four stage modules of the build (DESIGN U9): source -> config -> convert -> target, each with the
             # template's instructions for its stage; the wizard's setup commands go into the source stage, its
             # quantization logic into the convert stage and its packaging commands into the target stage.
             for stage in STAGE_MODULES:

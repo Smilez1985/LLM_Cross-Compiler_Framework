@@ -718,7 +718,7 @@ class TestPin:
 
     def test_legacy_places_are_reported_not_failed(self, tmp_path):
         # The shipped targets' stage modules name no llama.cpp version of their own since build.sh runs them
-        # (DECISIONS U9): the source stage reports the image's pin. A target that still has the source_module.sh of
+        # (DESIGN U9): the source stage reports the image's pin. A target that still has the source_module.sh of
         # version 1.x (an older community target) is reported, never failed.
         assert [p for p in pins.pin_places(PIN) if p.kind == "legacy"] == []
         root = tmp_path / "repo"
@@ -780,7 +780,7 @@ class TestPin:
         assert module.main(["check", "--local"]) == 0
         out = capsys.readouterr().out
         assert f"Pin: {PIN.tag} = {PIN.commit}" in out and "targets/Rockchip/dockerfile" in out
-        # No shipped place is legacy any more: the stage modules read the image's pin (DECISIONS U9).
+        # No shipped place is legacy any more: the stage modules read the image's pin (DESIGN U9).
         assert "MISMATCH" not in out and "legacy" not in out
 
     def test_image_build_without_a_pin_stops(self, tmp_path, monkeypatch):

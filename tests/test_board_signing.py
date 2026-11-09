@@ -1,4 +1,4 @@
-"""A stolen board key runs nothing new (DECISIONS 2026-10-31): llmcf's key line and the framework's signing key live
+"""A stolen board key runs nothing new (DESIGN, decision of 2026-10-31): llmcf's key line and the framework's signing key live
 in root-owned places on the board (the root step root-board, orchestrator/remote/gate.py), and the gate runs only
 runtime tarballs and packages signed with the framework's key (orchestrator/runtime/device/board_ops.py runtime-check
 and the install job), never writes an upload where a program runs from, and checks run-program's arguments against

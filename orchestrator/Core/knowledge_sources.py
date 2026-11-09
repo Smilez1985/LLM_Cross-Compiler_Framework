@@ -3,7 +3,7 @@
 What the knowledge base holds, as the person sees it: every source with the licence and copyright notice it shows, and
 what a knowledge pack would carry of it (its full text, only its address and short facts, or nothing) and why
 (DESIGN round 8, Q-1 and Q-1'), and how much hidden text was left out of it before it was stored (recon P1).
-`llm-cli knowledge sources` and Tools > Knowledge Sources... show the same list through these functions (DECISIONS W1':
+`llm-cli knowledge sources` and Tools > Knowledge Sources... show the same list through these functions (DESIGN W1':
 the CLI is never the person's only way); the words of "In a pack" and of "Hidden text left out" are the same on both
 (the GUI has them in both languages, l10n_knowledge).
 

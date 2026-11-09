@@ -3,7 +3,7 @@
 The knowledge base's snapshots as the person sees them (Tools > Knowledge Snapshots...).
 
 Every snapshot with its name, when it was taken, its size, what it is and its full path, each with a check box;
-nothing is ticked. There is no limit and the framework deletes no snapshot by itself (DECISIONS, sixth round; round
+nothing is ticked. There is no limit and the framework deletes no snapshot by itself (DESIGN round 6; round
 5 f). The person frees space in two ways:
 
 - [Delete ticked...] opens the deletion dialog with exactly the ticked snapshots (full path, file name, size, what
@@ -17,13 +17,13 @@ a Deep Ingest, a restore and a pack import are refused until there is room. When
 not fit (eighth round, answer 2), `offer_snapshot_list` says so and opens this window on the person's "Open"; nothing
 is ticked and nothing is deleted by itself.
 
-It also says where the knowledge base is stored (DECISIONS RG5), in every state (migration.storage_status, the same
+It also says where the knowledge base is stored (DESIGN RG5), in every state (migration.storage_status, the same
 status as `llm-cli knowledge storage`): in Qdrant Edge, converted from the storage of earlier versions on first use,
 whose old folder is kept until the person deletes it here ([Delete the old storage...] opens the deletion dialog with
 that folder's full path and size; "No" is the default); still in the old storage (not converted yet, no Qdrant Edge
 for this computer, or its conversion failed, with the reason); on a Qdrant server; or in Qdrant Edge that cannot be
 loaded. [Convert now] (not tried yet) or [Try the conversion again] (after a failure) converts it now on the condition
-of `llm-cli knowledge storage convert` (RAGManager.convert_storage; DECISIONS W1': the CLI is never the person's only
+of `llm-cli knowledge storage convert` (RAGManager.convert_storage; DESIGN W1': the CLI is never the person's only
 way), in a worker thread that reports through the one WorkerRelay, since a large knowledge base takes minutes.
 
 Every text is plain text.

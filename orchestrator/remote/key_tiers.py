@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The tiers of the framework's key on a board (DECISIONS 2026-10-31, Dropbear tiers; nothing in the repository held
+The tiers of the framework's key on a board (DESIGN, decision of 2026-10-31, Dropbear tiers; nothing in the repository held
 this vocabulary before, so it is a module of its own next to remote/gate.py, which installs each tier).
 
 - TIER_ROOT ("root"): OpenSSH with sudo. The key line lives in a root-owned file sshd reads for the account (Match

@@ -108,7 +108,7 @@ stages:
   between_convert_and_target: []
   after_target: []
 
-# The build (DECISIONS U9): the framework's stage runner runs the four stage modules in this order inside the image,
+# The build (DESIGN U9): the framework's stage runner runs the four stage modules in this order inside the image,
 # for every build (the stages: block above); each module's header says which image it runs in, which system the
 # result is for and what its stage does. This block describes the folder; nothing reads it.
 modules:

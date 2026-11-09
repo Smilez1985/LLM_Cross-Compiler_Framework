@@ -1,4 +1,4 @@
-"""The local knowledge base in Qdrant Edge (DECISIONS RG5): the store contract on every backend, the snapshot files of
+"""The local knowledge base in Qdrant Edge (DESIGN RG5): the store contract on every backend, the snapshot files of
 both versions, the conversion of the storage of earlier versions (success, failure, a check that does not match, the
 disk), the old folder that only the person deletes, and what the person and an AI see of it.
 

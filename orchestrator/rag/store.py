@@ -9,7 +9,7 @@ vector (Qdrant applies the IDF), and queries fuse both rankings with Reciprocal 
 Two backends offer the same methods (RAGManager calls only these):
 
 - EdgeKnowledgeStore (orchestrator/rag/edge_store.py): the local knowledge base on this computer, in Qdrant Edge
-  (the Rust engine of Qdrant, in the process; DECISIONS RG5).
+  (the Rust engine of Qdrant, in the process; DESIGN RG5).
 - ClientKnowledgeStore (orchestrator/rag/client_store.py): qdrant-client, for a Qdrant server (setting qdrant_url),
   and for the local storage of earlier versions (qdrant-client's local mode, a Python re-implementation) until it is
   converted to Qdrant Edge (orchestrator/rag/migration.py).
@@ -45,7 +45,7 @@ SNAPSHOT_VERSIONS = (1, 2)
 # Reciprocal Rank Fusion: score = sum of 1 / (k + rank). k = 2 is Qdrant's default, which the earlier local storage
 # used too, so the fused scores (and the reranker's fused_score) stay what they were.
 RRF_K = 2
-# The size estimate of a snapshot before it is written (DECISIONS, eighth round, answer 2): this many points are
+# The size estimate of a snapshot before it is written (DESIGN round 8, answer 2): this many points are
 # compressed as the file holds them and scaled to the whole collection, plus a margin for points that compress worse.
 EXPORT_SAMPLE = 64
 EXPORT_MARGIN = 1.2

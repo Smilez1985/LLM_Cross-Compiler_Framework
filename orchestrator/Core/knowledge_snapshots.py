@@ -5,7 +5,7 @@ Knowledge-base snapshots as the person sees them.
 Before every Deep Ingest, every index of the framework's own documents, every restore and every knowledge pack import,
 the knowledge base is saved as a snapshot (`knowledge_snapshots/` in the per-user folder), so the change can be undone.
 There is no limit: the framework keeps as many as the disk holds and deletes none by itself, on any channel, and no
-count of them reminds or warns (DECISIONS, sixth round; round 5 f: deleting always asks the person, with the full
+count of them reminds or warns (DESIGN round 6; round 5 f: deleting always asks the person, with the full
 list). `llm-cli knowledge snapshots` and Tools > Knowledge Snapshots... list each one with its full path, file name,
 size and what it is; to free space the person deletes the ones they choose (multiple choice, nothing ticked by
 default) or exports them.
@@ -16,7 +16,7 @@ default) or exports them.
 - Exporting (`export_snapshots`): copies the chosen snapshots to a folder the person picks (on this computer, a USB
   stick, a network share). Each copy is checked against the original by sha256 before it counts as done; a copy that
   does not match is removed again and reported. Exporting never deletes or changes a snapshot.
-- Room on the disk (`snapshot_room`, DECISIONS, eighth round, answer 2): before a snapshot is made, its size is
+- Room on the disk (`snapshot_room`, DESIGN round 8, answer 2): before a snapshot is made, its size is
   estimated. When it does not fit on the disk of the snapshot folder (beside the reserve that always stays free and what
   other calls reserved), no snapshot is made and the change that needed it does not run either: there is no "continue
   anyway" (`SnapshotNoRoom`, blocker `snapshot_no_room`); the person gets the list to delete or export snapshots. When
@@ -116,7 +116,7 @@ def size_text(n: int) -> str:
     return f"{n / 1000 ** 3:.1f} GB" if n >= 10 ** 9 else f"{n / 1000 ** 2:.1f} MB"
 
 
-# --- room for the next snapshot (DECISIONS, eighth round, answer 2) --------------------------------------------------
+# --- room for the next snapshot (DESIGN round 8, answer 2) --------------------------------------------------
 
 @dataclass(frozen=True)
 class SnapshotRoom:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Texts of the golden-artifact output folder (the save dialog, Save..., the output folder setting), of the disk check
-before a knowledge snapshot and of the note about an identical earlier build (DECISIONS, eighth round: answers 2 and
+before a knowledge snapshot and of the note about an identical earlier build (DESIGN round 8: answers 2 and
 3, N11, N13), English and German. LocalizationManager merges them (localization.TEXT_MODULES); a key that exists
 already is refused there, so these never replace another text.
 

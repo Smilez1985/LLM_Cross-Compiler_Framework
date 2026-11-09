@@ -43,7 +43,7 @@ DELETION_WHERE = ("you choose what is deleted: 'llmcf mojo --miracle' in a termi
                   "Images... in the GUI")
 # Deletion findings Mojo Miracle opens no list for, and the person's own list that frees them (named to the person and
 # to an AI): the knowledge snapshots (eighth round, answer 2) and the old knowledge base storage after its conversion
-# (DECISIONS RG5), which Mojo never deletes.
+# (DESIGN RG5), which Mojo never deletes.
 OTHER_LISTS = {"knowledge.storage": "Tools > Knowledge Snapshots... > Delete the old storage... in the GUI, or "
                                     "'llm-cli knowledge storage delete-old' in a terminal",
                "knowledge.snapshots": "Tools > Knowledge Snapshots... in the GUI, or 'llm-cli knowledge snapshots "

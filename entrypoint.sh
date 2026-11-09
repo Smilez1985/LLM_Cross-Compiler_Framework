@@ -179,7 +179,7 @@ verify_environment() {
 # RUNTIME MODES
 # ============================================================================
 
-# Both modes run the canonical build structure (DECISIONS U9): the framework's stage runner (the runtime layer's
+# Both modes run the canonical build structure (DESIGN U9): the framework's stage runner (the runtime layer's
 # runner.sh at /llmcf when the host mounted it, else the target's deprecated modules/build.sh, which hands over to the
 # same runner) runs the stages source -> config -> convert -> target of the target's modules in the order of its
 # target.yml; a stage that finished before with the same inputs is resumed, not run again (markers in

@@ -1,4 +1,4 @@
-"""The knowledge and Community Hub mouse paths (DECISIONS W1', wave 5 chain "knowledge"; offscreen).
+"""The knowledge and Community Hub mouse paths (DESIGN W1', wave 5 chain "knowledge"; offscreen).
 
 Every action of `llmcf knowledge` and `llmcf zoo` can be started in the GUI by mouse, without typing a command:
 

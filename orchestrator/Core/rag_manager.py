@@ -1240,7 +1240,7 @@ class RAGManager:
 
     def create_snapshot(self, name: Optional[str] = None, before: str = "the change") -> Optional[str]:
         """Saves the active collection (vectors included) to a file; returns its name, None if empty or failed.
-        No snapshot is ever deleted here, on any channel, and there is no limit (DECISIONS, sixth round: as many as
+        No snapshot is ever deleted here, on any channel, and there is no limit (DESIGN round 6: as many as
         the disk holds); the person deletes or exports them, with the full list (`llm-cli knowledge snapshots`).
         Its size is estimated first (eighth round, answer 2): when it does not fit on the disk, SnapshotNoRoom (the
         caller does not make its change either, there is no "continue anyway"); when it fits but leaves little free
@@ -1299,8 +1299,8 @@ class RAGManager:
 
     def delete_snapshots(self, accepted, trash=None, audit=None):
         """Deletes exactly the snapshots of the plan the person accepted (knowledge_snapshots.delete_snapshots): no
-        count, no age, nothing chosen by the framework. There is no limit of the framework's own (DECISIONS, sixth
-        round); only the person's deletion dialog and `llm-cli knowledge snapshots delete` call this."""
+        count, no age, nothing chosen by the framework. There is no limit of the framework's own (DESIGN round
+        6); only the person's deletion dialog and `llm-cli knowledge snapshots delete` call this."""
         return delete_snapshots(self.snapshot_dir, accepted, trash=trash, audit=audit)
 
     def list_snapshots(self) -> List[str]:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The switch of a board to OpenSSH (DECISIONS 2026-10-31, Dropbear tiers, addendum 2): when the person says yes, the
+The switch of a board to OpenSSH (DESIGN, decision of 2026-10-31, Dropbear tiers, addendum 2): when the person says yes, the
 framework's board setup installs OpenSSH if it is not there, like any other dependency of the installer, then pairs
 with the root-owned key line. It follows install.sh's way (one system family from ID and ID_LIKE in /etc/os-release,
 the distribution's own package manager, known package names per family, a plan shown first and a plain report after):

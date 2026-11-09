@@ -70,7 +70,7 @@ DELETION_SITES = {
     ("orchestrator/runtime/container_server.py", "DittoDocker.remove_image"): PERSON,
     ("orchestrator/runtime/container_server.py", "DittoDocker.remove_container"): PERSON,
     ("orchestrator/utils/input_history.py", "InputHistory.clear"): PERSON_LIST,
-    # the old knowledge base storage after its conversion to Qdrant Edge (DECISIONS RG5): the person's list only
+    # the old knowledge base storage after its conversion to Qdrant Edge (DESIGN RG5): the person's list only
     ("orchestrator/rag/migration.py", "delete_old_store"): PERSON,
     # the old Hugging Face download cache after its Take over (A6): the person's list only (tests/test_hf_takeover.py)
     ("orchestrator/Core/hf_takeover.py", "delete_old_copies"): PERSON,

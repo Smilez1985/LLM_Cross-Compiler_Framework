@@ -25,7 +25,7 @@ DEFAULT_PORT = 22
 # A board's address or host name (192.168.1.50, myboard.local, an IPv6 address); the person enters what they know.
 # An IPv6 address is written without brackets: the port is a field of its own.
 # An IPv6 link-local address (fe80::/10) may carry its zone, the interface it is reached on (fe80::1%eth0, or the
-# interface's number on Windows): a board paired over a direct cable is reached that way (DECISIONS: local links).
+# interface's number on Windows): a board paired over a direct cable is reached that way (DESIGN: local links).
 HOST_PATTERN = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|[0-9A-Fa-f:.]{2,45}"
                           r"(?:%[A-Za-z0-9_.-]{1,32})?)$", re.ASCII)
 # An account name on a board: no option, no shell character, at most 32 characters.

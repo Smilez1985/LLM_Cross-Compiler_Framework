@@ -1,4 +1,4 @@
-"""Identical builds (DECISIONS, eighth round, N11).
+"""Identical builds (DESIGN round 8, N11).
 
 "Identical" means 100 % the same chosen options: the model and its exact commit (a local model: every weights file by
 name, size and time), the target and the sha256 of its definition, board, format, quantization, importance matrix and

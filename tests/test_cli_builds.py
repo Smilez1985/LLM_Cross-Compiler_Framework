@@ -1247,11 +1247,11 @@ def test_build_scripts_do_not_read_imatrix_chunks():
     assert "IMATRIX_CHUNKS" not in engine_code
     for script in list((REPO_ROOT / "targets").glob("*/modules/*.sh")):
         assert "IMATRIX_CHUNKS" not in script.read_text(encoding="utf-8"), script
-    # The importance-matrix job lives in the convert stage since build.sh became the stage runner (DECISIONS U9).
+    # The importance-matrix job lives in the convert stage since build.sh became the stage runner (DESIGN U9).
     assert "--chunks 100" in (ROCKCHIP_DIR / "modules" / "convert_module.sh").read_text(encoding="utf-8")
 
 
-# build.sh, the stage runner, and the modules of its stages (DECISIONS U9)
+# build.sh, the stage runner, and the modules of its stages (DESIGN U9)
 STAGE_SCRIPTS = [ROCKCHIP_DIR / "modules" / name for name in ("build.sh", "source_module.sh", "config_module.sh",
                                                                 "convert_module.sh", "target_module.sh")]
 

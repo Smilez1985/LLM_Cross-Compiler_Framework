@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The canonical texts of the licences that ask for their text or permission notice with every copy (DECISIONS,
+The canonical texts of the licences that ask for their text or permission notice with every copy (DESIGN,
 answers of 2026-10-16, W3).
 
 A pack that carries pages or code in full under such a licence ships the licence's text with them (pack_licences.py).

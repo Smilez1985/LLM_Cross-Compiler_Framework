@@ -494,7 +494,7 @@ def verify_index(index_bytes: bytes, signature: PackSignature,
     return _verify(_INDEX_CONTEXT + index_bytes, signature, keys, now, "community index")
 
 
-# --- Board signatures (DECISIONS 2026-10-31: a board runs only what the framework's key signed) --------------------
+# --- Board signatures (DESIGN, decision of 2026-10-31: a board runs only what the framework's key signed) --------------------
 # The same Ed25519 key that signs the person's packs (UserKeys.signing_key) signs every runtime tarball and package
 # the framework sends to a board. A board checks it with its own OpenSSH tool (`ssh-keygen -Y verify`, OpenSSH 8.1 and
 # later) against the public key in a root-owned allowed_signers file, so the envelope is OpenSSH's SSHSIG format

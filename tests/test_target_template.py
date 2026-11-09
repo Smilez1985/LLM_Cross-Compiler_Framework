@@ -79,7 +79,7 @@ STAGES = ("source_module.sh", "config_module.sh", "convert_module.sh", "target_m
 
 
 def stage_code(target: Path) -> str:
-    """The build of a target: its four stage modules (DECISIONS U9; the runner is the framework's)."""
+    """The build of a target: its four stage modules (DESIGN U9; the runner is the framework's)."""
     return "\n".join((target / "modules" / name).read_text(encoding="utf-8").split("set -euo pipefail", 1)[1]
                      for name in STAGES)
 
@@ -167,7 +167,7 @@ def test_a_branch_that_writes_nothing_fails(tmp_path):
     assert result.returncode != 0 and "No artifact" in result.stderr
 
 
-# --- a generated module under the stage runner (DECISIONS U9) ------------------------------------------------------
+# --- a generated module under the stage runner (DESIGN U9) ------------------------------------------------------
 
 @needs_bash
 def test_the_quantization_logic_and_the_packaging_may_use_quant_as_before(tmp_path):

@@ -7,7 +7,7 @@ pack after showing its summary, and "Build" fills the Builder from an installed 
 makes a scrubbed pack signed with your key and hands it to a pull request. Nothing is uploaded from here and no
 repository token is ever asked for.
 
-Every `llm-cli zoo` action has its mouse path here (DECISIONS W1'), each calling the same core function as the CLI:
+Every `llm-cli zoo` action has its mouse path here (DESIGN W1'), each calling the same core function as the CLI:
 Details... (zoo show: CommunityManager.details), Import file... with a passphrase or the key files of the only senders
 to accept (zoo install --file --passphrase / --from: prepare_install_file), Check installed packs (zoo verify:
 verify_installed), Check a pack file... (zoo verify FILE: verify_file), Export... (zoo export target|recipe|knowledge

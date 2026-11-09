@@ -246,7 +246,7 @@ def install_public_key(client, public_line: str, bundle=None, *, allow_unrestric
     if tier not in ("", "root"):
         raise HostKeyError(f"{tier!r} is not a tier the framework installs; nothing was installed.")
     if bundle is not None:
-        # the root step (DECISIONS 2026-10-31): the gate, the key's restricted line and the framework's signing key in
+        # the root step (DESIGN, decision of 2026-10-31): the gate, the key's restricted line and the framework's signing key in
         # root-owned places the board account cannot change, with the person's one-time `password` for sudo -S (or
         # sudo -n); a board that cannot take it gets no key (GateUnavailable says why), unless the person allowed an
         # unrestricted one

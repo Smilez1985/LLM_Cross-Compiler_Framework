@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The local knowledge base in Qdrant Edge (DECISIONS RG5).
+The local knowledge base in Qdrant Edge (DESIGN RG5).
 
 Qdrant Edge is the Rust engine of Qdrant as a library in this process (PyPI qdrant-edge-py, Apache-2.0): no server,
 no open port, no Docker. One Edge shard holds one collection; the storage folder (`<state>/qdrant_edge`) holds:

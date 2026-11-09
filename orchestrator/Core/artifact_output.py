@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Where golden artifacts go (DECISIONS, eighth round, answer 3)
+LLM Cross-Compiler Framework - Where golden artifacts go (DESIGN round 8, answer 3)
 
 A golden artifact is a finished build: its folder (the model files, build_info.json, the model card) and the ZIP next
 to it. Two folders hold them:

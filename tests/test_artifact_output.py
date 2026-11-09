@@ -1,4 +1,4 @@
-"""Where golden artifacts go (DECISIONS, eighth round, answer 3).
+"""Where golden artifacts go (DESIGN round 8, answer 3).
 
 The person sets the output folder once (default ~/llmcf/output). A build the person starts in the GUI waits in the
 framework's build folder; when it has finished, a native save dialog opens at the output folder: OK saves it there or
