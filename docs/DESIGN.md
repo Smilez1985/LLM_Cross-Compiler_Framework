@@ -1232,6 +1232,7 @@ modules source, config, convert and target and the target's own modules in fixed
 | Optional LoRA training is a lean trainer of the framework's own; Unsloth is never installed or used; ideas and solutions come from Unsloth's repository only within its licence: from its Apache-2.0 core, nothing from its LGPL part (unsloth_zoo) or its AGPL part (Unsloth Studio). | planned: ROADMAP row "Optional LoRA training". | A trainer of its own stays small and fits the pipeline; the licence decides what may be taken. |
 | Large models can be quantized: disk space and RAM checked before a build, F16 intermediates reused, GGUF as input, per-tensor recipes checked by KL divergence. | planned: ROADMAP row "Large models". | A large model must fail before the build, not after hours, and must not need more memory than the computer has. |
 | airllm is taken on board where it makes sense and gives llmcf real added value, for example where its layer-by-layer loading lets a model that is larger than the computer's memory be run, checked or converted on small memory. Whether and where that is the case is decided by an evaluation first, and nothing of airllm is built in before that evaluation has passed. | planned: ROADMAP row "airllm, evaluated as an option". The evaluation compares airllm with the framework's own way for large models (the disk and RAM check, reused F16 intermediates, GGUF as input) on the uses where it could help: converting large weights on a computer with little memory, and a check run of a large converted model layer by layer, such as a smoke test or the KL-divergence comparison of a quantization recipe. A use that passes becomes an optional part in its own pinned environment, like every toolchain, and the pipeline keeps working without it; a use that fails is recorded with its numbers, and airllm stays out of it. | airllm is a runtime for inference and training, not a converter, which is why it was first left out of the pipeline; but its layer-by-layer loading aims at exactly the case of a large model on a small computer that the framework wants to serve. Measuring first makes sure that a new dependency comes in only where it does something the framework cannot already do. |
+| An RKNN vision model leaves the build with its model card: the converter writes `<name>.card.json` next to the `.rknn`, from the model's own configuration and the settings it converted with. | planned: [build plan of the vision engine](#build-plan-the-vision-engine-llmcf-detect), ROADMAP row "Vision on the NPU, step 1". `targets/Rockchip/scripts/rknn_converter.py` (the same file in the template) passes mean and std to `rknn.config` and writes the card (`llmcf-model-card/1`); the host checks it with `orchestrator/runtime/bundle/model_card.py` when it takes the artefact in, with the vectors the engine shares. | Only the conversion knows how the model was converted; a card written afterwards by hand could disagree with the model. |
 
 **History**
 
@@ -1348,6 +1349,7 @@ folder (`device runtime deploy`, MCP `deploy_device_runtime`); way 3, the bundle
 | The first deployment target is SCP plus SSH: the file goes to the board and is installed there, the self-built llama.cpp server included. | `orchestrator/remote/` (`RemoteSession` over Paramiko or the system OpenSSH) with resumable upload. | It needs nothing on the board but SSH. |
 | Where the board runtime lives is a deploy setting chosen before the deployment, never asked at deploy or run time: the home folder with a start script (the default) or a systemd unit (only when the probe reports systemd, and with the confirmation that the deploy may run `sudo -n`). | `runtime/device/settings.py` (`install: user` or `systemd`, kept in `<device id>.deploy.json` next to the device's hardware profile). | A question at run time interrupts the person; the unit needs root, the home folder does not. |
 | The board side comes to Windows only after the remaining Linux points are done, as a port, for all three device kinds: x64 with an NVIDIA RTX GPU, AMD Ryzen Z1, Windows on ARM. Windows' own OpenSSH server installed like a dependency, the key line in `administrators_authorized_keys`, the command gate as a small Rust program, `llmcf-install` for Windows x64 and ARM64 under the program folder, a local account and a Windows service, Job Objects for the limits. Later the Rust gate replaces the POSIX-sh gate on Linux too. Jetson stays on Linux (JetPack has no Windows). | planned: ROADMAP row "The board side on Windows, after the Linux points"; today the board side is Linux only, and the Windows probe skips pairing (row "Pairing a Windows board during the probe"). | Finishing Linux first leaves only a port; the three device kinds are what people run Windows on. |
+| The board installer prepares a board for the NPU and a camera: the overlays, Rockchip's camera service with the sensor's tuning file, MPP and RGA, the NPU runtime, the engine's account with its devices, and a restart only when an overlay changed; idempotent, shown in the plan, after the person's yes. | planned: [build plan of the vision engine](#build-plan-the-vision-engine-llmcf-detect), ROADMAP row "Vision on the NPU, step 2". New typed root actions of llmcf-install (`enable_overlay`, `install_package`, `place_vendor_file`, `reboot_board`) beside `create_user` and `place_root_file`, checked on both sides through `tests/data/bundle_manifest_vectors.json`; the camera table as data of the Rockchip target (`targets/Rockchip/cameras.yml`). | Camera makers publish exact steps; the installer follows them as typed, reversible actions instead of a shell line, so the plan can show them and a second run changes nothing. |
 
 **History**
 
@@ -1590,12 +1592,334 @@ harness reaches and binds to, and it passes answers on as they come, streams as 
 | The gateway is a universal adapter: every model and engine type, future ones included, works with only a target module that builds it and a bundle block that says how it runs and how it is reached; the gateway's code does not change for it. How it is reached is said per block (its `reach`), never per board or per deploy; the route table is generated by the bundle generator from the chosen blocks and the board's measurement. Protocol adapters where the gateway knows the protocol, a generic checked passthrough with declared limits for everything else. Block kinds are open. | done (decisions of 2026-11-08). A block's optional `reach` section (`orchestrator/runtime/bundle/reach.py`; the schema stays `llmcf-bundle-block/1`: the field is additive, a block without it keeps the routes its kind always had, `generator.block_reach`/`LEGACY_REACH`, and a framework version that does not know it refuses the block instead of serving it wrongly) lists routes: `path` (under `/v1/` or `/api/`, lower-case segments; `/health`, `/metrics` and everything below `/v1/llmcf` and `/api/llmcf` are the gateway's own and refused), `method`, `protocol`, `upstream_path`, `max_body_kb`, `timeout_s`, `stream`, `types` (http-binary), `fields` (http-multipart), `engine_route_key` (the route's name within its engine) and `match: images` (openai-chat: the chats that carry image parts); `port` names the block's port variable. Protocols: the adapters `openai-chat`, `openai-completions`, `openai-models`, `openai-embeddings`, `openai-audio-transcription`, `openai-audio-speech`, and the generic `http-json` (one strict JSON object), `http-multipart` (the bounded form parser, the declared fields only, a file by its magic type, the engine gets the gateway's own form with each file under a fixed name), `http-sse` (an event stream passed through, the timeout between two events) and `http-binary` (a body of a declared magic type: jpeg, png, gif, webp, bmp, tiff, wav, flac, ogg, mp3, mp4, webm, pdf, sent with that type's media type). The framework's llm, whisper and vision blocks carry `reach` sections that reproduce the old routes exactly. The generator (`generator._route_table`) makes `routes.json` (`llmcf-gateway-routes/1`): each engine component with its port from its block's variables, the runtime's key only where its block makes one (`keygen`), its context size, each route with its body cap (the smaller of the block's and the gateway's own cap for the protocol: `max_body_kb` for JSON, `max_audio_mb` for speech uploads); two blocks that want the same method, path and match refuse the plan. The table is a file of the gateway component (block file `from: routes`, role config), listed with its sha256 in the signed manifest, copied and checked like every payload file, and passed as one `--routes` argument (the gateway block 2.0.0 no longer passes `--stt-port`, `--vision-port`, `--vision-ctx-size`, `--max-audio-mb`); the plan shows it line by line and as labels. The gateway (`rust/llmcf-gateway/src/routes.rs`) reads it once at its start: at most 64 KiB, strict JSON, every key known, the same rules as reach.py (shared vectors `tests/data/gateway_routes_vectors.json`); without `--routes` it makes the old table from its options. `generic.rs` holds the generic adapters, `rules.rs` the embeddings and speech checks; every route goes through the same fair queue, memory guard and engine scheduler (lazy start), has its own timeout for the answer's head and every gap inside it, an event stream only where it declares one, counts in `/metrics` (`route=...`, an images route with `match="images"`, `llmcf_gateway_generic_total`) and its entry in `/health` (protocol, `<engine>.<key>`, cap, timeout); the log line holds the protocol, sizes and counts, never content; the remote-URL refusal for images stays. Open kinds: `manifest.RE_KIND` (2 to 32 lower-case letters, digits and `-`), every kind but gateway and harness is an engine (`manifest.is_engine`; llmcf-install the same), up to 15 engine units under `allow_unit_control`; the scheduler, `--engine ID=UNIT:MIB[:PORT]`, the engines' memory check, the out-of-memory order and together or in turn know engines by their component id, never by a fixed list; the plan of an llm, speech and vision bundle stayed the same byte for byte. Measured again with a generated route table (release build, x86_64, fake upstreams, a Python load generator on the same machine, the gateway of the previous commit measured the same way next to it): 2.1 MB program, 3.3 to 3.6 MB resident at rest with the table of the voice bundle or of a bundle with a detection engine (the previous gateway 3.1 to 3.3 MB); 64 parallel clients sending 2000 chats of 9 KB through a queue of 64: 9.7 to 10.8 MB peak (the previous gateway 7.9 to 10.9 MB under the same generator); the same with every tenth request a 1 MB image form to the detector's http-multipart route: 8.9 MB peak. The route table changes the gateway's memory by no more than the noise of the measurement. The reach prefilled from a model: the next row. | A new model needs a module and a block, never a gateway release; the person and the signed block decide what the board exposes, the gateway only enforces it, the same in Python and Rust. |
 | A block is proposed from a model: the Hugging Face pipeline task (the library where the model has none) gives the block's kind and a `reach` draft; every field says where it came from; the person reviews and writes it; an AI may propose, never write or sign a block. | done (2026-11-08). `orchestrator/runtime/bundle/propose.py` (pure, no network): `TASKS` maps text-generation to `llm` (openai-models, openai-chat, openai-completions), image-text-to-text to `vision` (openai-chat with `match: images`), feature-extraction and sentence-similarity to `embed` (openai-embeddings), automatic-speech-recognition to `stt`, text-to-speech to `tts` (the OpenAI audio adapters), object-detection, image-classification, image-segmentation and keypoint-detection to `detect`, `classify`, `segment`, `keypoints` (an `http-multipart` image form, jpeg or png, the answer JSON, and an `http-sse` camera route), video-classification and video-text-to-text to `video-classify` and `video-text` (a video form, mp4 or webm, a prompt for the second, and the event route); `LIBRARY_TASKS` (sentence-transformers, ultralytics, timm) only where the model has no task; any other task gives a generic `http-json` draft of the task's kind (else `custom`) that needs the person. `LIMITS` holds the conservative body caps and timeouts per route family; the model files set the formats (gguf, an mmproj projector, ggml-whisper, onnx) and the memory limit (the largest model file times 1.2 plus 128 MB). Every field carries a `Reason` with its origin (task, library, default, model files, needs the person); `MODEL_CARD_TASKS` add the hints input size, classes, pre- and post-processing with where each should come from (the model's `preprocessor_config.json`, `config.json` `id2label`, else the target module), into the block's notes and its guide's `## Models` section. A draft is status `template` and always passes `blocks.parse_block`. Facts: `hf_hub.HubClient.info` keeps `pipeline_tag` and `library_name` from its one lookup (model_info, else the card; plain words), `hf_hub.folder_facts` reads a local folder without the network (its files, `config.json`, the README front matter, the classes and input size; never its path). The person: `llm-cli bundle block propose --hf/--from-folder/--task [--write [DIR]]` (written only at a terminal after a yes, "No" by default) and Propose from model... in the Board bundle window (a review dialog: the reasons read only, `block.yml` editable and checked again, Save writes it through `blocks.new_block(spec=, guide=)` as an own block). An AI: the optional read-only tool `propose_bundle_block` (facts, draft, reasons; no path, no token; a `note` kept by `ProposalNotes` in the per-user folder, at most 10 per model, shown to the person as AI-generated text, never applied); writing is `NO_TOOL_ACTIONS` `write_bundle_block`. | A new model needs a block, and the person should not have to know the gateway's protocols to write one; the rules make the draft explainable field by field, and the person, not an AI, decides what the board exposes. |
 | Air-gapped conversion takes a model archive (`llmcf-model/1`: commit, every file, licence and gating, sha256s, signature) and modular tool packs; archives stay with the person, only recipes and target modules are shared. | planned: ROADMAP row "A portable model archive for a computer without a network". | The network-less sandbox can check a conversion only when everything it needs came in one checked piece; weights are never redistributed. |
-| The board's vision engine (`llmcf-detect`, Rust) runs every RKNN vision model through a model card from the target module: input, normalisation, classes, thresholds, the role of each output and one of the post-processing kinds (YOLO with anchors, anchor-free, DFL, NMS-free, NMS in the model, SSD priors, instance segmentation, pose, oriented boxes, classification, semantic segmentation, embeddings, depth, CTC text, DB text detection; two-stage pipelines composed of these). It takes every camera a Raspberry Pi or Radxa board can use (the CSI modules of every maker and USB cameras), plus RTSP, video files and images. The Raspberry Pi camera modules (such as the Camera v1.3 and v2) work on Rockchip boards too: the board installer enables the camera overlay for the person's camera model as the board maker describes it, on Radxa boards in `rsetup` under System Configuration, where the camera overlay is enabled and the overlay for the camera model selected (the maker's camera page for the Radxa ZERO 3 shows the steps). The board installer sets up what a camera needs by its maker's official instructions: the driver, the overlays for the NPU and the camera (on Radxa boards through `rsetup`), Rockchip's camera service (`rkaiq_3A`) and the sensor's tuning (IQ) file, idempotently, showing what it changes, after the person's yes, and then restarts the board. What it answers follows what the model can process (boxes, masks, keypoints, text or embeddings): JSON, an event stream and video with the results drawn in; only the engine's own account opens the camera. | planned: ROADMAP row "Vision on the NPU", the next piece of work. The block `vision-rknn-detect` with its `reach` routes through the gateway, started on demand. Frames through V4L2 (a device found by its name under `/sys/class/video4linux`, never by its number), Rockchip's MPP to decode and RGA to scale and convert colours, the CPU where MPP or RGA is missing; GStreamer only as a fallback where it is strictly needed. Rockchip's `librknnrt.so` (`librknnmrt.so` on RV1103 and RV1106) is never shipped (its licence allows no redistribution): the board's own copy first, else a download pinned to a commit and its SHA256, with the person's consent and Rockchip's licence shown, kept in a folder of its own and loaded by its absolute path; runtime at least the toolkit version that converted the model, runtime and driver version checked at start; Rust for aarch64 with glibc. The tests use a simulated NPU runtime, so CI checks the engine without a board. Delivery in three steps: (a) the core, the cards, the image sources and every detection kind; (b) segmentation, pose, oriented boxes, classification, semantic segmentation and depth; (c) embeddings, OCR and multi-stage pipelines. The Raspberry Pi AI Camera (IMX500) is supported as well (planned: ROADMAP row "The Raspberry Pi AI Camera (IMX500)"). It needs Raspberry Pi's own stack: its kernel driver configures the module over I2C, the sensor's network firmware is downloaded at every start (the package `imx500-all` on Raspberry Pi OS), and an RP2040 on the module is driven by a Raspberry Pi specific SPI driver; Ubuntu's libcamera does not cover it either, and no Rockchip or Radxa driver or overlay exists. On Raspberry Pi targets it therefore comes with the Raspberry Pi target modules, through Raspberry Pi's own stack; on Rockchip boards it is planned as a port of the imx500 driver, the firmware download and the RP2040 SPI driver to the Rockchip vendor kernel, whose feasibility is checked first, and until then it is not usable there. Research: [RKNN vision research](recherche/RKNN_Vision.md). | All variants, all cameras: a new model family needs a card, not new code, as for the gateway. Cameras have official drivers and their makers' exact instructions, so the installer follows them instead of leaving the set-up to the person, and a Raspberry Pi camera on a Rockchip board costs a choice of overlay, not new code; Raspberry Pi boards are to get target modules of their own, so the AI Camera belongs with them, and on Rockchip it goes as far as it is technically possible; without GStreamer the board carries fewer dependencies. |
+| The board's vision engine (`llmcf-detect`, Rust) runs every RKNN vision model through a model card from the target module: input, normalisation, classes, thresholds, the role of each output and one of the post-processing kinds (YOLO with anchors, anchor-free, DFL, NMS-free, NMS in the model, SSD priors, instance segmentation, pose, oriented boxes, classification, semantic segmentation, embeddings, depth, CTC text, DB text detection; two-stage pipelines composed of these). It takes every camera a Raspberry Pi or Radxa board can use (the CSI modules of every maker and USB cameras), plus RTSP, video files and images. The Raspberry Pi camera modules (such as the Camera v1.3 and v2) work on Rockchip boards too: the board installer enables the camera overlay for the person's camera model as the board maker describes it, on Radxa boards in `rsetup` under System Configuration, where the camera overlay is enabled and the overlay for the camera model selected (the maker's camera page for the Radxa ZERO 3 shows the steps). The board installer sets up what a camera needs by its maker's official instructions: the driver, the overlays for the NPU and the camera (on Radxa boards through `rsetup`), Rockchip's camera service (`rkaiq_3A`) and the sensor's tuning (IQ) file, idempotently, showing what it changes, after the person's yes, and then restarts the board. What it answers follows what the model can process (boxes, masks, keypoints, text or embeddings): JSON, an event stream and video with the results drawn in; only the engine's own account opens the camera. | planned: the [build plan](#build-plan-the-vision-engine-llmcf-detect) below and the ROADMAP rows "Vision on the NPU, step 1" to "step 4" (step 1 the next piece of work) and "Vision on the NPU on a real board". The block `vision-rknn-detect` with its `reach` routes through the gateway, started on demand. Frames through V4L2 (a device found by its name under `/sys/class/video4linux`, never by its number), Rockchip's MPP to decode and RGA to scale and convert colours, the CPU where MPP or RGA is missing; GStreamer only as a fallback where it is strictly needed. Rockchip's `librknnrt.so` (`librknnmrt.so` on RV1103 and RV1106) is never shipped (its licence allows no redistribution): the board's own copy first, else a download pinned to a commit and its SHA256, with the person's consent and Rockchip's licence shown, kept in a folder of its own and loaded by its absolute path; runtime at least the toolkit version that converted the model, runtime and driver version checked at start; Rust for aarch64 with glibc. The tests use a simulated NPU runtime, so CI checks the engine without a board. Delivery in four steps: (1) the core, the cards, the image sources and every detection kind; (2) cameras and video; (3) segmentation, pose, oriented boxes, classification, semantic segmentation, depth and text; (4) embeddings and multi-stage pipelines. The Raspberry Pi AI Camera (IMX500) is supported as well (planned: ROADMAP row "The Raspberry Pi AI Camera (IMX500)"). It needs Raspberry Pi's own stack: its kernel driver configures the module over I2C, the sensor's network firmware is downloaded at every start (the package `imx500-all` on Raspberry Pi OS), and an RP2040 on the module is driven by a Raspberry Pi specific SPI driver; Ubuntu's libcamera does not cover it either, and no Rockchip or Radxa driver or overlay exists. On Raspberry Pi targets it therefore comes with the Raspberry Pi target modules, through Raspberry Pi's own stack; on Rockchip boards it is planned as a port of the imx500 driver, the firmware download and the RP2040 SPI driver to the Rockchip vendor kernel, whose feasibility is checked first, and until then it is not usable there. Research: [RKNN vision research](recherche/RKNN_Vision.md). | All variants, all cameras: a new model family needs a card, not new code, as for the gateway. Cameras have official drivers and their makers' exact instructions, so the installer follows them instead of leaving the set-up to the person, and a Raspberry Pi camera on a Rockchip board costs a choice of overlay, not new code; Raspberry Pi boards are to get target modules of their own, so the AI Camera belongs with them, and on Rockchip it goes as far as it is technically possible; without GStreamer the board carries fewer dependencies. |
 | whisper.cpp's own `whisper-server` is never reachable from outside the board: it listens on the board's loopback only, and speech reaches clients only through `llmcf-gateway`. | Block `stt-whisper-cpp` (`--host 127.0.0.1`; the plan refuses another host); the gateway's `/v1/audio/transcriptions` passes the checked form on. | `whisper-server` loads files it is told and has no key; the Rust gateway is the one checked door. |
 | llmcf designs no speech behaviour of its own: the gateway passes speech on as the engine and the harness do it. Whether a transcription comes as one answer or as a stream, and what is done with it, is decided by the engine and by the harness or its programmer (a harness such as Chimera manages that itself); the gateway's job is to be the adapter that every harness can reach and bind to, and to pass a streamed answer on as a stream. | Built: every route of the route table names its engine and how it is reached; an answer that is an event stream (`text/event-stream`) goes back as a stream on a route that declares `stream`, and the answer of an `http-sse` route must be one (`rust/llmcf-gateway/src/server.rs`, `forward` and `is_event_stream`), under the same limits as every request. Nothing beyond that is planned: the earlier proposal of an llmcf-made transcription in parts at speech pauses is dropped. | The harness knows how its conversation should behave; an adapter that adds behaviour of its own would bend every harness to llmcf instead of letting each one bind to the board as it is. |
 | The bridge's guards: a bridged tool is switched off again when its description changes; a changing foreign tool always asks; no key is passed on; loop guards; a fixed list is never done over the board's MCP: deploy, delete, network release, keys, rules. | planned: ROADMAP row "Bridge mode with autodiscovery". | A foreign server can change what its tool does after the person enabled it. |
 | Whether the language model runs on the board is the person's choice first, then bounded by the measured limits; running it elsewhere stays the fallback. | The bundle plan shows the measured fit of the chosen components (rows on the measured limits and "Together or in turn is measured" above); the person picks the components. | The person knows the use; the board's memory decides what fits. |
 | A contract test for harnesses checks the gateway's interfaces the way a harness uses them, without any harness code in llmcf. | planned: ROADMAP row "A contract test for harnesses". | A harness is its own project; llmcf must still not break it. |
+
+#### Build plan: the vision engine `llmcf-detect`
+
+This is the build plan of the board's vision engine, written before it is built, under the rule that work which needs
+real hardware waits and the plan comes before the build: nothing here needs hardware to be built, and what needs a board
+is named and waits. It refines the vision row of the table above with the [RKNN vision
+research](recherche/RKNN_Vision.md) and fits into what exists: the Rust workspace, the bundle's blocks and their
+`reach`, the gateway's route table, scheduler and memory guard, the root helper llmcf-install, and the Rockchip target
+module. Where the research left a question open, the answer below is the assistant's, marked "decided here" with its
+reason; the maintainer reviews the plan.
+
+##### 1. Purpose and boundaries
+
+`llmcf-detect` is one Rust program on the board that runs vision models on Rockchip's NPU: it takes an image or the
+frames of a source, prepares them the way the model wants them, runs the model, decodes its outputs into results and
+gives them back as JSON, as events or as video. It is a new crate `rust/llmcf-detect` in the existing workspace, under
+the same pinned toolchain, release profile, cargo-deny rules and exact pins as the gateway, and it serves HTTP with the
+gateway's stack (tokio current-thread and hyper 1), so the board carries one way of serving HTTP and whoever reads one
+program can read the other. It listens only on the board's loopback, on its block's port (8093, the port `propose.py`
+gives the `detect` kind), and is reached only through `llmcf-gateway`, like whisper-server: the gateway checks every
+request, queues it fairly, guards the memory and starts the engine on demand.
+
+What it does not do: no language model (a vision language model that describes a picture stays the llama-server `vision`
+engine with its projector), nothing of Ditto or Mojo, no cloud and no network beyond loopback (an RTSP camera aside,
+section 9), no downloads, no recording of frames or results, no gallery of faces or persons and no identification (it
+returns embeddings; a harness decides what they mean), and no tracking across frames in the four steps (a harness can
+follow the event stream; a tracker can come later as a step after the post-processing). Why: one engine per job keeps
+each one small and testable, and every decision about what a picture means for the person belongs to the harness, not to
+the engine.
+
+##### 2. The NPU runtime
+
+The engine never links Rockchip's runtime: it loads it at start with `dlopen` from an absolute path given on its command
+line (`--rknn-runtime`), never by a library name, so no search path, `LD_LIBRARY_PATH` or other package can put another
+library in its place. Which file: the board's own copy first (a vendor package such as Radxa's `rknpu2-rk356x` or
+`rknpu2-rk3588`, found by the probe at its fixed places), else the pinned download: rknn-toolkit2's
+`rknpu2/runtime/Linux/librknn_api/aarch64/librknnrt.so` at commit `2c723177a94fac65cbc036d722907ddbc91980cf` (tag
+v2.5.0), SHA256 `4b6cc575bedf8952b13db4b1190fa3b3d2ac213f00be774ff6ccd19d651970c0`, fetched by the board installer from
+Rockchip's repository after the person has seen the RKNN SDK License and said yes (the block's `terms`), placed
+root-owned in a folder of its own (`/opt/llmcf/vendor/rknn/2.5.0/`) and checked against its SHA256 when it is placed and
+again at every start of the engine. The board's own copy is not checked by a hash, because vendor packages are stripped
+and differ per release (research 1.1); it is taken as the board's package manager installed it and checked by its
+version. The plan prefers the board's copy when its version is at least the card's toolkit version and proposes the
+download otherwise; the file never enters the repository or the bundle, since its licence gives no right to pass it on.
+
+At start `rknn_query(RKNN_QUERY_SDK_VERSION)` gives the runtime's API version and the driver's version. The runtime must
+be at least the toolkit version in the model's card (the same major version 2), the driver at least 0.9.2, the
+development guide's minimum; below 0.9.8, which the 2.5.0 quick start recommends, `/health` and the plan show a warning.
+Decided here: a driver below 0.9.2 is refused, not tried, because an NPU job on an unsupported driver can hang the
+device for every engine of the board; the first run on a real RK3566 image with driver 0.8.8 (research 1.3) shows
+whether an exception is needed. The model must fit the board: the card's target platform against the SoC named in
+`/proc/device-tree/compatible`, RK3566 and RK3568 interchangeable, every other pair exact (research 1.3). On the RK3588
+(three NPU cores) and the RK3576 (two) the engine sets its core mask with `rknn_set_core_mask` from the block variable
+`npu_cores` (`auto` by default, else a list of cores), so the measurement can split the cores between engines (section
+6); on a single-core SoC the plan refuses a mask.
+
+The mini runtime `librknnmrt.so` of the RV1103 and RV1106 has a smaller interface (INT8 only, NHWC output, buffers made
+with `rknn_create_mem`) and runs on uClibc systems, for which Rust has only a tier-3 target. Decided here: these SoCs
+get their own later row, outside the four steps, and the trait below already carries the mini runtime's differences, so
+the port is a build target, not a new design.
+
+All NPU access goes through one Rust trait, `Npu`: load a model from its bytes, query its inputs and outputs
+(dimensions, layout, type, zero point, scale), set the core mask, run with input buffers and hand back the output
+buffers. One implementation calls the runtime through hand-written FFI declarations of exactly the functions and
+structures the engine uses; no header of Rockchip's is copied or generated into the repository, the structure sizes are
+checked at start against what the runtime reports, and the first run on a board checks them for real. The other
+implementation, `SimNpu`, is the simulated NPU of the tests (section 8). It exists only in a test build (the cargo
+feature `sim-npu`), and the release build refuses it, as llmcf-install's release build refuses its test root, so a board
+never runs a simulation by mistake.
+
+##### 3. The model card
+
+Every RKNN model comes with a model card, a strict JSON file of the schema `llmcf-model-card/1` next to the `.rknn`
+(`<name>.card.json`); it is what makes a new model family a matter of a card, not of new code. The Rockchip target
+module writes it at conversion, because only the conversion knows how the model was converted: `rknn_converter.py` (kept
+identical in the template) takes the input size, colour order, mean and std from the model's own configuration
+(`preprocessor_config.json`; the metadata of an Ultralytics ONNX export with its class names, stride, image size and
+task; `config.json` with `id2label`), passes mean and std to `rknn.config`, so the normalisation is in the model as in
+Rockchip's model zoo and the engine feeds plain uint8 RGB, reads the output names and shapes from the ONNX graph,
+chooses the post-processing kind by its rules and records the toolkit version, the target platform and the quantisation
+it converted with. Where the rules cannot decide the kind or a role, the converter writes no card and says what is
+missing; the person then gives a card with the model (the same schema), which the module checks and completes. A block
+may override only what is a decision of use, not a fact of the model: the score threshold, the NMS IoU, the most results
+and a subset of the labels, as block variables passed as arguments; a whole card from the person is the block's card
+file, checked the same way. The model-card hints of `propose.py` (input size, classes, pre- and post-processing, "else
+the target module") now point to this card.
+
+The card holds: `schema`; `model` (name, source repository and commit, licence); `rknn` (file name, SHA256, toolkit
+version, target platform, quantisation w8a8 or fp16); `input` (width, height, layout NHWC or NCHW, colour order rgb or
+bgr, resize by letterbox, stretch or centre crop, the pad value, 114 by default as in the zoo, mean and std per channel,
+whether the normalisation is in the model, the input type); `task` (detect, segment, pose, obb, classify, semantic,
+depth, embed, text, text-detect); `postprocess` (the kind, one of the fifteen, and its parameters: anchors per stride,
+strides, the DFL's `reg_max`, the number of classes, top-K, prior boxes and their variances, the number of keypoints,
+the number of mask prototypes, the CTC blank index, the DB thresholds and unclip ratio, the angle formula); `labels`
+(the class names or a dictionary of characters, at most 20,000 entries of at most 64 bytes); `thresholds` (score, NMS
+IoU, most results); `score_activation` (in the model, or sigmoid or softmax on the board); `outputs` (for each output
+its index, its role among boxes, scores, score_sum, objectness, mask_coeffs, protos, keypoints, angle, class_logits,
+embedding, depth, text_logits and prob_map, and its expected shape with named dimensions; a role may be `auto`, found by
+its shape as the zoo's code for YOLO26 and YOLOv8 finds it). The quantisation's scales and zero points are not in the
+card: the engine reads them from the model at load (`rknn_query`), so a card can never disagree with the model about
+them. At load the engine compares the card's outputs with what the model reports and refuses a mismatch, naming the
+output and both shapes; nothing is guessed.
+
+The card is checked on both sides by the same rules: on the host by `orchestrator/runtime/bundle/model_card.py` (when
+the build's artefact is taken in, and in the bundle plan, which also checks by the card's SHA256 that card and model are
+a pair, as it checks a model and its projector), on the board by the engine's `card.rs`, with one set of shared vectors,
+`tests/data/model_card_vectors.json`, as the route table (`gateway_routes_vectors.json`) and the manifest
+(`bundle_manifest_vectors.json`) already have: at most 1 MiB, strict JSON, every key known, every value bounded. The
+card is a block file of the role `data` with the new format `model-card`, and the model one of the role `model` with the
+new format `rknn`: the role says what the installer does with a file, and a card is copied like any data file, so no new
+role is needed. Why a versioned schema: a framework that meets a card of a newer schema refuses it instead of misreading
+it, as with the route table.
+
+##### 4. Post-processing
+
+The post-processing is one module per kind behind one function signature (the model's outputs with their attributes and
+the card's parameters in, results out), pure code without I/O, so every kind is tested on recorded tensors without an
+NPU. The fifteen kinds of the research (section 2.3) come in three groups, delivered in the steps of section 10. (a) The
+detection kinds, with step 1: `yolo-anchor` (YOLOv5, v7), `yolo-anchorfree-obj` (YOLOX), `yolo-dfl` (YOLOv6, v8, 11,
+PP-YOLOE), `yolo-nms-free` (YOLOv10, YOLO26), `device-nms` (NMS compiled into the model) and `ssd-prior` (SSD,
+RetinaFace, SCRFD, with the landmarks where the model has them). (b) With step 3: `yolo-seg-protos`, `yolo-pose`,
+`yolo-obb` (with the probIoU NMS), `classification` (softmax, top-K), `semantic-seg` (argmax per pixel), `depth-map`,
+`ctc-text` (LPRNet) and `db-text-det` (the DB probability map, its contours and the unclip). (c) With step 4:
+`embedding` (L2-normalised vectors: ArcFace, CLIP, re-ID) and the two-stage composition: a card of the kind `pipeline`
+names two cards, a first model whose results (boxes, faces with landmarks, text regions) are cut out of the frame,
+aligned where the kind asks for it (faces by their five landmarks, text regions by their rotated rectangle) and handed
+to the second model (classification, embedding, CTC text), with a cap on the crops per frame.
+
+Open-vocabulary models (YOLO-World, CLIP zero-shot) need text embeddings of the person's words. Decided here: the target
+module computes them at conversion with the model's text encoder on the host and writes them into the card, so the board
+runs only the image model; a new vocabulary is a new conversion, which costs minutes on the host instead of a second
+model's memory on every board. MobileSAM's promptable segmentation, super-resolution and lanes stay "later" (research
+2.3).
+
+Two rules, both taken from the model zoo, make the post-processing fast on a small board. The thresholds are compared in
+the quantised domain: the score threshold is turned once per output into the output's integer type with its scale and
+zero point (through the inverse sigmoid where the activation is applied on the board), so the many candidates below it
+are dropped without ever becoming floating point, and only the few above it are dequantised and decoded. And the layout
+is read, never assumed: the engine asks the runtime for each output's format, takes the native NHWC output where it
+saves the driver a conversion (always on the RV110x, on the others where the query offers it) and NCHW otherwise; every
+kind indexes through one layout helper and is tested in both layouts against the same golden results. Results are given
+in the coordinates of the source image (the letterbox's scale and padding undone), with the card's labels and class ids.
+
+##### 5. Frame sources
+
+A frame comes from one of four kinds of sources, and each ends in the same place: an image in the model's input size,
+colour order and layout, ready for the NPU. (1) Images posted through the gateway, JPEG and PNG (the magic types the
+route declares), decoded as below. (2) A CSI camera on a Rockchip vendor kernel: the ISP's V4L2 node, found by its name
+in `/sys/class/video4linux/*/name` (`rkisp_mainpath` or `rkisp_selfpath`), never by its number, captured as multiplanar
+NV12 into DMA-BUF buffers (research 3); its image is usable only with Rockchip's 3A service and the sensor's tuning
+file, which the board installer sets up (section 7). (3) A USB camera (`uvcvideo`): MJPEG for 720p and above on USB 2.0,
+YUYV for small sizes; MJPEG is decoded by MPP, else by libjpeg-turbo, else by a JPEG decoder in Rust built into the
+engine. (4) An RTSP camera or a video file (H.264 or H.265), decoded by MPP. Decided here: there is no CPU decoder for
+these, because it would bring a large C library onto every board for a case that a Rockchip board's MPP covers; the plan
+tells a board without MPP so. libcamera is not used: it does not work on the vendor kernels (research 3).
+
+Scaling, colour conversion and the letterbox are done by RGA on the DMA-BUF that the camera or MPP produced, so a camera
+frame reaches the NPU without the CPU touching its pixels; where RGA is missing or refuses a format, a CPU path in Rust
+does the same, slower but correct, and it is the path the tests take. MPP (`librockchip_mpp`), RGA (`librga`) and
+libjpeg-turbo are loaded at run time like the NPU runtime, by absolute path from the board's own packages, because they
+are vendor libraries whose versions differ per image and whose absence must make the engine take the CPU path, not fail
+to start; the Rust decoders and the CPU path are compiled in. GStreamer stays a fallback only for a source that none of
+these paths can read. Decided here: none of the research's sources needs it, so no GStreamer code is planned in the four
+steps.
+
+Only the latest frame counts: a source keeps a small ring of capture buffers (four by default), the inference takes the
+newest frame whenever it is free, and every older frame goes back to the driver unprocessed. Frames are dropped, never
+queued, and each result carries its frame's sequence number, its time stamp and how many frames were dropped since the
+last result. Why: a result about a frame of two seconds ago is worse than a skipped frame, and a queue of frames would
+grow without bound whenever the NPU is slower than the camera. A camera source runs only while at least one client
+follows its events or its video and stops a short time after the last one leaves; several clients share one capture and
+one inference and get the same results, and a slow client skips results instead of making the engine keep them for it.
+One source per engine in these steps; several cameras on one engine (one model in memory, their frames taken in turn)
+need the source named in the request, which waits until the gateway passes a checked query parameter on a stream route.
+
+Only the engine's own account (`llmcf-vision`, a system account without login) opens the camera: the installer puts it
+into the groups that own the NPU's, RGA's and MPP's device nodes and gives the chosen camera's node to it alone with a
+udev rule; the gateway's account and the harness are not in these groups. An RTSP camera's address with its credentials
+is a secret: the person enters it at deploy over the board's SSH session, it is written with mode 0600 into the engine's
+own state folder and never into the manifest, a plan, an argument or a log. A video file source is a file name inside
+the engine's own media folder, never a path.
+
+##### 6. Outputs and reach
+
+What the engine answers follows what the model can produce: boxes, masks, keypoints, oriented boxes, classes, class
+maps, depth, text or embeddings. Each result is one JSON object of the schema `llmcf-vision-result/1`: the model and the
+task; the frame (source, size, sequence number, time stamp, dropped frames); the timings of preparation, NPU and
+post-processing in milliseconds; and the results: detections with label, class id, score and box in the source's pixels,
+plus keypoints, an angle or a mask as a run-length code inside its box where the kind has them; classes with their
+scores; a class map or a depth map as a PNG (8 or 16 bit, base64) at the model's output size with its scale to the
+source; text with its score and polygon; embeddings as normalised arrays of floats. Why run-length codes and PNG: a mask
+or a map written as plain JSON numbers would be many times larger than the image it describes.
+
+The block `vision-rknn-detect` (kind `detect`, one of the framework's own blocks) declares its routes in its `reach`, so
+the gateway needs no code for the engine (the universal adapter). `POST /api/detect` is `http-multipart` with the file
+field `image` (jpeg or png, required) and the optional text field `options` (JSON: thresholds, most results, a subset of
+the labels, within the card's bounds), the route that `propose.py` drafts for a detection model. `POST
+/api/detect/image` is `http-binary` (jpeg, png) for clients that only send an image, answered with the card's defaults.
+`GET /api/detect/events` is `http-sse`, the stream of results of the engine's source, one event per processed frame.
+With step 2 comes `GET /api/detect/video`, the source's video with the results drawn in. The caps are those of
+`propose.py`'s route families: 8 MB and 60 seconds for an image, 30 seconds of silence for an event stream. Blocks for
+other kinds that the same program serves (`classify`, `segment`, `keypoints`, `embed`, with `propose.py`'s ports and
+paths) come with the steps that bring their kinds; they differ only in their block, never in the program.
+
+Video comes first as MJPEG over HTTP (`multipart/x-mixed-replace`), which every browser and player shows without a
+plug-in: boxes, labels and keypoints are drawn into the NV12 frame itself, so drawing needs no colour conversion, and
+the frame is encoded by MPP's JPEG encoder where the SoC has one, else on the CPU at a lower rate, at most `video_fps`
+frames a second (10 by default) and `video_width` pixels wide (640 by default). The gateway passes on only what it can
+check, so the video route needs a new generic protocol `http-mjpeg` in `reach.py` and `routes.rs`, with shared vectors:
+a GET whose answer must be `multipart/x-mixed-replace` with JPEG parts, each part checked by its magic bytes and against
+a size cap, with the idle timeout between two frames as for `http-sse`. H.264 through MPP's encoder comes later. Decided
+here: as fragmented MP4 over HTTP through the same kind of checked stream route, not as an RTSP server, because the
+gateway is the board's one door and it speaks HTTP; an RTSP output would be a second door. RTSP stays an input.
+
+Under the gateway's scheduler the engine lives like every engine. The block has a unit (`llmcf-detect.service`, run as
+`llmcf-vision`), its memory and its port, so the generator passes `--engine detect=llmcf-detect.service:<MiB>:8093`; in
+turn its unit is installed but not enabled at boot, the gateway starts it on its first request and stops it after the
+idle time, and together it is started on its first request as well. Decided here: its memory is 96 MB plus twice the
+model file until it is measured, since the runtime holds the model file and the NPU's copy of the weights, plus the
+capture ring. The engine answers `/health` with 503 until the model is loaded and the version checks have passed, so the
+gateway's wait after a start sees real readiness. Memory that the NPU driver allocates is not charged to the unit's
+cgroup, so `MemoryMax` alone cannot bound it; what keeps it in bounds is the gateway's memory guard, which watches the
+board's free memory, and the measurement step "measure the engines", which measures the board's free memory under load
+rather than the process's resident size.
+
+Two rules for long streams, decided here because the gateway's places in flight were made for requests that end: an open
+event or video stream does not take one of the `max_inflight` places but one of a small pool of its own per route
+(`max_streams`, two by default), so a person watching the camera never blocks the language model's requests; and in
+turn, when another engine needs the memory, the gateway ends the vision engine's open streams after the engine's hold
+time with a last event that says why, and the client reconnects later (an event stream reconnects by itself); together
+nothing is ended. Next to the other engines: on an RK3566 the language model runs on the CPU (RKLLM does not support
+it), so the NPU belongs to the vision engine alone and together is usually possible, with the CPU cores for capture and
+post-processing pinned by the measurement; on an RK3588 with an RKLLM model, the NPU's cores are split between the two
+by the measurement's proposal and the person's choice (`npu_cores`); whisper stays on the CPU.
+
+##### 7. Board setup by the board installer
+
+What the NPU and a camera need is set up by the board installer, planned as typed root actions of llmcf-install: each is
+carried out only when it is not in place yet, recorded in its journal for the removal, shown in the plan before the
+person's yes, and checked on both sides with the shared manifest vectors. `enable_overlay` switches on the NPU's overlay
+where the probe finds no NPU, and the camera's overlay for the person's camera model, the way the board maker's own tool
+does it (on Radxa images the same steps as `rsetup`'s overlay menu). `install_package` installs from the board's own
+signed vendor repository: Rockchip's camera engine with its `rkaiq_3A` service, MPP and RGA, and the board's NPU runtime
+package where it is newer than the one there. `place_vendor_file` places a pinned download with its SHA256 and its
+licence shown: the NPU runtime of section 2, and a sensor's tuning file when the board maker's package does not carry
+it. The engine's account comes through `create_user` with its device groups, the udev rule through `place_root_file`,
+and `reboot_board` comes last and only when an overlay changed; the host then connects again, runs the installer once
+more (which now changes nothing) and checks that the NPU and the camera's node are there.
+
+The camera cannot be found before its overlay is on (a CSI camera is on no bus until then), so the person picks the
+camera model in the plan. The list of cameras, with the sensor, the overlay per board, where the tuning file comes from
+and the link to the maker's instructions, is data of the Rockchip target (`targets/Rockchip/cameras.yml`), because
+hardware facts live with the target module and a new camera is a new row, not new code. The plan shows the maker's
+instructions it follows, every overlay, package, file and group it changes, and that the board restarts; nothing of it
+happens without the yes, and enterprise mode takes it only from the framework's and indexed blocks. Why typed actions
+and not a script: they can be shown, checked, undone and repeated without effect, which a shell line cannot promise.
+
+##### 8. Build and test without hardware
+
+`librknnrt.so` exists only for glibc (research 1.3), and a static musl program cannot load a glibc library, so the
+engine is the first board program of the workspace built for `aarch64-unknown-linux-gnu` instead of musl. Decided here:
+it is linked by zig through `cargo-zigbuild`, both pinned exactly, against glibc 2.31 (`--target
+aarch64-unknown-linux-gnu.2.31`). zig carries the glibc symbol stubs of every version, so the baseline is set exactly,
+whatever C library the build computer or the runner has, without a sysroot to download, and the same pinned tool works
+in CI and in the framework's builder image on the person's computer, which builds the board programs today
+(`root_helper.ensure_helper`). 2.31 (Debian 11, Ubuntu 20.04) covers the vendor images in use with a margin, while the
+runtime itself needs only 2.17; the probe's C library fact lets the plan refuse an older board with the reason. Every
+library the engine needs from the board beyond the C library is loaded at run time, so the program's needed libraries
+are only the C library's own (libc, libm, libdl, libpthread, libgcc_s). `rust-toolchain.toml` gains the target,
+`root_helper` learns a target per program (the gateway and llmcf-install stay static musl) and its ELF check accepts
+this one program as dynamic with exactly that list.
+
+CI needs no board. The existing Rust job runs fmt, clippy and the engine's unit tests on the host; a new step builds the
+release program with zig and checks its ELF (the aarch64 interpreter, the needed libraries above and nothing else, no
+glibc symbol version above 2.31, the simulated NPU refused); and a new job on GitHub's arm64 runner runs the tests and
+the end-to-end test again on aarch64, with the test build made the same way. The unit tests drive each post-processing
+kind with recorded tensors through `SimNpu`, which reads a recorded model (its input and output attributes as JSON and
+its outputs as raw little-endian files per input) and can also play the runtime's failures (a driver too old, a load
+error, an output that does not match the card).
+
+The golden results come from two places. Tensors built by construction from known boxes in the quantised domain: the
+expected result is known before the code runs, and the edge cases (scores on the threshold, NMS ties, empty frames) are
+made on purpose. And tensors from real models run on the host's CPU at small input sizes, decoded by the model zoo's own
+Python post-processing at its pinned tag v2.5.0 where the zoo has one, else by a line-by-line Python port of its
+`postprocess.cc`: a developer tool makes them and is never part of a test run, the zoo's code is fetched at its tag and
+never copied into the repository, and only the tensors and the results (tens of kilobytes) are committed, no weights.
+The end-to-end test (`tests/test_bundle_detect.py`, like the tests of llmcf-install and the gateway with their test
+builds) plans a bundle with the block, starts the gateway with the generated `routes.json` and the engine's test build
+with a file source (a folder of still images played at a fixed rate), posts an image through each image route and
+compares the answer with its golden result, reads the event stream and checks the order, the dropped count while the
+client reads slowly, and the refusals: a wrong type (415), a body too large (413) and an image whose header announces
+more pixels than the cap (422). What waits for real hardware has its own ROADMAP rows: the first run on a real NPU (the
+FFI structures, the versions, the timings, the core mask), the camera bring-up per camera and board, and the performance
+tuning.
+
+##### 9. Security
+
+The engine's attack surface is what it needs and no more. Network: it listens on loopback only and the plan refuses
+another address; its unit allows loopback only, plus exactly an RTSP camera's address when the person configured one (on
+the local network, by the locality rule). Inputs: the gateway caps the body and checks its magic type before the engine
+sees it; the engine reads an image's dimensions from its header before it decodes it and refuses more than 40 megapixels
+(decided here: above a 12-megapixel still and far below what would exhaust a small board's memory), so a small file
+cannot unpack into gigabytes; options are strict JSON bounded by the card. Devices: only the engine's account opens the
+camera and the NPU's, RGA's and MPP's nodes, and its unit allows exactly those devices. Files: the model and its card
+are listed with their SHA256 in the signed manifest, copied and checked by the installer like every payload, and checked
+again by the engine at every start before the runtime parses the model, because that parser is a closed vendor library;
+the engine never downloads a model and loads one only from its component's folder. Vendor libraries run inside the
+engine's process, which is why that process has its own account, no network and only its devices, and the downloaded NPU
+runtime is pinned by its hash. The log holds numbers and states only, never an image, a result's content or an RTSP
+address.
+
+##### 10. Delivery
+
+Four steps, each wired and tested green before the next, and the work that needs a board apart, waiting for it. Step 1,
+the engine without a camera: the crate, the `Npu` trait with the runtime and the simulated NPU, the model card on both
+sides with its vectors and the converter writing it, the six detection kinds, posted images and image files as sources,
+JSON and the event stream, the block with its reach, the cross-build and the tests of section 8. Step 2, cameras and
+video: the UVC and rkisp sources with MPP and RGA, RTSP and video files, the MJPEG video with the gateway's `http-mjpeg`
+protocol and the pool for streams, and the board installer's setup of section 7 with the camera table. Step 3, the
+remaining single-model kinds of group (b). Step 4, embeddings and the two-stage composition with the open-vocabulary
+text embeddings. Apart: the first run on a real NPU, the camera bring-up, the performance tuning and the port to the
+RV1103 and RV1106 (ROADMAP rows "Vision on the NPU, step 1" to "step 4" and "Vision on the NPU on a real board").
 
 ### Knowledge base and Deep Ingest
 
@@ -1907,6 +2231,7 @@ that cannot be deleted) is made visible on Linux too.
 | Windows rules for every chain: no Linux-only command in a test without a Windows skip; scripts written with Unix line endings; a read-only file made writable before it is replaced; each change searched for Windows hazards before a push. | The chain's own check before the push; the Windows runner of `ci.yml` and the NTFS emulation in `tests/test_removal.py` catch what slips through. | Failures that only the Windows runner finds came back after every merge. |
 | `docker.yml` checks the target images: hadolint over the Dockerfiles, then the Rockchip image built and smoke-tested, on changes to the targets and the build path, weekly and by hand. | `.github/workflows/docker.yml` (a path filter on `targets/**`, the build engine, the build context and the runtime Dockerfiles; a weekly schedule; `workflow_dispatch`), its actions pinned by commit like every workflow's. | An image that no longer builds must be found before a person's build fails on it. |
 | Every piece of work gets an adversarial review before it lands: reviewers try to break the change, and confirmed findings are fixed and tested on every supported Python version. | A review workflow over the change's diff; its findings and their fixes go with the work. | A change checked only by its author misses what a second look finds. |
+| The vision engine is built for aarch64 with glibc and tested without a board: host tests and an end-to-end run through the gateway with a simulated NPU, the cross-build checked for its glibc baseline, and the tests once more on an arm64 runner. | planned: [build plan of the vision engine](#build-plan-the-vision-engine-llmcf-detect), ROADMAP row "Vision on the NPU, step 1". `cargo zigbuild --target aarch64-unknown-linux-gnu.2.31` with cargo-zigbuild and zig pinned exactly; the ELF check of the needed libraries and symbol versions; the cargo feature `sim-npu`, refused by the release build; a job on GitHub's arm64 runner. | `librknnrt.so` exists only for glibc, so the engine cannot be a static musl program like the other tools; zig sets the glibc baseline exactly, whatever C library the runner has. |
 
 ### Documentation and the blueprint
 
@@ -3973,6 +4298,28 @@ ein sehr gutes ergebnis dabei abliefern. Es muss nicht nur funktionieren, es mus
 muss brauchbar / perfekt auf die target hardware abgestimmt sein." Hardware work waits; the assistant chooses the order.
 
 Now in: [Repository, layers and consolidation](#repository-layers-and-consolidation)
+
+### Round 73
+
+<a id="decision-round-73"></a>
+Written 2026-11-09. The build plan of the vision engine `llmcf-detect`, written by the assistant under the rules of
+round 72 (no hardware, the plan before the build, what exists first): its purpose and boundaries, the NPU runtime behind
+a trait with a simulated NPU, the model card `llmcf-model-card/1` written by the target module and checked on both
+sides, the post-processing kinds in groups, the frame sources with only the latest frame, the outputs and the block's
+routes under the gateway's scheduler, the board installer's setup as typed root actions, the build for aarch64 with
+glibc and the tests without a board, the security, and the delivery in four steps with the board's work apart. Where the
+research left a question open, the assistant decided it, each with its reason in the plan: a driver below 0.9.2 is
+refused; the RV1103 and RV1106 get a later row; open-vocabulary text embeddings are computed at conversion; no CPU
+decoder for H.264 and H.265; no GStreamer code in the four steps; one source per engine until the gateway passes a
+checked query parameter; video first as MJPEG through a new checked protocol `http-mjpeg`, H.264 later as fragmented MP4
+over HTTP, never an RTSP server; long streams in a pool of their own and ended at a switch in turn; the engine's memory
+96 MB plus twice the model until it is measured; zig and glibc 2.31 for the build; an image cap of 40 megapixels. The
+owner reviews the plan.
+
+Now in: [On the board: gateway, voice and MCP (planned)](#on-the-board-gateway-voice-and-mcp-planned),
+[Build pipeline and target modules](#build-pipeline-and-target-modules),
+[Deployment to boards](#deployment-to-boards),
+[Tests, CI and the Windows hazards](#tests-ci-and-the-windows-hazards)
 
 ### Round 74
 
