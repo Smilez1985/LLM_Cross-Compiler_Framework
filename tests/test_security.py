@@ -364,7 +364,7 @@ class TestSecretRedaction:
         ("sk-ant-api03-AbCdEf0123456789abcdefghij", "sk-REDACTED"),
         ("sk-" + "a1B2c3D4e5F6g7H8i9J0" * 2 + "k1L2m3N4", "sk-REDACTED"),   # legacy 48-char OpenAI key
         ("hf_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456", "hf_REDACTED"),
-        ("AIzaSyA1234567890abcdefghijklmnopqrstuv", "AIza-REDACTED"),
+        ("AIza" "SyA1234567890abcdefghijklmnopqrstuv", "AIza-REDACTED"),  # split: GitHub flags the exact format
         ("ghp_" "abcdefghijklmnopqrstuvwxyz0123456789", "gh-REDACTED"),  # split: GitHub blocks the exact format
     ])
     def test_known_key_formats_are_redacted(self, secret, marker):

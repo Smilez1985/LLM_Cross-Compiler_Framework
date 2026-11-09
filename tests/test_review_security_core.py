@@ -34,6 +34,9 @@ from orchestrator.tools.framework_tools import AUDIT_KEY_ID
 from orchestrator.tools.policy import Decision, PolicyStore, ToolPolicy, ToolTier
 from orchestrator.tools.registry import ToolContext, ToolDenied, ToolError, ToolRegistry, ToolSpec
 
+# A made-up key in Google's format, split so that secret scanners do not flag the test itself.
+FAKE_GEMINI_KEY = "AIza" "SyA1234567890abcdefghijklmnopqrstuv"
+
 HF = "hf_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456"
 SK = "sk-proj-AbCdEf0123456789_xyz-ABCDEFGHIJ"
 
@@ -430,7 +433,7 @@ class TestSecretsStore:
 
         with monkeypatch.context() as m:
             m.setattr(secrets_module.os, "replace", failing_replace)
-            assert sm.set_secret("gemini_api_key", "AIzaSyA1234567890abcdefghijklmnopqrstuv") is False
+            assert sm.set_secret("gemini_api_key", FAKE_GEMINI_KEY) is False
         assert store.read_bytes() == before, "the old store is untouched when the new one cannot be put in place"
         assert leftovers(store.parent) == []
 
@@ -506,14 +509,14 @@ class TestSecretsFollowUp:
         gui_store = SecretsManager(tmp_path / "configs")
         assert gui_store.initialize()
         assert gui_store.set_secret("hf_token", "hf_oldTokenFromTheGuiStore0123456789")
-        assert gui_store.set_secret("gemini_api_key", "AIzaSyA1234567890abcdefghijklmnopqrstuv")
+        assert gui_store.set_secret("gemini_api_key", FAKE_GEMINI_KEY)
         cli_store = SecretsManager(tmp_path / "state")
         assert cli_store.initialize() and cli_store.set_secret("hf_token", HF)
 
         sm = secrets_for(tmp_path)
 
         assert sm.get_secret("hf_token") == HF, "a secret already in the per-user store is never overwritten"
-        assert sm.get_secret("gemini_api_key") == "AIzaSyA1234567890abcdefghijklmnopqrstuv"
+        assert sm.get_secret("gemini_api_key") == FAKE_GEMINI_KEY
         assert sm.delete_secret("gemini_api_key")
         assert secrets_for(tmp_path).get_secret("gemini_api_key") is None, "the takeover ran a second time"
 
@@ -534,7 +537,7 @@ class TestSecretsFollowUp:
         assert moved.get_secret("openai_api_key") == SK
 
         # Another old store with other content is still taken over once.
-        gemini = "AIzaSyA1234567890abcdefghijklmnopqrstuv"
+        gemini = FAKE_GEMINI_KEY
         other = SecretsManager(tmp_path / "other" / "configs")
         assert other.initialize() and other.set_secret("gemini_api_key", gemini)
         assert secrets_for(tmp_path, tmp_path / "other" / "configs").get_secret("gemini_api_key") == gemini
