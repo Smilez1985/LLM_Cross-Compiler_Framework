@@ -164,6 +164,14 @@ or the `uvcvideo` driver), never by number. CSI: multiplanar NV12, DMA-BUF buffe
 colour conversion and letterbox. USB: MJPEG decoded by MPP (`librockchip_mpp`), libjpeg-turbo as the fallback. RTSP
 and files: MPP decode; vendor demos use GStreamer (`mppvideodec`) or FFmpeg with rkmpp [25].
 
+The Raspberry Pi AI Camera (IMX500) needs Raspberry Pi's own stack: the kernel driver configures the module over I2C,
+the sensor's network firmware is downloaded at every start (the package `imx500-all` on Raspberry Pi OS), and an
+RP2040 on the module is driven by a Raspberry Pi specific SPI driver
+([Raspberry Pi: AI Camera](https://raspberrypi.com/documentation/accessories/ai-camera.html)). Ubuntu's libcamera does
+not cover it either ([Ubuntu: Raspberry Pi cameras](https://documentation.ubuntu.com/hardware-support/boards/how-to/special_hardware/rpi-camera/)),
+and there is no Rockchip or Radxa driver or overlay for it. On Rockchip boards it would take a port of the imx500
+driver, the firmware download and the RP2040 SPI driver to the vendor kernel **[Inference]**.
+
 ## 4. What this means for llmcf
 
 [Inference] The decisions taken from this research are in DESIGN.md (component "On the board", and the decision log

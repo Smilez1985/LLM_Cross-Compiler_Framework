@@ -173,6 +173,15 @@ RGA für Skalierung, Farbumwandlung und Letterbox. USB: MJPEG, dekodiert von MPP
 Rückfall. RTSP und Dateien: Dekodierung durch MPP; die Hersteller-Demos nutzen GStreamer (`mppvideodec`) oder FFmpeg
 mit rkmpp [25].
 
+Die Raspberry Pi AI Camera (IMX500) braucht den eigenen Stack von Raspberry Pi: Der Kernel-Treiber richtet das Modul
+über I2C ein, die Netzwerk-Firmware des Sensors wird bei jedem Start heruntergeladen (das Paket `imx500-all` auf
+Raspberry Pi OS), und ein RP2040 auf dem Modul wird von einem eigenen SPI-Treiber von Raspberry Pi angesteuert
+([Raspberry Pi: AI Camera](https://raspberrypi.com/documentation/accessories/ai-camera.html)). Auch das libcamera von
+Ubuntu deckt sie nicht ab ([Ubuntu: Raspberry-Pi-Kameras](https://documentation.ubuntu.com/hardware-support/boards/how-to/special_hardware/rpi-camera/)),
+und einen Treiber oder ein Overlay für Rockchip oder Radxa gibt es nicht. Auf Rockchip-Boards bräuchte es eine
+Portierung des imx500-Treibers, des Firmware-Downloads und des RP2040-SPI-Treibers auf den Herstellerkernel
+**[Schluss]**.
+
 ## 4. Was das für llmcf bedeutet
 
 [Schluss] Die Entscheidungen, die aus dieser Recherche folgen, stehen in DESIGN.md (Baustein „Auf dem Board“, und
