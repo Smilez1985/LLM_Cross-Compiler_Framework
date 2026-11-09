@@ -1292,6 +1292,10 @@ Targets in festen Plätzen läuft.
 | Das Build-Image behält die Container-Modi des ursprünglichen Designs: interaktiv (die Vorgabe), Pipeline, ein Modul für sich, der Systemtest und Status. | `entrypoint.sh`, in jeden Build-Kontext kopiert: `interactive`, `pipeline`, `source`, `config`, `convert`, `target`, `test`, `status`; ein Build selbst läuft über die Laufzeitschicht, deren Einstieg der Host setzt. | Das ursprüngliche Design des Maintainers: Jeder Schritt lässt sich im Image von Hand ausführen und testen. |
 | Passt kein Target zur Probe, bietet der Builder an, eines mit dem Assistenten anzulegen oder Ditto zu fragen, die Probe-Datei für beide bereit; nie nur eine Log-Zeile. | `gui/builder_parts.py` (das Angebot unter der Board-Empfehlung), `builder_tab.create_target_requested`. | Eine Log-Zeile lässt eine Person ohne Terminal stehen. |
 | Build-Ausgang mit erlaubten Zielen: Build-Container laufen in einem internen Netz, ein kleiner DNS-Filter in Rust löst nur die Namen einer Erlaubnisliste auf und protokolliert jede Anfrage je Build, der Offline-Modus löst nur lokale Namen auf, eine Netzregel sperrt nackte Adressen; kein mitgeliefertes Caddy und kein systemweites Unbound. | geplant: ROADMAP-Zeile „Build-Ausgang mit erlaubten Zielen.“ (Rust-Teile). | Ein Build soll nur erreichen, was er braucht; ein zweiter TLS-Proxy würde das Rust-Gateway doppeln, und ein Systemresolver nähme Port 53 und veränderte den Rechner der Person. |
+| Ein Build, der nicht gelingen kann, stoppt, bevor er beginnt: Eine Prüfung vor dem Build vergleicht die Treiber, die die Hardware-Probe fand, mit dem, was das SDK des Targets braucht (etwa die CUDA- und Treiber-Matrix). | geplant: ROADMAP-Zeile „Prüfung vor dem Build“; `orchestrator/Core/consistency_manager.py` bleibt im Code, bis sie in den Build-Start verdrahtet ist. | Ein Build, der spät an einem unpassenden Treiber scheitert, kostet die Person Stunden; die Prüfung war unfertiger Code, kein Abfall. |
+| LoRA-Adapter werden unterstützt: in das Modell gemergt, als Adapter behalten oder beides, RKLLM-LoRA eingeschlossen. | geplant: ROADMAP-Zeile „LoRA-Adapter“. | Feinabgestimmte Varianten sind verbreitet, und niemand soll sie von Hand mergen müssen. |
+| Optionales LoRA-Training ist ein eigener, schlanker Trainer des Frameworks; Unsloth wird nie installiert oder benutzt; Ideen und Lösungen kommen aus Unsloths Repository nur im Rahmen seiner Lizenz: aus seinem Apache-2.0-Kern, nichts aus seinem LGPL-Teil (unsloth_zoo) oder seinem AGPL-Teil (Unsloth Studio). | geplant: ROADMAP-Zeile „Optionales LoRA-Training“. | Ein eigener Trainer bleibt klein und passt zur Pipeline; die Lizenz entscheidet, was übernommen werden darf. |
+| Große Modelle lassen sich quantisieren: Plattenplatz und RAM vor einem Build geprüft, F16-Zwischenstufen wiederverwendet, GGUF als Eingabe, Rezepte je Tensor per KL-Divergenz geprüft. | geplant: ROADMAP-Zeile „Große Modelle“; ob airllm bei großen Gewichten hilft (eine Laufzeit, kein Konverter, heute aus der Pipeline gelassen), ist eine offene Frage der ROADMAP, „airllm für große Gewichte?“. | Ein großes Modell muss vor dem Build scheitern, nicht nach Stunden, und darf nicht mehr Speicher brauchen, als der Rechner hat. |
 
 **Geschichte**
 
@@ -1355,6 +1359,12 @@ beweist.
 | Hailo-Builds nehmen nur, was der Fall braucht: das Suite-Image des Herstellers als Basis, wenn es da ist, sonst die Installation der Person in ein kleines eigenes Image eingehängt; die Optimierung läuft vorerst auf der CPU und später, zusammen mit dem NVIDIA-Target, auf der GPU; die öffentlichen Repositorys des Herstellers (die Beispiele für den Raspberry Pi 5, der Model Zoo, die Apps, HailoRT, die Anwendungsbeispiele, TAPPAS) sind die Quellen des Hailo-Plans; die GUI bekommt dieselbe Zeile „Hailo:“ wie `llm-cli scan`. | geplant: ROADMAP Später „Hailo.“ und Zeile „Die Hailo-Zeile im Scan der GUI“; heute druckt `llm-cli scan` die Zeile, und `gui/menus/deploy.py` nennt die GUI-Zeile als Teil der Hailo-Welle. | Nur was ein Fall braucht, hält Images klein; eine Liste der Quellen hält den Plan prüfbar. |
 | Eine Hersteller-Toolchain wird geführt installiert: Das Framework zeigt den Lizenztext des Herstellers, und das eigene Ja der Person dazu ist die Annahme der Lizenz; eine KI nimmt nie eine Lizenz an. | geplant: ROADMAP-Zeile „Geführte Installation von Hersteller-Toolchains“. | Hersteller-SDKs stehen unter eigenen Bedingungen; nur die Person kann sie annehmen. |
 | Ein Schritt „alle Dateien bearbeiten“ im Modul-Assistenten umfasst die Stage-Module, die `target.yml` mit ihren Slots und das Dockerfile, nie den Stage-Runner; die Prüfungen laufen mit einem Diff erneut. | geplant: ROADMAP Später, der Punkt zu einem Schritt „alle Dateien bearbeiten“ im Modul-Assistenten. | Herstellerpfade und Flags lassen sich fertigstellen, bevor das Modul gespeichert wird; der Runner ist die Laufzeitschicht des Frameworks. |
+| Die ersten Targets sind RK3566-Boards, NVIDIA-RTX-GPUs der Serien 20 und 30 und der AMD Ryzen Z1 Extreme; jedes andere Target kommt aus der Community, über den Modul-Assistenten und Target-Pakete. | geplant: ROADMAP-Zeilen „Eine eigene Target-Vorlage für den RK3566“, „NVIDIA-GPU-Target“ und „Target für AMD-RDNA3-APUs“; der Modul-Assistent und `create_target_module` sind gebaut. | Diese Targets lassen sich zuerst testen; niemand bringt jedes Board allein. |
+| Der AMD Ryzen Z1 Extreme ist ein Target unter Windows und unter Linux: unter Linux ein Container mit ROCm oder Vulkan (HIP für seine GPU, gfx1103), unter Windows ein natives Deployment über SSH und PowerShell mit llama.cpp (Vulkan, ROCm optional), weil Docker dort keine AMD-GPU durchreicht. ROCm wird auch dort angeboten, wo AMD die GPU nicht offiziell unterstützt, über die bekannten Umwege (etwa `HSA_OVERRIDE_GFX_VERSION`); ob das brauchbar ist, entscheidet die Person. | geplant: ROADMAP-Zeile „Target für AMD-RDNA3-APUs“. | Das Framework soll es können; ob es sich auf einem Rechner lohnt, kann nur die Person beurteilen. |
+| Das NVIDIA-GPU-Target bringt alles Machbare: GGUF mit CUDA für RTX-GPUs der Serien 20 und 30 (die CUDA-Version nach Treiber gewählt), die vLLM-Formate AWQ und GPTQ, EXL3 (ExLlamaV3) und ein natives Deployment auf Windows-Rechner mit NVIDIA-GPUs (llama.cpp mit CUDA, ohne Docker und ohne WSL2). | geplant: ROADMAP-Zeile „NVIDIA-GPU-Target“. | RTX-GPUs sind die häufigsten GPUs zu Hause, und jedes Format dient einer anderen Laufzeit. |
+| Neue Quantisierungsmethoden, Laufzeiten und Formate werden aufgenommen, sobald sie erscheinen; die Recherche vom 2026-10-10 nannte NVFP4 und FP8 (llm-compressor, ModelOpt), ExecuTorch, MNN-LLM, MLC LLM, ONNX Runtime GenAI und OpenVINO mit NNCF als Kandidaten. | Bisher aufgenommen (siehe Changelog): die IQ-Typen und die Importance-Matrix von llama.cpp, RKLLM 1.3.1, RKNN 2.3.2; die Kandidaten sind geplant: ROADMAP Später, der Punkt „Neu recherchierte Formate und Laufzeiten“. | Ein Framework, das nur die Formate des Vorjahres kennt, verliert seinen Nutzen. |
+| Ein Target wird über seine ID oder seinen Ordnernamen gefunden: Ein Target ohne `metadata.id` nimmt seinen Ordnernamen, ein Ordner, dessen Name mit `_` oder `.` beginnt (die Vorlage), ist nie ein Target, und jeder Baustein löst Targets über eine einzige Zuordnung auf. | `read_target_folders` und `resolve_target_name` in `Core/target_manager.py`, genutzt von der Target-Verwaltung, dem Build-Dienst, dem Orchestrator und der Build-Engine; `-t` nimmt die ID oder den Ordnernamen, zuerst genau, dann ohne Unterschied von Groß- und Kleinschreibung. | Bausteine, die Targets jeder auf eigene Weise auflösten, waren sich uneinig; eine Person tippt, was sie sieht. |
+| Die Hardware-Probe gibt es in drei Formen: `scripts/hardware_probe.py` und die beiden Skripte `scripts/hardware_probe.sh` (Linux) und `scripts/hardware_probe.ps1` (Windows), die als Rückfall bleiben, den die Person von Hand startet, auch auf einem Board ohne Netz. | Alle drei schreiben dieselben Schlüssel (`tests/test_hardware_probe_keys.py`); die Datei wird zurückgetragen und mit `llm-cli scan --import` gelesen. | Auch ein Board ohne Python oder ohne Netz muss sich prüfen lassen. |
 
 **Geschichte**
 
@@ -1483,6 +1493,7 @@ Freigaben und ein HMAC-verkettetes Audit-Log.
 | Mojos Zeile zur Türklingel behält die Adresse des Brokers (`scheme://host:port`) und den letzten Sendefehler, auch dort, wo eine KI sie liest (Mojos KI-Sicht, das Tool `run_doctor`, Ditto); nie den Benutzernamen oder das Passwort. | `Core/mojo/checks/doorbell.py` nennt den Broker über `Broker.label()` (nur Schema, Host und Port) und liest das letzte Ergebnis aus `doorbell_status.json`; den Sendefehler hält `doorbell._error_text` fest, das Geheimnisse schwärzt und Passwort und Benutzernamen durch `***` ersetzt; die KI-Sicht (`mojo/views.labeller`) benennt Pfade per Label und schwärzt Geheimnisse, behält aber Adresse und Fehler. | Transparenz: Mit Adresse und Fehler sieht die Person (oder die KI, die ihr hilft), welcher Broker scheiterte und warum, und kann es beheben; die Adresse des Brokers ist eine Einstellung, die die Person gewählt hat, die Zugangsdaten bleiben aus jedem Text heraus. |
 | Grenzen je Client: Aufrufe pro Minute und gleichzeitige Builds und Jobs je Aufrufer, einstellbar; sie begrenzen nie die Größe eines Gewicht-Downloads. | `tools/limits.py`, von der Registry auf jeden Aufrufer angewandt. | Ein Client darf die anderen nicht aushungern; ein großes Modell ist die Wahl der Person, keine Grenze. |
 | „Für diese Modellversion nicht mehr fragen“: ein Häkchen in der Build-Frage, standardmäßig aus, für eine Sicherheits- oder Rechtswarnung auf genau diesem Repository und Commit; nie fürs Löschen oder für Lizenzen. | geplant: ROADMAP-Zeile zu „Für diese Modellversion nicht mehr fragen“ (auf den stabilen Warnungscodes). | Dieselbe Warnung zum selben Modell immer wieder gefragt ist Rauschen; eine neue Version kann ändern, was die Warnung bedeutet. |
+| Keine Funktion baut auf MCP-Sampling (der Server bittet das Modell des Clients um eine Antwort); ein MCP-Client erledigt Dittos Arbeit selbst mit den Tools und Prompts des Frameworks. | Der Server bietet Tools, Ressourcen und Prompts (`tools/`, `tools/framework_prompts.py`) und schickt keine Sampling-Anfrage; er vermerkt nur, ob ein Client Sampling unter seinen Fähigkeiten nennt. | Die Recherche vom 2026-10-10 fand Sampling auf dem Weg hinaus, und viele Clients boten es nie an; eine Funktion darauf würde mit ihnen scheitern. |
 
 **Geschichte**
 
@@ -1573,6 +1584,9 @@ Hände sind die eigenen Tools des Frameworks; sein lokales Modell läuft auf ein
 | Startschwellen für Dittos lokales Modell: mindestens 8 Tokens pro Sekunde und eine KL-Divergenz von höchstens 0,05 (0,10 als äußere Grenze) gegen die Referenz, auf einem festen Bewertungstext, abgestimmt mit `ditto eval`. | geplant: ROADMAP-Zeile „Startschwellen für Dittos lokales Modell“. | Ein Modell, das zu langsam ist oder zu weit vom Original weg, macht Ditto schlechter als gar kein lokales Modell. |
 | Dittos Server in Docker ist nur von diesem Rechner aus erreichbar und bekommt die GPU, wo es geht; ein erzwungener Moduswechsel nutzt die Modelle weiter und baut nur llama-server neu; erzwingen geht im Installer, in der CLI und in der GUI. | `runtime/container_server.py`: der Port nur auf 127.0.0.1 veröffentlicht, der Modellordner schreibgeschützt eingehängt, `--gpus all` für NVIDIA und `/dev/dri` mit seinen Render-Gruppen für AMD und Intel, ein ehrlicher Hinweis, wo es nicht geht. | Der Port des lokalen Modells darf nicht zum Netz zeigen; ein Modell zweimal zu laden kostet Zeit und Platz. |
 | Ein echtes Upsert in Dittos Archiv ersetzt auch einen Eintrag, den die Person geprüft hat, aber der geprüfte Text bleibt als Kopie, mit Hinweis und Rückgängig. | geplant: ROADMAP-Zeile „Dittos Archiv, Phase 1: Fakten aus Tool-Ergebnissen.“ | Eine neuere Tatsache muss gewinnen, und die eigene Prüfung der Person darf nicht still verloren gehen. |
+| Die Person muss für Dittos Arbeit nie einen Prompt schreiben: Anbieter, Modell und die Wahlmöglichkeiten einer Aufgabe wählt sie in der GUI aus Listen (Dropdown-Menüs), und die Aufgabentexte sind die des Frameworks; der Chat bleibt für Fragen und Aufträge in eigenen Worten. | „Ditto einrichten...“ mit den Anbieter-Vorgaben aus `configs/llm_providers.yml` und der live geladenen Modellliste; die Vorlagen- und Assistenten-Auswahl des Modul-Assistenten; die Aufgabentexte in `orchestrator/llm/task_prompts.py`. | Ein Laie weiß nicht, was er schreiben soll; eine Wahl aus einer Liste lässt sich nicht falsch formulieren. |
+| Ein 2-Bit-Modell (Q2) muss erst in Dittos Evaluation auf dem Rechner der Person zeigen, dass es klug genug für Dittos Aufgaben ist; es ist nie Dittos Standard, und die Stufen 4B und 9B mit 2 Bit werden erst nach einer bestandenen Evaluation angeboten. | Heute misst es `llm-cli ditto eval --tier small --tier small-q2`, und die Stufen 4B und 9B mit 2 Bit werden nie empfohlen, nur per Namen geladen; die Sperre ist geplant: ROADMAP-Zeile „2-Bit-Stufen erst nach bestandener Evaluation“. Ob das 2B-Modell mit 2 Bit, das heute bei 3 GiB RAM oder weniger empfohlen wird, die Sperre ebenfalls braucht, ist eine offene Frage der ROADMAP. | Das 9B-Modell mit 2 Bit war größer und langsamer als das 4B-Modell mit 4 Bit, und ein Modell, das die Aufgaben nicht schafft, macht Ditto schlechter als keines. |
+| Ein großer Kontext (bis zu 1M Token) und automatisches Prompt-Caching sind der Standard, wo immer der Anbieter sie bietet. | geplant: ROADMAP-Zeilen „Das echte Kontextfenster je Modell“ und „Cloud-Caching so, wie der Anbieter es vorsieht“; ob der 1M-Kontext ein fester Standard für Cloud-Modelle ist oder das Fenster jedem Modell mit Verdichtung folgt, ist eine offene Frage der ROADMAP. | Ein großes Fenster hält das ganze Gespräch ohne Zusammenfassungen, und Caching senkt die Kosten jeder Anfrage. |
 
 #### Gemessene Token-Zahlen
 
@@ -1661,7 +1675,7 @@ Doku-Seiten, nachdem die Person es startet (oder die Anfrage einer KI bestätigt
 | Was | Wie | Warum |
 |---|---|---|
 | Deep Ingest über MCP: ja, auf „fragen“ begrenzt, die Frage zeigt jede Adresse, und die Prüfungen der Vorbehalte, die Grenzen und der einmalige Hinweis gelten wie in der GUI. | `crawl_docs_site` in `tools/tools_crawl.py`; ein Wächtertest hält jeden anderen Weg zum Crawler fern. Ob eine Delegation die Frage eines Crawls beantworten darf (die Entscheidung zu Delegationen nennt Deep Ingest als Arbeit, die eine KI tun darf), ist eine offene Frage der ROADMAP, „Deep Ingest unter einer Delegation“. | Text in einem Log oder einer Seite könnte eine KI zum Crawlen bringen. |
-| Geteilt wird nur öffentlich zugängliches Wissen, robots.txt und die anderen Vorbehalte beachtet; das Urheberrecht bleibt erhalten, wo es erkennbar ist, und Lizenzen entscheiden (keine Lizenz heißt alle Rechte vorbehalten: nur Link und kurze Fakten); ein Paket, das Text unter einer Lizenz trägt, die ihren Text verlangt, liefert diesen Text mit. | `orchestrator/rag/licences.py`, die Lizenztexte aus der SPDX-Liste, der Paket-Export. | Wir halten uns an das Recht und brauchen trotzdem die Informationen, die Ditto nutzen darf. |
+| Geteilt wird nur öffentlich zugängliches Wissen, robots.txt und die anderen Vorbehalte beachtet; das Urheberrecht bleibt erhalten, wo es erkennbar ist, und Lizenzen entscheiden (keine Lizenz heißt alle Rechte vorbehalten: nur Link und kurze Fakten); ein Paket, das Text unter einer Lizenz trägt, die ihren Text verlangt, liefert diesen Text mit. | `orchestrator/rag/licences.py`, die Lizenztexte aus der SPDX-Liste, der Paket-Export; ob alles Öffentliche zitiert und verwendet werden darf, wie eine frühe Entscheidung sagte, ist eine offene Frage der ROADMAP, „Öffentliche Inhalte: zitiert und verwendet, oder entscheidet die Lizenz?“. | Wir halten uns an das Recht und brauchen trotzdem die Informationen, die Ditto nutzen darf. |
 | Die lokale Wissensbasis liegt in Qdrant Edge (die Rust-Engine im Prozess), mit geprüfter Umwandlung; qdrant-client bleibt nur für einen optionalen Qdrant-Server. | `orchestrator/rag/` mit `qdrant-edge-py`; die Umwandlung behält den alten Ordner, bis die Person ihn löscht. | Der alte lokale Modus verglich jede Anfrage in Python mit jedem Punkt. |
 | Eine neuere Nebenversion von Qdrant Edge kommt erst nach einem Test über Versionen hinweg und einem automatischen Schnappschuss. | Der Bereich bleibt innerhalb von 0.9 (`>=0.9.0,<0.10`): Patch-Versionen kommen mit dem Lock, dem Update-Lauf und den Installern nach der Wartezeit und den Tests; die nächste Nebenversion folgt geplant: ROADMAP-Zeile „Schritt 7“. | Das Wissen der Person muss ein Update der Engine überstehen. |
 | Versteckte HTML-Träger werden beim Deep Ingest entfernt und der Text bereinigt, mit Testseiten in der CI. | `orchestrator/rag/html_text.py`, `RAGManager.ingest_page`; die nächtliche Abruf-Evaluation. | Versteckter Text ist ein häufiger Weg, Anweisungen einzuschleusen. |
@@ -1682,7 +1696,7 @@ signierten Index und installiert über eine Quarantäne.
 | Was | Wie | Warum |
 |---|---|---|
 | Ein Rezept ist eine Target-Vorlage: Es enthält den Build-Code, und Modell, Quantisierung, Format und Deployment sind Variablen, die die Person im Build-Menü wählt, nie an die Wahl des Erstellers gebunden; was ein Rezept enthält, muss der Builder nutzen; reine Datenpakete sind „getestete Einstellungen“; vorhandene Vorlagen werden korrigiert und verbessert, nicht neu erfunden. | `schemas/recipes.py` und der Rezept-Lader; Rezepte als Vorlagen sind geplant: ROADMAP-Zeile „Rezepte als Target-Vorlagen“. | Eine Vorlage betrifft die Hardware; den Rest entscheidet, wer sie holt. |
-| Geteilt werden Target-Vorlagen über das öffentliche Community-Repository (Übergabe als Pull Request); nichts Image-Artiges kommt in den Hub, nie Modelle zu Hugging Face; eigene Images der Person sind frei; das Framework holt die Liste fertiger Vorlagen automatisch; Firmen bauen Cluster-Images selbst aus den Dockerfiles in ihre eigene Registry. | `Core/community_manager.py` (`submit_contribution`, der Index), der Community-Hub. | Vorlagen sind klein und prüfbar; Images müssten für jedes Update neu gebaut werden. |
+| Geteilt werden Target-Vorlagen über das öffentliche Community-Repository (Übergabe als Pull Request); nichts Image-Artiges kommt in den Hub, nie Modelle zu Hugging Face; eigene Images der Person sind frei; das Framework holt die Liste fertiger Vorlagen automatisch; Firmen bauen Cluster-Images selbst aus den Dockerfiles in ihre eigene Registry. | `Core/community_manager.py` (`submit_contribution`, der Index), der Community-Hub; ob das Framework das Wissen der Community auch selbst herunterlädt, wenn die Wissensbasis genutzt wird, ist eine offene Frage der ROADMAP, „Ein Community-Archiv, das das Framework selbst herunterlädt?“. | Vorlagen sind klein und prüfbar; Images müssten für jedes Update neu gebaut werden. |
 | Das Community-Repository ist das Wissensbasis-Repository des Projekts (Vorgabe von `community_repo`); die Index-Adresse folgt, sobald der erste signierte Index existiert; Workflows von Fork-Pull-Requests brauchen eine Freigabe für alle Beitragenden von außen. | Vorgabe von `community_repo`; den Index zu veröffentlichen ist geplant: ROADMAP-Zeile „Community-Repository und Index veröffentlicht“. | Ein Pull Request von außen darf die Prüfungen des Repositorys nicht ungeprüft ausführen. |
 | Board-Wissen in einem Target-Paket wird beim Empfänger importiert. | Der Paket-Installer importiert das `knowledge/` eines Targets in die Wissensbasis. | Die Doku der Vorlage gehört zu ihr. |
 | Ein Rezept nennt sein Target über den eigenen Inhalts-Digest des Target-Pakets, und ein installiertes Target-Paket gilt als dieses Target, solange es seit der Installation unverändert ist, auch wo das Dateisystem kein Ausführungsbit hält (Windows); ein bearbeitetes Target ist ein anderes Target. | Ein Helfer in `Core/community_manager.py`: `installed_digest` (was ein Build festhält) und `same_content` (was eine Rezeptprüfung vergleicht), über `Provenance.installed_unchanged`; der Builder, die Prüfung auf gleiche Builds im Build-Service, die Rezept-Tools und die Rezeptprüfung bei der Installation nutzen ihn alle. | Ein unter Linux gemachtes Rezept muss unter Windows bestehen und umgekehrt; die Inhaltsprüfung selbst bleibt das Sicherheitstor. |
@@ -1694,6 +1708,7 @@ signierten Index und installiert über eine Quarantäne.
 | Die Liste der Wissensquellen hat in CLI und GUI eine Spaltenreihenfolge, mit Thema oder Target an dritter Stelle. | `knowledge_sources.COLUMNS`; `llm-cli knowledge sources` legt seine Spalten daraus an, die `sources.col.*`-Texte des Fensters Wissensquellen sind diese Wörter auf Englisch und in derselben Reihenfolge. | Eine Liste verhindert, dass die beiden Ansichten auseinanderlaufen; wohin eine Quelle gehört, steht gleich nach dem, was sie ist. |
 | Ein signierter Indexeintrag eines Wissenspakets nennt das Thema oder Target seines Manifests; ein installiertes Paket muss dorthin gehören, wo sein Eintrag es sagt. | `IndexEntry.topic` / `target` / `belongs()` (weggelassen, wenn nicht gesetzt), geschrieben von `community_maintainer.entry_for`; eine Regel für Manifest und Eintrag (`community_pack.check_belongs`) und ein Text (`belongs_text`); `prepare_install` lehnt eine Abweichung ab. | Die Person sieht vor dem Download, wohin das Wissen geht; der signierte Eintrag und das Paket können sich nicht widersprechen. Ein Client von 3.1.0 lehnt einen Index mit den neuen Feldern ab, daher werden Einträge mit ihnen veröffentlicht, sobald 3.2.0 erschienen ist. |
 | Ein Bot darf neue Modelle mit Kompatibilitätstest als geprüften Pull Request vorschlagen; er übernimmt nie etwas selbst. | geplant: ROADMAP Später „Ein Bot, der neue Modelle als geprüften Pull Request vorschlägt“. | Neue Modelle erscheinen schneller als Releases; ein Mensch entscheidet trotzdem. |
+| Self-Healing wächst mit der Nutzung: Build-Fehler und ihre Lösungen, bereinigt von persönlichen Daten, werden als Wissen mit der Community geteilt, als Opt-in, über die bereinigten, signierten Pakete und die Übergabe per Pull Request; eine geteilte Lösung bleibt ein Rat und wird nur über die festen Strategien und mit der Zustimmung der Person angewendet. | geplant: ROADMAP-Zeile „Geteiltes Heilungswissen“. | Der gelöste Fehler einer Person erspart der nächsten die Suche; persönliche Daten verlassen den Rechner nie. |
 
 **Geschichte**
 
@@ -1749,6 +1764,8 @@ jeder Zugangsart; das Framework ist für alle da, die es starten können.
 | Der Revisionsanker einer signierten Datei (Tool-Richtlinie, Tokens, Freigaben) sinkt nie: Jeder Prozess vergleicht und schreibt ihn unter einer Sperre je Datei, liest zuerst den gespeicherten Wert und behält den höheren. | `tools/signing.RevisionAnchor` (`adopt`, `saved`, `_process_lock`: eine `<Datei>.anchor.lock` neben der Datei; ohne die Sperre geht der Schritt wie bisher weiter). | Eine ältere Kopie, die über die Datei gelegt wird, muss abgelehnt bleiben, auch wenn zwei Prozesse im selben Moment speichern. |
 | Ein gesperrter Tresor wartet auf das Entsperren; GUI und CLI geben ihre Umgebung weiter, ein von einer KI gestarteter Dienst bekommt nur das Nötigste. | Der Entsperrweg des Tresors; der Teil des Dienstes ist geplant: ROADMAP-Zeile „Schritt 1 - Build-Dienst“. | Eine KI darf nicht die ganze Umgebung der Person erben. |
 | Den SSH-Schlüssel eines Geräts erzeugt das Framework und hält ihn im Schlüsselbund unter dem Hostnamen des Targets: nur den Schlüssel, nie das Passwort, das die Person einmal getippt hat. | geplant: ROADMAP-Zeile „Ein eigenes Konto `llmcf` auf dem Host und auf Boards“. | Ein gehaltenes Passwort ist ein Passwort, das lecken kann; ein Schlüssel lässt sich je Gerät widerrufen. |
+| Die Anmeldung folgt jeder Zugangsart, für alle gängigen Cloud- und API-Anbieter und die gängigen lokalen Engines: zuerst ein API-Schlüssel; eine Anmeldung im Browser (OAuth mit PKCE) oder ein Gerätecode nur, wo der Anbieter sie Drittanbieter-Apps anbietet; die eigenen Anmeldeketten der Cloud-Plattformen; lokale Engines (Ollama, LM Studio, Unsloth Studio und andere) nur als Client, nie installiert oder mitgeliefert; Zugangsdaten nur im Tresor, nie im Repository; das Framework nutzt nie die Anmeldung eines anderen Programms mit. | Gebaut: API-Schlüssel mit ihrer Prüfung, Schlüssel aus Umgebungsvariablen, das Anmeldefeld und `llm-cli ditto login`, `logout`, `auth` (`orchestrator/llm/auth/`); der Rest ist in Arbeit: ROADMAP-Zeile „Anmeldung je Zugangsart“. Die Anmeldungen im Browser warten auf Registrierungen des Projekts (eine öffentliche OAuth-App bei Hugging Face, eine Entra-App für Azure) und einen Test mit einem echten ChatGPT-Tarif. | Jeder Anbieter hat seinen eigenen Weg der Anmeldung, und OAuth ist der bevorzugte Weg, wo ein Anbieter ihn erlaubt; eine geliehene Anmeldung bricht die Bedingungen des Anbieters. |
+| Der Schlüssel eines eigenen OpenAI-kompatiblen Servers oder einer lokalen Engine ist an die Adresse gebunden, für die er gespeichert wurde (Schema, Host und Port); ein Cloud-Schlüssel geht nie an eine übrig gebliebene eigene Adresse. | `orchestrator/llm/auth/store.py` speichert den Schlüssel mit seinem Ursprung und schickt ihn nur dorthin (ein ohne Ursprung gespeicherter Schlüssel wird an die erste Adresse gebunden, mit der er genutzt wird); Cloud-Vorgaben haben feste Endpunkte (Sicherheitsmodell, „Secrets gelangen nach außen“). | Ein Schlüssel, der an die gerade eingestellte Adresse geht, kann beim Server eines Dritten landen. |
 
 ### GUI und der Weg der Person
 
@@ -1902,13 +1919,17 @@ Ein Repository mit Schichten, die ein Test durchsetzt; jede Änderung erweitert,
 | Null Toleranz für Lecks: Kein Token, kein Passwort und keine persönlichen Daten (Namen, E-Mail-Adressen, Hosts, Adressen, lokale Pfade) gelangen je ins Repository; vor jedem Push läuft ein Leck-Scan über die ausgehenden Commits. Ein Leck führt wie ein unnötiger Commit dazu, dass der Maintainer das Repository löscht. | Der Scan läuft vor jedem Push; ob er ein Skript des Repositorys mit Tests wird, und zuerst, ist eine offene Frage der ROADMAP („Ein Leck-Scan im Repository“); daneben der Bereinigungs-Test des Bauplans in `tests/test_docs.py`, Secret Scanning und Push Protection von GitHub und der geplante zweite Secret-Scanner in der CI (ROADMAP-Zeile „Ein zweiter Secret-Scanner in der CI“). | Das Repository ist öffentlich: Was einmal durchgesickert ist, ist kopiert und lässt sich nicht zurückholen. |
 | Nichts wird ohne Frage gelöscht: Der Assistent fragt mit der genauen Liste (Pfad und Name), bevor er einen Worktree, einen Zweig oder einen eigenen Ordner löscht, und räumt seine eigenen Reste selbst auf, statt das dem Maintainer zu überlassen. | Jedes Ja gilt nur für seine Liste. | Aufräumarbeit, die beim Maintainer landete, hat schon einmal das Repository gekostet. |
 | Das Repository wurde am 2026-11-07 unter demselben Namen neu angelegt, öffentlich, nur mit `main` und `development`; seine Geschichte beginnt am 2025-12-13 (ältere Commits waren nicht in der lokalen Kopie); Issues, Pull Requests, Releases, der Actions-Verlauf, Secrets und Einstellungen des alten kamen nicht mit. Seine Einstellungen: Dependabot-Warnungen und -Sicherheitsupdates, Secret Scanning und Push Protection eingeschaltet; der Zweig eines gemergten Pull Requests wird automatisch gelöscht; keine Regeln zum Zweigschutz. | Die Einstellungen schaltet der Maintainer in den Einstellungen von GitHub (eine Sitzung kann sie nicht ändern); die Workflows und die Dependabot-Konfiguration sind Dateien des Repositorys und liefen sofort wieder. | Zweigschutz würde die direkten Pushes auf `development` sperren; die Sicherheitsschalter schützen vor Lecks; die gelöschten Zweige halten die Zweigregel ein. |
-| Fragen kommen gebündelt, wenige auf einmal; was jetzt nicht gefragt wird, kommt als geordneter Punkt mit seinen offenen Entscheidungen in der Zeile in die Roadmap; nichts darf verwaisen. | Die Roadmap-Zeilen tragen ihre offenen Entscheidungen (etwa die Schritte des Build-Dienstes). | Die Roadmap ist eine Aufgabenliste, keine Ablage. |
+| Fragen kommen gebündelt, wenige auf einmal, als nummerierte Fragen in normalem Text, die der Maintainer mit Nummern beantwortet, nie über Multiple-Choice-Felder; was jetzt nicht gefragt wird, kommt als geordneter Punkt mit seinen offenen Entscheidungen in der Zeile in die Roadmap; nichts darf verwaisen. | Die Roadmap-Zeilen tragen ihre offenen Entscheidungen (etwa die Schritte des Build-Dienstes). | Die Roadmap ist eine Aufgabenliste, keine Ablage. |
 | Der Secret-Scan des Repositorys meldet einen Wert im genauen Format eines Tokens, das GitHubs Push-Schutz sperrt, egal wie unecht er aussieht und welche Erlaubnis-Markierung seine Zeile trägt; ausgenommen sind nur die dokumentierten Test-Attrappen der alten Geschichte, benannt über den sha256 des genauen Werts und nur für `--history`; jeder neue Commit mit so einem Wert und jedes echte Token, Passwort, jede Adresse oder persönliche Angabe schlägt weiter fehl. | `scripts/secret_scan.py`, `orchestrator/security/secret_patterns.py` (`EXACT_FORMATS`), `.secret-scan-allow`, der Verlaufs-Scan in `.github/workflows/security.yml`; CONTRIBUTING sagt, wie man ein unechtes Token in einem Test schreibt. | Eine Attrappe im genauen Format blockierte einen Push von 117 Commits; eine Erlaubnisliste im Klartext trüge den Wert selbst. |
 | Der Assistent spricht mit dem Maintainer Deutsch; die Dokumente bleiben englisch und deutsch. Er ist bei Namen nicht kleinlich: Ist ein Name, den der Maintainer nennt, leicht daneben, nimmt er den nächsten Treffer, statt nachzufragen. | Jede Antwort und Frage an den Maintainer ist deutsch; ein ähnlicher Name (ein Repository, eine Datei) wird nachgeschlagen und so genannt, wie er gefunden wurde. | Der Maintainer arbeitet auf Deutsch; eine Frage zur Schreibweise kostet eine Runde und hilft niemandem. |
 | Eigene Dokumente des Maintainers, die er zur Prüfung gibt, sind vertraulich: Sie werden im Arbeitsordner Zeile für Zeile analysiert, und nichts davon kommt ins öffentliche Repository, bevor der Maintainer zustimmt. Fremder Code (zum Beispiel ein Projekt von GitHub wie densely) wird erst nach Prüfung seiner Lizenz genutzt. | Die Analyse bleibt im Arbeitsordner der Sitzung; eine Lizenzprüfung nennt die Lizenz und was sie erlaubt, bevor eine Zeile übernommen wird. | Die Arbeit des Maintainers gehört ihm, bis er sie veröffentlicht; Code ohne passende Lizenz kann nicht in ein öffentliches Repository. |
 | Kein Aufräumen über die ganze Engine: Eine Arbeit führt nie ein `prune` der Container-Engine aus (Images, Volumes, Build-Cache); jede Kette hat ihren eigenen Arbeits- und Testordner und entfernt nur, was sie selbst angelegt hat, einzeln über die ID. Einem laufenden Workflow-Agenten werden keine Ergänzungen geschickt; sie gehen in die Entscheidungen oder den nächsten Schritt. | Der Ordner jeder Kette trägt ihren Namen; Images und Container, die sie angelegt hat, werden über ihre IDs entfernt. | Ein `volume prune` löschte jedes ungenutzte Volume der Sandbox, und zwei Läufe in einem Ordner löschten gegenseitig ihre Dateien; eine Nachricht an einen laufenden Agenten weckte ein Duplikat, das denselben Worktree bearbeitete. |
-| Schreibt der Maintainer, während etwas läuft, wird zuerst der echte Stand geprüft, nie angenommen; bevor ein Nutzungslimit greift, wird laufende Arbeit gezielt angehalten, Unfertiges committet und eine Notiz zum Weitermachen geschrieben. | Der Stand der Hintergrundaufgaben und CI-Läufe wird vor einer Antwort gelesen; die Pause lässt jede Arbeit an einem Commit stehen. | „Läuft noch“ wurde gemeldet, als nichts lief; ein harter Abbruch am Limit verliert Arbeit. |
+| Schreibt der Maintainer, während etwas läuft, wird zuerst der echte Stand geprüft, nie angenommen; bevor ein Nutzungslimit greift, wird laufende Arbeit gezielt angehalten, Unfertiges committet und eine Übergabe zum Weitermachen ins Repository geschrieben; die Arbeit ruht dann, bis der Maintainer sagt, dass es weitergeht. | Der Stand der Hintergrundaufgaben und CI-Läufe wird vor einer Antwort gelesen; die Pause lässt jede Arbeit an einem Commit stehen. | „Läuft noch“ wurde gemeldet, als nichts lief; ein harter Abbruch am Limit verliert Arbeit. |
 | Die Reihenfolge der Arbeit wie entschieden: zuerst der MCP-Server und seine Tools, die selbst gebaute Laufzeit parallel und ihre Tools danach; die Konsolidierung (Helfer, Paket remote, Platte, Build- und Deploy-Weg) vor den Bereichsketten der Welle 6; der Build-Worker direkt nach Stufe C der Konsolidierung; Linux vor Windows (der Eigenbau, das Konto `llmcf`, die Board-Seite). | Umgesetzt in 3.1.0 bis 3.3.0 (siehe Changelog); was übrig ist, ordnet die Roadmap. | Jeder Schritt baut auf dem vorigen auf; eine Portierung ist billiger als zwei parallele Entwürfe. |
+| Fremder Code, der zur Anregung übergeben oder gefunden wird (ein anderes Projekt des Maintainers, ein Projekt von GitHub), wird nur gelesen, in einen eigenen Ordner außerhalb des Repositorys entpackt, nie ausgeführt oder installiert, auch nicht von Subagenten; was das Framework daraus nimmt, sind Ideen im Rahmen der Lizenz, und sein eigener Teil bleibt schlank. | Der Code liegt im Arbeitsordner der Sitzung; nichts davon wird ausgeführt; was übernommen wird, nennt seine Herkunft. | Code von anderswo kann alles tun, sobald er läuft, und Lesen genügt, um von ihm zu lernen; ein schlankes Framework bleibt wartbar. |
+| Braucht die Arbeit Zugangsdaten, die der Assistent nicht hat (etwa ein Token zum Pushen), fragt er den Maintainer, statt die Sperre zu umgehen; Zugangsdaten kommen nie ins Repository. | Die Frage nennt, was gebraucht wird und warum. | Ein Umweg um eine Sperre verdeckt das Problem, und Zugangsdaten in einem öffentlichen Repository lassen sich nicht zurückholen. |
+| Unfertiger Funktionscode wird nie ohne Zustimmung des Maintainers entfernt: Eine Prüfung meldet ihn und schlägt seine Roadmap-Zeile vor. Das Benchmark-Fenster, der Updater und elf ungelesene Einstellungen, die ein Aufräumen als tot entfernt hatte, wurden unverändert wiederhergestellt, und die Prüfung vor dem Build blieb. | `tests/test_core.py` hält ihre Module und Einstellungen im Code; ROADMAP-Zeilen „Benchmark-Fenster“, „Prüfung vor dem Build“, „Vorgaben für Importance-Matrix und Kalibrierung“, „Signierte Updates“ und unter Später „Lokaler API-Server“, „GUI-Design und automatische Aktualisierung“ und „Aufräumen“. | Code, der nur noch nicht verdrahtet ist, ist der Plan des Maintainers, kein Abfall. |
+| Nur fertige, geprüfte Arbeit wird committet: Dateien, die ein laufender Agent noch schreibt, warten, bis er endet und ihre Tests geprüft sind. | Die Bitte, ungetrackte Dateien zu committen, wird abgelehnt, solange ein Agent sie noch schreibt. | Ein halb geschriebener, womöglich fehlschlagender Test darf nicht in den öffentlichen Zweig. |
 
 ### Tests, CI und die Windows-Fallen
 
@@ -1936,6 +1957,8 @@ Dateien, die sich nicht löschen lassen), wird auch unter Linux sichtbar.
 | Dependabot öffnet seine Pull Requests gegen `development`, und der Assistent prüft die offenen Pull Requests vor neuer Arbeit und bei jeder Integration. Die GPU-Vorlage bleibt auf einer LTS-Version, die zu CUDA passt, und Dependabot schlägt kein Ubuntu ohne LTS vor. | `.github/dependabot.yml` (`target-branch: development` für uv, GitHub Actions und Docker; Dependabot liest sie vom Standardzweig). Die Ubuntu-Regel dort ignoriert jeden Major- und Minor-Sprung, LTS-Versionen eingeschlossen: ROADMAP offene Frage „Dependabot und das Ubuntu der GPU-Vorlage“. | Die Arbeit landet auf `development`; main bekommt nur `development` als Ganzes; eine Version ohne LTS brach die Paarung mit CUDA. |
 | Ein roter Lauf ist ein Alarm: Nach jedem Push werden die Läufe von CI und Security bis zum Ende beobachtet, geplante Läufe täglich geprüft, und Bandit ist lokal grün, bevor eine Arbeit fertig ist. Ein Fehler wird richtig behoben: falscher Code im Code, ein umgebungsabhängiger Test unabhängig gemacht; kein Test wird übersprungen oder abgeschwächt, um einen Lauf grün zu machen, und ein Test, der sich wirklich nicht beheben lässt, wird nur mit seinem Grund daneben abgeschaltet. | `gh run watch` nach jedem Push, `gh run list` für die geplanten Workflows; `bandit` aus der Dev-Gruppe. | Acht rote Läufe, die niemand bemerkte, waren ein stummer Zeuge, kein Alarm. |
 | Windows-Regeln für jede Kette: kein reiner Linux-Befehl in einem Test ohne Windows-Überspringen; Skripte mit Unix-Zeilenenden geschrieben; eine schreibgeschützte Datei vor dem Ersetzen beschreibbar gemacht; jede Änderung vor einem Push nach Windows-Fallen durchsucht. | Die eigene Prüfung der Kette vor dem Push; der Windows-Runner von `ci.yml` und die NTFS-Nachbildung in `tests/test_removal.py` fangen, was durchrutscht. | Fehler, die nur der Windows-Runner findet, kamen nach jedem Merge wieder. |
+| `docker.yml` prüft die Target-Images: hadolint über die Dockerfiles, dann das Rockchip-Image gebaut und im Rauchtest geprüft, bei Änderungen an den Targets und am Build-Weg, wöchentlich und von Hand. | `.github/workflows/docker.yml` (ein Pfadfilter auf `targets/**`, die Build-Engine, den Build-Kontext und die Dockerfiles der Laufzeit; ein wöchentlicher Zeitplan; `workflow_dispatch`), seine Actions per Commit festgelegt wie die jedes Workflows. | Ein Image, das sich nicht mehr bauen lässt, muss auffallen, bevor der Build einer Person daran scheitert. |
+| Jede Arbeit bekommt vor dem Einspielen eine adversariale Prüfung: Prüfer versuchen, die Änderung zu brechen, und bestätigte Funde werden behoben und auf jeder unterstützten Python-Version getestet. | Ein Prüf-Workflow über den Diff der Änderung; seine Funde und ihre Behebung gehören zur Arbeit. | Eine Änderung, die nur ihr Autor geprüft hat, übersieht, was ein zweiter Blick findet. |
 
 ### Dokumentation und der Bauplan
 
@@ -2100,14 +2123,14 @@ diesem Design steht. Das Protokoll wächst mit jeder Runde; eine neue Runde beko
 der Fragen innerhalb einer Runde. Was entschieden ist, steht immer bei seinem Baustein; weichen beide voneinander ab,
 gilt der Baustein.
 
-Woher die Einträge kommen. Das Gespräch, in dem die Runden gefragt und beantwortet wurden, ist bis zum 2026-10-11
-15:57:42 UTC zurück ausgewertet. Die Runden 2 bis 56 und 57 bis 66 stammen daraus: Jeder Eintrag nennt das Datum, jede
-Frage seiner Runde mit ihren Möglichkeiten und der Empfehlung des Assistenten, die Antwort des Maintainers (kurze
-Antworten wörtlich auf Deutsch zitiert, lange zusammengefasst), die Entscheidungen, die daraus folgten, was der
-Assistent selbst ohne Widerspruch entschied (als „nicht widersprochen“ markiert) und was eine spätere Runde ersetzte.
-Alles vor dem 2026-10-11 15:57:42 UTC ist weiter nur das, was das Repository sagt, bis es ausgewertet ist: Das ist
-Runde 1, deren Fragen vor diesem Zeitpunkt beantwortet wurden (ihr Eintrag ist aus den Verweisen in Code und Tests, den
-Commit-Nachrichten und dem Changelog rekonstruiert). Das Arbeitsprotokoll, in dem die Runden zuerst nummeriert wurden,
+Woher die Einträge kommen. Das Gespräch, in dem die Runden gefragt und beantwortet wurden, ist vollständig
+ausgewertet, von seinem Beginn am 2025-12-13 22:59 UTC bis zum 2026-11-09 13:59 UTC, und jeder Eintrag stammt daraus:
+Jeder Eintrag nennt das Datum, jede Frage seiner Runde mit ihren Möglichkeiten und der Empfehlung des Assistenten,
+die Antwort des Maintainers (kurze Antworten wörtlich auf Deutsch zitiert, lange zusammengefasst), die
+Entscheidungen, die daraus folgten, was der Assistent selbst ohne Widerspruch entschied (als „nicht widersprochen“
+markiert) und was eine spätere Runde ersetzte. Die Entscheidungen vor den nummerierten Runden, vom 13. Dezember 2025
+bis 11. Oktober 2026, stehen in einem Eintrag vor Runde 1, [Vor den Runden](#decision-before-rounds), nach Datum
+geordnet. Das Arbeitsprotokoll, in dem die Runden zuerst nummeriert wurden,
 lag außerhalb des Repositorys und ist verloren; die Rundennummern hier sind die, die das Gespräch nennt. Wo das
 Gespräch keine Nummer nennt, behält ein Eintrag die Nummer, die ihm das Repository gibt, wenn sein Inhalt passt (Runden
 11, 12 und 17), und Entscheidungen ohne Nummer stehen unter ihrem Datum mit ihren eigenen Kürzeln, als Unterabschnitt
@@ -2136,25 +2159,142 @@ Steht jetzt in: [Repository, Schichten und Konsolidierung](#repository-schichten
 [Dokumentation und der Bauplan](#dokumentation-und-der-bauplan),
 [Versionierung und Dokumentationsregeln](#versionierung-und-dokumentationsregeln)
 
+#### 13. Dezember 2025 bis 11. Oktober 2026 · Vor den Runden
+
+<a id="decision-before-rounds"></a>
+Die Entscheidungen vor den nummerierten Runden, vom Beginn des Gesprächs (2025-12-13 22:59 UTC) bis zum 2026-10-11
+15:57 UTC: die Arbeit, aus der 3.0.0 wurde, und der Anfang von 3.1.0. Sie wurden als Pläne, Phasen und Rückfragen
+gestellt, nicht als nummerierte Runden. Die sechs Fragen von Runde 1 (2026-10-11, 15:15 bis 15:32 UTC) haben ihren
+eigenen Eintrag, und die zwei Sätze, die ihnen bis 15:57 folgten, stehen darunter. Kurze Antworten sind auf Deutsch
+zitiert; „nicht widersprochen“ markiert, was der Assistent ankündigte und der Maintainer stehen ließ; was eine spätere
+Entscheidung ersetzte, ist mit dem genannt, was es ersetzte. Wo eine frühe Antwort und das heutige Design noch
+voneinander abweichen und keine spätere Entscheidung es klärte, fragt die Roadmap den Maintainer (ihre offenen Fragen).
+
+- 2025-12-13, der Auftrag zu Beginn: den Code allein beurteilen, jede Datei vollständig lesen, in Teilen mit einem
+  kurzen Stand, und vor jedem nächsten Teil fragen („fahre fort“). Eine Arbeitsregel dieser Analyse.
+- 2026-10-09, die Antworten auf die Prüfung: Geteiltes Wissen wird gefiltert, bevor es den Rechner verlässt, ohne
+  API-Schlüssel oder persönliche Daten, und „alle uploads sind opt-in!“ (das Framework hat keinen eigenen Upload mehr:
+  Geteilt wird über einen Pull Request, den die Person öffnet); Ditto verlangt keinen Prompt, „der user wählt in der
+  gui aus einem dropdown menü“; nur öffentlich zugängliche Inhalte kommen in die Wissensbasis, „was öffentlich
+  zugänglich ist darf zitiert und verwendet werden“ (eine offene Frage gegenüber den Lizenzregeln), und gecrawltes
+  Wissen kommt in ein Archiv der Community, das das Framework herunterlädt, wenn die Wissensbasis genutzt wird (eine
+  offene Frage gegenüber den signierten Paketen); Self-Healing wächst, weil die Fehler der Nutzer, bereinigt von
+  persönlichen Daten, geteilt werden; Ditto und die Wissensbasis sind jeweils Opt-in; das Deployment über SSH oder WLAN
+  genügt für Edge-Boards. „kannst du es fertig stellen? die lücken füllen? die fehlende verdrahtung erledigen?“: Das
+  Framework wird fertig, indem verdrahtet wird, was da ist; Phase 1 des Plans: „ja“. Nicht widersprochen: ein
+  Einrichtungsdialog für Ditto mit Anbieter und Modell (ersetzt durch „Ditto einrichten...“ und Anbieter als Daten),
+  Startadressen nur http(s), die SSRF-Prüfung des Crawlers bei jedem Weiterleitungsschritt, ein Target ohne
+  `metadata.id` nimmt seinen Ordnernamen, das Schwärzen moderner Schlüsselformate, Tests gegen den echten Code. „bitte
+  auf deutsch antworten, danke“: Der Assistent antwortet auf Deutsch.
+- 2026-10-09 23:59 bis 2026-10-10 02:55, Phase 1: Neue Quantisierungsmethoden, Frameworks und Formate müssen
+  unterstützt und die veralteten Abhängigkeiten aktualisiert werden; „bitte echte ci workflows erstellen“, mit pytest;
+  eine Zeit lang kein GitHub-CI (die Minuten waren aufgebraucht), die Prüfungen liefen lokal; Recherche, was bessere
+  Modelle und das neueste MCP ändern. Nicht widersprochen: Formate einmal erklärt (heute die Fähigkeiten in der
+  `target.yml`), eine Basis-URL nur für Ollama und eigene Server, mit einem eigenen Schlüssel (heute an seine Adresse
+  gebunden), `ci.yml`, `security.yml`, `docker.yml` und Dependabot mit per Commit festgelegten Actions, ein venv je
+  Toolchain, zuerst eine echte Umwandlung von Anfang bis Ende, BuildKit mit Rückfall, die echte Ursache in
+  Fehlermeldungen, nichts auf MCP-Sampling gebaut; das automatische Entfernen der Build-Images wurde später ersetzt
+  (kein Image wird ohne die Person gelöscht).
+- 2026-10-10 11:03, die Antworten auf den Plan: „Reihenfolge > angenommen“ (Pipeline, MCP-Server, Ditto, Formate und
+  Targets); jeden Fund beheben und jedes lose Ende verdrahten; Python war auf 3.12 festgelegt, weil einer Abhängigkeit
+  3.13 fehlte (eine offene Frage); die ersten Targets sind RK3566-Boards, RTX-GPUs der Serien 20 und 30 und der Ryzen
+  Z1 Extreme, dort ROCm über inoffizielle Umwege („ist die sache des users ob es brauchbar ist oder nicht“), jedes
+  andere Target aus der Community; „Erzwungene JSON-Ausgaben: wir brauchen Schemas“; Tool-Freigaben bei der ersten
+  Einrichtung von Ditto gefragt und gespeichert; ein winziges oder 2-Bit-Modell soll für Ditto reichen; „1 Million
+  Token Kontext und automatisches Prompt-Caching: ja, woillen wir als standard“ (eine offene Frage zu einem festen
+  Standard); lokale Embeddings und ein fester Gesundheitscheck (heute Mojo) nach dem Vorbild eines anderen Projekts des
+  Maintainers; reparieren, was neuere Modelle kaputt machten; „MCP: JA“; Sicherheit nach bewährter Praxis; erst
+  schauen, planen, rückfragen, dann bauen; airllm für große Gewichte vorgeschlagen (eine offene Frage), Ideen von
+  Unsloth ohne Abschreiben, LoRA-Adapter. Nicht widersprochen: Fremder Code wird nur gelesen, nie ausgeführt.
+- 2026-10-10 14:14 bis 15:03, die Rückfragen: Dittos Grundlage „können wir weder noch nutzen und entweder was
+  leicheres nehmen oder was eigenes bauen?“ (heute die eigene Anbieter-Schicht auf den offiziellen SDKs); das lokale
+  Modell auch auf schwacher Hardware, eine optionale Cloud-API, eine Modellwahl, die wechselt, wenn bessere Modelle
+  erscheinen, und „q2 muss getestet werden ob es überhaupt schlau genug ist“; der Ryzen Z1 Extreme: „Beides“ (Windows
+  und Linux); die Extras: „alles was machbar ist“ (vLLM AWQ und GPTQ, EXL3, ein natives Windows-Deployment für
+  NVIDIA); LoRA-Training als eigener, schlanker Trainer, Unsloth nie installiert, Ideen nur im Rahmen seiner Lizenz.
+  Eine Anmeldung mit einem Claude-Abo, wie eine andere App sie anbietet, war gewünscht; diese App gibt sich als Claude
+  Code aus, darum bietet das Framework keine an (nicht widersprochen), und ein Abo wirkt über den MCP-Server. Nicht
+  widersprochen: airllm aus der Pipeline, das LLM auf der CPU des RK3566, Host-Python 3.11 bis 3.14, die Reihenfolge
+  Sofortfixes, Fundament, MCP-Server, Ditto, Targets, eine adversariale Prüfung jeder Phase, eine Anmeldung bei
+  OpenRouter mit PKCE.
+- 2026-10-10 16:40 bis 23:52, Dokumentation, Anmeldung und der Container: Die Dokumentation geht mit der Arbeit mit
+  (README, Design, Roadmap und Changelog mit Zeitstempeln und Versionen, Keep a Changelog 1.1.0), Englisch zuerst und
+  Deutsch als zweite Sprache, die Roadmap sagt, was kommt, der Changelog, was war; ein Schnitt mit einer Übergabe, dann
+  eine Pause, bis der Maintainer sagt, dass es weitergeht; „im öffentlichen repo sollten nicht MEINE zugangsdaten
+  geleaked werden!“; eine Anmeldung je Zugangsart für jeden gängigen Anbieter und jede gängige lokale Engine (ein
+  Gerätecode eingeschlossen, Unsloth Studio nur als Client); nach einem Token fragen, statt eine Sperre zu umgehen;
+  der eigene Container des Frameworks: „Reparieren (Empfehlung)“. Nicht widersprochen: die Sandbox für Umwandlungen,
+  Vertrauen beim ersten Kontakt mit dem Framework-Schlüssel, kuratierte Kalibrierdaten, eine Versionsquelle, nur
+  fertige und geprüfte Arbeit committet.
+- 2026-10-11 00:02 bis 15:12, die alten Roadmaps und die Wissensbasis: der Crawl-Hinweis mit einer gesprochenen
+  Ansage, Reranking und Embedding aus einem anderen Projekt des Maintainers übernommen, der Teil des Frameworks bleibt
+  schlank; keine rechtliche Bestätigung, der Crawler prüft die Vorbehalte selbst; Cloud-Builds nur als API-Anbindungen
+  (später ersetzt: keine Builds in der Cloud oder auf gemieteten Maschinen); der Modell-Zoo aus den Vorlagen der
+  Community; der Swarm-Upload: „jetzt entfernen und durch eine echte verschlüsselung ersetzen“; „Alles jetzt in 3.1“;
+  „Echtes age via pyrage (Empfehlung)“; der mMARCO-Reranker: „Als Standard ok“; „Gezielt kürzen (Empfehlung)“;
+  nummerierte Fragen in normalem Text statt Multiple-Choice-Feldern; der eigene MCP-Server des Frameworks mit Tools für
+  seine Funktionen, für KI-Clients und Ditto gleichermaßen.
+
+Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
+[Targets, Hardware und Vorlagen](#targets-hardware-und-vorlagen),
+[MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
+[Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht),
+[Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest),
+[Community, Rezepte und Pakete](#community-rezepte-und-pakete),
+[Secrets, Anmeldung und Konten](#secrets-anmeldung-und-konten),
+[Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung),
+[Tests, CI und die Windows-Fallen](#tests-ci-und-die-windows-fallen),
+[Dokumentation und der Bauplan](#dokumentation-und-der-bauplan), [Wichtige Entscheidungen](#wichtige-entscheidungen)
+und die [offenen Fragen](ROADMAP_DE.md#offene-fragen-an-den-maintainer) der Roadmap
+
 ### Runde 1
 
 <a id="decision-round-1"></a>
-Die erste Fragerunde zum MCP-Server, beantwortet vor dem 2026-10-11 15:57:42 UTC; das ausgewertete Gespräch verweist
-nur auf ihre sechs Antworten. Aus dem Repository rekonstruiert (umgesetzt am 2026-10-12). Punkt 1: Deep Ingest erreicht
-KI-Aufrufer nur über das Tool `crawl_docs_site`, als Job, jedes Mal mit jeder Startadresse gefragt und abgelehnt,
-solange der Crawl-Hinweis ungelesen ist. Punkt 3: Der Community-Zoo für KI-Aufrufer listet und installiert Pakete nur
-aus dem signierten Index; es gibt kein Tool, das ein Paket hochlädt oder einen Pull Request öffnet. Punkt 4: Status,
-Einstellungen und ehrliche Grenzen für KI-Aufrufer (`get_status`). Punkt 5: Ein externer KI-Client darf Dittos Aufgabe
-übernehmen: Er bekommt Dittos Aufgabentexte als Prompts und denselben Wissenskontext, schlägt Heilungen selbst vor
-(`propose_healing_fix`) und legt Target-Module über die Prüfung des Modulgenerators an.
+2026-10-11, gefragt um 15:15, beantwortet um 15:32 UTC: die erste Fragerunde zum MCP-Server. Den Server gab es mit 11
+Tools; der vollständige Tool-Satz wurde entworfen, und was nie über MCP läuft, wurde zuerst genannt (Geheimnisse
+eingeben oder auslesen, die eigenen Freigaben der KI, den Tresor-Schutz oder das Audit-Log ändern).
+
+- Q1 Deep Ingest über MCP: Darf eine KI Dokumentationsseiten in die Wissensbasis holen lassen, jedes Mal gefragt, mit
+  allen Adressen und den Opt-out-Prüfungen wie in der GUI? Empfohlen ja. Antwort: „1. ja“.
+- Q2 Deployment auf ein Gerät über MCP, mit Rückfrage und nur für Geräte, deren SSH-Schlüssel ein Mensch in GUI oder
+  CLI bestätigt hat? Empfohlen ja. Antwort: „2. ja“.
+- Q3 Einen Community-Pull-Request über MCP veröffentlichen? Empfohlen nein, über MCP nur der lokale Export als Datei.
+  Antwort: „3. nein“.
+- Q4 Einstellungen über MCP ändern, mit Rückfrage, Freigaben, Geheimnisse und Tresor ausgenommen? Empfohlen ja.
+  Antwort: „4. ja“.
+- Q5 Ditto als Tool, das ein externer Client befragen kann? Empfohlen nein, der Client ist selbst eine KI. Antwort:
+  „5. nein, der externe client soll die aufgabe von ditto übernehmen, aber er muss die gleiche wissensbasis nutzen
+  können wie ditto es lokal auch tut + sein eigenes cloud wissen...“.
+- Q6 MCP Apps (eine eigene Oberfläche im Client) jetzt oder später? Empfohlen später. Antwort: „6. später, erst der
+  server, dann die tools, dann die apps“.
+
+Gebaut am 2026-10-12: Deep Ingest erreicht KI-Aufrufer nur über das Tool `crawl_docs_site`, als Job, jedes Mal mit
+jeder Startadresse gefragt und abgelehnt, solange der Crawl-Hinweis ungelesen ist (Q1, Punkt 1); eine KI liefert nur
+nach Rückfrage aus und nur auf ein Gerät, dessen Host-Schlüssel ein Mensch bestätigt hat (Q2); der Community-Zoo für
+KI-Aufrufer listet und installiert Pakete nur aus dem signierten Index, und kein Tool lädt ein Paket hoch oder öffnet
+einen Pull Request (Q3, Punkt 3); Status, Einstellungen und ehrliche Grenzen für KI-Aufrufer (`get_status`) (Q4,
+Punkt 4); ein externer KI-Client übernimmt Dittos Aufgabe: Er bekommt Dittos Aufgabentexte als Prompts und denselben
+Wissenskontext, schlägt Heilungen selbst vor (`propose_healing_fix`) und legt Target-Module über die Prüfung des
+Modulgenerators an (Q5, Punkt 5); MCP Apps stehen in der Liste Später der Roadmap (Q6).
 
 Steht jetzt in: [MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
+[Deployment auf Boards](#deployment-auf-boards),
 [Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest),
 [Community, Rezepte und Pakete](#community-rezepte-und-pakete),
 [Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht)
 
 #### 2026-10-11 · Vor Runde 2 (ohne Rundennummer)
 
+- 15:37 bis 15:42, nach der Frage, was das Aufräumen entfernt hatte: „1. ja“: das Benchmark-Fenster, der Updater und
+  elf ungelesene Einstellungen unverändert wiederhergestellt, jedes mit seiner Roadmap-Zeile und einem Test, der sie
+  hält; „2. nein, aber der verwaltete llama server wird ja mittels hardware_probe selbst gebaut? wir wollen kein
+  fertiges docker ziehen!“: `preferred_tiny_model` bleibt entfernt, und nichts Fertiges wird gezogen; „3. ja“: die
+  Prüfung vor dem Build bleibt und kommt auf die Roadmap. Nicht widersprochen: Nichts wird ohne Zustimmung des
+  Maintainers aus dem Code entfernt.
+- 15:56, die selbst gebaute Laufzeit: „1. JA!“: auf jeder Zielhardware ein für sie aus der Hardware-Probe gebauter
+  llama-server, der fertige nur auf Wunsch; „2.“: die Proben `.sh` und `.ps1` bleiben als Rückfall für Läufe von Hand
+  und ohne Netz, eine Python-Probe daneben; „3. ja“: das Laufzeit-Image lokal gebaut statt gezogen; „4. ja“: der
+  Integrationsstand sofort als Sicherung gepusht.
 - Der Push war durch GitHubs Secret Scanning blockiert (ein Fake-Token in einem Test). Möglichkeiten: 1) der Maintainer
   gibt den Fake-Wert auf GitHub frei, 2) der Assistent darf nur die nie gepushte Historie umschreiben. Antwort: „2“. In
   den nicht gepushten Commits änderte sich nur diese eine Testzeile; gepushte Historie wird nie umgeschrieben.
@@ -2163,6 +2303,9 @@ Steht jetzt in: [MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-ber
   Fake aussieht, und die Markierung `secret-scan: allow` nimmt ihn nicht mehr aus.
 
 Steht jetzt in: [Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung),
+[Targets, Hardware und Vorlagen](#targets-hardware-und-vorlagen),
+[Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
+[Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht),
 [Sicherheitsmodell](#sicherheitsmodell)
 
 ### Runde 2

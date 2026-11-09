@@ -1199,6 +1199,10 @@ modules source, config, convert and target and the target's own modules in fixed
 | The build image keeps the container modes of the original design: interactive (the default), pipeline, one module on its own, the system test and status. | `entrypoint.sh`, copied into every build context: `interactive`, `pipeline`, `source`, `config`, `convert`, `target`, `test`, `status`; a build itself runs through the runtime layer, whose entry the host sets. | The maintainer's original design: each step can be run and tested by hand inside the image. |
 | When no target fits the probe, the Builder offers to create one with the wizard or to ask Ditto, the probe file ready for both; never only a log line. | `gui/builder_parts.py` (the offer under the board recommendation), `builder_tab.create_target_requested`. | A log line leaves a person without a terminal stuck. |
 | Build egress with allowed destinations: build containers run in an internal network, a small DNS filter in Rust resolves only the names on an allow list and logs every lookup per build, offline mode resolves local names only, a network rule closes raw addresses; no bundled Caddy and no system-wide Unbound. | planned: ROADMAP row "Build egress with allowed destinations" (Rust parts). | A build must reach only what it needs; a second TLS proxy would duplicate the Rust gateway, and a system resolver would take port 53 and change the person's computer. |
+| A build that cannot succeed stops before it starts: a pre-flight check compares the drivers the hardware probe found with what the target's SDK needs (for example the CUDA and driver matrix). | planned: ROADMAP row "Pre-flight check before a build"; `orchestrator/Core/consistency_manager.py` stays in the code until it is wired into the build start. | A build that fails late on a driver mismatch costs the person hours; the check was unfinished code, not waste. |
+| LoRA adapters are supported: merged into the model, kept as an adapter, or both, RKLLM LoRA included. | planned: ROADMAP row "LoRA adapters". | Fine-tuned variants are common, and nobody should have to merge them by hand. |
+| Optional LoRA training is a lean trainer of the framework's own; Unsloth is never installed or used; ideas and solutions come from Unsloth's repository only within its licence: from its Apache-2.0 core, nothing from its LGPL part (unsloth_zoo) or its AGPL part (Unsloth Studio). | planned: ROADMAP row "Optional LoRA training". | A trainer of its own stays small and fits the pipeline; the licence decides what may be taken. |
+| Large models can be quantized: disk space and RAM checked before a build, F16 intermediates reused, GGUF as input, per-tensor recipes checked by KL divergence. | planned: ROADMAP row "Large models"; whether airllm helps with large weights (a runtime, not a converter, left out of the pipeline today) is a ROADMAP open question, "airllm for large weights?". | A large model must fail before the build, not after hours, and must not need more memory than the computer has. |
 
 **History**
 
@@ -1258,6 +1262,12 @@ module stays marked untested until a run on the board proves it.
 | Hailo builds take only what the case needs: the vendor's suite image as base when it is there, otherwise the person's installation mounted into a small own image; the optimization runs on the CPU for now and on the GPU later, together with the NVIDIA target; the vendor's public repositories (the Raspberry Pi 5 examples, the model zoo, the apps, HailoRT, the application examples, TAPPAS) are the sources of the Hailo plan; the GUI gets the same "Hailo:" line as `llm-cli scan`. | planned: ROADMAP Later "Hailo" and row "The Hailo line in the GUI's scan"; today `llm-cli scan` prints the line and `gui/menus/deploy.py` names the GUI line as coming with the Hailo wave. | Only what a case needs keeps images small; one list of sources keeps the plan checkable. |
 | A vendor toolchain is installed with guidance: the framework shows the vendor's licence text, and the person's own yes to it is the licence acceptance; an AI never accepts a licence. | planned: ROADMAP row "Guided install of vendor toolchains". | Vendor SDKs come under their own terms; only the person can accept them. |
 | An "edit all files" step in the module wizard covers the stage modules, `target.yml` with its slots and the Dockerfile, never the stage runner; the checks run again with a diff. | planned: ROADMAP Later, the item on an "edit all files" step in the module wizard. | Vendor paths and flags can be finished before the module is saved; the runner is the framework's runtime layer. |
+| The first targets are RK3566 boards, NVIDIA RTX GPUs of the 20 and 30 series and the AMD Ryzen Z1 Extreme; every other target comes from the community, through the module wizard and target packs. | planned: ROADMAP rows "An own target template for the RK3566", "NVIDIA GPU target" and "AMD RDNA3 APU target"; the module wizard and `create_target_module` are built. | These targets can be tested first; nobody can bring every board alone. |
+| The AMD Ryzen Z1 Extreme is a target on Windows and on Linux: on Linux a container with ROCm or Vulkan (HIP for its GPU, gfx1103), on Windows a native deploy over SSH and PowerShell with llama.cpp (Vulkan, ROCm optional), since Docker passes no AMD GPU through there. ROCm is offered also where AMD does not support the GPU officially, through the known workarounds (such as `HSA_OVERRIDE_GFX_VERSION`); whether that is useful is the person's call. | planned: ROADMAP row "AMD RDNA3 APU target". | The framework should be able to do it; whether it is worth it on a given machine only the person can judge. |
+| The NVIDIA GPU target brings everything feasible: GGUF with CUDA for RTX GPUs of the 20 and 30 series (the CUDA version chosen by driver), the vLLM formats AWQ and GPTQ, EXL3 (ExLlamaV3), and a native deploy to Windows machines with NVIDIA GPUs (llama.cpp with CUDA, without Docker and without WSL2). | planned: ROADMAP row "NVIDIA GPU target". | RTX GPUs are the most common GPUs at home, and each format serves another runtime. |
+| New quantization methods, runtimes and formats are taken in as they appear; the research of 2026-10-10 named NVFP4 and FP8 (llm-compressor, ModelOpt), ExecuTorch, MNN-LLM, MLC LLM, ONNX Runtime GenAI and OpenVINO with NNCF as candidates. | Taken in so far (see the changelog): llama.cpp's IQ types and the importance matrix, RKLLM 1.3.1, RKNN 2.3.2; the candidates are planned: ROADMAP Later, the item "Newly researched formats and runtimes". | A framework that knows only last year's formats loses its use. |
+| A target is found by its id or its folder name: a target without `metadata.id` takes its folder name, a folder whose name starts with `_` or `.` (the template) is never a target, and every component resolves targets through one map. | `read_target_folders` and `resolve_target_name` in `Core/target_manager.py`, used by the target registry, the build service, the orchestrator and the build engine; `-t` takes the id or the folder name, exactly first, then ignoring case. | Components that each resolved targets their own way disagreed; a person types what they see. |
+| The hardware probe comes in three forms: `scripts/hardware_probe.py` and the two scripts `scripts/hardware_probe.sh` (Linux) and `scripts/hardware_probe.ps1` (Windows), which stay as fallbacks the person runs by hand, also on a board without network. | The three write the same keys (`tests/test_hardware_probe_keys.py`); the file is carried back and read with `llm-cli scan --import`. | A board without Python or without network must still be probed. |
 
 **History**
 
@@ -1383,6 +1393,7 @@ person's stored permissions on every call, confirmations, pending and standing a
 | Mojo's doorbell line keeps the broker's address (`scheme://host:port`) and the last send error, also where an AI reads it (Mojo's AI view, the `run_doctor` tool, Ditto); never the user name or the password. | `Core/mojo/checks/doorbell.py` names the broker by `Broker.label()` (scheme, host and port only) and reads the last result from `doorbell_status.json`; the send error is kept by `doorbell._error_text`, which redacts secrets and replaces the password and the user name by `***`; the AI view (`mojo/views.labeller`) labels paths and redacts secrets but keeps the address and the error. | Transparency: with the address and the error the person (or the AI helping them) can see which broker failed and why, and fix it; the broker's address is a setting the person chose, the credentials stay out of every text. |
 | Limits per client: calls per minute and concurrent builds and jobs per caller, configurable; they never cap the size of a weight download. | `tools/limits.py`, applied by the registry to every caller. | One client must not starve the others; a large model is the person's choice, not a limit. |
 | "Do not ask again for this model version": a tick box in the build question, off by default, for one security or legal warning on exactly that repository and commit; never for deleting or licences. | planned: ROADMAP row on "Do not ask again for this model version" (on the stable warning codes). | The same warning on the same model asked again and again is noise; a new version can change what the warning means. |
+| No feature relies on MCP sampling (the server asking the client's model for an answer); an MCP client does Ditto's work itself with the framework's tools and prompts. | The server offers tools, resources and prompts (`tools/`, `tools/framework_prompts.py`) and sends no sampling request; it only notes whether a client declares sampling among its capabilities. | The research of 2026-10-10 found sampling being phased out, and many clients never offered it; a feature built on it would fail with them. |
 
 **History**
 
@@ -1471,6 +1482,9 @@ framework's own tools; its local model runs on a self-built llama.cpp server.
 | Start thresholds for Ditto's local model: at least 8 tokens per second and a KL divergence of at most 0.05 (0.10 as the outer bound) against the reference, on one fixed evaluation text, tuned by `ditto eval`. | planned: ROADMAP row "Start thresholds for Ditto's local model". | A model that is too slow or too far from its original makes Ditto worse than no local model. |
 | Ditto's server in Docker is reachable only from this computer and gets the GPU where it can; a forced switch of the mode reuses the models and rebuilds only llama-server; forcing works in the installer, the CLI and the GUI. | `runtime/container_server.py`: the port published on 127.0.0.1 only, the models folder mounted read-only, `--gpus all` for NVIDIA and `/dev/dri` with its render groups for AMD and Intel, an honest note where it cannot. | The local model's port must not face the network; downloading a model twice costs time and disk. |
 | A real upsert in Ditto's archive also replaces an entry the person verified, but the verified text is kept as a copy, with a notice and Undo. | planned: ROADMAP row "Ditto's archive, phase 1: facts from tool results." | A newer fact must win, and the person's own check must not be lost silently. |
+| The person never has to write a prompt for Ditto's work: provider, model and the choices of a task are picked from lists (drop-down menus) in the GUI, and the task texts are the framework's own; the chat stays for questions and tasks in the person's own words. | "Set up Ditto..." with the provider presets of `configs/llm_providers.yml` and the model list loaded live; the template and wizard choices of the module wizard; the task texts in `orchestrator/llm/task_prompts.py`. | A layperson does not know what to write; a choice from a list cannot be phrased wrong. |
+| A 2-bit (Q2) model must first prove in Ditto's evaluation on the person's machine that it is smart enough for Ditto's tasks; it is never Ditto's default, and the 4B and 9B tiers at 2-bit are offered only after a passed evaluation. | Today `llm-cli ditto eval --tier small --tier small-q2` measures it, and the 4B and 9B tiers at 2-bit are never recommended, only downloaded by name; the gate is planned: ROADMAP row "2-bit tiers only after a passed evaluation". Whether the 2B model at 2-bit, recommended today for 3 GiB of RAM or less, needs the gate too is a ROADMAP open question. | The 9B model at 2-bit was larger and slower than the 4B model at 4-bit, and a model that fails the tasks makes Ditto worse than none. |
+| A large context (up to 1M tokens) and automatic prompt caching are the default wherever the provider offers them. | planned: ROADMAP rows "The real context window per model" and "Cloud caching the provider's way"; whether the 1M context is a fixed default for cloud models or the window follows each model with compaction is a ROADMAP open question. | A large window keeps the whole conversation without summaries, and caching lowers the cost of every request. |
 
 #### Measured token numbers
 
@@ -1557,7 +1571,7 @@ documentation sites after the person starts it (or confirms an AI's request) and
 | What | How | Why |
 |---|---|---|
 | Deep Ingest over MCP: yes, capped at "ask", the question shows every address, and the opt-out checks, limits and the one-time notice apply as in the GUI. | `crawl_docs_site` in `tools/tools_crawl.py`; a guard test keeps every other way to the crawler out of reach. Whether a delegation may answer a crawl's question (the decision on delegations names Deep Ingest as work an AI may do) is a ROADMAP open question, "Deep Ingest under a delegation". | Text in a log or a page could steer an AI into crawling. |
-| Only publicly accessible knowledge is shared, robots.txt and the other opt-outs respected; copyright is kept wherever it is recognisable and licences decide (no licence means all rights reserved: link and short facts only); a pack that carries text under a licence that asks for its text ships that text. | `orchestrator/rag/licences.py`, the licence texts from the SPDX list, the pack exporter. | We follow the law and still need the information Ditto may use. |
+| Only publicly accessible knowledge is shared, robots.txt and the other opt-outs respected; copyright is kept wherever it is recognisable and licences decide (no licence means all rights reserved: link and short facts only); a pack that carries text under a licence that asks for its text ships that text. | `orchestrator/rag/licences.py`, the licence texts from the SPDX list, the pack exporter; whether everything public may be quoted and used, as an early decision said, is a ROADMAP open question, "Public content: quoted and used, or the licence decides?". | We follow the law and still need the information Ditto may use. |
 | The local knowledge base is stored in Qdrant Edge (the Rust engine in the process), with a verified migration; qdrant-client stays only for an optional Qdrant server. | `orchestrator/rag/` with `qdrant-edge-py`; the conversion keeps the old folder until the person deletes it. | The old local mode compared every query with every point in Python. |
 | A newer Qdrant Edge minor comes only after a cross-version shard test and an automatic snapshot. | The range stays within 0.9 (`>=0.9.0,<0.10`): patch releases come with the lock, the update run and the installers after the cooldown and the tests; the next minor follows planned: ROADMAP row "Step 7". | The person's knowledge must survive an engine update. |
 | Hidden HTML carriers are stripped and text is sanitized at Deep Ingest, with fixture pages in CI. | `orchestrator/rag/html_text.py`, `RAGManager.ingest_page`; the nightly retrieval evaluation. | Hidden text is a common way to inject instructions. |
@@ -1578,7 +1592,7 @@ signed index and installs through a quarantine.
 | What | How | Why |
 |---|---|---|
 | A recipe is a target template: it holds the build code, and model, quantization, format and deployment are variables the person picks in the build menu, never bound to the creator's choice; what a recipe holds must be used by the builder; data-only packs are "tested settings"; existing templates are fixed and improved, not reinvented. | `schemas/recipes.py` and the recipe loader; recipes as templates are planned: ROADMAP row "Recipes as target templates". | A template is about the hardware; the person who pulls it decides the rest. |
-| What people share are target templates through the public community repository (pull request hand-off); nothing image-like goes into the hub, never models to Hugging Face; a person's own images are free; the framework pulls the list of ready templates automatically; companies build cluster images themselves from the Dockerfiles into their own registry. | `Core/community_manager.py` (`submit_contribution`, the index), the Community Hub. | Templates are small and checkable; images would need a rebuild for every update. |
+| What people share are target templates through the public community repository (pull request hand-off); nothing image-like goes into the hub, never models to Hugging Face; a person's own images are free; the framework pulls the list of ready templates automatically; companies build cluster images themselves from the Dockerfiles into their own registry. | `Core/community_manager.py` (`submit_contribution`, the index), the Community Hub; whether the framework also downloads the community's knowledge by itself when the knowledge base is used is a ROADMAP open question, "A community archive that the framework downloads by itself?". | Templates are small and checkable; images would need a rebuild for every update. |
 | The community repository is the project's knowledge-base repository (default of `community_repo`); the index address follows once the first signed index exists; workflows of fork pull requests need approval for all outside contributors. | `community_repo` default; publishing the index is planned: ROADMAP row "Community repository and index published". | A pull request from outside must not run the repository's checks unreviewed. |
 | Board knowledge in a target pack is imported at the recipient. | The pack installer imports a target's `knowledge/` into the knowledge base. | The template's documentation belongs with it. |
 | A recipe names its target by the target pack's own content digest, and an installed target pack counts as that target as long as it is unchanged since its install, also where the file system keeps no execute bit (Windows); an edited target is another target. | One helper in `Core/community_manager.py`: `installed_digest` (what a build records) and `same_content` (what a recipe check compares), over `Provenance.installed_unchanged`; the builder, the build service's identical-build check, the recipe tools and the recipe install check all use it. | A recipe made on Linux must verify on Windows, and the other way round; the content check itself stays the security gate. |
@@ -1590,6 +1604,7 @@ signed index and installs through a quarantine.
 | The list of knowledge sources has one column order in the CLI and the GUI, with Topic or target third. | `knowledge_sources.COLUMNS`; `llm-cli knowledge sources` adds its columns from it, the Knowledge Sources window's `sources.col.*` texts are those words in English and in the same order. | One list keeps the two views from drifting apart; where a source belongs is read right after what it is. |
 | A signed index entry of a knowledge pack names the topic or target of its manifest; an installed pack must belong where its entry says. | `IndexEntry.topic` / `target` / `belongs()` (left out when unset), written by `community_maintainer.entry_for`; one rule for manifest and entry (`community_pack.check_belongs`) and one text (`belongs_text`); `prepare_install` refuses a mismatch. | The person sees where knowledge goes before the download; the signed entry and the pack cannot disagree. A 3.1.0 client rejects an index with the new fields, so entries with them are published once 3.2.0 is out. |
 | A bot may propose new models with a compatibility test as a tested pull request; it never takes anything over by itself. | planned: ROADMAP Later "A bot that proposes new models as a tested pull request". | New models appear faster than releases; a person still decides. |
+| Self-healing grows with use: build errors and their fixes, cleaned of personal data, are shared with the community as knowledge, opt-in, through the scrubbed, signed packs and the pull-request hand-off; a shared fix stays advice, applied only through the fixed strategies and with the person's approval. | planned: ROADMAP row "Shared healing knowledge". | One person's solved error spares the next person the search; personal data never leaves the computer. |
 
 **History**
 
@@ -1643,6 +1658,8 @@ for everyone who can start it.
 | The revision anchor of a signed file (tool policy, tokens, approvals) never goes down: every process compares and writes it under one lock per file, reads the stored value first and keeps the higher one. | `tools/signing.RevisionAnchor` (`adopt`, `saved`, `_process_lock`: a `<file>.anchor.lock` next to the file; without the lock the step goes on as before). | An older copy put back over the file must stay refused, also when two processes save at the same moment. |
 | A locked vault waits for unlock; the GUI and the CLI pass their environment, an AI-started service gets only basics. | The vault's unlock path; the service part is planned: ROADMAP row "Step 1 - Build service". | An AI must not inherit the person's whole environment. |
 | A device's SSH key is made by the framework and kept in the keyring under the target's host name: only the key, never the password the person typed once. | planned: ROADMAP row "An own account `llmcf` on the host and on boards". | A password kept is a password that can leak; a key can be revoked per device. |
+| Sign-in follows each access type, for all common cloud and API providers and the common local engines: an API key first; a browser sign-in (OAuth with PKCE) or a device code only where the vendor offers it to third-party apps; the cloud platforms' own credential chains; local engines (Ollama, LM Studio, Unsloth Studio and others) only as a client, never installed or bundled; credentials only in the vault, never in the repository; the framework never reuses another program's login. | Built: API keys with their check, keys from environment variables, the sign-in panel and `llm-cli ditto login`, `logout`, `auth` (`orchestrator/llm/auth/`); the rest is in progress: ROADMAP row "Sign-in per access type". The browser sign-ins wait for registrations of the project (a public Hugging Face OAuth app, an Entra app for Azure) and a test with a real ChatGPT plan. | Each provider has its own way to sign in, and OAuth is the preferred way where a vendor allows it; a borrowed login breaks the vendor's terms. |
+| The key of a custom OpenAI-compatible server or a local engine is bound to the address it was saved for (scheme, host and port); a cloud key never goes to a leftover custom address. | `orchestrator/llm/auth/store.py` stores the key with its origin and sends it only there (a key saved without one is bound to the first address it is used with); cloud presets have fixed endpoints (security model, "Secrets leak"). | A key sent to whatever address is set today can end up at a third party's server. |
 
 ### GUI and the person's path
 
@@ -1795,13 +1812,17 @@ One repository with layers enforced by a test; every change extends what exists.
 | Zero tolerance for leaks: no token, password or personal data (names, e-mail addresses, hosts, addresses, local paths) ever reaches the repository; a leak scan of the outgoing commits runs before every push. A leak, like an unnecessary commit, makes the maintainer delete the repository. | The scan runs before every push; whether it becomes a script of the repository with its tests, and first, is a ROADMAP open question ("A leak scan inside the repository"); beside it the blueprint's scrub test in `tests/test_docs.py`, GitHub's secret scanning and push protection, and the planned second secret scanner in CI (ROADMAP row "A second secret scanner in CI"). | The repository is public: what leaked once is copied and cannot be taken back. |
 | Nothing is deleted without asking: the assistant asks with the exact list (path and name) before it deletes a worktree, a branch or a folder of its own, and cleans up its own leftovers itself instead of handing that to the maintainer. | Each yes holds for its list only. | Clean-up handed to the maintainer cost the repository once. |
 | The repository was created anew on 2026-11-07 under the same name, public, with only `main` and `development`; its history starts on 2025-12-13 (older commits were not in the local copy); issues, pull requests, releases, the Actions history, secrets and settings of the old one did not carry over. Its settings: Dependabot alerts and security updates, secret scanning and push protection switched on; a merged pull request's branch deleted automatically; no branch protection rules. | The settings are switched in GitHub's settings by the maintainer (a session cannot change them); the workflows and the Dependabot configuration are files of the repository and ran again at once. | Branch protection would block the direct pushes to `development`; the security switches guard against leaks; the deleted head branches keep the branch rule. |
-| Questions come grouped, a few at a time; what is not asked now goes onto the roadmap as an ordered item with its open decisions in the row; nothing may be orphaned. | The roadmap rows carry their open decisions (for example the build-service steps). | The roadmap is a to-do list, not a dump. |
+| Questions come grouped, a few at a time, as numbered questions in plain text that the maintainer answers by number, never through multiple-choice forms; what is not asked now goes onto the roadmap as an ordered item with its open decisions in the row; nothing may be orphaned. | The roadmap rows carry their open decisions (for example the build-service steps). | The roadmap is a to-do list, not a dump. |
 | The repository's secret scan reports a value in the exact format of a token GitHub push protection blocks, however fake it looks and whatever allow marker its line carries; only the documented test mocks of the old history are exempt, named by the sha256 of the exact value and only for `--history`; every new commit with such a value, and every real token, password, address or personal datum, still fails. | `scripts/secret_scan.py`, `orchestrator/security/secret_patterns.py` (`EXACT_FORMATS`), `.secret-scan-allow`, the history scan in `.github/workflows/security.yml`; CONTRIBUTING says how to write a fake token in a test. | A fake in the exact format blocked a push of 117 commits; an allow list in clear text would itself carry the value. |
 | The assistant talks to the maintainer in German; the documents stay in English and German. It is not pedantic about names: when a name the maintainer gives is slightly off, the closest match is taken instead of asking. | Every answer and question to the maintainer is German; a near name (a repository, a file) is looked up and named as found. | The maintainer works in German; a question about a spelling costs a round trip and helps nobody. |
 | The maintainer's own documents handed in for review are confidential: they are analysed line by line in the working folder, and nothing of them goes into the public repository before the maintainer approves. Third-party code (for example a project from GitHub such as densely) is used only after its licence is checked. | The analysis stays in the session's working folder; a licence check names the licence and what it allows before any line is taken. | The maintainer's work is his until he publishes it; code without a fitting licence cannot go into a public repository. |
 | No engine-wide clean-up: a piece of work never runs a `prune` of the container engine (images, volumes, build cache); each chain has its own scratch and test folder and removes only what it created, one by one by ID. No additions are sent to a running workflow agent; they go into the decisions or the next step. | Each chain's folder carries its name; images and containers it made are removed by their IDs. | A `volume prune` deleted every unused volume of the sandbox, and two runs in one folder deleted each other's files; a message to a running agent resumed a duplicate that edited the same worktree. |
-| When the maintainer writes while something runs, the real status is checked first, never assumed; before a usage limit hits, running work is stopped on purpose, unfinished work committed and notes for resuming written. | The status of the background tasks and CI runs is read before an answer; the pause leaves every piece of work at a commit. | "Still running" was reported when nothing ran; a hard stop at the limit loses work. |
+| When the maintainer writes while something runs, the real status is checked first, never assumed; before a usage limit hits, running work is stopped on purpose, unfinished work committed and a handover for resuming written into the repository; the work then pauses until the maintainer says it goes on. | The status of the background tasks and CI runs is read before an answer; the pause leaves every piece of work at a commit. | "Still running" was reported when nothing ran; a hard stop at the limit loses work. |
 | The order of work as decided: the MCP server and its tools first, the self-built runtime in parallel and its tools after it; the consolidation (helpers, remote package, disk, build and deploy path) before the wave-6 area chains; the build worker right after consolidation stage C; Linux before Windows (the self-build, the `llmcf` account, the board side). | Carried out in 3.1.0 to 3.3.0 (see the changelog); what is left is ordered in the roadmap. | Each step builds on the one before; a port is cheaper than two parallel designs. |
+| Foreign code handed in or found for inspiration (another project of the maintainer, a project from GitHub) is only read, unpacked into a folder of its own outside the repository, never run or installed, also not by subagents; what the framework takes from it are ideas within its licence, and the framework's own part stays lean. | The code lies in the session's working folder; nothing of it is executed; what is taken names its origin. | Code from elsewhere can do anything once it runs, and reading is enough to learn from it; a lean framework stays maintainable. |
+| When work needs a credential the assistant does not have (for example a token to push), it asks the maintainer instead of working around the block; a credential never goes into the repository. | The question names what is needed and why. | A way around a block hides the problem, and a credential in a public repository cannot be taken back. |
+| Unfinished feature code is never removed without the maintainer's consent: a review reports it and proposes its roadmap row. The benchmark window, the updater and eleven unread settings that a clean-up had removed as dead were restored unchanged, and the pre-flight check stayed. | `tests/test_core.py` keeps their modules and settings in the code; ROADMAP rows "Benchmark window", "Pre-flight check before a build", "Defaults for the importance matrix and calibration", "Signed updates", and under Later "Local API server", "GUI theme and automatic refresh" and "Housekeeping". | Code that is only not wired yet is the maintainer's plan, not waste. |
+| Only finished, checked work is committed: files that a running agent is still writing wait until it ends and their tests are checked. | A request to commit untracked files is declined while an agent still writes them. | A half-written, possibly failing test must not land in the public branch. |
 
 ### Tests, CI and the Windows hazards
 
@@ -1829,6 +1850,8 @@ that cannot be deleted) is made visible on Linux too.
 | Dependabot opens its pull requests against `development`, and the assistant checks the open pull requests before new work and at every integration. The GPU template stays on an LTS release that matches CUDA, and Dependabot proposes no non-LTS Ubuntu. | `.github/dependabot.yml` (`target-branch: development` for uv, GitHub Actions and Docker; Dependabot reads it from the default branch). The Ubuntu rule there ignores every major and minor bump, LTS releases included: ROADMAP open question "Dependabot and the GPU template's Ubuntu". | The work lands on `development`; main receives only `development` as a whole; a non-LTS release broke the CUDA pairing. |
 | A red run is an alarm: after every push the CI and Security runs are watched to the end, scheduled runs are checked daily, and Bandit is green locally before a piece of work is finished. A failure is fixed properly: wrong code in the code, an environment-dependent test made independent; no test is skipped or weakened to make a run green, and a test that truly cannot be fixed is turned off only with its reason written next to it. | `gh run watch` after each push, `gh run list` for the scheduled workflows; `bandit` from the dev group. | Eight red runs that nobody noticed were a silent witness, not an alarm. |
 | Windows rules for every chain: no Linux-only command in a test without a Windows skip; scripts written with Unix line endings; a read-only file made writable before it is replaced; each change searched for Windows hazards before a push. | The chain's own check before the push; the Windows runner of `ci.yml` and the NTFS emulation in `tests/test_removal.py` catch what slips through. | Failures that only the Windows runner finds came back after every merge. |
+| `docker.yml` checks the target images: hadolint over the Dockerfiles, then the Rockchip image built and smoke-tested, on changes to the targets and the build path, weekly and by hand. | `.github/workflows/docker.yml` (a path filter on `targets/**`, the build engine, the build context and the runtime Dockerfiles; a weekly schedule; `workflow_dispatch`), its actions pinned by commit like every workflow's. | An image that no longer builds must be found before a person's build fails on it. |
+| Every piece of work gets an adversarial review before it lands: reviewers try to break the change, and confirmed findings are fixed and tested on every supported Python version. | A review workflow over the change's diff; its findings and their fixes go with the work. | A change checked only by its author misses what a second look finds. |
 
 ### Documentation and the blueprint
 
@@ -1988,13 +2011,13 @@ same commit that writes its decisions into the components. References in code an
 Q2" point to the entry of that round here; Q, item and letter numbers are the numbers of the questions within a
 round. What is decided always stands at its component; where the two differ, the component wins.
 
-Where the entries come from. The conversation in which the rounds were asked and answered is evaluated back to
-2026-10-11 15:57:42 UTC. Rounds 2 to 56 and 57 to 66 are taken from it: each entry gives the date, every question of
-its round with its options and the assistant's recommendation, the maintainer's answer (short answers quoted word for
-word in German, long ones summarized), the decisions that followed, what the assistant decided itself without an
-objection (marked "not objected"), and what a later round replaced. Anything before 2026-10-11 15:57:42 UTC is still
-only what the repository says, until it is evaluated: that is round 1, whose questions were answered before that time
-(its entry is rebuilt from the references in code and tests, the commit messages and the changelog). The working log in
+Where the entries come from. The conversation in which the rounds were asked and answered is evaluated
+completely, from its start on 2025-12-13 22:59 UTC to 2026-11-09 13:59 UTC, and every entry is taken from it: each
+entry gives the date, every question of its round with its options and the assistant's recommendation, the
+maintainer's answer (short answers quoted word for word in German, long ones summarized), the decisions that
+followed, what the assistant decided itself without an objection (marked "not objected"), and what a later round
+replaced. The decisions before the numbered rounds, from 13 December 2025 to 11 October 2026, stand in one entry
+before round 1, [Before the rounds](#decision-before-rounds), listed by date. The working log in
 which the rounds were first numbered was kept outside the repository and is lost; the round numbers here are the ones
 the conversation names. Where the conversation names no number, an entry keeps the number the repository gives it when
 its content matches (rounds 11, 12 and 17), and decision sets without a number stand under their date with their own
@@ -2021,25 +2044,137 @@ Now in: [Repository, layers and consolidation](#repository-layers-and-consolidat
 [Documentation and the blueprint](#documentation-and-the-blueprint),
 [Versioning and documentation policy](#versioning-and-documentation-policy)
 
+#### 13 December 2025 to 11 October 2026 · Before the rounds
+
+<a id="decision-before-rounds"></a>
+The decisions before the numbered rounds, from the start of the conversation (2025-12-13 22:59 UTC) to 2026-10-11
+15:57 UTC: the work that became 3.0.0 and the start of 3.1.0. They were asked as plans, phases and follow-up
+questions, not as numbered rounds. Round 1's six questions (2026-10-11, 15:15 to 15:32 UTC) have their own entry, and
+the two sets that followed them until 15:57 stand under it. Short answers are quoted in German; "not objected" marks
+what the assistant announced and the maintainer let stand; what a later decision replaced is named with what replaced
+it. Where an early answer and today's design still differ and no later decision settled it, the roadmap asks the
+maintainer (its open questions).
+
+- 2025-12-13, the opening request: analyse the code alone, read every file in full, in parts with a short status, and
+  ask before each next part ("fahre fort"). A working rule of that analysis.
+- 2026-10-09, the answers to the review: shared knowledge is filtered before it leaves the computer, without API keys
+  or personal data, and "alle uploads sind opt-in!" (the framework has no upload of its own any more: sharing goes
+  through a pull request the person opens); Ditto asks for no prompt, "der user wählt in der gui aus einem dropdown
+  menü"; only publicly accessible content goes into the knowledge base, "was öffentlich zugänglich ist darf zitiert
+  und verwendet werden" (an open question against the licence rules), and crawled knowledge goes into a community
+  archive that the framework downloads when the knowledge base is used (an open question against the signed packs);
+  self-healing grows because users' errors, cleaned of personal data, are shared; Ditto and the knowledge base are
+  each opt-in; deployment over SSH or Wi-Fi is enough for edge boards. "kannst du es fertig stellen? die lücken füllen?
+  die fehlende verdrahtung erledigen?": the framework is finished by wiring what exists; the plan's phase 1: "ja". Not
+  objected: a set-up dialog for Ditto with provider and model (replaced by "Set up Ditto..." and providers as data),
+  start addresses only http(s), the crawler's SSRF check on every redirect hop, a target without `metadata.id` taking
+  its folder name, the redaction of modern key formats, tests against the real code. "bitte auf deutsch antworten,
+  danke": the assistant answers in German.
+- 2026-10-09 23:59 to 2026-10-10 02:55, phase 1: new quantization methods, frameworks and formats must be supported,
+  and the outdated dependencies updated; "bitte echte ci workflows erstellen", with pytest; for a while no GitHub CI
+  (the minutes were used up), the checks ran locally; research on what better models and the newest MCP change. Not
+  objected: formats declared once (now the capabilities in `target.yml`), a base URL only for Ollama and custom
+  servers, with a key of their own (now bound to its address), `ci.yml`, `security.yml`, `docker.yml` and Dependabot
+  with actions pinned by commit, one venv per toolchain, a real end-to-end conversion first, BuildKit with a fallback,
+  the real cause in error messages, nothing built on MCP sampling; the automatic removal of build images was replaced
+  later (no image is deleted without the person).
+- 2026-10-10 11:03, the answers to the plan: "Reihenfolge > angenommen" (pipeline, MCP server, Ditto, formats and
+  targets); fix every finding and wire every loose end; Python had been pinned to 3.12 because a dependency lacked
+  3.13 (an open question); the first targets are RK3566 boards, RTX GPUs of the 20 and 30 series and the Ryzen Z1
+  Extreme, with ROCm there through unofficial workarounds ("ist die sache des users ob es brauchbar ist oder nicht"),
+  every other target from the community; "Erzwungene JSON-Ausgaben: wir brauchen Schemas"; tool permissions asked and
+  stored at Ditto's first setup; a tiny or 2-bit local model should be enough for Ditto; "1 Million Token Kontext und
+  automatisches Prompt-Caching: ja, woillen wir als standard" (an open question on a fixed default); local embeddings
+  and a deterministic health check (now Mojo) modelled on another project of the maintainer; repair what newer models
+  broke; "MCP: JA"; security by best practice; look first, plan, ask back, then build; airllm suggested for large
+  weights (an open question), ideas from Unsloth without copying, LoRA adapters. Not objected: foreign code is only
+  read, never run.
+- 2026-10-10 14:14 to 15:03, the follow-up questions: Ditto's base "können wir weder noch nutzen und entweder was
+  leicheres nehmen oder was eigenes bauen?" (now the own provider layer on the official SDKs); the local model on weak
+  hardware too, an optional cloud API, a choice of models that changes when better ones appear, and "q2 muss getestet
+  werden ob es überhaupt schlau genug ist"; the Ryzen Z1 Extreme: "Beides" (Windows and Linux); the extras: "alles was
+  machbar ist" (vLLM AWQ and GPTQ, EXL3, a native Windows deploy for NVIDIA); LoRA training as an own, lean trainer,
+  Unsloth never installed, ideas only within its licence. A sign-in with a Claude subscription, as another app offers
+  it, was asked for; that app impersonates Claude Code, so the framework offers none (not objected), and a
+  subscription works through the MCP server. Not objected: airllm out of the pipeline, the LLM on the RK3566's CPU,
+  host Python 3.11 to 3.14, the order fixes, foundation, MCP server, Ditto, targets, an adversarial review of every
+  phase, an OpenRouter sign-in with PKCE.
+- 2026-10-10 16:40 to 23:52, documentation, sign-in and the container: the documentation moves with the work (README,
+  design, roadmap and changelog with time stamps and versions, Keep a Changelog 1.1.0), English first and German
+  second, the roadmap says what comes and the changelog what was; a cut with a handover, then a pause until the
+  maintainer says go on; "im öffentlichen repo sollten nicht MEINE zugangsdaten geleaked werden!"; one sign-in per
+  access type for every common provider and local engine (a device code included, Unsloth Studio only as a client);
+  ask for a token instead of working around a block; the framework's own container: "Reparieren (Empfehlung)". Not
+  objected: the sandbox for conversions, trust on first use with the framework key, curated calibration data, one
+  version source, only finished and checked work committed.
+- 2026-10-11 00:02 to 15:12, the old roadmaps and the knowledge base: the crawl notice with a spoken announcement,
+  reranking and embedding taken from another project of the maintainer, the framework's part kept lean; no legal
+  confirmation, the crawler checks the opt-outs itself; cloud builds only as API connections (replaced later: no
+  builds in the cloud or on rented machines); the model zoo from the community's templates; the swarm upload: "jetzt
+  entfernen und durch eine echte verschlüsselung ersetzen"; "Alles jetzt in 3.1"; "Echtes age via pyrage
+  (Empfehlung)"; the mMARCO reranker: "Als Standard ok"; "Gezielt kürzen (Empfehlung)"; numbered questions in plain
+  text instead of multiple-choice fields; the framework's own MCP server with tools for its functions, for AI clients
+  and Ditto alike.
+
+Now in: [Build pipeline and target modules](#build-pipeline-and-target-modules),
+[Targets, hardware and templates](#targets-hardware-and-templates),
+[MCP server, tools and permissions](#mcp-server-tools-and-permissions),
+[Ditto, the local runtime and the LLM layer](#ditto-the-local-runtime-and-the-llm-layer),
+[Knowledge base and Deep Ingest](#knowledge-base-and-deep-ingest),
+[Community, recipes and packs](#community-recipes-and-packs),
+[Secrets, sign-in and accounts](#secrets-sign-in-and-accounts),
+[Repository, layers and consolidation](#repository-layers-and-consolidation),
+[Tests, CI and the Windows hazards](#tests-ci-and-the-windows-hazards),
+[Documentation and the blueprint](#documentation-and-the-blueprint), [Key decisions](#key-decisions), and the
+roadmap's [open questions](ROADMAP.md#open-questions-for-the-maintainer)
+
 ### Round 1
 
 <a id="decision-round-1"></a>
-The first round of questions on the MCP server, answered before 2026-10-11 15:57:42 UTC; the evaluated conversation
-only refers to its six answers. Rebuilt from the repository (implemented 2026-10-12). Item 1: Deep Ingest reaches AI
-callers only through the tool `crawl_docs_site`, as a job, asked every time with every start address, and refused
-while the crawl notice is unread. Item 3: the community zoo for AI callers lists and installs packs from the signed
-index only; there is no tool that uploads a pack or opens a pull request. Item 4: status, settings and honest limits
-for AI callers (`get_status`). Item 5: an external AI client may do Ditto's job: it gets Ditto's task texts as prompts
-and the same knowledge context, proposes healing fixes itself (`propose_healing_fix`) and creates target modules
-through the module generator's validation.
+2026-10-11, asked 15:15, answered 15:32 UTC: the first round of questions on the MCP server. The server existed with
+11 tools; the full tool set was being designed, and what never goes over MCP was named first (entering or reading
+secrets, changing the AI's own permissions, the vault protection or the audit log).
+
+- Q1 Deep Ingest over MCP: may an AI have documentation pages fetched into the knowledge base, asked every time with
+  every address shown and the opt-out checks as in the GUI? Recommended yes. Answer: "1. ja".
+- Q2 Deployment to a device over MCP, asked, and only to devices whose SSH key a person confirmed in the GUI or CLI?
+  Recommended yes. Answer: "2. ja".
+- Q3 Publishing a community pull request over MCP? Recommended no, only the local export as a file. Answer:
+  "3. nein".
+- Q4 Changing settings over MCP, asked, with permissions, secrets and the vault excluded? Recommended yes. Answer:
+  "4. ja".
+- Q5 Ditto as a tool an external client can ask? Recommended no, the client is an AI itself. Answer: "5. nein, der
+  externe client soll die aufgabe von ditto übernehmen, aber er muss die gleiche wissensbasis nutzen können wie ditto
+  es lokal auch tut + sein eigenes cloud wissen...".
+- Q6 MCP Apps (a UI of their own inside the client) now or later? Recommended later. Answer: "6. später, erst der
+  server, dann die tools, dann die apps".
+
+Built on 2026-10-12: Deep Ingest reaches AI callers only through the tool `crawl_docs_site`, as a job, asked every
+time with every start address, and refused while the crawl notice is unread (Q1, item 1); an AI deploys only after
+asking and only to a device whose host key a person confirmed (Q2); the community zoo for AI callers lists and
+installs packs from the signed index only, and no tool uploads a pack or opens a pull request (Q3, item 3); status,
+settings and honest limits for AI callers (`get_status`) (Q4, item 4); an external AI client does Ditto's job: it gets
+Ditto's task texts as prompts and the same knowledge context, proposes healing fixes itself (`propose_healing_fix`)
+and creates target modules through the module generator's validation (Q5, item 5); MCP Apps are on the roadmap's
+Later list (Q6).
 
 Now in: [MCP server, tools and permissions](#mcp-server-tools-and-permissions),
+[Deployment to boards](#deployment-to-boards),
 [Knowledge base and Deep Ingest](#knowledge-base-and-deep-ingest),
 [Community, recipes and packs](#community-recipes-and-packs),
 [Ditto, the local runtime and the LLM layer](#ditto-the-local-runtime-and-the-llm-layer)
 
 #### 2026-10-11 · Before round 2 (no round number)
 
+- 15:37 to 15:42, after the question what the clean-up had removed: "1. ja": the benchmark window, the updater and
+  eleven unread settings restored unchanged, each with its roadmap row and a test that keeps them; "2. nein, aber der
+  verwaltete llama server wird ja mittels hardware_probe selbst gebaut? wir wollen kein fertiges docker ziehen!":
+  `preferred_tiny_model` stays removed, and nothing prebuilt is pulled; "3. ja": the pre-flight check stays and goes
+  onto the roadmap. Not objected: nothing is removed from the code without the maintainer's consent.
+- 15:56, the self-built runtime: "1. JA!": on every target hardware a llama-server built for it from the hardware
+  probe, the prebuilt one only on request; "2.": the `.sh` and `.ps1` probes stay as fallbacks for runs by hand and
+  without network, a Python probe beside them; "3. ja": the runtime image built locally instead of pulled; "4. ja":
+  the integration state pushed at once as a backup.
 - Pushing was blocked by GitHub's secret scanning (a fake token in a test). Options: 1) the maintainer releases the
   fake value on GitHub, 2) the assistant may rewrite only the history that was never pushed. Answer: "2". Only that
   one test line changed in the unpushed commits; pushed history is never rewritten.
@@ -2048,6 +2183,9 @@ Now in: [MCP server, tools and permissions](#mcp-server-tools-and-permissions),
   `secret-scan: allow` no longer exempts it.
 
 Now in: [Repository, layers and consolidation](#repository-layers-and-consolidation),
+[Targets, hardware and templates](#targets-hardware-and-templates),
+[Build pipeline and target modules](#build-pipeline-and-target-modules),
+[Ditto, the local runtime and the LLM layer](#ditto-the-local-runtime-and-the-llm-layer),
 [Security model](#security-model)
 
 ### Round 2

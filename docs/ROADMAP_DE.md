@@ -55,7 +55,8 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
   Gemini, OpenRouter und weitere OpenAI-kompatible API-Dienste bekommen Vorlagen mit Schlüsselseiten und Prüfungen.
 - **Anmeldung im Browser nur, wo der Anbieter sie für Drittanbieter-Apps erlaubt**: OpenRouter (OAuth mit PKCE,
   liefert einen API-Schlüssel), Hugging Face mit einer eigenen registrierten App des Frameworks und „Sign in with
-  ChatGPT“ für OpenAI-Tarife (Beta, bis es mit einem echten Konto getestet ist). Das Framework nutzt nie die
+  ChatGPT“ für OpenAI-Tarife (Beta, bis es mit einem echten Konto getestet ist), dazu ein Gerätecode, wo ein Anbieter ihn
+  Drittanbieter-Apps anbietet. Das Framework nutzt nie die
   Anmeldung eines anderen Programms mit.
 - **Cloud-Plattformen** (AWS, Google Cloud, Azure) über die eigenen Anmeldeketten der Anbieter, als optionale
   Erweiterungen; gespeichert werden nur Auswahlwerte wie Profil und Region.
@@ -74,6 +75,7 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
 | **Echte Token-Zahlen: der bezahlte Lauf der Person.** Die Messung ist gebaut (die `tokens`-Fälle der Evaluation und der bezahlte Test `openai_paid`); übrig ist der Lauf selbst: Die Person startet den bezahlten OpenAI-Test einmal in ihrem eigenen llmcf mit ihrem eigenen Schlüssel (nie aus einer Sandbox oder der CI; der Schlüssel verlässt den Rechner nie), und seine `openai_cache_check.json` klärt die 12-Stunden-Lebensdauer des Caches und die Token-Zählung von OpenAI. | geplant |
 | **Das echte Kontextfenster je Modell**, mit Zählen, Budget und Verdichtung: Dittos lokales Modell aus den gemessenen Grenzen der Hardware, API-Modelle je Modell, beim Server des Anbieters erfragt, wo er es sagt. | geplant |
 | **Cloud-Caching so, wie der Anbieter es vorsieht**: das eigene Caching des Anbieters und seine Anleitungen für Cache-Punkte (Anthropic, OpenRouter), die Lebensdauer des Caches eine Einstellung mit kurzer Vorgabe und einer Kostengrenze als weicher Obergrenze. | geplant |
+| **2-Bit-Stufen erst nach bestandener Evaluation**: Die Stufen 4B und 9B mit 2 Bit werden Ditto erst angeboten, nachdem `llm-cli ditto eval` mit ihnen auf diesem Rechner bestanden hat; bis dahin werden sie nie empfohlen und nur per Namen geladen. | geplant |
 | **Dittos Archiv, Phase 1: Fakten aus Tool-Ergebnissen.** Ein durchsuchbares Archiv dessen, was Ditto über llmcf und das Bauen gelernt hat (nie die privaten Gespräche der Person), lesbar für alle, die den Harness nutzen, in einer eigenen Collection des vorhandenen Speichers der Wissensbasis; ein neuerer Fakt ersetzt den älteren. Ein Eintrag, den die Person geprüft hat, wird auch ersetzt, aber sein Text bleibt als Kopie, mit Hinweis und Rückgängig. | geplant |
 | **LLMLingua-2 bei Bedarf**, standardmäßig aus: etwa 150 Zeilen der MIT-Methode übernommen (ein numpy-Runner in der App), das Modell bei Bedarf von seiner Originalquelle geholt und nur, wenn es fehlt, nie im Repository mitgeliefert. | geplant |
 | **Dittos Archiv, Phase 2**: Fakten aus Dittos eigenen Antworten, Export und Import, Schnappschüsse. | geplant |
@@ -152,7 +154,7 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
 | **Weitere Rockchip-SoCs für RKLLM** (RK3562, RV1126B) mit einer Tabelle der unterstützten Typen je SoC. | geplant |
 | **NVIDIA-GPU-Target**: GGUF mit CUDA für RTX-GPUs der Serien 20 und 30 (CUDA-Version je nach Treiber), die vLLM-Formate AWQ und GPTQ, EXL3 und natives Deployment auf Windows-Rechner mit NVIDIA-GPU. | geplant |
 | **GPU-Beschleunigung** für die Importance-Matrix und den RKLLM-Export. | geplant |
-| **Target für AMD-RDNA3-APUs** für den Ryzen Z1 Extreme: llama.cpp mit Vulkan und HIP, Linux-Container und natives Deployment unter Windows. | geplant |
+| **Target für AMD-RDNA3-APUs** für den Ryzen Z1 Extreme: llama.cpp mit Vulkan und HIP, Linux-Container und natives Deployment unter Windows; ROCm auch dort, wo AMD die GPU nicht offiziell unterstützt, über die bekannten Umwege (etwa `HSA_OVERRIDE_GFX_VERSION`), und ob das brauchbar ist, entscheidet die Person. | geplant |
 | **Prüfung vor dem Build** (`orchestrator/Core/consistency_manager.py`, in Entwicklung): vergleicht die Treiber, die die Hardware-Probe gefunden hat, mit dem, was das SDK des Targets braucht (etwa die CUDA- und Treiber-Matrix), und hält einen Build an, der nicht gelingen kann, bevor er startet; muss noch in den Build-Start eingebunden werden. | geplant |
 | **Benchmark-Fenster** (`orchestrator/gui/benchmark_window.py`, in Entwicklung): llama-bench ausführen und die Ergebnisse als Tabelle zeigen; muss noch auf Basis der Laufzeit auf dem Gerät fertig gebaut und in der GUI erreichbar gemacht werden. | geplant |
 | **Eine SSH-Verbindung für die Befehle eines Board-Schritts** (OpenSSH `ControlMaster`, als Option): Der OpenSSH-Rückfallweg meldet sich einmal je Schritt an statt einmal je Befehl; geteilte Verbindungen bleiben bis dahin aus, und die eigenen SSH-Einstellungen des Frameworks lehnen sie ab. | geplant |
@@ -164,12 +166,13 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
 | Punkt | Status |
 |---|---|
 | **LoRA-Adapter**: in das Modell einrechnen oder als Adapter behalten (oder beides), mit eigenem Streaming-Merger, GGUF-Adaptern für `llama-server --lora`, RKLLM-LoRA und einem Block `lora` in den Target-Capabilities. | geplant |
-| **Optionales LoRA-Training** mit einem eigenen, schlanken Trainer: Ideen von Unsloth, aber kein Unsloth-Code und keine Unsloth-Installation. | geplant |
+| **Optionales LoRA-Training** mit einem eigenen, schlanken Trainer: Ideen und Lösungen von Unsloth nur im Rahmen seiner Lizenz (aus seinem Apache-2.0-Kern, nichts aus unsloth_zoo (LGPL) oder Unsloth Studio (AGPL)), und keine Unsloth-Installation. | geplant |
 | **Große Modelle**: eine Prüfung von Speicherplatz und RAM vor dem Build, Wiederverwendung von F16-Zwischenständen, GGUF als Eingabe (Durchreichen und Neu-Quantisieren), Quantisierungsrezepte je Tensor, per KL-Divergenz geprüft, eine Importance-Matrix berechnet, von Hugging Face übernommen oder aus einer Datei geladen, und Prüfungen von Tokenizer und Chat-Vorlage nach jedem Build. | geplant |
 | **Vorgaben für Importance-Matrix und Kalibrierung** (Einstellungen `default_enable_imatrix` und `default_calibration_dataset`, in Entwicklung): als Vorgaben in Builder, CLI und den KI-Tools genutzt. | geplant |
 | **Den pip-Cache in der CI zurückbringen, sobald das Kontingent es erlaubt**: `cache: pip` in den setup-python-Schritten von `ci.yml`, `security.yml` und `retrieval-eval.yml` ist vorerst abgeschaltet, weil das Cache- und Egress-Kontingent des Kontos aufgebraucht war und ein Job beim Wiederherstellen des Caches hing ([Design](DESIGN_DE.md#tests-ci-und-die-windows-fallen)). | geplant |
 
-Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht in die Pipeline.
+Vorerst nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und bleibt aus der Pipeline; ob es bei großen
+Gewichten doch helfen soll, ist eine offene Frage weiter unten.
 
 ### Offene Fragen an den Maintainer
 
@@ -187,6 +190,12 @@ nennt jede dort, wo sie hingehört.
 | **Der Bereich von Qdrant Edge**: `qdrant-edge-py` `>=0.9.0,<0.10` mit einem Shard-Test über Versionen vor dem nächsten Minor, oder wieder genau gepinnt? | offene Frage |
 | **Dependabot und das Ubuntu der GPU-Vorlage**: Die Entscheidung sagt, die GPU-Vorlage bleibt auf einer LTS-Version, die zu CUDA passt, und Dependabot schlägt kein Ubuntu ohne LTS vor; `.github/dependabot.yml` ignoriert jeden Major- und Minor-Sprung von Ubuntu, LTS-Versionen eingeschlossen. Auf Versionen ohne LTS einengen, oder jeden Versionswechsel als bewussten Schritt im Katalog lassen? | offene Frage |
 | **Deep Ingest unter einer Delegation**: Die Entscheidung zu Delegationen nennt Deep Ingest als echte Arbeit, die eine KI tun darf; das Design hält `crawl_docs_site` bei „fragen“, nie von einer dauerhaften Freigabe gedeckt, und das Sicherheitsmodell hält Crawls aus dauerhaften Freigaben heraus. Darf eine Delegation die Frage eines Crawls beantworten? | offene Frage |
+| **Öffentliche Inhalte: zitiert und verwendet, oder entscheidet die Lizenz?** Eine frühe Entscheidung sagte, was öffentlich zugänglich ist, darf zitiert und verwendet werden, und der Crawler nimmt nur Zitate in die Wissensbasis; das Design lässt die maschinenlesbaren Vorbehalte der Seite und die Lizenz entscheiden (keine Lizenz: nur der Link und kurze Fakten; Volltext in einem Paket nur, wo die Lizenz es erlaubt). Die Regeln des Designs behalten oder Zitate jeder öffentlichen Seite erlauben? | offene Frage |
+| **Ein Community-Archiv, das das Framework selbst herunterlädt?** Eine frühe Entscheidung sagte, gecrawltes Wissen kommt per Upload in ein Archiv der Community, und das Framework lädt es herunter, wenn die Wissensbasis genutzt wird; das Design teilt Wissen als signierte Pakete über das Community-Repository mit Übergabe per Pull Request und installiert ein Paket nur, wenn die Person es will, über eine Quarantäne. Einen automatischen Download des Community-Wissens hinzufügen oder bei der ausdrücklichen Installation bleiben? | offene Frage |
+| **Python auf dem Host und die alte 3.12-Festlegung**: Python war einmal auf 3.12 festgelegt, weil eine nötige Abhängigkeit für 3.13 nicht verfügbar war; der Host unterstützt jetzt 3.11 bis 3.14, und die Build-Images bleiben für die Rockchip-Wheels (CPython 3.10 bis 3.12) bei 3.11. Den Bereich behalten oder den Host wieder festlegen? | offene Frage |
+| **airllm für große Gewichte?** Der Maintainer schlug airllm als Hilfe beim Quantisieren großer Gewichte vor; es blieb aus der Pipeline, weil es eine Laufzeit für Inferenz und Training ist, kein Konverter. Doch für große Modelle nutzen oder draußen lassen? | offene Frage |
+| **1M Kontext als fester Standard?** Eine frühe Entscheidung wollte 1M Token Kontext und automatisches Prompt-Caching als Standard; das Design nimmt das Kontextfenster jedes Modells vom Anbieter (oder aus der gemessenen Hardware) und behält eine Verdichtung. Ein fester 1M-Standard für Cloud-Modelle, wo der Anbieter ihn bietet, oder das Fenster je Modell mit Verdichtung? | offene Frage |
+| **Das 2B-Modell mit 2 Bit ohne Evaluation?** Eine frühe Entscheidung sagte, ein Q2-Modell muss erst in einer Evaluation zeigen, dass es klug genug für Dittos Aufgaben ist; die Empfehlung des lokalen Modells wählt das 2B-Modell mit 2 Bit bei 3 GiB RAM oder weniger ohne eine solche. Auch dafür die Sperre oder die Empfehlung behalten? | offene Frage |
 
 ## Als Nächstes - Build-Dienst, Warteschlange und Modi (geplant; beginnt direkt nach der Architektur-Konsolidierung)
 
@@ -213,6 +222,7 @@ gefragt, wenn der Schritt beginnt.
 | **Dependabot-Wartezeit** für LLM-SDKs. | geplant |
 | **Ein zweiter Secret-Scanner in der CI** (das gitleaks-Programm, festgelegt und per Prüfsumme geprüft) und GitHub-Push-Schutz. | geplant |
 | **Signierte Updates** des Frameworks selbst (`orchestrator/utils/updater.py` heute: Update-Prüfung, dann ein Git-Vorspulen und ein neuer Lauf des Installers mit den Schaltern der Person, der die Abhängigkeiten neu auflöst; `llm-cli update` und Extras > Wartung > Framework aktualisieren...), fertig gebaut als geprüfte Updates einer signierten Veröffentlichung statt eines einfachen `git pull`. Werkzeugketten-Images gehören nicht dazu: Das Framework teilt Rezepte, nie kompilierte Images, daher werden sie weiter auf deinem Rechner aus dem Dockerfile des Targets gebaut; die Einstellungen `docker_registry` (standardmäßig leer) und `docker_namespace`, die nichts liest, bleiben erhalten. Keine Vorgabe nennt ein Image aus einer Registry: Die Image-Einstellungen nennen lokale Images (`llm-framework/...`) oder Images Dritter wie Trivy und Qdrant, und der Block `docker` in der `target.yml` eines Targets nennt ein lokales Image ohne Registry. | geplant |
+| **Geteiltes Heilungswissen**: Build-Fehler und ihre Lösungen, bereinigt von persönlichen Daten, als Wissenspakete mit der Community geteilt (Opt-in, bereinigt und signiert, über die Übergabe per Pull Request), damit Self-Healing mit der Nutzung wächst; eine geteilte Lösung bleibt ein Rat und wird nur über die festen Strategien mit der Zustimmung der Person angewendet. | geplant |
 
 ## Rust-Teile (geplant)
 
@@ -253,6 +263,9 @@ Rust geschrieben; andere Teile wechseln nur, wenn eine Messung einen Gewinn zeig
   - **Hersteller-SDK-Dateien, die du bereitstellst:** eine Datei, die du hinter einer Hersteller-Anmeldung
     heruntergeladen hast, geprüft per sha256 und Größe; du nimmst ihre Lizenz an, und Pakete tragen nur einen Verweis,
     nie die Datei. Warum: Hailo und Qualcomm geben Teile ihrer SDKs nur nach einer Registrierung heraus.
+  - **Neu recherchierte Formate und Laufzeiten**, als Kandidaten: NVFP4 und FP8 (llm-compressor, ModelOpt),
+    ExecuTorch, MNN-LLM, MLC LLM, ONNX Runtime GenAI und OpenVINO mit NNCF. Warum: Neue
+    Quantisierungsmethoden und Laufzeiten kamen, nachdem das Framework entstand, und es muss sie kennen.
 - **Später nützlich**, aus den Notizen des Maintainers und der Lückenprüfung:
   - **Versionsbewusstes Wissen:** Auszüge mit Target-, Toolkit- und Treiberversion markiert, Suchen danach gefiltert,
     und Doku-Quellen mit ihrer SDK-Version in der `target.yml`. Warum: Antworten für verschiedene SDK-Versionen dürfen

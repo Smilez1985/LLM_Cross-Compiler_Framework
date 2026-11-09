@@ -54,7 +54,8 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
   OpenAI-compatible API services get presets with key pages and checks.
 - **Browser sign-in only where the vendor allows it for third-party apps**: OpenRouter (OAuth with PKCE, which
   returns an API key), Hugging Face with the framework's own registered app, and "Sign in with ChatGPT" for OpenAI
-  plans (beta until it is tested with a real account). The framework never reuses another program's login.
+  plans (beta until it is tested with a real account), and a device code where a vendor offers one to
+  third-party apps. The framework never reuses another program's login.
 - **Cloud platforms** (AWS, Google Cloud, Azure) through the vendors' own credential chains, as optional extras;
   only selectors such as profile and region are stored.
 - **Local engines as a client only**: Ollama, LM Studio, llama.cpp, vLLM, Jan, Lemonade, Foundry Local and
@@ -72,6 +73,7 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 | **Real token numbers: the person's paid run.** The measurement is built (the evaluation's `tokens` cases and the paid test `openai_paid`); what is left is the run itself: the person starts the paid OpenAI test once in their own llmcf with their own key (never from a sandbox or CI; the key never leaves the computer), and its `openai_cache_check.json` settles the 12-hour cache lifetime and the token count of OpenAI. | planned |
 | **The real context window per model**, with counting, a budget and compaction: Ditto's local model from the measured hardware limits, API models per model, asked from the provider's server where it tells. | planned |
 | **Cloud caching the provider's way**: the provider's own caching and its guides for placing cache points (Anthropic, OpenRouter), the cache lifetime a setting with a short default and a cost limit as soft cap. | planned |
+| **2-bit tiers only after a passed evaluation**: the 4B and 9B tiers at 2-bit are offered for Ditto only after `llm-cli ditto eval` passed with them on this computer; until then they are never recommended and only downloaded by name. | planned |
 | **Ditto's archive, phase 1: facts from tool results.** A searchable archive of what Ditto learned about llmcf and building (never the person's private talk), readable by everyone who uses the harness, in its own collection of the existing knowledge-base storage; a newer fact replaces the older one. An entry the person verified is replaced too, but its text is kept as a copy, with a notice and Undo. | planned |
 | **LLMLingua-2 on demand**, off by default: about 150 lines of the MIT method ported (a numpy runner in the app), the model fetched on demand from its original source and only when it is missing, never shipped in the repository. | planned |
 | **Ditto's archive, phase 2**: facts from Ditto's own answers, export and import, snapshots. | planned |
@@ -150,7 +152,7 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 | **More Rockchip SoCs for RKLLM** (RK3562, RV1126B) with a per-SoC table of supported types. | planned |
 | **NVIDIA GPU target**: GGUF with CUDA for RTX GPUs of the 20 and 30 series (CUDA version chosen by driver), vLLM formats AWQ and GPTQ, EXL3, and native deployment to Windows machines with NVIDIA GPUs. | planned |
 | **GPU acceleration** for the importance matrix and the RKLLM export. | planned |
-| **AMD RDNA3 APU target** for the Ryzen Z1 Extreme: llama.cpp with Vulkan and HIP, Linux container and native Windows deployment. | planned |
+| **AMD RDNA3 APU target** for the Ryzen Z1 Extreme: llama.cpp with Vulkan and HIP, Linux container and native Windows deployment; ROCm also where AMD does not support the GPU officially, through the known workarounds (such as `HSA_OVERRIDE_GFX_VERSION`), the person deciding whether it is useful. | planned |
 | **Pre-flight check before a build** (`orchestrator/Core/consistency_manager.py`, in development): compares the drivers the hardware probe found with what the target's SDK needs (for example the CUDA and driver matrix) and stops a build that cannot succeed before it starts; still to be wired into the build start. | planned |
 | **Benchmark window** (`orchestrator/gui/benchmark_window.py`, in development): run llama-bench and show the results as a table; still to be finished on top of the runtime on the device and made reachable from the GUI. | planned |
 | **One SSH connection shared by a board step's commands** (OpenSSH `ControlMaster`, as an option): the OpenSSH fallback logs in once per step instead of once per command; connection sharing stays off until then, and the framework's own SSH settings refuse it. | planned |
@@ -162,12 +164,13 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 | Item | Status |
 |---|---|
 | **LoRA adapters**: merge them into the model or keep them as an adapter (or both), with an own streaming merger, GGUF adapters for `llama-server --lora`, RKLLM LoRA, and a `lora` block in the target capabilities. | planned |
-| **Optional LoRA training** with a lean trainer of our own: ideas from Unsloth, but no Unsloth code and no Unsloth installation. | planned |
+| **Optional LoRA training** with a lean trainer of our own: ideas and solutions from Unsloth only within its licence (from its Apache-2.0 core, nothing from unsloth_zoo (LGPL) or Unsloth Studio (AGPL)), and no Unsloth installation. | planned |
 | **Large models**: a check of disk space and RAM before a build, reuse of F16 intermediates, GGUF as input (passthrough and requantization), per-tensor quantization recipes checked by KL divergence, an importance matrix computed, taken from Hugging Face or loaded from a file, and tokenizer and chat-template checks after each build. | planned |
 | **Defaults for the importance matrix and calibration** (settings `default_enable_imatrix` and `default_calibration_dataset`, in development): used as the defaults of the Builder, the CLI and the AI tools. | planned |
 | **Bring the pip cache back in CI once the quota allows**: `cache: pip` in the setup-python steps of `ci.yml`, `security.yml` and `retrieval-eval.yml` is switched off for now, because the account's cache and egress quota ran out and a job hung at the cache restore ([design](DESIGN.md#tests-ci-and-the-windows-hazards)). | planned |
 
-Not planned: airllm. It is a runtime, not a converter, and does not belong in the pipeline.
+Not planned for now: airllm. It is a runtime, not a converter, and is left out of the pipeline; whether it should help
+with large weights after all is an open question below.
 
 ### Open questions for the maintainer
 
@@ -185,6 +188,12 @@ belongs.
 | **Qdrant Edge's range**: `qdrant-edge-py` `>=0.9.0,<0.10` with a cross-version shard test before the next minor, or pinned exactly again? | open question |
 | **Dependabot and the GPU template's Ubuntu**: the decision says the GPU template stays on an LTS release that matches CUDA and Dependabot proposes no non-LTS Ubuntu; `.github/dependabot.yml` ignores every major and minor Ubuntu bump, LTS releases included. Narrow it to non-LTS releases, or keep every release change a deliberate step in the catalogue? | open question |
 | **Deep Ingest under a delegation**: the decision on delegations names Deep Ingest as real work an AI may do; the design keeps `crawl_docs_site` at "ask", never covered by a standing approval, and the security model keeps crawls out of standing approvals. May a delegation answer a crawl's question? | open question |
+| **Public content: quoted and used, or the licence decides?** An early decision said that what is publicly accessible may be quoted and used, and that the crawler only takes quotations into the knowledge base; the design lets the site's machine-readable opt-outs and the licence decide (no licence: the link and short facts only; full text in a pack only where the licence allows it). Keep the design's rules, or allow quotations of every public page? | open question |
+| **A community archive that the framework downloads by itself?** An early decision said that crawled knowledge goes to the community by an upload into an archive, and that the framework downloads it when the knowledge base is used; the design shares knowledge as signed packs through the community repository with a pull-request hand-off, and installs a pack only when the person asks for it, through a quarantine. Add an automatic download of the community's knowledge, or keep the explicit install? | open question |
+| **Python on the host and the old 3.12 pin**: Python was once pinned to 3.12 because a needed dependency was not available for 3.13; the host now supports 3.11 to 3.14, and the build images keep 3.11 for the Rockchip wheels (CPython 3.10 to 3.12). Keep the range, or pin the host again? | open question |
+| **airllm for large weights?** The maintainer suggested airllm as a help for quantizing large weights; it was left out of the pipeline because it is a runtime for inference and training, not a converter. Use it for large models after all, or keep it out? | open question |
+| **A 1M context as the fixed default?** An early decision wanted a 1M-token context and automatic prompt caching as the default; the design takes each model's context window from the provider (or from the measured hardware) and keeps a compaction. A fixed 1M default for cloud models where the provider offers it, or the window per model with compaction? | open question |
+| **The 2B model at 2-bit without an evaluation?** An early decision said that a Q2 model must first prove in an evaluation that it is smart enough for Ditto's tasks; the local model's recommendation picks the 2B model at 2-bit for 3 GiB of RAM or less without one. Gate it too, or keep the recommendation? | open question |
 
 ## Next - build service, queue and modes (planned; starts right after the architecture consolidation)
 
@@ -211,6 +220,7 @@ step starts.
 | **Dependabot cooldown** for LLM SDKs. | planned |
 | **A second secret scanner in CI** (the gitleaks binary, pinned and checksum-verified) and GitHub push protection. | planned |
 | **Signed updates** of the framework itself (`orchestrator/utils/updater.py` today: update check, then a git fast-forward and a fresh run of the installer with the person's flags, which resolves the dependencies anew; `llm-cli update` and Tools > Maintenance > Update Framework...), finished as verified updates of a signed release instead of a plain `git pull`. Toolchain images are not part of it: the framework shares recipes, never compiled images, so they stay built on your machine from the target's Dockerfile; the settings `docker_registry` (empty by default) and `docker_namespace`, which nothing reads, are kept. No default names a registry image: the image settings name local images (`llm-framework/...`) or third-party images such as Trivy and Qdrant, and the `docker` block of a target's `target.yml` names a local image without a registry. | planned |
+| **Shared healing knowledge**: build errors and their fixes, cleaned of personal data, shared with the community as knowledge packs (opt-in, scrubbed and signed, through the pull-request hand-off), so self-healing grows with use; a shared fix stays advice and is applied only through the fixed strategies with the person's approval. | planned |
 
 ## Rust parts (planned)
 
@@ -248,6 +258,9 @@ parts move only when a measurement shows a gain (maintainer decision of 2026-10-
   - **Vendor SDK files you provide:** a file you downloaded behind a vendor login, checked by sha256 and size; you
     accept its licence, and packs carry only a reference, never the file. Why: Hailo and Qualcomm ship parts of their
     SDKs only after registration.
+  - **Newly researched formats and runtimes**, as candidates: NVFP4 and FP8 (llm-compressor, ModelOpt),
+    ExecuTorch, MNN-LLM, MLC LLM, ONNX Runtime GenAI and OpenVINO with NNCF. Why: new quantization methods
+    and runtimes came after the framework was first made, and it must know them.
 - **Useful later**, from the maintainer's notes and the gap check:
   - **Version-aware knowledge:** excerpts tagged with target, toolkit and driver version, searches filtered by them,
     and documentation sources with their SDK version in `target.yml`. Why: answers for different SDK versions must
