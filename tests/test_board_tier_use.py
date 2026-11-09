@@ -60,7 +60,7 @@ def test_enterprise_mode_refuses_the_weaker_tiers_at_use_and_names_the_ways_on()
         assert "Enterprise mode refuses to use this board" in text and "Nothing was done" in text
         assert "switch to OpenSSH" in text and "password login" in text and "private mode" in text
         assert key_tiers.use_problem(tier, "private") == ""
-    for tier in (key_tiers.TIER_ROOT, key_tiers.TIER_PASSWORD, key_tiers.TIER_UNRESTRICTED, ""):
+    for tier in (key_tiers.TIER_ROOT, key_tiers.TIER_PLAIN_LOGIN, key_tiers.TIER_UNRESTRICTED, ""):
         assert key_tiers.use_problem(tier, "enterprise") == ""
 
 

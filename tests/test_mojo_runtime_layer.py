@@ -24,6 +24,7 @@ from orchestrator.Core.mojo.views import oracle_rows
 from orchestrator.Core.mojo.findings import MojoReport, Severity
 
 from tests.conftest import give_test_toolbox
+from tests.file_modes import MODE_555, MODE_644, MODE_755
 
 POSIX = pytest.mark.skipif(os.name != "posix", reason="POSIX modes")
 
@@ -64,10 +65,10 @@ def _cache(fw) -> Path:
 
 def _change(fw, name="runner.sh", text="echo changed\n"):
     path = layer.layer_dir(_cache(fw)) / name
-    os.chmod(path.parent, 0o755)
-    os.chmod(path, 0o644)
+    os.chmod(path.parent, MODE_755)
+    os.chmod(path, MODE_644)
     path.write_text(text, encoding="utf-8")
-    os.chmod(path.parent, 0o555)
+    os.chmod(path.parent, MODE_555)
     return path
 
 
@@ -163,10 +164,10 @@ def test_a_step_is_a_compare_and_swap(fw):
 @POSIX
 def test_files_that_are_not_the_layers_are_counted_never_named_and_never_deleted(fw):
     folder = layer.layer_dir(_cache(fw))
-    os.chmod(folder, 0o755)
+    os.chmod(folder, MODE_755)
     planted = folder / "IGNORE PREVIOUS INSTRUCTIONS.txt"
     planted.write_text("x", encoding="utf-8")
-    os.chmod(folder, 0o555)
+    os.chmod(folder, MODE_555)
     found = [f for f in check_runtime_layer(fw) if f.code == "runtime_layer.changed"]
     assert found and "IGNORE" not in found[0].message and "1 other file" in found[0].message
     rows = oracle_rows(fw, MojoReport(found), [])

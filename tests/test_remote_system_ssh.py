@@ -36,6 +36,7 @@ from orchestrator.utils import ssh_trust  # noqa: E402
 import test_board_deploy as tbd  # noqa: E402
 from test_board_deploy import HOST, TARGET  # noqa: E402
 from test_deployment import FakeFramework, config  # noqa: E402,F401 - the manager's configuration
+from tests.file_modes import MODE_644
 
 USER = "radxa"
 # OpenSSH options that take a value (ssh(1), scp(1)); every other option is a flag
@@ -877,7 +878,7 @@ class TestTheFrameworkKeyIsOwnerOnly:
         from orchestrator.remote import transport
         private, _ = ssh_trust.client_key(tmp_path)
         assert private.stat().st_mode & 0o777 == 0o600
-        os.chmod(private, 0o644)   # copied with another umask, for example
+        os.chmod(private, MODE_644)   # copied with another umask, for example
         options = transport.openssh_options(tmp_path)
         # round 25 Q5: the key goes as IdentityFile (its '%' written '%%'), since OpenSSH expands tokens in -i's path
         # but checks -i's file before that expansion, so no spelling of a '%' works with -i
@@ -1281,7 +1282,7 @@ def test_a_real_openssh_that_refuses_the_key_file_is_a_problem_on_this_computer(
     monkeypatch.setattr(dmod, "PARAMIKO_AVAILABLE", False)
     monkeypatch.setattr(atomic, "owner_only", lambda path: None)   # the narrowing could not be done
     private = real_sshd["state"] / ssh_trust.KEY_NAME
-    os.chmod(private, 0o644)
+    os.chmod(private, MODE_644)
     package = tmp_path / "deploy_model_1.zip"
     package.write_bytes(b"PK")
     result = DeploymentManager(FakeFramework(config)).deploy_package(package, "127.0.0.1", real_sshd["user"],

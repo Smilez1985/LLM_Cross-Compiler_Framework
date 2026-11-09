@@ -17,6 +17,7 @@ import pytest
 from orchestrator.llm.catalog import load_catalog
 from orchestrator.utils import locality
 from orchestrator.utils.locality import LocalityRefused
+from tests.hosts import names_host
 
 
 class Settings:
@@ -67,7 +68,7 @@ def test_offline_mode_refuses_ollama_outside_the_own_network(tmp_path, names):
     with pytest.raises(NotConfigured) as info:
         public.resolve()
     text = str(info.value)
-    assert "ollama.example.com" in text and "on the internet" in text and "count it as local" in text
+    assert names_host(text, "ollama.example.com") and "on the internet" in text and "count it as local" in text
     assert [s.id for s in info.value.steps] == ["settings.local_network"]
     lan = client(tmp_path, ai_provider="ollama", ai_base_url="http://gpu.lan:11434/v1", offline_mode=True)
     assert lan.resolve().base_url == "http://gpu.lan:11434/v1"

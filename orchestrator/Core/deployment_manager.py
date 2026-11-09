@@ -37,6 +37,7 @@ from orchestrator.utils import ssh_trust
 from orchestrator.utils.helpers import sha256_fileobj, write_sha256sums
 from orchestrator.utils.helpers import sha256_file  # deployment_manager.sha256_file, a public name
 from orchestrator.utils.next_steps import WithSteps
+from orchestrator.utils.modes import SHARED_RUN
 
 # A local image name: a package takes it only once it was built on this computer (image_problem); no framework image
 # is published or pulled.
@@ -415,7 +416,7 @@ class DeploymentManager:
             with open(deploy_script_path, "w", newline='\n') as f:
                 f.write(script_content)
             # deploy.sh is run on the board and holds no secret.
-            os.chmod(deploy_script_path, 0o755)  # nosec B103
+            os.chmod(deploy_script_path, SHARED_RUN)  # nosec B103
 
             # E. Checksums & Zip
             self._generate_checksums(temp_path, temp_path / "checksums.sha256")

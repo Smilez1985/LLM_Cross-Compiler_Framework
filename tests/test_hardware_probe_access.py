@@ -41,6 +41,7 @@ from orchestrator.runtime.profile import (
     parse_profile,
     parse_profile_json,
 )
+from tests.file_modes import MODE_755
 
 SHELLS = available_shells()
 NEEDS_SHELL = pytest.mark.skipif(not SHELLS, reason="no POSIX shell")
@@ -55,7 +56,7 @@ TCP_HEADER = ("  sl  local_address rem_address   st tx_queue rx_queue tr tm->whe
 def program(root: Path, rel: str, script: str) -> None:
     """A fake program of the board (a shell script; the probe runs it by its sysroot path)."""
     write(root, rel, "#!/bin/sh\n" + script + "\n")
-    os.chmod(root / rel.lstrip("/"), 0o755)
+    os.chmod(root / rel.lstrip("/"), MODE_755)
 
 
 def fake_id(bindir: Path, uid: int) -> None:

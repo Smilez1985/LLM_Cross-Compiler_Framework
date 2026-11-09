@@ -23,6 +23,8 @@ import pytest
 
 from orchestrator.Core import build_end
 from orchestrator.Core import runtime_layer as layer
+from tests.file_modes import MODE_444, MODE_4755, MODE_555, MODE_644, MODE_755, MODE_777
+from tests.hosts import names_host
 
 # These tests make and check the toolbox themselves: the real ensure_toolbox, never the test toolbox of conftest
 pytestmark = pytest.mark.real_toolbox
@@ -67,7 +69,7 @@ class Box:
 
     def __init__(self, tools: bool = True):
         self.root = Path(tempfile.mkdtemp(prefix="llmcf-layer-", dir="/tmp"))  # nosec B108 - test folder
-        os.chmod(self.root, 0o755)
+        os.chmod(self.root, MODE_755)
         self.layer = self.root / "llmcf"
         shutil.copytree(layer.SHIPPED_DIR, self.layer, ignore=shutil.ignore_patterns("toolbox", "MANIFEST.sha256"))
         if tools:
@@ -81,7 +83,7 @@ class Box:
             if LAYER_SETPRIV:
                 shutil.copy2(LAYER_SETPRIV, self.layer / "bin" / "setpriv")
         for path in [self.layer, *self.layer.rglob("*")]:
-            os.chmod(path, 0o755)
+            os.chmod(path, MODE_755)
         self.image = self.root / "image"
         self.modules = self.image / "app" / "modules"
         self.modules.mkdir(parents=True)
@@ -100,12 +102,12 @@ class Box:
         if os.geteuid() == 0:
             for path in [self.cache, *self.cache.rglob("*"), self.end]:
                 os.chown(path, RUNNER, RUNNER)
-        os.chmod(self.end, 0o755)
+        os.chmod(self.end, MODE_755)
 
     def module(self, name: str, text: str) -> None:
         path = self.modules / f"{name}_module.sh"
         path.write_text(text, encoding="utf-8")
-        os.chmod(path, 0o755)
+        os.chmod(path, MODE_755)
 
     def env(self, **extra: str) -> dict:
         return {"PATH": f"{self.fakebin}:/usr/sbin:/usr/bin:/sbin:/bin", "BUILD_CACHE_DIR": str(self.cache),
@@ -174,7 +176,7 @@ def test_a_fake_setpriv_or_bash_on_the_images_path_is_never_used_by_the_runner(b
     trap = "#!/bin/sh\nid -u > \"$BUILD_SCRATCH_DIR/trap-$(basename \"$0\")\"\nexec /usr/bin/env -- \"$@\"\n"
     for name in ("setpriv", "sh", "sed", "mktemp"):
         (box.fakebin / name).write_text(trap, encoding="utf-8")
-        os.chmod(box.fakebin / name, 0o755)
+        os.chmod(box.fakebin / name, MODE_755)
     box.module("source", WHOAMI)
 
     result = box.run("--job", "build", "--to", "source")
@@ -204,7 +206,7 @@ def test_a_setuid_program_gives_a_stage_module_no_rights_back(box):
     """no-new-privileges: a setuid-root program in the image runs with the stage account's ids."""
     program = box.image / "id-suid"
     shutil.copy2("/usr/bin/id", program)
-    os.chmod(program, 0o4755)
+    os.chmod(program, MODE_4755)
     box.module("source", f"#!/bin/bash\n{program} -u > \"$BUILD_SCRATCH_DIR/suid\"\n")
 
     result = box.run("--job", "build", "--to", "source")
@@ -327,10 +329,10 @@ def test_the_layer_is_assembled_checked_and_a_change_refuses_the_build(tmp_path)
     assert layer.layer_check(tmp_path).verdict == "missing"
     assert layer.ready_layer(tmp_path).ok
     script = layer.layer_dir(tmp_path) / "runner.sh"
-    os.chmod(layer.layer_dir(tmp_path), 0o755)
-    os.chmod(script, 0o644)
+    os.chmod(layer.layer_dir(tmp_path), MODE_755)
+    os.chmod(script, MODE_644)
     script.write_text("#!/bin/sh\necho changed\n", encoding="utf-8")
-    os.chmod(script, 0o444)
+    os.chmod(script, MODE_444)
     check = layer.layer_check(tmp_path)
     assert check.verdict == "changed" and check.names == ["runner.sh"]
     with pytest.raises(layer.LayerRefused) as refused:
@@ -346,7 +348,7 @@ def test_offline_with_nothing_cached_refuses_naming_both_ways(tmp_path):
     with pytest.raises(layer.ToolboxMissing) as refused:
         layer.ensure_toolbox(tmp_path, "build", offline=True)
     text = str(refused.value)
-    assert "offline" in text and "'build'" in text and "'fetch'" in text and "snapshot.debian.org" in text
+    assert "offline" in text and "'build'" in text and "'fetch'" in text and names_host(text, "snapshot.debian.org")
 
 
 def test_a_prebuilt_archive_is_checked_by_both_pins(tmp_path):
@@ -360,7 +362,7 @@ def test_a_prebuilt_archive_is_checked_by_both_pins(tmp_path):
 def test_the_end_folder_counts_only_when_it_is_the_runners_alone(tmp_path):
     end = tmp_path / "end-build"
     end.mkdir()
-    os.chmod(end, 0o755)
+    os.chmod(end, MODE_755)
     (end / "build.end").write_text("status done\nexit 0\nstage target\njob build\ninputs -\nend protected\n",
                                    encoding="ascii")
     me = os.getuid()
@@ -368,9 +370,9 @@ def test_the_end_folder_counts_only_when_it_is_the_runners_alone(tmp_path):
     assert record is not None and record.sealed and protected and problem is None
     record, protected, problem = build_end.read_runner_record(end, me + 1, platform_name="linux")
     assert record is not None and not record.sealed and problem
-    os.chmod(end, 0o777)
+    os.chmod(end, MODE_777)
     assert build_end.read_runner_record(end, me, platform_name="linux")[2]
-    os.chmod(end, 0o755)
+    os.chmod(end, MODE_755)
     # Docker Desktop on Windows or macOS: the build runs, marked unprotected
     record, protected, problem = build_end.read_runner_record(end, me, platform_name="win32")
     assert record.sealed and not protected and problem is None
@@ -490,7 +492,7 @@ def test_the_runners_path_leads_into_the_read_only_layer(tmp_path):
     shutil.copytree(layer.SHIPPED_DIR, lay, ignore=shutil.ignore_patterns("toolbox", "MANIFEST.sha256"))
     (lay / "bin").mkdir()
     (lay / "bin" / "busybox").write_text(STAND_IN_BUSYBOX, encoding="utf-8")
-    os.chmod(lay / "bin" / "busybox", 0o755)
+    os.chmod(lay / "bin" / "busybox", MODE_755)
     result = subprocess.run(["sh", "-c", 'LLMCF_LAYER="$1"; . "$1/tools.sh"; printf %s "$PATH"', "_", str(lay)],
                             capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
@@ -811,11 +813,11 @@ def test_a_changed_layer_is_never_replaced_silently_when_the_toolbox_is_made_aga
     assert layer.ready_layer(tmp_path).ok
     current = layer.layer_dir(tmp_path)
     target = current / ("runner.sh" if change == "script" else "bin/setpriv")
-    os.chmod(target.parent, 0o755)
-    os.chmod(target, 0o644)
+    os.chmod(target.parent, MODE_755)
+    os.chmod(target, MODE_644)
     target.write_bytes(b"#!/bin/sh\necho changed\n")
-    os.chmod(target, 0o444)
-    os.chmod(target.parent, 0o555)
+    os.chmod(target, MODE_444)
+    os.chmod(target.parent, MODE_555)
     if change == "no_record":
         shutil.rmtree(layer.toolbox_dir(tmp_path))
     else:

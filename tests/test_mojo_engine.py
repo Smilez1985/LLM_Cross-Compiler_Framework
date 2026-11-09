@@ -20,6 +20,7 @@ from orchestrator.Core.mojo.repairs import REPAIRS, StepChanged
 from orchestrator.Core.mojo.repairs import state as state_repair
 from orchestrator.Core.mojo.repairs.engine import apply_repair, lock_path
 from orchestrator.Core.mojo.repairs.model import RepairPlan, RepairStep, classify
+from tests.file_modes import MODE_750, MODE_755, MODE_777
 
 REPO = Path(__file__).resolve().parent.parent
 POSIX = pytest.mark.skipif(os.name != "posix", reason="POSIX modes")
@@ -47,7 +48,7 @@ def framework_with(state: Path, audit=None):
 def open_state(tmp_path):
     state = tmp_path / "state"
     state.mkdir()
-    os.chmod(state, 0o755)
+    os.chmod(state, MODE_755)
     return state
 
 
@@ -205,7 +206,7 @@ def test_chmod_is_compare_and_swap_on_the_folder(open_state):
     framework = framework_with(open_state)
     finding = check_user_state(framework)[0]
     plan = state_repair.plan(framework, finding)
-    os.chmod(open_state, 0o750)          # someone changed it after the plan was shown
+    os.chmod(open_state, MODE_750)          # someone changed it after the plan was shown
     result = apply_repair(framework, "state.permissions", actor="cli", expect_sha256=plan.sha256())
     assert result.outcome == "plan_changed" and "nothing was changed" in result.reason
     assert stat.S_IMODE(open_state.stat().st_mode) == 0o750
@@ -222,7 +223,7 @@ def test_miracle_binds_each_repair_to_the_plan_that_was_shown(open_state):
     engine = Mojo(framework, [check_user_state])
     before = engine.run()
     shown = offers(framework, before)        # the plan 0755 -> 0700, as Mojo Oracle printed it
-    os.chmod(open_state, 0o777)
+    os.chmod(open_state, MODE_777)
     result = engine.miracle(actor="cli", at_terminal=True, before=before, offered=shown)
     (entry,) = result.entries
     assert entry.outcome == "plan_changed" and "nothing was changed" in entry.reason
@@ -236,7 +237,7 @@ def test_miracle_binds_each_repair_to_the_plan_that_was_shown(open_state):
 def test_repair_refuses_a_linked_state_folder(tmp_path):
     real = tmp_path / "elsewhere"
     real.mkdir()
-    os.chmod(real, 0o755)
+    os.chmod(real, MODE_755)
     link = tmp_path / "state"
     link.symlink_to(real)
     framework = framework_with(link)

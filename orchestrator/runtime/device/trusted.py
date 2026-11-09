@@ -453,7 +453,7 @@ def tier_refusal(state_dir: Path, device_id: str, mode: str, shell: Any = None) 
         tier = TrustedDevices(Path(state_dir)).key_tier(device_id)
     except Exception:  # noqa: BLE001 - an unreadable record: the board itself is asked below
         tier = ""
-    if tier in ("", kt.TIER_PASSWORD) and shell is not None:
+    if tier in ("", kt.TIER_PLAIN_LOGIN) and shell is not None:
         from orchestrator.runtime.device.board_ops import key_facts
         asked = key_facts(shell).get("tier", "") or ""
         if not tier or asked in (kt.TIER_ROOT, kt.TIER_DROPBEAR, kt.TIER_HOME):

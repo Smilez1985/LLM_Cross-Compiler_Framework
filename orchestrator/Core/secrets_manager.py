@@ -419,7 +419,7 @@ class SecretsManager:
         try:
             value.encode("utf-8")
         except UnicodeError:
-            self.logger.error(f"The value for {key} cannot be stored (not valid text).")
+            self.logger.error("A secret's value cannot be stored (not valid text); the caller names the secret.")
             return False
         name = canonical_name(key)
         plain = json.dumps({"v": 1, "kind": "api_key", "secret": value}) if name.startswith("cred/") else value

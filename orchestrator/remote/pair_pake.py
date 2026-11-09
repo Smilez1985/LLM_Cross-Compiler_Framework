@@ -495,8 +495,9 @@ def boards_in(packet: bytes, source: Tuple[Any, ...], *, link: str = "", allow_l
 
 
 def _query_sockets(links: Iterable[Any]) -> List[Tuple[socket.socket, Tuple[Any, ...], str]]:
-    """One UDP socket per local link with the mDNS group to ask there (IPv4: the link's address as the outgoing
-    interface; IPv6: the interface index), each with the link's kind."""
+    """One UDP socket per local link with the mDNS group to ask there, each with the link's kind. Every socket is
+    bound to this computer's own address on that link (IPv6: the link-local address with its interface index), never
+    to all interfaces: the answers come back to that address, and nothing on another network reaches the socket."""
     out = []
     seen = set()
     for link in links:
@@ -516,7 +517,7 @@ def _query_sockets(links: Iterable[Any]) -> List[Tuple[socket.socket, Tuple[Any,
                 seen.add(link.address)
             elif link.scope_id and ("v6", link.scope_id) not in seen:
                 s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-                s.bind(("::", 0, 0, link.scope_id))
+                s.bind((link.address, 0, 0, link.scope_id))
                 s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_IF, link.scope_id)
                 s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, 255)
                 out.append((s, (MDNS_V6, MDNS_PORT, 0, link.scope_id), link.kind))

@@ -22,6 +22,7 @@ from types import SimpleNamespace
 import pytest
 
 from orchestrator.utils import atomic
+from tests.file_modes import MODE_755, MODE_777
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -353,7 +354,7 @@ def unreadable_folders(monkeypatch):
         if stat.S_ISDIR(st.st_mode) and st.st_mode & locked != locked:
             raise PermissionError(13, "Permission denied", os.fsdecode(path))
 
-    def open_(path, flags, mode=0o777, *, dir_fd=None):
+    def open_(path, flags, mode=MODE_777, *, dir_fd=None):
         refuse(path, dir_fd)
         return real_open(path, flags, mode, dir_fd=dir_fd)
 
@@ -375,7 +376,7 @@ class TestAroundTheTree:
         tree = around / ".bench-copy"
         tree.mkdir(parents=True)
         (tree / "open.log").write_text("busy")
-        os.chmod(around, 0o755)
+        os.chmod(around, MODE_755)
         before = stat.S_IMODE(os.stat(around).st_mode)   # 0o755 on POSIX; Windows reports its own mode bits
         left = atomic.remove_tree(tree)
         assert [p.name for p in left] == ["open.log"]
@@ -385,7 +386,7 @@ class TestAroundTheTree:
         around = tmp_path / "models"
         tree = around / ".bench-copy"
         tree.mkdir(parents=True)
-        os.chmod(around, 0o755)
+        os.chmod(around, MODE_755)
         before = stat.S_IMODE(os.stat(around).st_mode)   # 0o755 on POSIX; Windows reports its own mode bits
         real = atomic.shutil.rmtree
 

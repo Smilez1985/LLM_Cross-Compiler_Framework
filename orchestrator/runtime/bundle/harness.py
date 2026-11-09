@@ -58,6 +58,8 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, Tuple
 
+from orchestrator.utils.modes import SHARED_READ, SHARED_RUN
+
 SCHEMA = "llmcf-harness/1"
 KINDS = ("git", "archive", "folder")
 OUTCOMES = ("done", "findings")
@@ -388,7 +390,7 @@ MAX_SEARCH_DIRS = 200000
 def _set_mode(path: Path, executable: bool) -> None:
     """On a host with an executable bit the file system follows the decided bit (so its listing is the same)."""
     if not NO_EXEC_BIT and not os.path.islink(path):
-        os.chmod(path, 0o755 if executable else 0o644)
+        os.chmod(path, SHARED_RUN if executable else SHARED_READ)
 
 
 def _caps(files: int, size: int) -> None:

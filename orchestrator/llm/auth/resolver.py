@@ -15,6 +15,7 @@ register_type() and token refreshers with register_refresher().
 """
 
 import hashlib
+import hmac
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Callable, Dict, Literal, Mapping, Optional, Tuple, Union
@@ -64,10 +65,18 @@ class ResolvedCredential:
 
     @property
     def fingerprint(self) -> str:
-        """Tells credentials apart (adapter cache) without keeping the value: a short hash."""
-        parts = [self.kind, self.method, reveal(self.api_key) or "", repr(sorted(self.headers.items())),
-                 self.profile or "", "token" if self.token_provider else ""]
+        """Tells credentials apart by what is not secret (adapter cache): kind, method, headers, profile and whether a
+        token provider is used, as a short hash. The key itself is never part of it, nor hashed anywhere: same_key
+        compares it."""
+        parts = [self.kind, self.method, repr(sorted(self.headers.items())), self.profile or "",
+                 "token" if self.token_provider else ""]
         return hashlib.sha256("\x00".join(parts).encode("utf-8", "surrogatepass")).hexdigest()[:16]
+
+    def same_key(self, other: "ResolvedCredential") -> bool:
+        """Whether `other` carries the same key as this credential (both none counts as the same), compared in
+        constant time; no value is copied out, logged or hashed."""
+        mine, theirs = reveal(self.api_key) or "", reveal(other.api_key) or ""
+        return hmac.compare_digest(mine.encode("utf-8", "surrogatepass"), theirs.encode("utf-8", "surrogatepass"))
 
     def describe(self) -> Dict[str, Any]:
         """For status lines and `auth status` (no secrets): method, type, source, origin, header names."""

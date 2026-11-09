@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
+from tests.hosts import names_host
 
 AT = "@"
 PASSWORD = "FAKEpassword123"
@@ -34,7 +35,7 @@ def test_a_credential_in_the_url_is_found(url, kind):
     shown = shown_repo_url(url)
     for secret in (PASSWORD, "pw1", GH_TOKEN, LONG_TOKEN, "secretvalue42"):
         assert secret not in shown, shown
-    assert "REDACTED" in shown and "git.example.com" in shown
+    assert "REDACTED" in shown and names_host(shown, "git.example.com")
 
 
 @pytest.mark.parametrize("url", CLEAN)

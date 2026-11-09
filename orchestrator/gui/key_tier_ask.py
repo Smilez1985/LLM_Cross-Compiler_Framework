@@ -34,11 +34,11 @@ class GuiTierChooser(TierChooser):
             self.tell([ui_text("deploy.tier.probe_disagrees")])
         # the stored probe's proposal is asked first (still with "No" as the default)
         for choice in (offer.in_order() if hasattr(offer, "in_order") else offer.choices):
-            if choice == key_tiers.TIER_PASSWORD:
+            if choice == key_tiers.TIER_PLAIN_LOGIN:
                 break
             if self._ask(f"deploy.tier.ask.{choice}", reason=reason):
                 return choice
-        return key_tiers.TIER_PASSWORD
+        return key_tiers.TIER_PLAIN_LOGIN
 
     def confirm(self, title: str, lines: Any) -> bool:
         key = "deploy.tier.ask.dropbear_off" if title == "dropbear" else "deploy.tier.ask.plan"

@@ -31,6 +31,7 @@ from orchestrator.Core.community_maintainer import Cancelled, Maintainer, Mainta
 from orchestrator.Core.community_manager import CommunityIndex, CommunityManager
 from orchestrator.tools.audit import AuditLog
 from test_zoo import HEAD_SHA_EXPRESSION, check_workflow, make_target, pack_bytes, run_check
+from tests.hosts import names_host
 
 REPO = "lcf-example/community"
 KEY = "lcf-test-2026"
@@ -549,7 +550,7 @@ def test_without_gh_or_git_the_reason_names_the_next_step(tmp_path):
     m = plain_maintainer(tmp_path, lambda *a, **k: pytest.fail("ran"), which=lambda n: None)
     with pytest.raises(MaintainerError) as refused:
         m.contributions()
-    assert refused.value.code == "no_gh" and "https://cli.github.com" in str(refused.value)
+    assert refused.value.code == "no_gh" and names_host(str(refused.value), "https://cli.github.com")
     m = plain_maintainer(tmp_path, lambda *a, **k: pytest.fail("ran"), which=lambda n: "/bin/gh" if n == "gh" else None)
     with pytest.raises(MaintainerError) as refused:
         m.contributions()

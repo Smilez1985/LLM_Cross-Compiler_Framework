@@ -20,6 +20,7 @@ import pytest
 from orchestrator.Core.mojo import Finding, Severity, banner, runner
 from orchestrator.Core.mojo.checks import check_user_state
 from test_mojo_cli import open_state, run_cli  # noqa: F401 - open_state: a fixture, used by name below
+from tests.file_modes import MODE_755
 
 POSIX = pytest.mark.skipif(os.name != "posix", reason="POSIX modes")
 
@@ -50,7 +51,7 @@ def state_only(booted_framework, monkeypatch):
     state = Path(booted_framework.config.user_state_dir)
     monkeypatch.setattr(type(booted_framework.config), "user_state_dir", property(lambda self: state))
     if os.name == "posix":
-        os.chmod(state, 0o755)
+        os.chmod(state, MODE_755)
     monkeypatch.setattr(runner, "DEFAULT_CHECKS", [check_user_state])
     return state
 

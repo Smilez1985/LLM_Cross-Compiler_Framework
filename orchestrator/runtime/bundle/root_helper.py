@@ -33,6 +33,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from orchestrator.utils.modes import SHARED_RUN
+
 RUST_DIR = Path(__file__).resolve().parents[3] / "rust"
 CRATE = "llmcf-install"
 PROGRAM = "llmcf-install"
@@ -191,7 +193,7 @@ def keep(cache_dir: Path, target: str, made: Path, way: str, rust_dir: Path = RU
     folder.mkdir(parents=True, exist_ok=True)
     tmp = folder / f".{crate}.tmp"
     shutil.copyfile(made, tmp)
-    os.chmod(tmp, 0o755)
+    os.chmod(tmp, SHARED_RUN)
     os.replace(tmp, folder / crate)
     sha = sha256_file(folder / crate)
     record = {"version": helper_version(rust_dir, crate), "target": target, "sha256": sha, "way": way,

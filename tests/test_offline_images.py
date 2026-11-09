@@ -15,6 +15,7 @@ from orchestrator.Core.builder import (BuildConfiguration, BuildEngine, BuildPro
                                        IMAGE_LABEL, ModelFormat, OfflineImageMissing)
 from orchestrator.Core.config_manager import ConfigManager
 from orchestrator.Core.deployment_manager import DeployError, DeploymentManager
+from tests.hosts import names_host
 
 DIGEST = "sha256:" + "a" * 64
 HUB_IMAGE = f"ghcr.io/acme/runtime@{DIGEST}"
@@ -45,9 +46,9 @@ class TestThePullRule:
         from orchestrator.utils.image_ref import offline_pull_refusal
         text = offline_pull_refusal(HUB_IMAGE, {"offline_mode": True})
         assert text.startswith(f"Offline mode is on, and the image {HUB_IMAGE} is not on this computer")
-        assert "ghcr.io" in text and "while offline mode is off" in text
+        assert names_host(text, "ghcr.io") and "while offline mode is off" in text
         hub = offline_pull_refusal(f"debian@{DIGEST}", {"offline_mode": True})
-        assert "registry-1.docker.io" in hub, "an image without a registry is pulled from Docker Hub"
+        assert names_host(hub, "registry-1.docker.io"), "an image without a registry is pulled from Docker Hub"
 
     def test_offline_a_registry_in_the_own_network_or_on_this_computer_may_serve_it(self, names):
         from orchestrator.utils.image_ref import offline_pull_refusal

@@ -279,6 +279,25 @@ def test_browse_asks_nothing_without_a_local_link():
     assert pair_pake.browse(0.1, links=[]) == []
 
 
+def test_every_question_socket_is_bound_to_the_own_address_on_its_link_never_to_all_interfaces():
+    """IPv4 and IPv6 alike: the socket listens on this computer's address on the link only (the loopback addresses
+    stand in for a link's address here; the interface index is the loopback interface's)."""
+    try:
+        scope = socket.if_nametoindex("lo")
+    except OSError:
+        pytest.skip("no loopback interface named lo")
+    links = [SimpleNamespace(address="127.0.0.1", scope_id=0, kind="cable"),
+             SimpleNamespace(address="::1", scope_id=scope, kind="cable")]
+    made = pair_pake._query_sockets(links)
+    try:
+        bound = {s.getsockname()[0] for s, _, _ in made}
+    finally:
+        for s, _, _ in made:
+            s.close()
+    assert "127.0.0.1" in bound
+    assert bound <= {"127.0.0.1", "::1"}, bound   # "::1" when this computer has IPv6 at all; never "::" or 0.0.0.0
+
+
 # --- pair_by_code ends in complete_pairing --------------------------------------------------------------------------------
 
 class Audit:

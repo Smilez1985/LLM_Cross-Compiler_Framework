@@ -40,6 +40,7 @@ from orchestrator.tools.framework_tools import ResolveHealingIn  # noqa: E402
 from orchestrator.tools.policy import Decision, PolicyStore, ToolPolicy, ToolTier  # noqa: E402
 from orchestrator.tools.registry import ToolRegistry, ToolSpec  # noqa: E402
 from test_mcp_server import In, Out, answering, run, text_of  # noqa: E402
+from tests.file_modes import MODE_644
 
 MODES = ["auto", "legacy"]  # 2026-07-28 input_required rounds, and the classic in-request elicitation
 # Wave 6 (V2): the next step is rendered from the catalogue for a client on no channel (stdio MCP), with the command's
@@ -664,10 +665,10 @@ class TestClaudeDesktopConfig:
     def test_existing_readable_backup_becomes_private(self, tmp_path, umask):
         umask(0o022)
         path = tmp_path / "claude_desktop_config.json"
-        raw = write_original(path, 0o644)
+        raw = write_original(path, MODE_644)
         backup = path.with_name(path.name + ".bak")
         backup.write_text("old backup")
-        os.chmod(backup, 0o644)
+        os.chmod(backup, MODE_644)
         mcp_server.write_claude_desktop_config(REPO_ROOT, path)
         assert backup.read_bytes() == raw and mode_of(backup) == 0o600
 

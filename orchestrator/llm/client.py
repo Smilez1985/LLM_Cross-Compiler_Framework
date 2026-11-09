@@ -124,7 +124,7 @@ class LLMClient:
         self._loopback_http = None
         self._offline_http = None
         self._located_http = None   # online: the pinned client of a server labelled local by its address
-        self._adapters: Dict[tuple, Any] = {}
+        self._adapters: Dict[tuple, Tuple[Any, Any]] = {}   # cache key -> (adapter, the credential it was made for)
         self._state_cache: Dict[str, SecretStr] = {}
         self._lock = threading.Lock()
         # Credentials: vault records and their metadata (next to the vault), resolved per call.
@@ -347,14 +347,17 @@ class LLMClient:
         # nor one made while the address counted as local, once it does not (its client differs too)
         key = (preset.id, base_url, credential.method, credential.fingerprint, repr(sorted(options.items(), key=str)),
                offline, target.local)
+        # The API key is no part of the cache key (nothing derived from it is kept): an adapter is reused only for the
+        # same API key, compared with the credential it was made for, and one made for another API key is replaced.
         with self._lock:
-            adapter = self._adapters.get(key)
+            cached = self._adapters.get(key)
+            adapter = cached[0] if cached is not None and credential.same_key(cached[1]) else None
             if adapter is None:
                 cls = adapter_class(preset.adapter)
                 adapter = cls(preset, base_url=base_url, api_key=credential.api_key, credential=credential,
                               http_client=self._http_client_for(target),
                               timeout=float(self._setting("ai_timeout", 600)), **options)
-                self._adapters[key] = adapter
+                self._adapters[key] = (adapter, credential)
         return adapter
 
     def _http_client_for(self, target: Target):

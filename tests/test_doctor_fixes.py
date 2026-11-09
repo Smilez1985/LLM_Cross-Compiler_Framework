@@ -27,6 +27,7 @@ from orchestrator.Core.builder import IMAGE_LABEL
 from orchestrator.Core.doctor import (Doctor, ImagePlanChanged, check_disk, check_knowledge, delete_framework_images,
                                       framework_image_plan)
 from orchestrator.tools.registry import ToolContext
+from tests.file_modes import MODE_755
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -410,7 +411,7 @@ def test_run_doctor_gives_an_ai_no_host_path_and_the_person_keeps_it(booted_fram
     audit = framework.tool_registry.audit
 
     def check_user_state(_fw):  # reading config.user_state_dir makes the folder private again: opened right here
-        os.chmod(state, 0o755)
+        os.chmod(state, MODE_755)
         return doctor_module.check_user_state(SimpleNamespace(config=SimpleNamespace(user_state_dir=state)))
 
     monkeypatch.setattr(audit, "check", lambda: SimpleNamespace(  # tools.audit names the audit log twice

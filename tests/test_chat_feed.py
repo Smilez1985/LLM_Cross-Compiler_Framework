@@ -27,6 +27,7 @@ from orchestrator.Core.chat_feed import (CONVERSATION_KINDS, FEED_KINDS, RECORD_
                                          import_chat_history, reason_sha256)
 from orchestrator.tools import signing
 from orchestrator.tools.signing import SignatureError, sign, sign_row, verify, verify_row
+from tests.file_modes import MODE_644
 
 KEY = b"k" * 32          # stands in for the audit key from the keyring (tests build no real credential)
 OTHER_KEY = b"o" * 32
@@ -167,7 +168,7 @@ class TestSignedRows:
         FeedWriter(store, "gui").person_message("hello")
         assert state.stat().st_mode & 0o777 == 0o700
         assert store.path.stat().st_mode & 0o777 == 0o600
-        os.chmod(store.path, 0o644)
+        os.chmod(store.path, MODE_644)
         FeedWriter(store, "gui").person_message("again")
         assert store.path.stat().st_mode & 0o777 == 0o600, "a file left open to others is made private again"
         linked = tmp_path / "linked"

@@ -98,12 +98,12 @@ def _weaker_keys(store, boards, mode: str = "private") -> List[Finding]:
     an unrestricted key from an earlier pairing, or no key at all), from the tier recorded at their pairing or last
     verify: named with what it means and the way up. Mojo reads only the record. In enterprise `mode` a tier that mode
     refuses (a board paired in private mode before the person switched) is a warning that says so."""
-    from orchestrator.remote.key_tiers import (TIER_PASSWORD, TIER_TEXTS, TIER_UNRESTRICTED, UPGRADE_TEXT, allowed,
+    from orchestrator.remote.key_tiers import (TIER_PLAIN_LOGIN, TIER_TEXTS, TIER_UNRESTRICTED, UPGRADE_TEXT, allowed,
                                                is_weaker)
     findings = []
     for device in boards:
         tier = store.key_tier(device.device_id)
-        if not (is_weaker(tier) or tier == TIER_PASSWORD):
+        if not (is_weaker(tier) or tier == TIER_PLAIN_LOGIN):
             continue
         refused = not allowed(tier, mode)
         message = f"Board {device.label}: {TIER_TEXTS[tier]}."

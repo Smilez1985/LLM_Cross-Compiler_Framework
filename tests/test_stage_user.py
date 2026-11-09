@@ -33,6 +33,7 @@ from conftest import NO_POSIX_BASH, REPO_ROOT, posix_shell
 from test_review_build_engine import client, engine, make_engine  # noqa: F401 - fixtures
 
 from orchestrator.Core import build_end
+from tests.file_modes import MODE_070, MODE_640, MODE_644, MODE_755, MODE_775, MODE_777
 
 KEY = "0123456789abcdef0123456789abcdef"   # a marker the runner holds in its memory (its environment)
 LAYER = REPO_ROOT / "orchestrator" / "runtime_layer"
@@ -163,7 +164,7 @@ class RunnerBox:
 
     def __init__(self, target: str, modules: Path = None):
         self.root = Path(tempfile.mkdtemp(prefix="llmcf-stage-user-", dir="/tmp"))  # nosec B108 - test folder
-        os.chmod(self.root, 0o755)
+        os.chmod(self.root, MODE_755)
         self.layer = self.root / "llmcf"
         shutil.copytree(LAYER, self.layer, ignore=shutil.ignore_patterns("toolbox", "MANIFEST.sha256"))
         (self.layer / "bin").mkdir()
@@ -173,7 +174,7 @@ class RunnerBox:
         shutil.copy2(os.environ.get("LLMCF_TEST_LAYER_SETPRIV") or shutil.which("setpriv") or "/usr/bin/setpriv",
                      self.layer / "bin" / "setpriv")
         for path in [self.layer, *self.layer.rglob("*")]:
-            os.chmod(path, 0o755)
+            os.chmod(path, MODE_755)
         self.app = self.root / "app"
         shutil.copytree(modules or REPO_ROOT / "targets" / target / "modules", self.app / "modules")
         shutil.copytree(REPO_ROOT / "targets" / target / "scripts", self.app / "scripts")
@@ -188,14 +189,14 @@ class RunnerBox:
         self.end.mkdir()
         for path in [self.cache, *self.cache.rglob("*"), self.end]:
             os.chown(path, RUNNER, RUNNER)
-        os.chmod(self.end, 0o755)
+        os.chmod(self.end, MODE_755)
         for path in self.app.rglob("*"):
-            os.chmod(path, 0o755)
+            os.chmod(path, MODE_755)
 
     def module(self, name: str, text: str) -> None:
         path = self.app / "modules" / f"{name}_module.sh"
         path.write_text(text, encoding="utf-8")
-        os.chmod(path, 0o755)
+        os.chmod(path, MODE_755)
 
     def run(self, *args: str, caps: str = "+setuid,+setgid", isolation: str = "user",
             **extra: str) -> subprocess.CompletedProcess:
@@ -553,7 +554,7 @@ def test_the_entrypoint_makes_the_runner_the_person_with_only_the_two_rights():
     built = RunnerBox("Rockchip")
     try:
         runner = built.layer / "runner.sh"
-        os.chmod(runner, 0o644)
+        os.chmod(runner, MODE_644)
         runner.write_text('grep -E "^(Uid|Gid|CapEff|CapPrm|CapAmb|NoNewPrivs):" /proc/self/status\n', encoding="utf-8")
         env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "STAGE_ISOLATION": "user",
                "STAGE_RUNNER_IDS": f"{RUNNER}:{RUNNER}"}
@@ -597,7 +598,7 @@ def test_an_input_the_stage_account_cannot_read_refuses_the_build_before_any_mod
     assert "cannot read input-model" in refused.stderr and str(box.root) not in refused.stderr.split("read ")[-1]
     assert not (box.work / "whoami").exists()
 
-    os.chmod(model / "weights.bin", 0o640)
+    os.chmod(model / "weights.bin", MODE_640)
     assert box.run("--to", "source", MODEL_SOURCE=str(model)).returncode == 0
 
 
@@ -605,16 +606,16 @@ def test_an_input_the_stage_account_cannot_read_refuses_the_build_before_any_mod
 def test_a_folder_the_stage_account_cannot_write_refuses_the_build(box):
     box.module("source", WHOAMI)
     os.chown(box.output, 0, 0)          # not the runner's: its mode stays, and the stage account cannot write it
-    os.chmod(box.output, 0o775)
+    os.chmod(box.output, MODE_775)
 
     refused = box.run("--to", "source")
 
     # the runner itself cannot write it either: it is not one of the folders the modules write, nothing is refused
     assert refused.returncode == 0, refused.stdout + refused.stderr
-    os.chmod(box.output, 0o777)
+    os.chmod(box.output, MODE_777)
     # owned by another account: the runner writes it through its group, the stage account as its owner may not
     os.chown(box.work / "home", STAGE, RUNNER)
-    os.chmod(box.work / "home", 0o070)
+    os.chmod(box.work / "home", MODE_070)
 
     refused = box.run("--to", "source")
 

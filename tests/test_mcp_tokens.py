@@ -26,6 +26,7 @@ from orchestrator.tools.mcp_tokens import (TOKEN_PREFIX, TokenStore, TokenStoreE
                                            read_only_policy)
 from orchestrator.tools.policy import Decision, PolicyStore, ToolPolicy, ToolTier  # noqa: E402
 from orchestrator.tools.registry import ToolContext, ToolDenied, ToolRegistry, ToolSpec  # noqa: E402
+from tests.file_modes import MODE_640, MODE_644, MODE_666
 
 
 class In(BaseModel):
@@ -157,7 +158,7 @@ class TestTokenStore:
     @pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
     def test_a_store_others_can_read_is_reported(self, tokens):
         tokens.add("x")
-        os.chmod(tokens.path, 0o644)
+        os.chmod(tokens.path, MODE_644)
         assert "chmod 600" in tokens.private_problem()
 
     @pytest.mark.skipif(os.name != "posix", reason="POSIX owners and permission bits")
@@ -168,7 +169,7 @@ class TestTokenStore:
         tokens.set_policy("box", ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
         write = registry.get("write")
         assert tokens.find(token) and registry.decide(write, caller="mcp:box") == Decision.ALLOW
-        os.chmod(tokens.path, 0o666)  # the file's size, inode and mtime stay the same: the cache must not answer
+        os.chmod(tokens.path, MODE_666)  # the file's size, inode and mtime stay the same: the cache must not answer
         assert tokens.find(token) is None and registry.decide(write, caller="mcp:box") == Decision.DENY
         with pytest.raises(TokenStoreError, match="chmod 600"):
             tokens.list()
@@ -465,7 +466,7 @@ class TestServeHttp:
     @pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
     def test_a_store_others_can_read_refuses_to_start(self, registry, tokens, tmp_path):
         tokens.add("x")
-        os.chmod(tokens.path, 0o640)
+        os.chmod(tokens.path, MODE_640)
         with pytest.raises(ValueError, match="chmod 600"):
             mcp_server.serve(framework_for(registry, tmp_path), transport="http")
 

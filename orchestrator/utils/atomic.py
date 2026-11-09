@@ -51,6 +51,8 @@ import time
 from pathlib import Path
 from typing import List
 
+from orchestrator.utils.modes import NEW_FILE
+
 REPLACE_RETRIES = 10 if os.name == "nt" else 0
 WINDOWS = os.name == "nt"   # which way owner_only narrows a file (tests set it to try the Windows way with fakes)
 
@@ -229,7 +231,7 @@ def write_file(path, text: str) -> None:
     tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
     # O_BINARY (Windows only): a text-mode descriptor would turn every LF into CR LF a second time below the text
     # layer, which already writes the system's line ends (Path.write_text semantics, as mkstemp gives write_private).
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o666)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), NEW_FILE)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)

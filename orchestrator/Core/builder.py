@@ -49,6 +49,7 @@ from orchestrator.utils.llama_pin import pinned_source
 from orchestrator.utils.sandbox import (FALLBACK_USER, container_sandbox, hand_over,  # noqa: F401 - re-exported
                                         runner_ids, sandbox_user, stage_user_sandbox, stage_user_support)
 from orchestrator.utils.atomic import remove_tree
+from orchestrator.utils.modes import SHARED_READ, SHARED_RUN
 
 class StagingLock(DownloadLock):
     """The lock of one staging folder (a Hugging Face model's commit); its message names no path."""
@@ -1687,7 +1688,7 @@ class BuildEngine:
             remove_tree(folder)
             raise
         # Readable for the scanner, which runs without capabilities; the folder around it stays private (0700).
-        os.chmod(archive, 0o644)
+        os.chmod(archive, SHARED_READ)
         progress.add_log(f"Saved the image to a temporary archive for the scan ({gb(archive.stat().st_size)}).")
         return folder, archive
 
@@ -2145,7 +2146,7 @@ class BuildEngine:
         target = folder / PROFILE_FILE_NAME
         if not target.is_file() or target.read_text(encoding="utf-8") != text:
             target.write_text(text, encoding="utf-8")
-            os.chmod(target, 0o644)  # read by the container's user through a read-only mount
+            os.chmod(target, SHARED_READ)  # read by the container's user through a read-only mount
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         if config.hardware_sha256 != digest:
             config.hardware_sha256 = digest
@@ -2215,7 +2216,7 @@ class BuildEngine:
 
         hand_over(build_temp, user)  # a root host owns the per-build folders; hand them to the stage runner
         if os.name == "posix" and os.getuid() == 0:
-            os.chmod(end_dir, 0o755)
+            os.chmod(end_dir, SHARED_RUN)
         memory = str(self._get_conf("build_memory_limit", "") or "").strip()
         kwargs, isolation_env = stage_user_sandbox(
             user, working_dir="/build-cache/work", mem_limit=memory or None,

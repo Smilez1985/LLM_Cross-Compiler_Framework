@@ -14,6 +14,7 @@ import pytest
 import yaml
 
 from conftest import REPO_ROOT, windows_newlines
+from tests.file_modes import MODE_777
 
 TEMPLATE = REPO_ROOT / "targets" / "_template"
 
@@ -101,7 +102,7 @@ def test_the_server_key_file_is_written_through_a_binary_descriptor(tmp_path, mo
         monkeypatch.setattr(os, "O_BINARY", binary, raising=False)
     real_open, seen = os.open, []
 
-    def recording(path, flags, mode=0o777, *args, **kwargs):
+    def recording(path, flags, mode=MODE_777, *args, **kwargs):
         seen.append(flags)
         return real_open(path, flags & ~(1 << 28), mode, *args, **kwargs)
 

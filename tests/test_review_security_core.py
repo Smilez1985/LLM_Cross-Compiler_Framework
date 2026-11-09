@@ -33,6 +33,7 @@ from orchestrator.tools.audit import GENESIS, AuditLog
 from orchestrator.tools.framework_tools import AUDIT_KEY_ID
 from orchestrator.tools.policy import Decision, PolicyStore, ToolPolicy, ToolTier
 from orchestrator.tools.registry import ToolContext, ToolDenied, ToolError, ToolRegistry, ToolSpec
+from tests.file_modes import MODE_644
 
 # A made-up key in Google's format, split so that secret scanners do not flag the test itself.
 FAKE_GEMINI_KEY = "AIza" "SyA1234567890abcdefghijklmnopqrstuv"
@@ -422,7 +423,7 @@ class TestSecretsStore:
         store = sm.secrets_file
         if os.name == "posix":
             assert store.stat().st_mode & 0o777 == 0o600
-            os.chmod(store, 0o644)
+            os.chmod(store, MODE_644)
             assert sm.set_secret("openai_api_key", SK)
             assert store.stat().st_mode & 0o777 == 0o600, "a rewrite makes a readable store private again"
         assert leftovers(store.parent) == []

@@ -258,7 +258,7 @@ def pair(client: Any, state_dir: Path, bundle: Any = None, *, allow_unrestricted
           problem)
     if problem:
         raise ssh_trust.GateUnavailable("enterprise" if not key_tiers.allowed(choice, mode) else "declined", offer)
-    if choice == key_tiers.TIER_PASSWORD:
+    if choice == key_tiers.TIER_PLAIN_LOGIN:
         chooser.tell([_reason_text("declined")])
         return PairOutcome("password")
     if choice in (key_tiers.TIER_DROPBEAR, key_tiers.TIER_HOME):

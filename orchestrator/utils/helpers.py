@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Callable, List, Optional, Union
 
 from orchestrator.security import secret_patterns
+from orchestrator.utils.modes import NEW_FILE
 
 def ensure_directory(path: Union[str, Path], mode: int = 0o755) -> Path:
     """Creates directory if not exists."""
@@ -261,7 +262,7 @@ def sha256_fd(fd: int, *, cancel: Optional[Callable[[], Any]] = None, chunk: int
 
 
 def copy_hashed(source: Union[int, str, Path], target: Union[str, Path], *, cancel: Optional[Callable[[], Any]] = None,
-                follow_links: bool = False, fsync: bool = False, mode: int = 0o666,
+                follow_links: bool = False, fsync: bool = False, mode: int = NEW_FILE,
                 chunk: int = HASH_CHUNK) -> str:
     """Copies `source` (an open descriptor, read from its start, or a path opened once and, unless follow_links, never
     through a link) into the new file `target` (refused when it exists: FileExistsError) and returns the sha256 of the

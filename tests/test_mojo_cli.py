@@ -16,6 +16,7 @@ import pytest
 
 from orchestrator.Core.mojo import Finding, Severity, docker_objects, runner
 from orchestrator.Core.mojo.checks import check_user_state
+from tests.file_modes import MODE_755, MODE_777
 
 REPO = Path(__file__).resolve().parent.parent
 POSIX = pytest.mark.skipif(os.name != "posix", reason="POSIX modes")
@@ -47,7 +48,7 @@ def open_state(booted_framework, monkeypatch):
     # ConfigManager.user_state_dir makes the folder private on every read (next-fixes 118); here it stays open, as on a
     # computer where something opened it after the framework read it
     monkeypatch.setattr(type(booted_framework.config), "user_state_dir", property(lambda self: state))
-    os.chmod(state, 0o755)
+    os.chmod(state, MODE_755)
 
     def others(_fw):
         return [Finding("disk", "disk.cache", Severity.ERROR, "Only 1.0 GB free for the cache folder.",
@@ -140,7 +141,7 @@ def test_miracle_applies_only_the_plan_the_person_saw(booted_framework, open_sta
 
     def confirm(text, *args, **kwargs):
         if "Run Mojo Miracle now?" in text:
-            os.chmod(open_state, 0o777)   # something changed the folder while the person read the plan
+            os.chmod(open_state, MODE_777)   # something changed the folder while the person read the plan
         return real(text, *args, **kwargs)
     monkeypatch.setattr(click, "confirm", confirm)
     _, out = run_cli(booted_framework, monkeypatch, "mojo", terminal=True, answer="y\n\n")

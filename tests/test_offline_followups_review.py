@@ -150,6 +150,7 @@ def https_server(chain, key):
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2   # no TLS 1.0 or 1.1, as for any server
     context.load_cert_chain(chain, key)
     httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()

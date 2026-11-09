@@ -21,6 +21,7 @@ from typing import Optional
 from orchestrator.Core.mojo.findings import Finding
 from orchestrator.Core.mojo.repairs.model import RepairPlan, RepairStep
 from orchestrator.Core.mojo.repairs.state import StepChanged
+from orchestrator.utils.modes import SHARED_RUN
 
 REPAIR_ID = "runtime_layer.restore"
 CODE = "runtime_layer.changed"
@@ -102,7 +103,7 @@ def apply_step(framework, step: RepairStep) -> None:
     modes = {d: stat.S_IMODE(os.lstat(d).st_mode) for d in {folder, parent}}
     try:
         for d in modes:
-            os.chmod(d, 0o755)
+            os.chmod(d, SHARED_RUN)
         if os.path.lexists(path):
             kept.mkdir(parents=True, exist_ok=True)
             os.replace(path, kept / name.replace("/", "_"))

@@ -17,6 +17,7 @@ from orchestrator.runtime.build.source import (Git, SourceError, cached_source, 
                                                fetch_source, import_source, manifest_path, source_dir,
                                                upstream_tag_commit)
 from orchestrator.runtime.catalog import LlamaCppSource
+from tests.file_modes import MODE_644, MODE_755
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 
@@ -44,7 +45,7 @@ def upstream(tmp_path):
     (up / "ggml").mkdir()
     (up / "ggml" / "ggml.c").write_text("int ggml(void) { return 42; }\n")
     (up / "run.sh").write_text("#!/bin/sh\necho fake\n")
-    os.chmod(up / "run.sh", 0o755)
+    os.chmod(up / "run.sh", MODE_755)
     run_git("add", ".", cwd=up)
     run_git("commit", "-q", "-m", "two", cwd=up)
     second = run_git("rev-parse", "HEAD", cwd=up)
@@ -125,8 +126,8 @@ class TestFetch:
         source = pin(upstream["second"])
         path = fetch_source(source, state, url=upstream["url"])
         victim = path / "ggml" / "ggml.c"
-        os.chmod(victim.parent, 0o755)
-        os.chmod(victim, 0o644)
+        os.chmod(victim.parent, MODE_755)
+        os.chmod(victim, MODE_644)
         victim.write_text("int ggml(void) { return 0; }\n")
         assert cached_source(source, state) is None
         messages = []
@@ -138,7 +139,7 @@ class TestFetch:
         state = tmp_path / "state"
         source = pin(upstream["second"])
         path = fetch_source(source, state, url=upstream["url"])
-        os.chmod(path, 0o755)
+        os.chmod(path, MODE_755)
         (path / "planted.cmake").write_text("message(planted)\n")
         assert cached_source(source, state) is None
 
@@ -153,7 +154,7 @@ class TestFetch:
         state = tmp_path / "state"
         path = fetch_source(source, state, url=upstream["url"])
         assert cached_source(source, state) == path
-        os.chmod(path, 0o755)
+        os.chmod(path, MODE_755)
         (path / "dist").mkdir()
         (path / "dist" / "index.html").write_text("<script>planted</script>\n")
         assert cached_source(source, state) is None

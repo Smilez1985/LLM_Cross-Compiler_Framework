@@ -34,6 +34,7 @@ from orchestrator.utils.logging import get_logger
 from orchestrator.utils.helpers import ensure_directory
 from orchestrator.utils.prebuilt_llama import is_prebuilt_llama_image, scan_target_folder
 from orchestrator.utils.atomic import remove_tree
+from orchestrator.utils.modes import SHARED_RUN
 
 # --- Validation of module data (wizard input, AI output, community input) ---------------------------
 # Every value below ends up in Dockerfiles, YAML or shell scripts, so it is checked before any
@@ -1094,7 +1095,7 @@ echo "Generated $OUTPUT_FILE"
 
     def _make_executable(self, path: Path):
         # Generated build scripts must run in the image; packs keep exactly the modes 0644 or 0755.
-        try: os.chmod(path, 0o755)  # nosec B103
+        try: os.chmod(path, SHARED_RUN)  # nosec B103
         except: pass
 
 

@@ -27,6 +27,7 @@ from orchestrator.runtime.build.recipe import DOWNLOAD_OPTIONS_OFF, NEVER_SET, T
 from orchestrator.runtime.catalog import load_catalog
 from orchestrator.runtime.profile import read_profile
 from orchestrator.utils.prebuilt_llama import scan_target_folder
+from tests.hosts import names_host
 
 CATALOG = load_catalog()
 PIN = CATALOG.llama_cpp.source
@@ -426,7 +427,7 @@ class TestTheAptSourcesStep:
         step = step.replace("/etc/apt", str(apt))
         plain = run(step, {"PATH": os.environ.get("PATH", "")})
         assert plain.returncode == 0, plain.stderr
-        assert "deb.debian.org" in (apt / "sources.list.d" / "debian.sources").read_text(), "nothing set: unchanged"
+        assert names_host((apt / "sources.list.d" / "debian.sources").read_text(), "deb.debian.org"), "nothing set: unchanged"
         assert not (apt / "apt.conf.d" / "01llmcf-proxy").exists()
         result = run(step, {"PATH": os.environ.get("PATH", ""), "APT_MIRROR": "http://192.0.2.10/",
                             "APT_PROXY": "http://192.0.2.11:3142"})

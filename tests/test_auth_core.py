@@ -406,6 +406,20 @@ class TestResolver:
         store.update_metadata("alibaba", "api_key", {"region": "eu-1"})
         assert self.resolver(store).resolve(preset, "api_key").region == "eu-1"
 
+    def test_the_fingerprint_holds_nothing_of_the_key_and_same_key_tells_keys_apart(self, store, catalog):
+        from orchestrator.llm.auth import resolver as resolver_module
+        anthropic = catalog.get("anthropic")
+        store.save_api_key(anthropic, anthropic.method("api_key"), CLAUDE_KEY, fields={"workspace_id": WORKSPACE})
+        first = self.resolver(store).resolve(anthropic, "api_key")
+        again = self.resolver(store).resolve(anthropic, "api_key")
+        other = resolver_module.ResolvedCredential(kind=first.kind, method=first.method, type=first.type,
+                                                   api_key="another-key", headers=dict(first.headers))
+        assert first.fingerprint == again.fingerprint == other.fingerprint, "the key is no part of the fingerprint"
+        assert first.same_key(again) and not first.same_key(other) and not other.same_key(first)
+        keyless = resolver_module.ResolvedCredential(kind="none", method="none", type="none")
+        assert keyless.same_key(resolver_module.ResolvedCredential(kind="none", method="none", type="none"))
+        assert not keyless.same_key(first)
+
     def test_the_resolved_credential_shows_no_value(self, store, catalog):
         anthropic = catalog.get("anthropic")
         store.save_api_key(anthropic, anthropic.method("api_key"), CLAUDE_KEY, fields={"workspace_id": WORKSPACE})

@@ -26,6 +26,7 @@ from conftest import POSIX_MODES_ONLY, REPO_ROOT
 from orchestrator.tools import gui_bridge, gui_surface
 from orchestrator.tools.gui_surface import DITTO, Filler, GuiField, GuiForm, GuiSurface
 from orchestrator.tools.registry import ToolContext, ToolError, current_question
+from tests.file_modes import MODE_644
 
 FAKE_KEY = "not-a-real-key-0123456789abcdef"
 POSIX_ONLY = pytest.mark.skipif(os.name == "nt", reason="AF_UNIX sockets, user ids and file modes are POSIX; on "
@@ -303,7 +304,7 @@ def test_the_bridge_lives_in_a_private_folder_with_a_private_key(booted_framewor
     sock = Path(info.address)
     assert stat.S_ISSOCK(os.stat(sock).st_mode) and stat.S_IMODE(os.stat(sock).st_mode) == 0o600
     assert stat.S_IMODE(os.stat(sock.parent).st_mode) == 0o700, "the socket's folder is private too"
-    os.chmod(key_file, 0o644)   # a key others could read is never used
+    os.chmod(key_file, MODE_644)   # a key others could read is never used
     assert gui_bridge.read_info(state_dir(booted_framework)) is None
     os.chmod(key_file, 0o600)
 

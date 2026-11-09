@@ -7,6 +7,7 @@ import pytest
 
 from orchestrator.Core.doctor import Doctor, Finding, Severity
 from orchestrator.tools.registry import ToolContext
+from tests.file_modes import MODE_755
 
 
 def finding(code, severity, fix=None, tier=0):
@@ -56,7 +57,7 @@ class TestDoctor:
     @pytest.mark.skipif(os.name != "posix", reason="POSIX permissions")
     def test_world_readable_state_dir_ends_up_private(self, booted_framework):
         state = booted_framework.config.user_state_dir
-        os.chmod(state, 0o755)
+        os.chmod(state, MODE_755)
         from orchestrator.Core.doctor import check_user_state
         report = Doctor(booted_framework, [check_user_state]).fix(1)
         assert state.stat().st_mode & 0o077 == 0 and report.exit_code == 0

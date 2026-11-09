@@ -31,7 +31,7 @@ BASELINE = REPO_ROOT / "tests" / "data" / "command_text_baseline.json"
 COMMAND = re.compile(r"llm-cli |\bllmcf [a-z]|in a terminal|im Terminal|in einem Terminal")
 # A hand-written menu path: a top-level menu title or a tab of the main window, then " > ".
 MENU_PATH = re.compile(r"(?<![\w-])(?:File|Build|Boards|Ditto|Security|View|Tools|Help|Datei|Sicherheit|Ansicht|"
-                       r"Extras|Hilfe|Werkzeuge|Builder|Deployment)\s+>\s+[A-Z\w]")
+                       r"Extras|Hilfe|Werkzeuge|Builder|Deployment)\s+>\s+\w")
 PATTERNS = {"command": COMMAND, "menu_path": MENU_PATH}
 # A place written out in words instead of a path ("Save... in the Deployment tab"): the person's texts only (review
 # w6-a0-v found one the " > " pattern missed).

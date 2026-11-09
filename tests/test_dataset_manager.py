@@ -22,6 +22,7 @@ from orchestrator.runtime.build.store import BuildStore
 from orchestrator.runtime.build.verify import Check, VerifyReport
 from orchestrator.runtime.catalog import load_catalog
 from orchestrator.runtime.profile import read_profile
+from tests.hosts import image_registry
 
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG = load_catalog()
@@ -251,7 +252,7 @@ class TestSandbox:
         run = manager(tmp_path, store, engine=engine, runner=runner).run_perplexity(model, text, sandbox=True)
         assert run.where == "sandbox" and not run.trusted and run.ppl == 8.9013 and runner.calls == []
         call = engine.runs[0]
-        assert call["image"] == self.IMAGE and not call["image"].startswith("ghcr.io")
+        assert call["image"] == self.IMAGE and image_registry(call["image"]) != "ghcr.io"
         assert call["options"]["network_mode"] == "none" and call["options"]["read_only"] is True
         assert call["options"]["cap_drop"] == ["ALL"]
         assert all(m.read_only for m in call["mounts"]) and {m.target for m in call["mounts"]} == {

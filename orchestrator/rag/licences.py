@@ -203,6 +203,12 @@ def _cc_id(kind: str, version: Optional[str]) -> Optional[str]:
     return licence if licence in LICENCES else None
 
 
+def _on_site(host: str, site: str) -> bool:
+    """Whether the host name `host` is the site `site` or one of its subdomains (www.gnu.org is gnu.org; a name that
+    only ends in the same letters, such as notgnu.org, is not)."""
+    return host == site or host.endswith("." + site)
+
+
 def licence_from_url(url: str) -> Optional[str]:
     """The licence a licence address names (Creative Commons, SPDX, OSI, choosealicense, Apache, GNU, Mozilla,
     unlicense.org), or None."""
@@ -211,7 +217,7 @@ def licence_from_url(url: str) -> Optional[str]:
     except ValueError:
         return None
     host, path = (parsed.hostname or "").lower(), parsed.path or ""
-    if host.endswith("creativecommons.org"):
+    if _on_site(host, "creativecommons.org"):
         m = _CC_PATH.match(path)
         if not m:
             return None
@@ -224,9 +230,9 @@ def licence_from_url(url: str) -> Optional[str]:
         name = re.sub(r"\.(html|json|txt|php)$", "", name, flags=re.I)
         name = re.sub(r"-(only|or-later)$", "", name, flags=re.I)
         return next((key for key in LICENCES if key.lower() == name.lower()), None)
-    if host.endswith("apache.org") and re.match(r"^/licenses/LICENSE-2\.0", path, re.I):
+    if _on_site(host, "apache.org") and re.match(r"^/licenses/LICENSE-2\.0", path, re.I):
         return "Apache-2.0"
-    if host.endswith("gnu.org"):
+    if _on_site(host, "gnu.org"):
         m = _GNU_PATH.match(path)
         if m:
             kind, version = m.group(1).lower(), m.group(2)
@@ -237,9 +243,9 @@ def licence_from_url(url: str) -> Optional[str]:
             if kind == "lgpl":
                 return "LGPL-2.1" if version == "2.1" else "LGPL-3.0"
             return "GPL-2.0" if (version or "").startswith("2") else "GPL-3.0"
-    if host.endswith("mozilla.org") and re.match(r"^/(?:en-US/)?MPL/2\.0", path, re.I):
+    if _on_site(host, "mozilla.org") and re.match(r"^/(?:en-US/)?MPL/2\.0", path, re.I):
         return "MPL-2.0"
-    if host.endswith("unlicense.org"):
+    if _on_site(host, "unlicense.org"):
         return "Unlicense"
     return None
 
@@ -498,7 +504,7 @@ def from_html(soup, url: str, headers: Optional[Mapping[str, Any]] = None) -> Di
         # reserved".
         for tag in soup.find_all("a", href=True):
             href = urljoin(url, str(tag["href"]))
-            if "creativecommons.org" in href.lower() and _licenses_the_page(tag):
+            if _on_site((urlparse(href).hostname or "").lower(), "creativecommons.org") and _licenses_the_page(tag):
                 licence = licence_from_url(href)
                 if licence:
                     candidates.append((licence, "Creative Commons link", href))

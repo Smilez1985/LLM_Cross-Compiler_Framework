@@ -11,8 +11,8 @@ this vocabulary before, so it is a module of its own next to remote/gate.py, whi
   weaker: the account itself could edit that line; a stolen key cannot, because no gate operation writes to ~/.ssh.
 - TIER_HOME ("home"): no sudo. The gate and the signing key live in the account's home ("weaker protection"): a stolen
   key still runs only llmcf's operations, but anything running as the account could change the gate.
-- TIER_PASSWORD ("password"): no framework key; the person's password at every contact (the fallback when the person
-  declines every key tier).
+- TIER_PLAIN_LOGIN ("password"): no framework key; the person's own login with their password at every contact (the
+  fallback when the person declines every key tier).
 - TIER_UNRESTRICTED ("unrestricted"): a plain key line from before the gate (only an earlier pairing leaves one).
 
 The weaker tiers (dropbear, home) exist only in private mode and only after the person's yes; enterprise mode refuses
@@ -28,12 +28,12 @@ from typing import Any, Dict, Optional, Tuple
 TIER_ROOT = "root"
 TIER_DROPBEAR = "dropbear"
 TIER_HOME = "home"
-TIER_PASSWORD = "password"
+TIER_PLAIN_LOGIN = "password"
 TIER_UNRESTRICTED = "unrestricted"
-TIERS = (TIER_ROOT, TIER_DROPBEAR, TIER_HOME, TIER_PASSWORD, TIER_UNRESTRICTED)
+TIERS = (TIER_ROOT, TIER_DROPBEAR, TIER_HOME, TIER_PLAIN_LOGIN, TIER_UNRESTRICTED)
 # What the person may choose when the root tier is not possible (in this order); "openssh" is the switch to OpenSSH
 CHOICE_OPENSSH = "openssh"
-CHOICES = (CHOICE_OPENSSH, TIER_DROPBEAR, TIER_HOME, TIER_PASSWORD)
+CHOICES = (CHOICE_OPENSSH, TIER_DROPBEAR, TIER_HOME, TIER_PLAIN_LOGIN)
 WEAKER = (TIER_DROPBEAR, TIER_HOME, TIER_UNRESTRICTED)
 
 MODE_PRIVATE = "private"
@@ -48,7 +48,7 @@ TIER_TEXTS = {
                    "in the account's own authorized_keys, so the account itself could edit it (a stolen key cannot)",
     TIER_HOME: "home gate, weaker protection: no sudo, so the gate and the signing key live in the account's home; a "
                "stolen key still runs only llmcf's operations, but anything running as the account could change them",
-    TIER_PASSWORD: "no framework key: the board is reached with your password each time",
+    TIER_PLAIN_LOGIN: "no framework key: the board is reached with your password each time",
     TIER_UNRESTRICTED: "unrestricted key from an earlier pairing: it runs anything the account may run",
 }
 CHOICE_TEXTS = {
@@ -56,7 +56,7 @@ CHOICE_TEXTS = {
                     "so separately), then pair with the root-owned key line",
     TIER_DROPBEAR: "use the Dropbear tier (one step weaker than OpenSSH)",
     TIER_HOME: "use the home gate (weaker protection, no sudo)",
-    TIER_PASSWORD: "use no framework key: keep logging in with the password",
+    TIER_PLAIN_LOGIN: "use no framework key: keep logging in with the password",
 }
 UPGRADE_TEXT = ("To reach the root-owned key line, pair the board again with its password (a scan of the board "
                 "with its password, in the CLI or the GUI) and choose the switch to OpenSSH; "
@@ -220,7 +220,7 @@ class TierOffer:
     def in_order(self) -> Tuple[str, ...]:
         """The choices with the proposed one first (the GUI asks them one by one in this order); "password" stays
         last."""
-        if not self.proposed or self.proposed == TIER_PASSWORD:
+        if not self.proposed or self.proposed == TIER_PLAIN_LOGIN:
             return self.choices
         return (self.proposed,) + tuple(c for c in self.choices if c != self.proposed)
 
@@ -244,12 +244,12 @@ def offer(reason: str, facts: TierFacts, mode: str = MODE_PRIVATE) -> TierOffer:
         (choices if allowed(TIER_DROPBEAR, mode) else refused).append(TIER_DROPBEAR)
     if not facts.sudo_ok and facts.can_verify:
         (choices if allowed(TIER_HOME, mode) else refused).append(TIER_HOME)
-    choices.append(TIER_PASSWORD)
+    choices.append(TIER_PLAIN_LOGIN)
     return TierOffer(reason=reason, facts=facts, choices=tuple(choices), mode=mode, refused=tuple(refused))
 
 
 _NAMES = {TIER_ROOT: "root-owned key line", TIER_DROPBEAR: "Dropbear tier", TIER_HOME: "home gate",
-          TIER_PASSWORD: "password login", CHOICE_OPENSSH: "switch to OpenSSH"}
+          TIER_PLAIN_LOGIN: "password login", CHOICE_OPENSSH: "switch to OpenSSH"}
 _PROBE_SUDO = ("root", "nopasswd", "password")   # AccessFacts.sudo words with which sudo can be used once
 
 
@@ -267,7 +267,7 @@ def proposal(access: Any, mode: str = MODE_PRIVATE) -> str:
     if server == "dropbear" and sudo in _PROBE_SUDO:
         return TIER_DROPBEAR if allowed(TIER_DROPBEAR, mode) else CHOICE_OPENSSH
     if sudo == "absent":
-        return TIER_HOME if allowed(TIER_HOME, mode) else TIER_PASSWORD
+        return TIER_HOME if allowed(TIER_HOME, mode) else TIER_PLAIN_LOGIN
     return ""
 
 
@@ -299,7 +299,7 @@ def choice_problem(choice: str, the_offer: Optional[TierOffer], mode: str) -> st
 
 
 __all__ = ["CHOICES", "CHOICE_OPENSSH", "CHOICE_TEXTS", "MANAGERS", "MODES", "MODE_ENTERPRISE", "MODE_PRIVATE",
-           "TIERS", "TIER_DROPBEAR", "TIER_HOME", "TIER_PASSWORD", "TIER_ROOT", "TIER_TEXTS", "TIER_UNRESTRICTED",
+           "TIERS", "TIER_DROPBEAR", "TIER_HOME", "TIER_PLAIN_LOGIN", "TIER_ROOT", "TIER_TEXTS", "TIER_UNRESTRICTED",
            "TierFacts", "TierOffer", "UPGRADE_TEXT", "USE_WAYS", "WEAKER", "allowed", "choice_problem", "is_weaker",
            "normal_mode", "offer", "proposal", "server_of_banner", "tier_of_status", "use_problem",
            "with_proposal"]

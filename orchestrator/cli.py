@@ -6778,7 +6778,7 @@ def _tier_chooser():
             if key_tiers.is_weaker(choice):
                 console.print(f"[yellow]Weaker protection: {escape(key_tiers.TIER_TEXTS[choice])}.[/yellow]")
                 if not click.confirm("Use it anyway?", default=False):
-                    return key_tiers.TIER_PASSWORD
+                    return key_tiers.TIER_PLAIN_LOGIN
             return choice
 
         def confirm(self, title, lines):

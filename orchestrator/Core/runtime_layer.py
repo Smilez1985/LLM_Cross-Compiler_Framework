@@ -55,6 +55,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 # end record never pulls this module in): re-exported here, where the host side of the layer is read
 from orchestrator.Core.build_end import end_folder_state, mounts_keep_owners
 from orchestrator.utils.next_steps import WithSteps
+from orchestrator.utils.modes import READ_ONLY, READ_RUN_ONLY, SHARED_READ, SHARED_RUN
 
 SHIPPED_DIR = Path(__file__).resolve().parents[1] / "runtime_layer"
 SCRIPTS = ("tools.sh", "entrypoint.sh", "runner.sh", "stage_user.sh", "stage_env.sh", "cleanup.sh")
@@ -356,7 +357,7 @@ def write_toolbox(folder: Path, way: str, files: Dict[str, Path], sources: Dict[
         target = folder / tool
         tmp = folder / f".{tool}.tmp"
         shutil.copyfile(files[tool], tmp)
-        os.chmod(tmp, 0o555)
+        os.chmod(tmp, READ_RUN_ONLY)
         if os.name == "nt" and target.exists():
             # Windows refuses to replace a read-only file (WinError 5): the old tool of an earlier toolbox is made
             # writable first, so a toolbox made again replaces it as on POSIX.
@@ -676,7 +677,7 @@ def expected_files(cache_dir: Path) -> Dict[str, str]:
 
 def layer_mode(name: str) -> int:
     """The mode a file of the assembled layer has (assemble): the scripts read-only, the tools read and run."""
-    return 0o555 if name.startswith("bin/") else 0o444
+    return READ_RUN_ONLY if name.startswith("bin/") else READ_ONLY
 
 
 def shipped_source(cache_dir: Path, name: str) -> Path:
@@ -759,12 +760,12 @@ def assemble(cache_dir: Path) -> LayerCheck:
     (fresh / "bin").mkdir(parents=True)
     for name in SCRIPTS:
         shutil.copyfile(SHIPPED_DIR / name, fresh / name)
-        os.chmod(fresh / name, 0o444)
+        os.chmod(fresh / name, READ_ONLY)
     for tool in TOOLS:
         shutil.copyfile(toolbox_dir(cache_dir) / tool, fresh / "bin" / tool)
-        os.chmod(fresh / "bin" / tool, 0o555)
-    os.chmod(fresh / "bin", 0o555)
-    os.chmod(fresh, 0o555)
+        os.chmod(fresh / "bin" / tool, READ_RUN_ONLY)
+    os.chmod(fresh / "bin", READ_RUN_ONLY)
+    os.chmod(fresh, READ_RUN_ONLY)
     old = folder.with_name("current.old")
     if folder.exists() or folder.is_symlink():
         if old.exists():
@@ -785,7 +786,7 @@ def _remove_layer_folder(folder: Path) -> None:
     for path in [Path(folder), *Path(folder).rglob("*")]:
         try:
             if not path.is_symlink():
-                os.chmod(path, 0o755 if path.is_dir() else 0o644)
+                os.chmod(path, SHARED_RUN if path.is_dir() else SHARED_READ)
         except OSError:
             pass
     remove_tree(folder, label="the runtime layer")
@@ -831,7 +832,7 @@ def prepare_end_folder(path: Path, owner: Optional[Tuple[int, int]]) -> None:
     if os.name == "posix":
         if owner is not None and os.getuid() == 0:
             os.chown(path, *owner)
-        os.chmod(path, 0o755)
+        os.chmod(path, SHARED_RUN)
 
 
 def runner_owner_on_host(runner: Tuple[int, int], rootless: bool) -> Optional[int]:

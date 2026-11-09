@@ -20,6 +20,7 @@ import pytest
 
 from conftest import REPO_ROOT
 from orchestrator import cli as cli_module
+from tests.hosts import names_host
 
 INSTALL_SH = REPO_ROOT / "install.sh"
 PASSWORD = "board-pw-Zq7"  # made up for the tests
@@ -345,7 +346,7 @@ def test_no_default_names_a_registry_image(tmp_path):
 
     allowed = REPO_ROOT / "orchestrator" / "utils" / "prebuilt_llama.py"
     named = [str(path.relative_to(REPO_ROOT)) for path in sorted((REPO_ROOT / "orchestrator").rglob("*.py"))
-             if path != allowed and "ghcr.io" in path.read_text(encoding="utf-8")]
+             if path != allowed and names_host(path.read_text(encoding="utf-8"), "ghcr.io")]
     assert named == [], f"a framework default names a registry image: {named}"
     assert "ghcr.io/smilez1985/llm-runtime" in KNOWN_PREBUILT_IMAGES, "the detection list stays"
 

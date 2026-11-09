@@ -27,6 +27,7 @@ from orchestrator.llm.providers.base import ProviderAdapter  # noqa: E402
 from orchestrator.llm.providers.openai_responses import OpenAIResponsesAdapter  # noqa: E402
 from orchestrator.llm.types import CacheProbe, Usage  # noqa: E402
 from test_llm import SECRETS, FakeHTTP, claude_message, responses_body, text_block  # noqa: E402
+from tests.hosts import url_host
 
 TARGETS = REPO_ROOT / "targets"
 DOC_NETWORKS = [ipaddress.ip_network(n) for n in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24",
@@ -455,7 +456,7 @@ def test_the_paid_test_never_falls_back_to_another_provider(tmp_path):
     for case_id in ("openai-cache-ttl-12h", "openai-count-tokens"):
         attempt = ev.run_case(case(case_id))
         assert not attempt.passed
-    assert http.requests and all("api.openai.com" in r.url for r in http.requests), \
+    assert http.requests and all(url_host(r.url) == "api.openai.com" for r in http.requests), \
         sorted({r.url for r in http.requests})
 
 

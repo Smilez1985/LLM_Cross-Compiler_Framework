@@ -43,6 +43,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from orchestrator.utils.locality import BUILD_SOURCE_SETTINGS
 from orchestrator.utils.next_steps import WithSteps
+from orchestrator.utils.modes import SHARED_READ, SHARED_RUN
 
 # The build arguments that say where the image's sources come from, never what they are: they stay out of the image's
 # INPUTS_LABEL, so an image built online is found offline and the other way round (the pins are in the other args).
@@ -533,12 +534,12 @@ def stage_llama_copy(copy: Path, context: Path) -> Path:
     # modes, another user inside) can enter them; nothing secret is in them, the files stay 0644.
     for root, dirs, files in os.walk(target):
         for name in dirs:
-            os.chmod(Path(root) / name, 0o755)  # nosec B103
+            os.chmod(Path(root) / name, SHARED_RUN)  # nosec B103
         for name in files:
             path = Path(root) / name
             if not path.is_symlink():
-                os.chmod(path, 0o644)
-    os.chmod(target, 0o755)  # nosec B103
+                os.chmod(path, SHARED_READ)
+    os.chmod(target, SHARED_RUN)  # nosec B103
     return target
 
 

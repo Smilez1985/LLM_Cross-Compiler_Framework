@@ -1879,6 +1879,19 @@ class TestClientIntegration:
         client.set_runtime_endpoint("local", "http://127.0.0.1:9999/v1", "explicit", "other")  # explicit wins
         assert client.resolve().base_url == "http://127.0.0.1:9999/v1" and client.resolve().model == "other"
 
+    def test_an_adapter_is_reused_for_the_same_key_only(self, tmp_path):
+        # The adapter cache keeps nothing derived from the key: it compares the key with the credential the cached
+        # adapter was made for, reuses it for the same key and makes a new one for another key.
+        answer = [("http://127.0.0.1:9123/v1", "key-a", "m")]
+        client = self.make(tmp_path, lambda pid: answer[0])
+        target = client.resolve()
+        first = client.adapter(target)
+        assert client.adapter(target) is first, "the same key reuses the adapter"
+        answer[0] = ("http://127.0.0.1:9123/v1", "key-b", "m")
+        second = client.adapter(target)
+        assert second is not first, "another key gets its own adapter"
+        assert client.adapter(target) is second and len(client._adapters) == 1
+
     def test_a_new_key_never_goes_to_the_port_of_the_previous_server(self, tmp_path):
         # A restart between resolve() and adapter() gives a new port and a new key. The adapter used to pair the old
         # URL with the new key (the credential read the endpoint again); another program may hold the old port now.

@@ -20,6 +20,7 @@ import pytest
 
 from orchestrator.Core import vault_key
 from orchestrator.runtime import llama_server
+from tests.file_modes import MODE_644, MODE_755, MODE_777
 
 POSIX = os.name != "nt"
 
@@ -83,7 +84,7 @@ class TestRuntimeWritePrivate:
         real_replace, real_open = os.replace, os.open
         monkeypatch.setattr(os, "replace", lambda s, d: replaced.append((Path(s), Path(d))) or real_replace(s, d))
         monkeypatch.setattr(os, "fsync", lambda fd: synced.append(fd))
-        monkeypatch.setattr(os, "open", lambda p, flags, mode=0o777, **k: opened.append((Path(p), flags, mode))
+        monkeypatch.setattr(os, "open", lambda p, flags, mode=MODE_777, **k: opened.append((Path(p), flags, mode))
                             or real_open(p, flags, mode, **k))
         target = tmp_path / "runtime" / "active.json"
         llama_server._write_private(target, "a\nb\n")
@@ -235,10 +236,10 @@ class TestWriteFile:
         from orchestrator.utils import atomic
         folder = tmp_path / "knowledge"
         folder.mkdir(mode=0o755)
-        os.chmod(folder, 0o755)
+        os.chmod(folder, MODE_755)
         target = folder / "pack-a.released"
         target.write_text("old", encoding="utf-8")
-        os.chmod(target, 0o644)
+        os.chmod(target, MODE_644)
         atomic.write_file(target, "new")
         assert target.read_text(encoding="utf-8") == "new"
         assert oct(os.stat(target).st_mode & 0o777) == oct(0o644) and oct(os.stat(folder).st_mode & 0o777) == oct(0o755)
@@ -289,7 +290,7 @@ def test_write_file_opens_its_temporary_file_in_binary_mode_where_the_system_has
     monkeypatch.setattr(os, "O_BINARY", fake_binary, raising=False)
     real_open, flags_seen = os.open, []
 
-    def spy(path, flags, mode=0o777, **kwargs):
+    def spy(path, flags, mode=MODE_777, **kwargs):
         flags_seen.append(flags)
         return real_open(path, (flags & ~fake_binary) | (real_binary if flags & fake_binary else 0), mode, **kwargs)
     monkeypatch.setattr(os, "open", spy)

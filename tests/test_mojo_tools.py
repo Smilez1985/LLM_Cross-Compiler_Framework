@@ -19,6 +19,7 @@ from orchestrator.tools.confirmation import MAX_ELICITATION, MAX_FRAMEWORK
 from orchestrator.tools.policy import (TOOL_RENAMES, CallerPolicy, Decision, ToolPolicy, ToolTier,
                                        renamed_names)
 from orchestrator.tools.registry import ToolContext, ToolError, current_question
+from tests.file_modes import MODE_750, MODE_755
 
 POSIX = pytest.mark.skipif(os.name != "posix", reason="POSIX modes")
 ABSOLUTE = re.compile(r"(?:^|[\s('\"=])(?:/|~/|[A-Za-z]:\\)[^\s'\")]+")
@@ -32,7 +33,7 @@ def open_state(booted_framework, monkeypatch):
     118), and one problem of each reason Mojo Miracle does not repair."""
     state = Path(booted_framework.config.user_state_dir)
     monkeypatch.setattr(type(booted_framework.config), "user_state_dir", property(lambda self: state))
-    os.chmod(state, 0o755)
+    os.chmod(state, MODE_755)
 
     def others(_fw):
         return [Finding("x", code, Severity.ERROR, f"problem {code} in {state / 'cache'}", "a hint",
@@ -93,7 +94,7 @@ def test_miracle_tool_asks_with_the_plan_and_repairs_exactly_it(booted_framework
     assert out.outcome == "repaired" and out.repaired is True and mode(open_state) == 0o700
     assert "only you can open the state folder" in out.what and out.reason == ""
     # A client's form (an MCP elicitation, which an AI may read) never carries the path.
-    os.chmod(open_state, 0o755)
+    os.chmod(open_state, MODE_755)
     inp = registry.validate_input(spec, {"code": "state.permissions"})
     facts = registry.look_up(spec, inp, ToolContext("mcp"))
     client_form = registry.question_text(spec, {"code": "state.permissions"}, ToolContext("mcp"), facts,
@@ -126,7 +127,7 @@ def test_miracle_tool_changes_nothing_when_the_problem_changed_during_the_questi
     registry = booted_framework.tool_registry
 
     def answer(_spec, _inp):
-        os.chmod(open_state, 0o750)   # someone changed the folder while the person read the plan
+        os.chmod(open_state, MODE_750)   # someone changed the folder while the person read the plan
         return True
     out = registry.call("run_mojo_miracle", {"code": "state.permissions"}, ToolContext("mcp", confirm=answer))
     assert out.outcome == "plan_changed" and out.repaired is False and "nothing was changed" in out.reason

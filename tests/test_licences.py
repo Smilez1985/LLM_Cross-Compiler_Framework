@@ -43,6 +43,27 @@ def test_a_recognisable_licence_is_recorded_with_where_it_was_found(html, header
     assert (meta.get("licence"), meta.get("licence_found")) == expected
 
 
+@pytest.mark.parametrize("url, expected", [
+    ("https://creativecommons.org/licenses/by/4.0/", "CC-BY-4.0"),
+    ("https://www.gnu.org/licenses/gpl-3.0.html", "GPL-3.0"),
+    ("https://www.apache.org/licenses/LICENSE-2.0", "Apache-2.0"),
+    ("https://unlicense.org/", "Unlicense"),
+    # a host that only ends in the same letters is another site, and the site's name in the path or query is no host
+    ("https://notcreativecommons.org/licenses/by/4.0/", None),
+    ("https://evilgnu.org/licenses/gpl-3.0.html", None),
+    ("https://example.net/unlicense.org", None),
+    ("https://example.net/licenses/by/4.0/?ref=creativecommons.org", None),
+])
+def test_a_licence_address_counts_only_on_the_licence_site_itself(url, expected):
+    assert licences.licence_from_url(url) == expected
+
+
+def test_a_creative_commons_name_outside_the_link_host_is_no_creative_commons_link():
+    page = soup('<p>x</p><footer>Text under <a href="https://spdx.org/licenses/MIT.html?via=creativecommons.org">MIT'
+                '</a></footer>')
+    assert "licence" not in licences.from_html(page, f"{SITE}/guide")
+
+
 def test_an_unrecognised_licence_keeps_its_words_as_plain_text():
     meta = licences.from_html(soup('<head><meta name="license" content="Internal use\x07 only"></head><p>x</p>'),
                               f"{SITE}/a")

@@ -44,6 +44,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from orchestrator.utils.helpers import copy_hashed, digest_matches, sha256_fd, sha256_file
 from orchestrator.utils.atomic import remove_tree
+from orchestrator.utils.modes import SHARED_READ
 
 BENCH = "llama-bench"
 SCHEMA = "llm-framework.bench/1"
@@ -378,7 +379,7 @@ class BenchRunner:
             if stop is not None and stop.is_set():
                 raise BenchStopped()
         try:
-            digest = copy_hashed(fd, target, cancel=stopped, mode=0o644)
+            digest = copy_hashed(fd, target, cancel=stopped, mode=SHARED_READ)
         except FileExistsError:
             raise  # not this copy's file
         except BaseException:
