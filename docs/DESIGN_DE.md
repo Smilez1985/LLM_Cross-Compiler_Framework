@@ -1,4 +1,4 @@
-Version 3.4.0 · Stand 2026-11-08
+Version 3.4.0 · Stand 2026-11-09
 
 [English](DESIGN.md) · **Deutsch**
 
@@ -21,6 +21,7 @@ nicht gebaut ist, steht in der Roadmap, nicht hier.
 - [Bausteine und Entscheidungen](#bausteine-und-entscheidungen)
 - [Sicherheitsmodell](#sicherheitsmodell)
 - [Wichtige Entscheidungen](#wichtige-entscheidungen)
+- [Entscheidungsprotokoll](#entscheidungsprotokoll)
 - [Versionierung und Dokumentationsregeln](#versionierung-und-dokumentationsregeln)
 - [Geschichte](#geschichte)
 - [Glossar](#glossar)
@@ -1231,10 +1232,10 @@ tippen musst. Nichts Geheimes wird gemerkt.
 ## Bausteine und Entscheidungen
 
 Jeder Baustein im Detail, mit den Entscheidungen, die ihn prägen: was jede Entscheidung sagt, wie der Code sie umsetzt
-(oder die Roadmap-Zeile, die es tun wird) und warum. Die Entscheidungen des Maintainers werden in einem Arbeitsprotokoll
-außerhalb des Repositorys gesammelt; jede steht hier beim Baustein, den sie betrifft, ohne private Daten. Die neueste
-Entscheidung gilt; eine ersetzte bleibt als eine Zeile unter **Geschichte** (Runde und Datum, was sie sagte, was sie
-ersetzte). Entscheidungen ohne einen einzelnen Baustein stehen unter [Wichtige
+(oder die Roadmap-Zeile, die es tun wird) und warum. Jede Entscheidung des Maintainers steht hier beim Baustein, den sie
+betrifft, ohne private Daten, und jede Entscheidungsrunde ist im [Entscheidungsprotokoll](#entscheidungsprotokoll)
+festgehalten. Die neueste Entscheidung gilt; eine ersetzte bleibt als eine Zeile unter **Geschichte** (Runde und Datum,
+was sie sagte, was sie ersetzte). Entscheidungen ohne einen einzelnen Baustein stehen unter [Wichtige
 Entscheidungen](#wichtige-entscheidungen).
 
 ### Build-Pipeline und Target-Module
@@ -1887,7 +1888,7 @@ dem Changelog.
 
 | Was | Wie | Warum |
 |---|---|---|
-| Der Bauplan besteht aus drei Dateien mit deutschen Zwillingen: DESIGN (jeder Baustein und jede Entscheidung: was, wie, warum), ROADMAP (was kommt) und CHANGELOG (was war: nur fertige, verdrahtete, getestete und committete Arbeit, die Arten von Keep a Changelog, kein Abschnitt Unreleased, jeder Eintrag mit Zeitstempel und Version, mit seinem Code committet); jede Entscheidung kommt bereinigt ins DESIGN bei ihrem Baustein; das Entscheidungsprotokoll bleibt als Arbeitsprotokoll außerhalb des Repositorys. | docs/BLUEPRINT_DE.md ist das Verzeichnis; `tests/test_docs.py` prüft die Dateien, die Stempel, die Roadmap und die Entscheidungsblöcke dieses Abschnitts. | Ein Ort für jede Frage: wie und warum, was kommt, was war. |
+| Der Bauplan besteht aus drei Dateien mit deutschen Zwillingen: DESIGN (jeder Baustein und jede Entscheidung: was, wie, warum), ROADMAP (was kommt) und CHANGELOG (was war: nur fertige, verdrahtete, getestete und committete Arbeit, die Arten von Keep a Changelog, kein Abschnitt Unreleased, jeder Eintrag mit Zeitstempel und Version, mit seinem Code committet); jede Entscheidung kommt bereinigt ins DESIGN bei ihrem Baustein, und jede Entscheidungsrunde ist im Abschnitt Entscheidungsprotokoll des DESIGN festgehalten, der mit jeder Runde wächst; ein Verweis auf eine Runde in Code oder Tests zeigt auf ihren Eintrag dort. | docs/BLUEPRINT_DE.md ist das Verzeichnis; das [Entscheidungsprotokoll](#entscheidungsprotokoll) hat einen Eintrag je Runde mit dem Anker `decision-round-N`, in beiden Sprachen gleich; `tests/test_docs.py` prüft die Dateien, die Stempel, die Roadmap, die Entscheidungsblöcke dieses Abschnitts und dass jede Runde, die ein Verweis nennt, ihren Eintrag in beiden Sprachen hat. | Ein Ort für jede Frage: wie und warum, was kommt, was war. |
 | Die Dokumente bekommen einen Aufräum-Durchgang (Keep a Changelog, Roadmap); Auto-Tuning ist geplant und kommt in die Roadmap; Fachbegriffe bleiben in den deutschen Texten englisch. | Die Dokumentationsregeln in diesem Design und in CONTRIBUTING; `tests/test_docs.py`. | Leser brauchen eine einheitliche Gliederung in beiden Sprachen. |
 
 **Geschichte**
@@ -2029,6 +2030,455 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
 | Reihenfolge: die Rotationsstufe und das allgemeine ARM64-Target direkt nach den Rezepten. | ROADMAP 3.2.0 führt sie in dieser Reihenfolge. | Sie helfen den meisten Boards am schnellsten. |
 | Nachrichten von KIs kommen in einem Chat-Bereich rechts im Hauptfenster an, mit Blasen je Antwort, wo die Person fragen, Aufgaben geben und Entscheidungen hinterfragen kann. | `orchestrator/gui/chat_panel/` und der Chat-Verlauf. | Die Person muss sehen und hinterfragen können, was KIs tun, an einem Ort. |
 
+## Entscheidungsprotokoll
+
+Jede Runde der Entscheidungen des Maintainers, der Reihe nach: was sie entschied und wo diese Entscheidung jetzt in
+diesem Design steht. Das Protokoll wächst mit jeder Runde; eine neue Runde bekommt ihren Eintrag hier, mit einem Anker
+`decision-round-N`, im selben Commit, der ihre Entscheidungen in die Bausteine schreibt. Verweise in Code und Tests wie
+„DECISIONS round 25 Q2“ zeigen auf den Eintrag dieser Runde hier; Q-, Punkt- und Buchstabennummern sind die Nummern
+der Fragen innerhalb einer Runde. Was entschieden ist, steht immer bei seinem Baustein; weichen beide voneinander ab,
+gilt der Baustein.
+
+Bis Runde 65 wurde das Protokoll außerhalb des Repositorys geführt. Dieses frühere Arbeitsprotokoll ging verloren; die
+Einträge bis Runde 65 wurden aus dem wiederhergestellt, was das Repository über jede Runde sagt: den Verweisen in Code
+und Tests, den Commit-Nachrichten, dem Changelog und den Entscheidungen in diesem Design. Die Daten sind die der Commits
+und Changelog-Einträge, die eine Runde umsetzten. Runden, die nichts im Repository nennt (13, 18 bis 21, 28, 30, 31, 37
+bis 39, 41 bis 43, 45 bis 53, 55 bis 59), haben keinen Eintrag. Einige Verweise nennen eine Entscheidung mit einem
+Kürzel des früheren Protokolls statt ihrer Runde: U9 (der Build sind die vier Stufenmodule, vom Stufen-Runner des
+Frameworks der Reihe nach ausgeführt; [Build-Pipeline und Target-Module](#build-pipeline-und-target-module)) und RG5
+(die lokale Wissensbasis in Qdrant Edge, ihr alter Speicher bleibt, bis die Person ihn löscht;
+[Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest)).
+
+### Runde 1
+
+<a id="decision-round-1"></a>
+Umgesetzt am 2026-10-12. Punkt 1: Deep Ingest erreicht KI-Aufrufer nur über das Tool `crawl_docs_site`, als Job, jedes
+Mal mit jeder Startadresse gefragt und abgelehnt, solange der Crawl-Hinweis ungelesen ist. Punkt 3: Der Community-Zoo
+für KI-Aufrufer listet und installiert Pakete nur aus dem signierten Index; es gibt kein Tool, das ein Paket hochlädt
+oder einen Pull Request öffnet. Punkt 4: Status, Einstellungen und ehrliche Grenzen für KI-Aufrufer (`get_status`).
+Punkt 5: Ein externer KI-Client darf Dittos Aufgabe übernehmen: Er bekommt Dittos Aufgabentexte als Prompts und
+denselben Wissenskontext, schlägt Heilungen selbst vor (`propose_healing_fix`) und legt Target-Module über die Prüfung
+des Modulgenerators an. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist,
+steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
+[Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest),
+[Community, Rezepte und Pakete](#community-rezepte-und-pakete),
+[Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht)
+
+### Runde 2
+
+<a id="decision-round-2"></a>
+Umgesetzt am 2026-10-11 und 2026-10-12. Punkt 4: Daueranweisungen („ja, und nicht mehr fragen“) für Pakete des
+Community-Zoos; die Runden 2 bis 4 haben die Daueranweisungen zusammen geformt: nur von einer Person im eigenen Fenster
+des Frameworks angelegt, begrenzt auf Fakten, die das Framework nachgeschlagen hat. Punkte 7 und 8: die
+Hugging-Face-Tools für KI-Aufrufer; keine feste Größengrenze für einen Modell-Download (ein 72B-Modell muss möglich
+sein, wenn die Platte es fasst): Es entscheiden die Plattenregel und eine Hardware-Schätzung. Punkt 9: gemeinsamer
+Build-Zustand, damit jeder Prozess des Frameworks die Build-Aufträge der anderen sieht. (Frage und Antwort standen im
+früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
+[Hugging Face](#hugging-face), [Community, Rezepte und Pakete](#community-rezepte-und-pakete)
+
+### Runde 3
+
+<a id="decision-round-3"></a>
+Umgesetzt am 2026-10-12. Basis-Images von Target-Modulen, die eine KI vorschlägt: Jede Registry ist erlaubt; das Image
+wird vor der Frage an die Person auf den Digest festgelegt, auf den sein Tag gerade zeigt, und schlicht gezeigt
+(Registry, Image, Tag, Digest, ob es ein Docker Official Image ist); jedes `FROM` eines Dockerfiles wird gezeigt, nicht
+nur das erste (c); ein Image, das kein Docker Official Image ist, braucht die Begründung der KI, die die Person vor der
+Zustimmung liest (d). Jeder Aufgabentext trägt die Regel des ehrlichen „kann nicht“: Ein Modell, das eine Aufgabe nicht
+kann, sagt das mit dem genauen Grund. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was
+entschieden ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [Targets, Hardware und Vorlagen](#targets-hardware-und-vorlagen),
+[MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
+[Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht)
+
+### Runde 4
+
+<a id="decision-round-4"></a>
+Umgesetzt am 2026-10-11 und 2026-10-12. Punkt 1: sprechende Namen für die Person, IDs und Bezeichnungen gegenüber einer
+KI, nie die echten Pfade der Person. Punkt 3: Ein Target-Paket aus der Community fragt immer. Punkt 4: Die Zahl der
+Herstellerquellen, pip-Pakete und Downloads eines Moduls sind weiche Grenzen; eine Überschreitung ist eine Warnung, die
+die Zustimmung aufhebt, nie eine harte Sperre. Punkt 5: Die lokalen stdio-Clients teilen sich einen Aufrufer, daher
+bekommt er keine unbefristete Daueranweisung. In derselben Runde: Jedes registrierte Tool lehnt ein Argument ab, das es
+nicht kennt, mit einem Vorschlag; erklärte Aliasse sind die einzige Zuordnung. (Frage und Antwort standen im früheren
+Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
+[Community, Rezepte und Pakete](#community-rezepte-und-pakete),
+[Targets, Hardware und Vorlagen](#targets-hardware-und-vorlagen)
+
+### Runde 5
+
+<a id="decision-round-5"></a>
+Umgesetzt vom 2026-10-12 bis 2026-10-16. a: Drei Arten von Befunden entscheiden, wer eine Frage beantwortet (Blocker
+lehnen vor jeder Frage ab, für KI und Person gleich); rechtliche Warnungen bleiben bei der Person. b: Eine
+Wiederherstellung sichert das aktuelle Wissen vorher als Snapshot. f: Löschen, was die Person sehen kann, ist allein
+Sache der Person, mit der vollständigen Liste (Name, voller Pfad, Größe, was es ist) im eigenen Fenster des Frameworks,
+nie über das Formular eines Clients, eine Daueranweisung oder eine Delegation; eine KI sieht nur Bezeichnungen; das
+Framework löscht keinen älteren Build von sich aus. h: Es wird kein Framework-Image veröffentlicht oder gezogen. Die
+eigene Buchführung des Frameworks (temporäre und halbe Dateien, Staging- und Quarantäneordner) ist von der Löschregel
+ausgenommen. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in
+den verlinkten Abschnitten)
+
+Steht jetzt in: [Löschen und der Papierkorb](#löschen-und-der-papierkorb),
+[MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
+[Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten)
+
+### Runde 6
+
+<a id="decision-round-6"></a>
+Umgesetzt am 2026-10-15 und 2026-10-16. Entscheidung 9: Aus dem Doctor wird Mojo (Mojo Oracle schaut, Mojo Miracle
+repariert), mit seinem Design in Abschnitt 7 dieser Runde: Ohne Terminal laufen nur harmlose Reparaturen (Q11), die
+Ja-Schaltfläche des Löschdialogs reagiert erst nach 600 ms, Dockers Build-Cache wird nie geleert. Entscheidung 14: uv
+ersetzt Poetry für den Abhängigkeits-Lock. Wissens-Snapshots haben keine Grenze: so viele, wie die Platte fasst, keiner
+wird von selbst gelöscht, keine Zahl erinnert oder warnt. Keine Voreinstellung nennt ein Image aus einer Registry. 10.4:
+Die Person hakt eine Teilmenge einer Löschliste an (Mehrfachauswahl, anfangs nichts angehakt). H1: die geplante Ordnung
+auf dem Rechner mit einem Ordner `Data`. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was
+entschieden ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [Mojo, der Gesundheitscheck](#mojo-der-gesundheitscheck),
+[Löschen und der Papierkorb](#löschen-und-der-papierkorb),
+[Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten),
+[Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest)
+
+### Runde 7
+
+<a id="decision-round-7"></a>
+Umgesetzt vom 2026-10-15 bis 2026-10-22. Punkt 2': Ein für ein Board gebautes Modell wird auf diesem Board gemessen
+(oder in der Docker-Sandbox), nie nativ auf diesem Rechner; nativ laufen nur Dittos eigene Katalogmodelle. Punkt 6:
+`install.sh` nimmt die Person in die Gruppe `docker` auf und sagt klar, was das bedeutet (der Standard ohne Root-Rechte
+ersetzte das am 2026-10-31). Punkt 11: `llmcf` ist der neue Name der Kommandozeile, `llm-cli` bleibt; 11': die
+Mojo-Tools für KI-Clients; M' und T: Jede Warnung und jeder Fehler sagt, wo, warum und was Mojo Miracle dagegen tun
+kann. Punkt 12: Der Builder löscht nie ein Image; wo Docker seine Images ablegt, wird gezeigt. D: Dittos lokaler Server
+läuft direkt auf dem Rechner oder in Docker, sein Image wird auf diesem Rechner gebaut und nie gezogen oder hochgeladen;
+die Objekte des alten Modus gehen nach einem Ja in einer Liste endgültig. Der eigene Linux-Schlüsselbunddienst dieser
+Runde steht in der Roadmap. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden
+ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht),
+[Mojo, der Gesundheitscheck](#mojo-der-gesundheitscheck),
+[Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
+[Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten),
+[Deployment auf Boards](#deployment-auf-boards)
+
+### Runde 8
+
+<a id="decision-round-8"></a>
+Umgesetzt am 2026-10-16. Antwort 2: Vor jedem Wissens-Snapshot wird seine Größe geschätzt; passt er nicht, wird die
+Änderung, die ihn braucht, abgelehnt, und nichts wird von selbst gelöscht. Antwort 3: Fertige Modelle (Golden Artifacts)
+kommen über einen Speichern-Dialog in den Ausgabeordner der Person (`~/llmcf/output`); der Build einer KI kommt ohne
+Dialog dorthin. Q-1 und Q-1': Lizenz und Urheberrecht jeder gecrawlten Seite werden festgehalten, und ein Wissenspaket
+trägt den vollen Text einer Seite nur, wo ihre Lizenz es erlaubt. Q-2: Ditto bleibt optional und wird als experimentell
+markiert. Q-3: Builds in der Cloud oder auf gemieteten Maschinen wurden gestrichen. „HYBRID CLARIFIED“: Der Remote-Modus
+ist weg, Dittos Hände sind die eigenen Tools des Frameworks auf diesem Rechner; W4: Das GUI-Tool gibt KI-Apps dieselben
+Hände. N3: „getestet auf Board X“; N4 bis N7: Deployment auf Boards über ein Netz, das abbricht (Hostnamen, Gründe,
+warum ein Board nicht erreichbar ist, die Art des KV-Caches); N8: Build-Fortschritt; N9, N9', N9'': Das Board, auf das
+eine Messung zeigt, ist nur eine Empfehlung; N10: die Dokumentationslinks eines Boards für Deep Ingest; N11: Gleiche
+Builds werden vor dem Bauen genannt; N12: Die eigenen Dokumente des Frameworks werden nur auf Wunsch indiziert; N13: ein
+Snapshot vor jedem Import eines Wissenspakets; N15: Reste einzeln entschieden.
+
+Steht jetzt in: [Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest),
+[Build-Pipeline und Target-Module](#build-pipeline-und-target-module), [Deployment auf Boards](#deployment-auf-boards),
+[Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht),
+[MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen),
+[Wichtige Entscheidungen](#wichtige-entscheidungen)
+
+### Runde 9
+
+<a id="decision-round-9"></a>
+Umgesetzt am 2026-10-17. U1 und Folge b: Was Ditto oder eine KI-App über die Tools des Frameworks tut, erscheint als
+Zeile im Chat-Verlauf und in den eigenen Fenstern des Frameworks. U2: Der Mausweg ist für die Person, denn viele
+Menschen benutzen nie ein Terminal: Die GUI sagt einer Person nie, sie solle einen Befehl tippen. (Frage und Antwort
+standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [GUI und der Weg der Person](#gui-und-der-weg-der-person),
+[MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen)
+
+### Runde 10
+
+<a id="decision-round-10"></a>
+Umgesetzt am 2026-10-17. Q1: Deutsche Texte sagen „du“, „Sie“ wählt die Person. Q2: der Aufbau der Menüleiste (die
+KI-Verwaltung zog ins Menü Ditto). Q5: Nur die eigenen Wege der Person (GUI und CLI) schreiben das Vertrauen in ein
+Board. Q7: Das Fehlerfenster sagt in einfachen Worten, was geschah, warum, wenn es bekannt ist, und einen nächsten
+Schritt. V1 und V2: Nächste Schritte sind Daten statt handgeschriebener Befehle, je Zielgruppe dargestellt, mit
+Mauswegen aus der Menütabelle. V6: Fachbegriffe werden beim Überfahren mit der Maus aus einem Glossar erklärt. Verweise
+nennen auch einen Teil 10b mit der Umbenennung des Repositorys in LLM_Cross-Compiler_Framework. (Frage und Antwort
+standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [GUI und der Weg der Person](#gui-und-der-weg-der-person),
+[SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote),
+[Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten)
+
+### Runde 11
+
+<a id="decision-round-11"></a>
+Umgesetzt vom 2026-10-17 bis 2026-10-23. A2: ein Repository, seine Schichten durch einen Test erzwungen. A3: PySide6 ist
+das optionale Extra `gui`; Kern, Kommandozeile und MCP-Server laufen ohne Qt (Installationen ohne Bildschirm und auf
+Servern). A5: Der OpenSSH-Rückfall ist ein zweiter Transport, kein zweites Deployment. A6: Die Downloads der Person im
+Hugging-Face-Browser der GUI gehen wie die einer KI durch den geprüften Abrufer des Frameworks, mit einer optionalen
+einmaligen Übernahme des alten Download-Caches. D-del: Von den aufgeführten Entfernungen geht nur Punkt 1; andere
+ersetzte Helfer bleiben als Delegaten. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was
+entschieden ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung),
+[Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten),
+[SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote), [Hugging Face](#hugging-face)
+
+### Runde 12
+
+<a id="decision-round-12"></a>
+Umgesetzt am 2026-10-17. Aufräumen mit Erkundung zuerst und einer Umsetzung: Neuerer Code nutzt das Original, wo beide
+dasselbe tun. Punkt 1: Der eigene Mess-Worker der GUI geht, das Ersatz-Messskript hat einen Ausführer. Punkt 6: Builds
+laufen über einen Weg (BuildService, Orchestrator, BuildEngine), und der Builder zeigt CPU und Speicher des laufenden
+Build-Containers. Punkte 10 und 11: doppelte Prüfhelfer und eine ungenutzte Download-Funktion gehen. Eine Docker-Prüfung
+und ein Ausführer für kurze Befehle. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was
+entschieden ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung),
+[Build-Pipeline und Target-Module](#build-pipeline-und-target-module)
+
+### Runden 14 und 15
+
+<a id="decision-round-14"></a><a id="decision-round-15"></a>
+Am 2026-10-22 in die Roadmap geschrieben: ein Build-Dienst, den GUI, CLI und MCP-Server als Clients nutzen (Fortsetzen
+an der letzten fertigen Stufe), eine Warteschlange über alle Programme mit Zulassung nach RAM, CPU und Platte, privater
+und Unternehmensmodus, Secret-Backends, Kubernetes und Nomad als wählbare Orte für Builds und die neuesten passenden
+Versionen. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den
+verlinkten Abschnitten)
+
+Steht jetzt in: [Build-Dienst, Warteschlange und Modi (geplant)](#build-dienst-warteschlange-und-modi-geplant)
+
+### Runde 16
+
+<a id="decision-round-16"></a>
+Umgesetzt am 2026-10-22. G4: Arbeit auf einem Board läuft weiter, wenn die Verbindung abbricht, und wird danach wieder
+verfolgt. Nachtrag zu U9: was das Konvertierungsmodul der Version 1.x im ursprünglichen Design des Maintainers versprach
+und nie hatte (Formaterkennung, Integritätsprüfungen, Statistik, ein Funktionstest), und jedes der vier Stufenmodule
+läuft wieder für sich mit seinen Optionen. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging;
+was entschieden ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
+[Deployment auf Boards](#deployment-auf-boards)
+
+### Runde 17
+
+<a id="decision-round-17"></a>
+Umgesetzt am 2026-10-23. ONNX nach GGUF wird mit dem klaren Grund abgelehnt (llama.cpp hat keinen Konverter aus ONNX)
+und nennt stattdessen das Format rknn für die NPU. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren
+ging; was entschieden ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module)
+
+### Runde 22
+
+<a id="decision-round-22"></a>
+Umgesetzt am 2026-10-23. P5: Der alte Schreiber eines bestätigten Host-Schlüssels ist veraltet und ein dünner Delegat
+auf den einen Schreiber, nur für die Person; nichts wird ohne das Wort des Maintainers entfernt. P6: Bestätigt die
+Person einen neuen Host-Schlüssel eines Boards, ziehen die Daten des Boards zu seiner neuen Geräte-ID um. (Frage und
+Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten
+Abschnitten)
+
+Steht jetzt in: [SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote)
+
+### Runde 23
+
+<a id="decision-round-23"></a>
+Umgesetzt am 2026-10-23 und 2026-10-24. Punkte 1, 2 und 8: Wissen gehört immer zu einem Thema oder einem Target: Eine
+lose Datei wird nie importiert, bevor die Person sie einsortiert, die neue Version eines Pakets ersetzt seine alten
+Auszüge, der Snapshot eines Target-Pakets wird beim Empfänger unter seinem Target importiert. Punkt 3: Die Installer
+laden nichts ungeprüft herunter (Docker aus seinem apt-Repository mit geprüftem Schlüssel, kein ungeprüftes
+pip-Upgrade). Punkt 4: Die Ergebnisse von hadolint werden unterschieden. Punkt 5: Die Hardware-Messung des Boards geht
+in jeden Build. Punkt 6: die Container-Tabelle des Deployment-Tabs. Punkt 7: Ein Build bietet genau die Formate an, die
+sein Target erklärt. Punkt 9: „Verwenden“ kopiert einen gleichen früheren Build. Punkt 10: Die Optimierungsprofile,
+Benchmark-Zeilen und Modellvorschläge sind nutzbare Daten, ungemessene Werte markiert. Punkt 11: die neuen Schlüssel der
+Messung (Level-2-Cache, Vulkan, OpenCL). Punkt 12: Der Modell-Download zeigt einen Prozentwert. Punkt 14: das
+Rockchip-Image in zwei Stufen. Punkt 15: ein NPU-Format nur mit dieser NPU in der Messung, RKLLM nur auf einem
+x86_64-Build-Rechner. Punkt 16: die Temperatur des Boards während der Prüfungen auf ihm.
+
+Steht jetzt in: [Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest),
+[Community, Rezepte und Pakete](#community-rezepte-und-pakete),
+[Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten),
+[Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
+[Targets, Hardware und Vorlagen](#targets-hardware-und-vorlagen), [Deployment auf Boards](#deployment-auf-boards)
+
+### Runde 24
+
+<a id="decision-round-24"></a>
+Umgesetzt am 2026-10-23. L-NET: Der Offline-Modus erreicht nur diesen Rechner und das eigene Netz der Person, nach einer
+Regel für die Netz-Nähe, und jeder Zugriff nach außen wird nach ihr beurteilt (Docker-Images, der Qdrant-Server, die
+Anmeldeprüfung, der Ersatz des llama.cpp-Repositorys, der Sicherheits-Scan). „L-NET final“: Die Person darf ein VPN,
+einen Host oder einen Adressbereich als lokal zählen; nur die Person schreibt diese Ausnahmen, nie eine KI. PKG:
+`install.sh` installiert auf jeder Linux-Familie über den eigenen Paketmanager der Familie.
+
+Steht jetzt in: [Offline-Modus und das eigene Netz](#offline-modus-und-das-eigene-netz),
+[Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten)
+
+### Runde 25
+
+<a id="decision-round-25"></a>
+Umgesetzt am 2026-10-23. Q1: Ein Offline-Build lädt sein Modell nie herunter; er nimmt die Kopie auf diesem Rechner oder
+ein Modell, das schon hier ist. Q2: Ein Hugging-Face-Token geht nur dorthin, wo Hugging Face eines braucht (ein
+zugangsbeschränktes oder privates Repository), kein stillschweigendes Token und keine Telemetrie für irgendeine
+Bibliothek, und die Modelle der Wissensbasis kommen über den eigenen Abrufer des Frameworks. Q3: eine Audit-Senke für
+die Board-Entscheidungen der Person. Q4: die eigene OpenSSH-Einstellungsdatei des Frameworks, mit `-F` übergeben, mit
+dem Import der Person aus `~/.ssh/config`. Q5: Ein '%' in einem Pfad wird für OpenSSH als '%%' geschrieben. Q6: Die
+CMake-Optionen eines Moduls folgen einer Zulassungsliste, und eine gültige Option außerhalb davon entscheidet die
+Person, gemerkt je Modulversion; Nachtrag: Was eine Download-Option holen würde, wird vor dem Build geholt, festgelegt,
+geprüft und schreibgeschützt eingebunden. Q7: x86 wird für eine andere Maschine mit ausdrücklichen Flags geplant,
+`-march=native` nur für diese Maschine. Q8: keine harte Zeitgrenze für einen Build-Schritt: eine weiche Grenze, die nur
+einen von einer KI gestarteten Build stoppt, eine Leerlaufgrenze und Schleifenschutz, und die Statistik des Builds in
+seinem Manifest. Mit Runde 24: Der Offline-Modus nutzt nur Docker-Images auf diesem Rechner oder in einer lokalen
+Registry.
+
+Steht jetzt in: [Offline-Modus und das eigene Netz](#offline-modus-und-das-eigene-netz), [Hugging Face](#hugging-face),
+[SSH, Host-Schlüssel und das Paket remote](#ssh-host-schlüssel-und-das-paket-remote),
+[Build-Pipeline und Target-Module](#build-pipeline-und-target-module)
+
+### Runde 26
+
+<a id="decision-round-26"></a>
+Umgesetzt am 2026-10-23. Q1: Docker CE ist die Standard-Container-Engine (auch auf den RHEL-Nachbauten), Podman der
+Rückfall (der Standard ohne Root-Rechte ersetzte das am 2026-10-31); ein Build, den die Engine nicht wie verlangt
+ausführen kann (eine GPU unter Podman), wird abgelehnt, bevor er eingereiht wird. Q3: Die Ausnahmen der Person zählen
+nur dafür, was der Offline-Modus erreichen darf, nie für die Einstufung eines Anbieters als lokal oder Cloud. Q4: Ein
+Name mit lokalen und öffentlichen Adressen zählt nur über seine lokalen Adressen als lokal, und eine Verbindung geht nur
+zu diesen. Q5: Im Offline-Modus liest ein Crawl, den die Person startet, das eigene Netz, nie einen Metadatendienst
+einer Cloud oder eine link-lokale Adresse. f: Der Ersatz des llama.cpp-Repositorys muss ein Spiegel im eigenen Netz
+sein. g: Ein internationaler Hostname im Offline-Modus nur in seiner Form `xn--`. h: Eine VPN-Adresse zählt nur für ein
+Gerät des Tailnets.
+
+Steht jetzt in: [Offline-Modus und das eigene Netz](#offline-modus-und-das-eigene-netz),
+[Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten),
+[Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest)
+
+### Runde 27
+
+<a id="decision-round-27"></a>
+Umgesetzt am 2026-10-24. Mojo schließt den Kreis: Endet Mojo Miracle nach Mojo Oracle an einem Terminal, zeigt die
+Konsole Mojos Kristallkugel und eine Zeile, die sagt, wie es lief; ein Nachtrag derselben Runde legte den Wortlaut der
+Zeile fest. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in
+den verlinkten Abschnitten)
+
+Steht jetzt in: [Mojo, der Gesundheitscheck](#mojo-der-gesundheitscheck)
+
+### Runden 29, 32 und 33
+
+<a id="decision-round-29"></a><a id="decision-round-32"></a><a id="decision-round-33"></a>
+Dittos Kontext: geringere Kosten bei Cloud-Anbietern und ein lokaler KV-Cache, der nicht so schnell überläuft; die
+Kontextgrenze und das Verdichten hängen vom Modell ab. Die Arbeit steht in der Roadmap. (Frage und Antwort standen im
+früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht)
+
+### Runde 34
+
+<a id="decision-round-34"></a>
+Entschieden und umgesetzt am 2026-10-29. Der Bauplan besteht aus drei Dateien mit deutschen Zwillingen: dem Design, der
+Roadmap und dem Changelog; `docs/BLUEPRINT_DE.md` ist ihr kurzes Verzeichnis. Der Changelog hat keinen Abschnitt
+Unreleased und führt nur fertige Arbeit; jeder Eintrag trägt Zeitstempel und Version, der deutsche Eintrag den Stempel
+seines englischen Zwillings. Die Roadmap kennt kein „fertig“: Ein fertiger Punkt verlässt sie im Commit, der seinen
+Changelog-Eintrag schreibt. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden
+ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [Dokumentation und der Bauplan](#dokumentation-und-der-bauplan)
+
+### Runde 35
+
+<a id="decision-round-35"></a>
+Umgesetzt am 2026-10-29. Der Bauplan ist bereinigt: keine Host-Adresse außerhalb der Dokumentationsbereiche, keine
+E-Mail-Adresse, kein Home-Ordner einer Person, kein Token und nichts, was sagt, welche Hardware der Maintainer besitzt;
+jeder Baustein des Designs hat seine Entscheidungen mit was, wie und warum. (Frage und Antwort standen im früheren
+Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [Dokumentation und der Bauplan](#dokumentation-und-der-bauplan)
+
+### Runde 36
+
+<a id="decision-round-36"></a>
+Umgesetzt am 2026-10-30. Offline-Modus heißt kein Internet; das eigene Netz darf da sein. Deshalb darf der Offline-Modus
+das Build-Container-Image bauen, wenn jede Quelle lokal ist (apt und pip über die Spiegel der Person im eigenen Netz,
+jeder andere Paketmanager wird genannt); sonst hält er früh an und nennt die fehlende Quelle. Images lassen sich als
+geprüfte Dateien exportieren und importieren (Build > Build-Container-Images..., `llm-cli build image`). (Frage und
+Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten
+Abschnitten)
+
+Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
+[Offline-Modus und das eigene Netz](#offline-modus-und-das-eigene-netz)
+
+### Runde 40
+
+<a id="decision-round-40"></a>
+Umgesetzt am 2026-10-30. Ein Build endet an seiner Fertig-Marke: Der Stufen-Runner schreibt als allerletzten Schritt
+einen Abschlussdatensatz mit einem Endgrund aus festem Wortschatz, und ein fertiger Build wird nie von einer Uhr
+gestoppt (ein Container, der „done“ schrieb, bekommt 30 Sekunden zum Beenden). Jeder Build bekommt genau eine Zeile im
+Chat-Verlauf, und das Fortschrittsfeld des Builders nennt den Endgrund in einfachen Worten. Die MQTT-Türklingel schickt
+das Ende jedes Builds an einen Broker, den die Person angibt; nur die Person stellt sie ein. (Frage und Antwort standen
+im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
+[MCP-Server, Tools und Berechtigungen](#mcp-server-tools-und-berechtigungen)
+
+### Runde 44
+
+<a id="decision-round-44"></a>
+Umgesetzt am 2026-10-31. Punkt 1: Der Helfer des Stufenkontos ist in jedem Build-Kontext der eigene des Frameworks; ein
+Target kann keinen eigenen mitbringen. Punkt 2: eine gemeinsame Gruppe für den Stufen-Runner und das Stufenkonto. (Frage
+und Antwort standen im früheren Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten
+Abschnitten)
+
+Steht jetzt in: [Build-Pipeline und Target-Module](#build-pipeline-und-target-module)
+
+### Runde 54
+
+<a id="decision-round-54"></a>
+Umgesetzt am 2026-11-02. Das Agent Client Protocol: Ditto als ACP-Agent für Editoren und llmcf als ACP-Client, der
+Agenten ausführt, die die Person auswählt, mit den Tools des Frameworks. (Frage und Antwort standen im früheren
+Arbeitsprotokoll, das verloren ging; was entschieden ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [ACP-Agent (Ditto in Editoren)](#acp-agent-ditto-in-editoren),
+[ACP-Client: Agenten, die die Person auswählt](#acp-client-agenten-die-die-person-auswählt)
+
+### Runden 60 bis 64
+
+<a id="decision-round-60"></a><a id="decision-round-61"></a><a id="decision-round-62"></a><a id="decision-round-63"></a><a id="decision-round-64"></a>
+Entschieden zwischen 2026-11-06 und 2026-11-08 und umgesetzt am 2026-11-07 und 2026-11-08 (Changelog 3.4.0); welche
+dieser Runden welches Thema entschied, ist nicht festgehalten. Das Gateway des Boards ist der Ressourcenplaner der
+Modelle: eine faire Warteschlange statt Ablehnungen, ein Speicherwächter (`MemAvailable` und die Pressure Stall
+Information), `OOMScoreAdjust` -500 für das Gateway und 500 für die Engines; die Engines laufen zusammen oder
+abwechselnd, wie die Person wählt, mit gemessener Passung; `allow_unit_control` lässt das Gateway genau die Units seines
+Bundles starten und stoppen (eine polkit-Regel ab polkit 0.106, sonst eine sudoers-Datei); abwechselnd starten die
+Engine-Units bei Bedarf. Sprache und Bilder gehen über das Gateway. Das Gateway ist ein universeller Adapter: Jeder
+Baustein sagt, wie seine Engine erreicht wird (`reach`), und der Bundle-Generator macht daraus die Routentabelle
+`routes.json`; Modellfamilien und ihre Vor- und Nachverarbeitung kommen aus Target-Modulen und Bausteinen. Ein Baustein
+kann aus einem Hugging-Face-Modell vorgeschlagen werden; die Person prüft und schreibt ihn, eine KI schreibt oder
+signiert nie einen Baustein. Ein tragbares Modellarchiv für einen Rechner ohne Netz; keine Gewichte im Repository, die
+Person entscheidet von Fall zu Fall. Ein Harness wird aus jedem üblichen Archiv- und Disk-Image-Format übernommen, an
+seinem Inhalt erkannt (mit dem eigenen ext4-Leser des Frameworks), das Passwort eines Archivs geht nur über die
+Standardeingabe, die fehlende Root-Bereitschaft wird mit dem Ja der Person angeboten, und Konten und Dienste, die der
+Installer des Harness mitbringt, werden erkannt. (Frage und Antwort standen im früheren Arbeitsprotokoll, das verloren
+ging; was entschieden ist, steht in den verlinkten Abschnitten)
+
+Steht jetzt in: [Auf dem Board: Gateway, Sprache und MCP (geplant)](#auf-dem-board-gateway-sprache-und-mcp-geplant),
+[Deployment auf Boards](#deployment-auf-boards)
+
+### Runde 65
+
+<a id="decision-round-65"></a>
+Umgesetzt am 2026-11-08 und 2026-11-09. Python-Abhängigkeiten sind Bereiche von der getesteten Version bis vor die
+nächste Hauptversion (bei 0.x-Paketen bis vor die nächste Nebenversion), keine Festlegung auf alte Versionen; nur
+`pyrage` bleibt exakt. Eine Wartezeit von 5 Tagen (`exclude-newer = "5 days"`) für jedes Lock, mit datierten Ausnahmen
+je Paket; pypdf 7.0.0 wurde wegen seiner Sicherheitskorrekturen innerhalb der Wartezeit übernommen. Jeder Lauf des
+Installers löst die neueste verträgliche Menge frisch auf, prüft sie auf Schwachstellen, prüft die neue Umgebung und
+fällt auf das getestete Lock zurück; `--offline` installiert das getestete Lock. Ein wöchentlicher Aktualisierungslauf
+öffnet einen Pull Request aus dem Zweig `deps/update` (eine erlaubte Ausnahme von der Regel der Zweige `main` und
+`development`); Testumgebungen entstehen nur aus dem Lock. Der Updater führt nur den Installer erneut aus (`llm-cli
+update`, Extras > Wartung > Framework aktualisieren...).
+
+Steht jetzt in: [Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten)
+
 ## Versionierung und Dokumentationsregeln
 
 - **Semantic Versioning 2.0.0.** MAJOR für inkompatible Änderungen, MINOR für neue Funktionen, PATCH für
@@ -2062,10 +2512,10 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
   2026-10-29“ (Englisch: „Version 3.1.0 · Last updated 2026-10-29“).
 - **Nur was es gibt.** Dokumente beschreiben den Code ihres Zweigs, geprüft am Code und an der Ausgabe von
   `--help`. Was nicht gebaut ist, gehört in die Roadmap.
-- **Entscheidungen stehen hier.** Die Entscheidungen des Maintainers werden in einem Arbeitsprotokoll gesammelt, das
-  außerhalb des Repositorys liegt; jede wird, ohne private Daten, in dieses Design übernommen, beim Baustein, den sie
-  betrifft (siehe [Bausteine und Entscheidungen](#bausteine-und-entscheidungen)). Die neueste Entscheidung gilt; eine
-  ersetzte bleibt als eine Zeile Geschichte stehen.
+- **Entscheidungen stehen hier.** Jede Entscheidung des Maintainers wird, ohne private Daten, in dieses Design
+  übernommen, beim Baustein, den sie betrifft (siehe [Bausteine und Entscheidungen](#bausteine-und-entscheidungen)),
+  und jede Entscheidungsrunde bekommt ihren Eintrag im [Entscheidungsprotokoll](#entscheidungsprotokoll), das mit jeder
+  Runde wächst. Die neueste Entscheidung gilt; eine ersetzte bleibt als eine Zeile Geschichte stehen.
 
 ## Geschichte
 

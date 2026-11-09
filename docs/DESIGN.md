@@ -1,4 +1,4 @@
-Version 3.4.0 · Last updated 2026-11-08
+Version 3.4.0 · Last updated 2026-11-09
 
 **English** · [Deutsch](DESIGN_DE.md)
 
@@ -21,6 +21,7 @@ yet is in the roadmap, not here.
 - [Components and decisions](#components-and-decisions)
 - [Security model](#security-model)
 - [Key decisions](#key-decisions)
+- [Decision log](#decision-log)
 - [Versioning and documentation policy](#versioning-and-documentation-policy)
 - [History](#history)
 - [Glossary](#glossary)
@@ -1140,10 +1141,10 @@ Nothing secret is remembered.
 ## Components and decisions
 
 Every component in detail, with the decisions that shape it: what each decision says, how the code does it (or the
-roadmap row that will) and why. The maintainer's decisions are collected in a working log outside the repository; each
-one is written here at the component it concerns, without private data. The newest decision wins; a replaced one stays
-as one line under **History** (round and date, what it said, what replaced it). Decisions that concern no single
-component are under [Key decisions](#key-decisions).
+roadmap row that will) and why. Each of the maintainer's decisions is written here at the component it concerns,
+without private data, and each round of decisions is recorded in the [Decision log](#decision-log). The newest
+decision wins; a replaced one stays as one line under **History** (round and date, what it said, what replaced it).
+Decisions that concern no single component are under [Key decisions](#key-decisions).
 
 ### Build pipeline and target modules
 
@@ -1779,7 +1780,7 @@ Every document exists in English and German; the blueprint is three files: this 
 
 | What | How | Why |
 |---|---|---|
-| The blueprint is three files with German twins: DESIGN (every component and decision: what, how, why), ROADMAP (what comes) and CHANGELOG (what was: only finished, wired, tested and committed work, Keep a Changelog types, no Unreleased section, every entry with time stamp and version, committed with its code); every decision goes into DESIGN at its component, scrubbed; the decisions log stays outside the repository as a working log. | docs/BLUEPRINT.md is the index; `tests/test_docs.py` checks the files, the stamps, the roadmap and this section's decision blocks. | One place for each question: how and why, what comes, what was. |
+| The blueprint is three files with German twins: DESIGN (every component and decision: what, how, why), ROADMAP (what comes) and CHANGELOG (what was: only finished, wired, tested and committed work, Keep a Changelog types, no Unreleased section, every entry with time stamp and version, committed with its code); every decision goes into DESIGN at its component, scrubbed, and each round of decisions is recorded in the Decision log section of DESIGN, which grows with every round; a reference to a round in code or tests points to its entry there. | docs/BLUEPRINT.md is the index; [Decision log](#decision-log) has one entry per round with the anchor `decision-round-N`, the same in both languages; `tests/test_docs.py` checks the files, the stamps, the roadmap, this section's decision blocks and that every round a reference names has its entry in both languages. | One place for each question: how and why, what comes, what was. |
 | The documents get a clean-up pass (Keep a Changelog, roadmap); Auto-Tuning is planned and goes into the roadmap; technical terms stay English in the German texts. | The documentation rules in this design and CONTRIBUTING; `tests/test_docs.py`. | Readers need one consistent structure in both languages. |
 
 **History**
@@ -1918,6 +1919,430 @@ These are real limitations of the current state. Most are scheduled in the [road
 | Order: the rotation stage and the generic ARM64 target right after the recipes. | ROADMAP 3.2.0 lists them in this order. | They help the most boards soonest. |
 | Messages of AIs arrive in a chat panel on the right of the main window, with bubbles per answer, where the person can ask, give tasks and question decisions. | `orchestrator/gui/chat_panel/` and the chat feed. | The person must see and question what AIs do, in one place. |
 
+## Decision log
+
+Every round of the maintainer's decisions, in order: what it decided, and where that decision now lives in this
+design. The log grows with every round; a new round gets its entry here, with an anchor `decision-round-N`, in the
+same commit that writes its decisions into the components. References in code and tests such as "DECISIONS round 25
+Q2" point to the entry of that round here; Q, item and letter numbers are the numbers of the questions within a
+round. What is decided always stands at its component; where the two differ, the component wins.
+
+Until round 65 the log was kept outside the repository. That earlier working log was lost; the entries up to round
+65 were rebuilt from what the repository says about each round: the references in code and tests, the commit
+messages, the changelog and the decisions in this design. The dates are those of the commits and changelog entries
+that carried a round out. Rounds that nothing in the repository names (13, 18 to 21, 28, 30, 31, 37 to 39, 41 to 43,
+45 to 53, 55 to 59) have no entry. A few references name a decision by a label of the earlier log instead of its
+round: U9 (the build is the four stage modules, run in order by the framework's stage runner;
+[Build pipeline and target modules](#build-pipeline-and-target-modules)) and RG5 (the local knowledge base in Qdrant
+Edge, its old storage kept until the person deletes it; [Knowledge base and Deep Ingest](#knowledge-base-and-deep-ingest)).
+
+### Round 1
+
+<a id="decision-round-1"></a>
+Implemented 2026-10-12. Item 1: Deep Ingest reaches AI callers only through the tool `crawl_docs_site`, as a job, asked
+every time with every start address, and refused while the crawl notice is unread. Item 3: the community zoo for AI
+callers lists and installs packs from the signed index only; there is no tool that uploads a pack or opens a pull
+request. Item 4: status, settings and honest limits for AI callers (`get_status`). Item 5: an external AI client may do
+Ditto's job: it gets Ditto's task texts as prompts and the same knowledge context, proposes healing fixes itself
+(`propose_healing_fix`) and creates target modules through the module generator's validation. (the original question and
+answer were in the earlier working log, which was lost; what is decided stands in the linked sections)
+
+Now in: [MCP server, tools and permissions](#mcp-server-tools-and-permissions),
+[Knowledge base and Deep Ingest](#knowledge-base-and-deep-ingest),
+[Community, recipes and packs](#community-recipes-and-packs),
+[Ditto, the local runtime and the LLM layer](#ditto-the-local-runtime-and-the-llm-layer)
+
+### Round 2
+
+<a id="decision-round-2"></a>
+Implemented 2026-10-11 to 2026-10-12. Item 4: standing approvals ("yes, and do not ask again") for packs of the
+community zoo; rounds 2 to 4 together shaped the standing approvals: created only by a person in the framework's own
+window, scoped to facts the framework looked up. Items 7 and 8: the Hugging Face tools for AI callers; no fixed size cap
+for a model download (a 72B model must be possible when the disk holds it): the disk rule and a hardware estimate
+decide. Item 9: shared build state, so every framework process sees the build requests of the others. (the original
+question and answer were in the earlier working log, which was lost; what is decided stands in the linked sections)
+
+Now in: [MCP server, tools and permissions](#mcp-server-tools-and-permissions), [Hugging Face](#hugging-face),
+[Community, recipes and packs](#community-recipes-and-packs)
+
+### Round 3
+
+<a id="decision-round-3"></a>
+Implemented 2026-10-12. Base images of AI-proposed target modules: any registry is allowed; the image is pinned to the
+digest its tag points at now, before the person is asked, and shown plainly (registry, image, tag, digest, whether it is
+a Docker Official Image); every `FROM` of a Dockerfile is shown, not only the first (c); an image that is not a Docker
+Official Image needs the AI's reason, which the person reads before approving (d). Every task text carries the
+honest-"cannot" rule: a model that cannot do a task says so with the specific reason. (the original question and answer
+were in the earlier working log, which was lost; what is decided stands in the linked sections)
+
+Now in: [Targets, hardware and templates](#targets-hardware-and-templates),
+[MCP server, tools and permissions](#mcp-server-tools-and-permissions),
+[Ditto, the local runtime and the LLM layer](#ditto-the-local-runtime-and-the-llm-layer)
+
+### Round 4
+
+<a id="decision-round-4"></a>
+Implemented 2026-10-11 to 2026-10-12. Item 1: speaking names for the person, ids and labels toward an AI, never the
+person's real paths. Item 3: a community target pack always asks. Item 4: counts of vendor sources, pip packages and
+downloads of a module are soft caps; going above one is a warning that approving overrides, never a hard block. Item 5:
+the local stdio clients share one caller, so it gets no open-ended standing approval. In the same round: every
+registered tool refuses an argument it does not know, with a suggestion; declared aliases are the only mapping. (the
+original question and answer were in the earlier working log, which was lost; what is decided stands in the linked
+sections)
+
+Now in: [MCP server, tools and permissions](#mcp-server-tools-and-permissions),
+[Community, recipes and packs](#community-recipes-and-packs),
+[Targets, hardware and templates](#targets-hardware-and-templates)
+
+### Round 5
+
+<a id="decision-round-5"></a>
+Implemented 2026-10-12 to 2026-10-16. a: three kinds of findings decide who answers a question (blockers refuse before
+any question, for the AI and the person alike); legal warnings stay with the person. b: a restore saves the current
+knowledge as a snapshot first. f: deleting anything the person can see is the person's alone, with the full list (name,
+full path, size, what it is) in the framework's own window, never through a client's form, a standing approval or a
+delegation; an AI sees labels only; the framework deletes no older build by itself. h: no framework image is published
+or pulled. The framework's own bookkeeping (temporary and partial files, staging and quarantine folders) is exempt from
+the deletion rule. (the original question and answer were in the earlier working log, which was lost; what is decided
+stands in the linked sections)
+
+Now in: [Deletion and the trash](#deletion-and-the-trash),
+[MCP server, tools and permissions](#mcp-server-tools-and-permissions),
+[Installer, platforms and dependencies](#installer-platforms-and-dependencies)
+
+### Round 6
+
+<a id="decision-round-6"></a>
+Implemented 2026-10-15 to 2026-10-16. Decision 9: the Doctor becomes Mojo (Mojo Oracle looks, Mojo Miracle repairs),
+with its design in section 7 of that round: only harmless repairs run without a terminal (Q11), the deletion dialog's
+yes button reacts only after 600 ms, Docker's build cache is never cleared. Decision 14: uv replaces Poetry for the
+dependency lock. Knowledge snapshots have no limit: as many as the disk holds, none deleted by itself, no count that
+reminds or warns. No default names a registry image. 10.4: the person ticks a subset of a deletion list (multiple
+choice, nothing ticked at first). H1: the planned host layout with one `Data` folder. (the original question and answer
+were in the earlier working log, which was lost; what is decided stands in the linked sections)
+
+Now in: [Mojo, the health check](#mojo-the-health-check), [Deletion and the trash](#deletion-and-the-trash),
+[Installer, platforms and dependencies](#installer-platforms-and-dependencies),
+[Knowledge base and Deep Ingest](#knowledge-base-and-deep-ingest)
+
+### Round 7
+
+<a id="decision-round-7"></a>
+Implemented 2026-10-15 to 2026-10-22. Item 2': a model built for a board is measured on that board (or in the Docker
+sandbox), never natively on this computer; only Ditto's own catalog models run natively. Item 6: `install.sh` adds the
+person to the `docker` group and says plainly what that means (the rootless default replaced this on 2026-10-31). Item
+11: `llmcf` is the command line's new name, `llm-cli` stays; 11': the Mojo tools for AI clients; M' and T: every warning
+and error says where, why and what Mojo Miracle can do about it. Item 12: the builder never deletes an image; where
+Docker keeps its images is shown. D: Ditto's local server runs bare metal or in Docker, its image built on this computer
+and never pulled or pushed; the old mode's objects go in one list, for good, after one yes. The own Linux keyring
+service of this round is on the roadmap. (the original question and answer were in the earlier working log, which was
+lost; what is decided stands in the linked sections)
+
+Now in: [Ditto, the local runtime and the LLM layer](#ditto-the-local-runtime-and-the-llm-layer),
+[Mojo, the health check](#mojo-the-health-check),
+[Build pipeline and target modules](#build-pipeline-and-target-modules),
+[Installer, platforms and dependencies](#installer-platforms-and-dependencies),
+[Deployment to boards](#deployment-to-boards)
+
+### Round 8
+
+<a id="decision-round-8"></a>
+Implemented 2026-10-16. Answer 2: before every knowledge snapshot its size is estimated; when it does not fit, the
+change that needs it is refused and nothing is deleted by itself. Answer 3: finished models (golden artifacts) go to the
+person's output folder (`~/llmcf/output`) through a save dialog; an AI's build goes there without a dialog. Q-1 and
+Q-1': the licence and copyright of every crawled page are recorded, and a knowledge pack carries a page's full text only
+where its licence allows it. Q-2: Ditto stays optional and is marked experimental. Q-3: builds in the cloud or on rented
+machines were struck. "HYBRID CLARIFIED": the remote mode is gone, Ditto's hands are the framework's own tools on this
+computer; W4: the GUI tool gives AI apps the same hands. N3: "tested on board X"; N4 to N7: board deployment over a
+network that drops (host names, reasons why a board cannot be reached, the KV cache type); N8: build progress; N9, N9',
+N9'': the board a probe points to is only a recommendation; N10: the documentation links of a board for Deep Ingest;
+N11: identical builds are named before building; N12: the framework's own documents are indexed only on request; N13: a
+snapshot before every knowledge pack import; N15: residues decided one by one.
+
+Now in: [Knowledge base and Deep Ingest](#knowledge-base-and-deep-ingest),
+[Build pipeline and target modules](#build-pipeline-and-target-modules), [Deployment to boards](#deployment-to-boards),
+[Ditto, the local runtime and the LLM layer](#ditto-the-local-runtime-and-the-llm-layer),
+[MCP server, tools and permissions](#mcp-server-tools-and-permissions), [Key decisions](#key-decisions)
+
+### Round 9
+
+<a id="decision-round-9"></a>
+Implemented 2026-10-17. U1 and consequence b: what Ditto or an AI app does through the framework's tools shows up as
+rows of the chat feed and in the framework's own windows. U2: the mouse path is for the person, since many people never
+use a terminal: the GUI never tells a person to type a command. (the original question and answer were in the earlier
+working log, which was lost; what is decided stands in the linked sections)
+
+Now in: [GUI and the person's path](#gui-and-the-persons-path),
+[MCP server, tools and permissions](#mcp-server-tools-and-permissions)
+
+### Round 10
+
+<a id="decision-round-10"></a>
+Implemented 2026-10-17. Q1: German texts say "du", with "Sie" as the person's choice. Q2: the menu bar's structure (the
+AI administration moved into the Ditto menu). Q5: only the person's own channels (GUI and CLI) write a board's trust.
+Q7: the error box says what happened in plain words, why when it is known, and one next step. V1 and V2: next steps are
+data instead of hand-written commands, rendered per audience, with mouse paths from the menu table. V6: technical terms
+are explained on mouse-over from one glossary. References also name a part 10b with the repository's rename to
+LLM_Cross-Compiler_Framework. (the original question and answer were in the earlier working log, which was lost; what is
+decided stands in the linked sections)
+
+Now in: [GUI and the person's path](#gui-and-the-persons-path),
+[SSH, host keys and the remote package](#ssh-host-keys-and-the-remote-package),
+[Installer, platforms and dependencies](#installer-platforms-and-dependencies)
+
+### Round 11
+
+<a id="decision-round-11"></a>
+Implemented 2026-10-17 to 2026-10-23. A2: one repository, its layers enforced by a test. A3: PySide6 is the optional
+extra `gui`; the core, the command line and the MCP server run without Qt (headless and server installs). A5: the
+OpenSSH fallback is a second transport, not a second deploy. A6: the person's downloads in the GUI's Hugging Face
+browser go through the framework's verified fetcher, like an AI's, with an optional one-time take-over of the old
+download cache. D-del: of the listed removals only item 1 goes; other replaced helpers stay as delegates. (the original
+question and answer were in the earlier working log, which was lost; what is decided stands in the linked sections)
+
+Now in: [Repository, layers and consolidation](#repository-layers-and-consolidation),
+[Installer, platforms and dependencies](#installer-platforms-and-dependencies),
+[SSH, host keys and the remote package](#ssh-host-keys-and-the-remote-package), [Hugging Face](#hugging-face)
+
+### Round 12
+
+<a id="decision-round-12"></a>
+Implemented 2026-10-17. Clean-up with recon first and one implementation: newer code uses the original where both do the
+same job. Item 1: the GUI's own probe worker goes, the fallback probe script has one runner. Item 6: builds run through
+one path (BuildService, orchestrator, BuildEngine), and the Builder shows the running build container's CPU and memory.
+Items 10 and 11: duplicate validation helpers and an unused download function go. One Docker check and one runner of
+short commands. (the original question and answer were in the earlier working log, which was lost; what is decided
+stands in the linked sections)
+
+Now in: [Repository, layers and consolidation](#repository-layers-and-consolidation),
+[Build pipeline and target modules](#build-pipeline-and-target-modules)
+
+### Rounds 14 and 15
+
+<a id="decision-round-14"></a><a id="decision-round-15"></a>
+Written into the roadmap on 2026-10-22: a build service that GUI, CLI and MCP server use as clients (resume at the last
+finished stage), one queue across programs with admission by RAM, CPU and disk, private and enterprise mode, secret
+backends, Kubernetes and Nomad as opt-in places to run builds, and the newest fitting versions. (the original question
+and answer were in the earlier working log, which was lost; what is decided stands in the linked sections)
+
+Now in: [Build service, queue and modes (planned)](#build-service-queue-and-modes-planned)
+
+### Round 16
+
+<a id="decision-round-16"></a>
+Implemented 2026-10-22. G4: work on a board keeps running when the connection drops and is followed again afterwards. U9
+addendum: what the convert module of version 1.x promised in the maintainer's original design and never had (format
+detection, integrity checks, statistics, a functional test), and each of the four stage modules runs on its own with its
+options again. (the original question and answer were in the earlier working log, which was lost; what is decided stands
+in the linked sections)
+
+Now in: [Build pipeline and target modules](#build-pipeline-and-target-modules),
+[Deployment to boards](#deployment-to-boards)
+
+### Round 17
+
+<a id="decision-round-17"></a>
+Implemented 2026-10-23. ONNX for GGUF is refused with the plain reason (llama.cpp has no converter from ONNX) and names
+the format rknn for the NPU instead. (the original question and answer were in the earlier working log, which was lost;
+what is decided stands in the linked sections)
+
+Now in: [Build pipeline and target modules](#build-pipeline-and-target-modules)
+
+### Round 22
+
+<a id="decision-round-22"></a>
+Implemented 2026-10-23. P5: the old writer of a confirmed host key is deprecated and a thin delegate to the one writer,
+for the person only; nothing is removed without the maintainer's word. P6: after the person confirms a new host key for
+a board, the board's data moves to its new device ID. (the original question and answer were in the earlier working log,
+which was lost; what is decided stands in the linked sections)
+
+Now in: [SSH, host keys and the remote package](#ssh-host-keys-and-the-remote-package)
+
+### Round 23
+
+<a id="decision-round-23"></a>
+Implemented 2026-10-23 to 2026-10-24. Items 1, 2 and 8: knowledge always belongs to a topic or a target: a loose file is
+never imported until the person sorts it, a pack's new version replaces its old excerpts, a target pack's snapshot is
+imported at the recipient under its target. Item 3: the installers download nothing unchecked (Docker from its apt
+repository with the checked key, no unchecked pip upgrade). Item 4: hadolint's outcomes told apart. Item 5: the board's
+hardware probe goes into every build. Item 6: the Deployment tab's container table. Item 7: a build offers exactly the
+formats its target declares. Item 9: "Use" copies an identical earlier build. Item 10: the optimization profiles,
+benchmark rows and model suggestions are usable data, unmeasured values marked. Item 11: the probe's new keys (level-2
+cache, Vulkan, OpenCL). Item 12: the model download shows a percentage. Item 14: the Rockchip image in two stages. Item
+15: an NPU format only with that NPU in the probe, RKLLM only on an x86_64 build computer. Item 16: the board's
+temperature during the checks on it.
+
+Now in: [Knowledge base and Deep Ingest](#knowledge-base-and-deep-ingest),
+[Community, recipes and packs](#community-recipes-and-packs),
+[Installer, platforms and dependencies](#installer-platforms-and-dependencies),
+[Build pipeline and target modules](#build-pipeline-and-target-modules),
+[Targets, hardware and templates](#targets-hardware-and-templates), [Deployment to boards](#deployment-to-boards)
+
+### Round 24
+
+<a id="decision-round-24"></a>
+Implemented 2026-10-23. L-NET: offline mode reaches only this computer and the person's own network, by one
+network-locality rule, and every reach-out is judged by it (Docker images, the Qdrant server, the sign-in check, the
+llama.cpp repository override, the security scan). "L-NET final": the person may count a VPN, a host or an address range
+as local; only the person writes these opt-outs, never an AI. PKG: `install.sh` installs on every Linux family through
+the family's own package manager.
+
+Now in: [Offline mode and the own network](#offline-mode-and-the-own-network),
+[Installer, platforms and dependencies](#installer-platforms-and-dependencies)
+
+### Round 25
+
+<a id="decision-round-25"></a>
+Implemented 2026-10-23. Q1: an offline build never downloads its model; it takes the copy on this computer or a model
+already here. Q2: a Hugging Face token goes only where Hugging Face needs one (a gated or private repository), no
+implicit token or telemetry for any library, and the knowledge base's models come through the framework's own fetcher.
+Q3: one audit sink for the person's board decisions. Q4: the framework's own OpenSSH settings file, passed with `-F`,
+with the person's import from `~/.ssh/config`. Q5: a '%' in a path is written '%%' for OpenSSH. Q6: a module's CMake
+options follow an allowlist, and a valid option outside it is the person's decision, remembered per module version;
+addendum: what a download option would fetch is fetched before the build, pinned, checked and mounted read-only. Q7: x86
+is planned with explicit flags for another machine, `-march=native` only for this machine. Q8: no hard time limit for a
+build step: a soft cap that stops only an AI-started build, an idle timeout and loop protection, and the build's
+statistics in its manifest. With round 24: offline mode uses only Docker images on this computer or in a local registry.
+
+Now in: [Offline mode and the own network](#offline-mode-and-the-own-network), [Hugging Face](#hugging-face),
+[SSH, host keys and the remote package](#ssh-host-keys-and-the-remote-package),
+[Build pipeline and target modules](#build-pipeline-and-target-modules)
+
+### Round 26
+
+<a id="decision-round-26"></a>
+Implemented 2026-10-23. Q1: Docker CE is the standard container engine (also on the RHEL rebuilds), Podman the fallback
+(the rootless default replaced this on 2026-10-31); a build the engine cannot run as asked (a GPU under Podman) is
+refused before it is queued. Q3: the person's opt-outs count only for what offline mode may reach, never for a
+provider's local or cloud label. Q4: a name with local and public addresses counts as local by its local addresses only,
+and a connection goes only to those. Q5: in offline mode a crawl the person starts reads the own network, never a cloud
+metadata service or a link-local address. f: the llama.cpp repository override must be a mirror in the own network. g:
+an international host name only in its `xn--` form in offline mode. h: a VPN address counts only for a device of the
+tailnet.
+
+Now in: [Offline mode and the own network](#offline-mode-and-the-own-network),
+[Installer, platforms and dependencies](#installer-platforms-and-dependencies),
+[Knowledge base and Deep Ingest](#knowledge-base-and-deep-ingest)
+
+### Round 27
+
+<a id="decision-round-27"></a>
+Implemented 2026-10-24. Mojo closes the circle: when Mojo Miracle ends after Mojo Oracle at a terminal, the console
+shows Mojo's crystal ball and one line that says how it went; an addendum of the same round settled the line's wording.
+(the original question and answer were in the earlier working log, which was lost; what is decided stands in the linked
+sections)
+
+Now in: [Mojo, the health check](#mojo-the-health-check)
+
+### Rounds 29, 32 and 33
+
+<a id="decision-round-29"></a><a id="decision-round-32"></a><a id="decision-round-33"></a>
+Ditto's context: lower cost with cloud providers and a local KV cache that does not overflow so fast; the context limit
+and compaction depend on the model. The work is on the roadmap. (the original question and answer were in the earlier
+working log, which was lost; what is decided stands in the linked sections)
+
+Now in: [Ditto, the local runtime and the LLM layer](#ditto-the-local-runtime-and-the-llm-layer)
+
+### Round 34
+
+<a id="decision-round-34"></a>
+Decided and implemented 2026-10-29. The blueprint is three files with German twins: the design, the roadmap and the
+changelog; `docs/BLUEPRINT.md` is their short index. The changelog has no Unreleased section and lists only finished
+work; every entry carries its time stamp and version, the German entry the stamp of its English twin. The roadmap has no
+"done": a finished item leaves it in the commit that writes its changelog entry. (the original question and answer were
+in the earlier working log, which was lost; what is decided stands in the linked sections)
+
+Now in: [Documentation and the blueprint](#documentation-and-the-blueprint)
+
+### Round 35
+
+<a id="decision-round-35"></a>
+Implemented 2026-10-29. The blueprint is scrubbed: no host address outside the documentation ranges, no e-mail address,
+no person's home folder, no token, and nothing that says which hardware the maintainer owns; every component of the
+design has its decisions with what, how and why. (the original question and answer were in the earlier working log,
+which was lost; what is decided stands in the linked sections)
+
+Now in: [Documentation and the blueprint](#documentation-and-the-blueprint)
+
+### Round 36
+
+<a id="decision-round-36"></a>
+Implemented 2026-10-30. Offline mode means no internet; the own network may be there. So offline mode may build the
+build container image when every source is local (apt and pip through the person's mirrors in the own network, any other
+package manager named); otherwise it stops early and names the missing source. Images can be exported and imported as
+checked files (Build > Build Container Images..., `llm-cli build image`). (the original question and answer were in the
+earlier working log, which was lost; what is decided stands in the linked sections)
+
+Now in: [Build pipeline and target modules](#build-pipeline-and-target-modules),
+[Offline mode and the own network](#offline-mode-and-the-own-network)
+
+### Round 40
+
+<a id="decision-round-40"></a>
+Implemented 2026-10-30. A build ends on its done marker: the stage runner writes one end record as its very last step,
+with one end reason from a fixed vocabulary, and a finished build is never stopped by a clock (a container that wrote
+"done" gets 30 seconds to exit). Every build gets exactly one row in the chat feed, and the Builder's progress panel
+says the end reason in plain words. The MQTT doorbell sends every build's end to a broker the person points to; only the
+person sets it. (the original question and answer were in the earlier working log, which was lost; what is decided
+stands in the linked sections)
+
+Now in: [Build pipeline and target modules](#build-pipeline-and-target-modules),
+[MCP server, tools and permissions](#mcp-server-tools-and-permissions)
+
+### Round 44
+
+<a id="decision-round-44"></a>
+Implemented 2026-10-31. Item 1: the stage account's helper is the framework's own in every build context; a target
+cannot ship its own. Item 2: one shared group for the stage runner and the stage account. (the original question and
+answer were in the earlier working log, which was lost; what is decided stands in the linked sections)
+
+Now in: [Build pipeline and target modules](#build-pipeline-and-target-modules)
+
+### Round 54
+
+<a id="decision-round-54"></a>
+Implemented 2026-11-02. The Agent Client Protocol: Ditto as an ACP agent for editors, and llmcf as an ACP client that
+runs agents the person picks, with the framework's tools. (the original question and answer were in the earlier working
+log, which was lost; what is decided stands in the linked sections)
+
+Now in: [ACP agent (Ditto in editors)](#acp-agent-ditto-in-editors),
+[ACP client: agents the person picks](#acp-client-agents-the-person-picks)
+
+### Rounds 60 to 64
+
+<a id="decision-round-60"></a><a id="decision-round-61"></a><a id="decision-round-62"></a><a id="decision-round-63"></a><a id="decision-round-64"></a>
+Decided between 2026-11-06 and 2026-11-08 and implemented 2026-11-07 to 2026-11-08 (changelog 3.4.0); which of these
+rounds decided which topic is not recorded. The board's gateway is the resource scheduler of the models: a fair queue
+instead of refusals, a memory guard (`MemAvailable` and the pressure stall information), `OOMScoreAdjust` -500 for the
+gateway and 500 for the engines; engines run together or in turn as the person chooses, with the fit measured;
+`allow_unit_control` lets the gateway start and stop exactly its bundle's units (a polkit rule from polkit 0.106, else a
+sudoers file); in turn the engine units start on demand. Speech and images go through the gateway. The gateway is a
+universal adapter: each block says how its engine is reached (`reach`), and the bundle generator makes the route table
+`routes.json`; model families and their pre- and post-processing come from target modules and blocks. A block can be
+proposed from a Hugging Face model; the person reviews and writes it, an AI never writes or signs a block. A portable
+model archive for a computer without a network; no weights in the repository, the person decides case by case. A harness
+is taken in from every common archive and disk-image format, recognised by its content (with the framework's own ext4
+reader), an archive's password goes only on standard input, the missing root readiness is offered with the person's yes,
+and accounts and services the harness's installer brings are recognised. (the original question and answer were in the
+earlier working log, which was lost; what is decided stands in the linked sections)
+
+Now in: [On the board: gateway, voice and MCP (planned)](#on-the-board-gateway-voice-and-mcp-planned),
+[Deployment to boards](#deployment-to-boards)
+
+### Round 65
+
+<a id="decision-round-65"></a>
+Implemented 2026-11-08 to 2026-11-09. Python dependencies are ranges from the tested version up to the next major (for
+0.x packages up to the next minor), no pins on old versions; only `pyrage` stays exact. A cooldown of 5 days
+(`exclude-newer = "5 days"`) for every lock, with dated per-package exceptions; pypdf 7.0.0 was taken inside the
+cooldown for its security fixes. Every installer run resolves the newest compatible set fresh, audits it, checks the new
+environment and falls back to the tested lock; `--offline` installs the tested lock. A weekly update run opens a pull
+request from the branch `deps/update` (an allowed exception to the rule of the branches `main` and `development`); test
+environments come only from the lock. The updater only runs the installer again (`llm-cli update`, Tools > Maintenance >
+Update Framework...).
+
+Now in: [Installer, platforms and dependencies](#installer-platforms-and-dependencies)
+
 ## Versioning and documentation policy
 
 - **Semantic Versioning 2.0.0.** MAJOR for incompatible changes, MINOR for new features, PATCH for fixes.
@@ -1948,10 +2373,10 @@ These are real limitations of the current state. Most are scheduled in the [road
   2026-10-29" (German: "Version 3.1.0 · Stand 2026-10-29").
 - **Only what exists.** Documents describe the code of their branch, checked against the code and the `--help`
   output. What is not built goes to the roadmap.
-- **Decisions live here.** The maintainer's decisions are collected in a working log that is kept outside the
-  repository; each one is carried into this design, scrubbed of private data, at the component it concerns (see
-  [Components and decisions](#components-and-decisions)). The newest decision wins; a superseded one stays as one
-  history line.
+- **Decisions live here.** Each of the maintainer's decisions is carried into this design, scrubbed of private data,
+  at the component it concerns (see [Components and decisions](#components-and-decisions)), and each round of
+  decisions gets its entry in the [Decision log](#decision-log), which grows with every round. The newest decision
+  wins; a superseded one stays as one history line.
 
 ## History
 

@@ -1,4 +1,4 @@
-Version 3.4.0 · Stand 2026-11-07
+Version 3.4.0 · Stand 2026-11-09
 
 [English](BLUEPRINT.md) · **Deutsch**
 
@@ -13,8 +13,9 @@ Der Bauplan des LLM Cross-Compiler Frameworks besteht aus drei Dateien, jede auf
 | [CHANGELOG_DE.md](../CHANGELOG_DE.md) | Was war: nur fertige, verdrahtete, getestete und committete Arbeit, ein Abschnitt je Version (Keep a Changelog 1.1.0), jeder Eintrag mit Zeitstempel und Version |
 
 Eine Änderung wird gegen alle drei gebaut und aktualisiert alle drei im selben Commit: ihren Changelog-Eintrag unter der
-Version, in der sie landet, ihre Entscheidung im Design und die Roadmap-Zeile, die sie abschließt, entfernt. Es gibt
-keinen Abschnitt „Unreleased“; Kommendes steht nur in der Roadmap.
+Version, in der sie landet, ihre Entscheidung im Design und die Roadmap-Zeile, die sie abschließt, entfernt. Jede
+Entscheidungsrunde ist im [Entscheidungsprotokoll](DESIGN_DE.md#entscheidungsprotokoll) des Designs festgehalten, das mit
+jeder Runde wächst. Es gibt keinen Abschnitt „Unreleased“; Kommendes steht nur in der Roadmap.
 
 ## Wohin die alten Abschnitte gezogen sind
 

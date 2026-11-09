@@ -887,9 +887,101 @@ def test_the_design_components_match_in_both_languages():
         f"the two designs differ in their components or decisions: {english} / {german}"
 
 
-def test_the_design_says_where_the_decisions_log_is():
-    for rel, phrase in (("docs/DESIGN.md", "outside the repository"), ("docs/DESIGN_DE.md", "außerhalb des Repositorys")):
-        assert phrase in " ".join(_read(rel).split()), f"{rel} must say that the decisions log lives outside the repo"
+# --- (3d) The decision log: one entry per round, in the design, in both languages ----------------------------------
+
+# Every round of the maintainer's decisions has its entry in the design's decision log, with the anchor
+# decision-round-N (the same in both languages), and every reference to a round in the repository ("DECISIONS round
+# 25 Q2", "DECISIONS rounds 29, 32 and 33", "maintainer decisions rounds 2-4") has its entry there. An entry may cover
+# several rounds ("### Rounds 60 to 64") and then carries one anchor per round.
+DECISION_LOG = {"docs/DESIGN.md": ("decision-log", "Decision log"),
+                "docs/DESIGN_DE.md": ("entscheidungsprotokoll", "Entscheidungsprotokoll")}
+_ROUND_ANCHOR = re.compile(r'<a id="decision-round-(\d+)"></a>')
+_ROUND_HEADING = re.compile(r"^### (?:Rounds?|Runden?) (\d+(?:(?:, | and | und | to | bis )\d+)*)$")
+_ROUND_NUMBERS = r"\d+(?:\s*(?:,|and|to|-|–)\s*\d+)*"
+_ROUND_REFERENCE = re.compile(r"\bDECISIONS[,:]?\s+(?:Runden?|rounds?)\s+(" + _ROUND_NUMBERS + ")", re.I)
+# A reference may break over two lines of a comment or docstring.
+_LINE_BREAK = re.compile(r"\n[ \t]*(?:#+|//|\*)?[ \t]*")
+
+
+def round_numbers(spec: str) -> List[int]:
+    """The rounds a heading or a reference names: "25", "29, 32 and 33", "2-4", "60 to 64"."""
+    numbers = [int(n) for n in re.findall(r"\d+", spec)]
+    if len(numbers) == 2 and re.search(r"\d\s*(?:-|–|to|bis)\s*\d", spec):
+        return list(range(numbers[0], numbers[1] + 1))
+    return numbers
+
+
+def decision_log_entries(rel: str) -> List[Tuple[str, List[int]]]:
+    """(heading, rounds of its anchors) for every entry of the design's decision log, in order."""
+    entries: List[Tuple[str, List[int]]] = []
+    for line in section_lines(rel, DECISION_LOG[rel][0]):
+        if line.startswith("### "):
+            entries.append((line.strip(), []))
+        elif entries:
+            entries[-1][1].extend(int(n) for n in _ROUND_ANCHOR.findall(line))
+    return entries
+
+
+def round_references(text: str) -> Set[int]:
+    """Every round a text names as "DECISIONS round N" (or rounds), also across a line break of a comment."""
+    flat = _LINE_BREAK.sub(" ", text)
+    return {n for m in _ROUND_REFERENCE.finditer(flat) for n in round_numbers(m.group(1))}
+
+
+def _repository_texts() -> List[str]:
+    env = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
+    try:
+        out = subprocess.run(["git", "-C", str(REPO_ROOT), "ls-files", "-z", "--cached", "--others",
+                              "--exclude-standard"], capture_output=True, check=True, env=env, timeout=60).stdout
+        names = sorted({n for n in out.decode("utf-8").split("\0") if n})
+    except (OSError, subprocess.SubprocessError):
+        names = [p.relative_to(REPO_ROOT).as_posix() for p in REPO_ROOT.rglob("*")
+                 if p.is_file() and not any(part.startswith(".") or part in _SKIP_DIRS for part in p.parts)]
+    return [name for name in names if (REPO_ROOT / name).is_file()]
+
+
+@pytest.mark.parametrize("rel", sorted(DECISION_LOG))
+def test_the_design_has_its_decision_log_with_one_entry_per_round(rel):
+    anchor, title = DECISION_LOG[rel]
+    text = _read(rel)
+    assert f"\n## {title}\n" in text, f"{rel}: the section '## {title}' is missing"
+    assert f"- [{title}](#{anchor})" in "\n".join(section_lines(rel, "inhalt" if rel.endswith(GERMAN_SUFFIX) else "contents")), \
+        f"{rel}: the contents list must name the {title}"
+    entries = decision_log_entries(rel)
+    assert len(entries) >= 20, f"{rel}: the decision log is missing or nearly empty"
+    problems = [heading for heading, rounds in entries
+                if not (_ROUND_HEADING.match(heading) and round_numbers(heading[4:]) == rounds)]
+    assert not problems, f"{rel}: entries whose heading does not match their anchors decision-round-N: {problems}"
+    order = [n for _, rounds in entries for n in rounds]
+    assert order == sorted(set(order)), f"{rel}: the rounds must be in order, each once: {order}"
+
+
+def test_the_decision_log_is_the_same_in_both_languages():
+    english = [rounds for _, rounds in decision_log_entries("docs/DESIGN.md")]
+    german = [rounds for _, rounds in decision_log_entries("docs/DESIGN_DE.md")]
+    assert english == german, f"the two decision logs differ in their entries or anchors: {english} / {german}"
+
+
+def test_every_round_a_reference_names_has_its_entry():
+    logged = {n for rel in DECISION_LOG for _, rounds in decision_log_entries(rel) for n in rounds}
+    missing: Dict[int, List[str]] = {}
+    for rel in _repository_texts():
+        try:
+            text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for n in round_references(text) - logged:
+            missing.setdefault(n, []).append(rel)
+    assert not missing, "rounds named in the repository without an entry in the decision log of docs/DESIGN.md: " + \
+        "; ".join(f"{n}: {', '.join(files[:5])}" for n, files in sorted(missing.items()))
+
+
+def test_the_reference_check_finds_every_form():
+    text = ("x (DECISIONS round 25 Q2) y\n# board (DECISIONS round\n# 23 item 5)\n"
+            "maintainer decisions rounds 2-4\n### Ditto's context (DECISIONS rounds 29, 32 and 33)\n"
+            "DECISIONS, eighth round; round 5 f\n")
+    assert round_references(text) == {25, 23, 2, 3, 4, 29, 32, 33}
+    assert round_numbers("60 to 64") == [60, 61, 62, 63, 64] and round_numbers("14 and 15") == [14, 15]
 
 
 # --- (4) One version everywhere -----------------------------------------------------------------------------
@@ -1053,8 +1145,9 @@ def test_the_rename_section_names_the_mcp_window_by_its_mouse_path(rel, lang):
 
 # --- public Markdown never names the working log or its round numbers ---------------------------------------------
 
-# The maintainer's working log is not public: a document names a decision by what it decides, or points to its row in
-# docs/DESIGN.md ("Components and decisions"), never by the log or a round number of it.
+# A document names a decision by what it decides, or points to its row in docs/DESIGN.md ("Components and
+# decisions"), never by a round number. The rounds themselves are named in one place only: the decision log of the
+# design (## Decision log / ## Entscheidungsprotokoll), where each round has its entry.
 WORKING_LOG = re.compile(r"DECISIONS|ENTSCHEIDUNGEN|\b[Dd]ecisions?\s+(?:round|Runde)\b|\b[Rr]ounds?\s+[0-9]|"
                          r"\bRunden?\s+[0-9]|\bEntscheidung(?:en)?(?:\s+des\s+Maintainers,?)?\s+Runde\b")
 
@@ -1064,10 +1157,24 @@ def working_log_mentions(rel: str, text: str) -> List[str]:
             if WORKING_LOG.search(line)]
 
 
+def without_decision_log(rel: str, text: str) -> str:
+    """`text` with the lines of the design's decision log blanked (its line numbers kept): the one place in the
+    public documents that names the rounds of the decisions, each by its entry."""
+    if rel not in DECISION_LOG:
+        return text
+    lines, inside = text.split("\n"), False
+    for n, line in enumerate(lines):
+        if line.startswith("## "):
+            inside = line[3:].strip() == DECISION_LOG[rel][1]
+        if inside:
+            lines[n] = ""
+    return "\n".join(lines)
+
+
 def test_no_public_document_names_the_working_log():
     found = []
     for rel in ALL_MARKDOWN:
-        found += working_log_mentions(rel, _read(rel))
+        found += working_log_mentions(rel, without_decision_log(rel, _read(rel)))
     assert not found, "public Markdown names the working log or a round of it:\n  " + "\n  ".join(found[:40])
 
 
@@ -1079,6 +1186,9 @@ def test_the_working_log_check_finds_every_form():
     for line in ("the decision of 2026-10-22 replaced it", "a round trip", "one more round of checks",
                  "Key decisions", "eine Runde später"):
         assert not working_log_mentions("x.md", line), line
+    design = "intro\n## Decision log\n### Round 25\nDECISIONS round 25 Q2\n## Versioning\nround 25\n"
+    assert [m.split(":")[1] for m in working_log_mentions("docs/DESIGN.md",
+                                                          without_decision_log("docs/DESIGN.md", design))] == ["6"]
 
 
 # --- the editors and agents guide: every command line parses, every quoted message and menu path is the real one ---

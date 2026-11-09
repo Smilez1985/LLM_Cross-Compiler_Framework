@@ -1,4 +1,4 @@
-Version 3.4.0 · Last updated 2026-11-07
+Version 3.4.0 · Last updated 2026-11-09
 
 **English** · [Deutsch](BLUEPRINT_DE.md)
 
@@ -13,7 +13,8 @@ The blueprint of the LLM Cross-Compiler Framework is three files, each in Englis
 | [CHANGELOG.md](../CHANGELOG.md) | What was: only finished, wired, tested and committed work, one section per version (Keep a Changelog 1.1.0), every entry with its time stamp and version |
 
 A change is built against all three and updates all three in the same commit: its changelog entry under the version it
-lands in, its decision in the design, and the roadmap row it finishes removed. There is no "Unreleased" section;
+lands in, its decision in the design, and the roadmap row it finishes removed. Each round of decisions is recorded in
+the design's [Decision log](DESIGN.md#decision-log), which grows with every round. There is no "Unreleased" section;
 upcoming work is in the roadmap only.
 
 ## Where the old sections went
