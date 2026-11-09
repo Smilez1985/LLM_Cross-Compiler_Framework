@@ -978,7 +978,7 @@ def test_generate_ai_with_provider_leaves_the_settings_unchanged(tmp_path, monke
     assert refused.exit_code == 2 and "Unknown AI provider 'nope'" in " ".join(refused.output.split())
 
 
-# --- the board's optimization profile and benchmark rows (DECISIONS round 23 item 10) ---------------------------
+# --- the board's optimization profile and benchmark rows (DESIGN round 23 item 10) ---------------------------
 
 def test_targets_window_boards_shows_profiles_and_marks_unmeasured_rows(qapp, tmp_path, monkeypatch):
     from orchestrator.gui.targets_window import TargetsDialog

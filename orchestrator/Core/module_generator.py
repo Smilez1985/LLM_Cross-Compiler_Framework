@@ -51,7 +51,7 @@ FLAG_RE = re.compile(r"^-[A-Za-z][\w.=+,:/-]*$")
 CMAKE_OPTION_RE = re.compile(r"(?<![\w-])-D\s*[\"']?([A-Za-z_][A-Za-z0-9_.]*)[\"']?(?::[A-Za-z]+)?=[\"']?([^\s'\";|&)]*)")
 # Switches that make cmake run a CMake script (an initial cache -C, script mode -P): a script can set any option.
 CMAKE_SCRIPT_FLAGS = ("-C", "-P")
-# An image reference: an optional registry with a port (registry.example:5000/...; any registry is allowed, DECISIONS
+# An image reference: an optional registry with a port (registry.example:5000/...; any registry is allowed, DESIGN
 # round 3), the repository, an optional tag and an optional digest.
 IMAGE_RE = re.compile(r"^(?:[a-z0-9][a-z0-9.-]*(?::\d{1,5})?/)?[a-z0-9][a-z0-9._/-]*(?::[\w][\w.-]{0,127})?"
                       r"(?:@sha256:[a-f0-9]{64})?$")
@@ -216,7 +216,7 @@ def target_name_collision(targets_dir: Path, *names: str) -> Optional[str]:
     return next((name for name in existing if canonical_target_name(name) in wanted), None)
 
 
-# --- vendor toolchains of a module (MCP design 2.6, DECISIONS round 3 (d) and round 4 item 4) ------------------------
+# --- vendor toolchains of a module (MCP design 2.6, DESIGN round 3 (d) and round 4 item 4) ------------------------
 # A module adds software as apt packages, vendor apt sources with a signing key, pinned pip packages and pinned
 # downloads. The framework's Dockerfile template renders them during the image build (which runs with network); the
 # AI's shell fields may still not download. Security checks are hard (https, pinned versions, sha256 and size, key
@@ -481,7 +481,7 @@ def validate_module_data(data: Dict[str, Any]) -> Dict[str, Any]:
             value = " ".join(str(v) for v in value)
         tokens = str(value).split()
         if key == "cmake_flags":
-            # The build recipe's one verdict (recipe.cmake_flag_verdicts, DECISIONS round 25 Q6): -DNAME=VALUE and
+            # The build recipe's one verdict (recipe.cmake_flag_verdicts, DESIGN round 25 Q6): -DNAME=VALUE and
             # CMake's -W words are allowed; what loads code, another toolchain, -S/-B, -C/-P or a download is
             # refused; a valid CMake option outside the allowlist stays in the module and is the person's decision
             # when it is built (Core/module_flags.py).

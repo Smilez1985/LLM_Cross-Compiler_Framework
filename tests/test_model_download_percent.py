@@ -1,4 +1,4 @@
-"""The build's model download shows a percentage (DECISIONS round 23 item 12): bytes done of the total over all files
+"""The build's model download shows a percentage (DESIGN round 23 item 12): bytes done of the total over all files
 of the snapshot, from the fetcher's progress callback, as the build's stage and percent; throttled; resumed bytes
 count; an unknown size shows bytes without a percent; nothing changes after a cancel."""
 

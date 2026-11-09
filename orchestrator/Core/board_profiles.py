@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 A board's optimization profile and its benchmark rows: the `optimization_profiles:` and `performance_benchmarks:`
-blocks of a target's target.yml (schemas in orchestrator/schemas/targets.py), made usable (DECISIONS round 23 item 10).
+blocks of a target's target.yml (schemas in orchestrator/schemas/targets.py), made usable (DESIGN round 23 item 10).
 
 - The profile's source side (llama.cpp's CMake options, the compiler flags) is what the build recipe
   (orchestrator/runtime/build/recipe.py, the one place that decides them) plans for a cross build for the board's SoC.

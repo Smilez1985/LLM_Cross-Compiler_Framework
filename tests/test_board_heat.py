@@ -1,4 +1,4 @@
-"""The board's temperature during the checks on it (DECISIONS round 23 item 16; stage C wave 3c-2, chain boards).
+"""The board's temperature during the checks on it (DESIGN round 23 item 16; stage C wave 3c-2, chain boards).
 
 The framework reads the board's thermal zones (temp, type, trip points) and, on a Raspberry Pi, vcgencmd over the board
 session it already has: one read-only command, nothing installed. It reads them during the runtime deploy's checks,

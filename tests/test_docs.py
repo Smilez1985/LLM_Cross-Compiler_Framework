@@ -6,7 +6,7 @@ targets/, data/ and wherever else one is added), except the commented EXCEPTIONS
 - Every document exists twice: X.md in English (primary) and X_DE.md in German, and each links to its twin.
 - Every relative link points to an existing file and, with an #anchor, to an existing heading
   (GitHub anchor rules).
-- The blueprint is three files (DECISIONS round 34): docs/DESIGN.md, docs/ROADMAP.md and CHANGELOG.md, each with
+- The blueprint is three files (DESIGN round 34): docs/DESIGN.md, docs/ROADMAP.md and CHANGELOG.md, each with
   its German twin; docs/BLUEPRINT.md is their short index.
 - CHANGELOG.md and CHANGELOG_DE.md (Keep a Changelog 1.1.0, without an [Unreleased] section) say what was done: the
   same versions in the same order with the same dates and the same sections, every entry stamped with its time and
@@ -39,7 +39,7 @@ EXPECTED_PAIRS: List[Tuple[str, str]] = [
     ("README.md", "README_DE.md"),
     ("CONTRIBUTING.md", "CONTRIBUTING_DE.md"),
     ("CHANGELOG.md", "CHANGELOG_DE.md"),
-    # The blueprint is three files (DECISIONS round 34): DESIGN (what, how, why), ROADMAP (what comes) and the
+    # The blueprint is three files (DESIGN round 34): DESIGN (what, how, why), ROADMAP (what comes) and the
     # CHANGELOG above (what was); BLUEPRINT is their short index, kept so that old links lead somewhere.
     ("docs/DESIGN.md", "docs/DESIGN_DE.md"),
     ("docs/ROADMAP.md", "docs/ROADMAP_DE.md"),
@@ -126,7 +126,7 @@ ROADMAP_LINKS: Dict[str, str] = {
     "CHANGELOG_DE.md": "docs/ROADMAP_DE.md",
 }
 
-# The three files of the blueprint and their index (English, German), DECISIONS round 34.
+# The three files of the blueprint and their index (English, German), DESIGN round 34.
 BLUEPRINT_FILES: List[Tuple[str, str]] = [
     ("docs/DESIGN.md", "docs/DESIGN_DE.md"),
     ("docs/ROADMAP.md", "docs/ROADMAP_DE.md"),
@@ -172,14 +172,14 @@ OLD_BLUEPRINT_ANCHORS: Dict[str, List[str]] = {
 }
 
 # The status in the last column of every roadmap table row, and its German name. There is no "done": a finished item
-# leaves the roadmap in the commit that writes its changelog entry (DECISIONS round 34).
+# leaves the roadmap in the commit that writes its changelog entry (DESIGN round 34).
 ROADMAP_STATUS_DE: Dict[str, str] = {
     "in progress": "in Arbeit",
     "planned": "geplant",
 }
 DONE_STATUSES = {"done", "fertig"}
 
-# Every changelog entry starts with its stamp: `YYYY-MM-DD HH:MM UTC` · `vX.Y.Z` (DECISIONS round 34).
+# Every changelog entry starts with its stamp: `YYYY-MM-DD HH:MM UTC` · `vX.Y.Z` (DESIGN round 34).
 STAMP = re.compile(r"^[-*] `(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2}) UTC` · `v(\d+\.\d+\.\d+)` \S")
 STAMP_PREFIX = re.compile(r"^`\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC` · `v[^`]+` ")
 
@@ -466,7 +466,7 @@ def test_changelogs_have_the_same_versions_dates_and_sections():
 
 @pytest.mark.parametrize("changelog", ["CHANGELOG.md", "CHANGELOG_DE.md"])
 def test_changelog_versions_are_newest_first_with_dates(changelog):
-    """No [Unreleased] and no other undated section: the changelog lists only what is done (DECISIONS round 34)."""
+    """No [Unreleased] and no other undated section: the changelog lists only what is done (DESIGN round 34)."""
     entries = changelog_entries(changelog)
     assert entries, f"{changelog} has no version"
     assert all(v != "Unreleased" for v, _, _ in entries), f"{changelog} has an [Unreleased] section"
@@ -608,7 +608,7 @@ def test_no_roadmap_item_is_also_a_changelog_entry(roadmap, changelog):
     assert not both, f"{roadmap} still lists finished items (their entries are in {changelog}): {both}"
 
 
-# --- (3b) Every changelog entry carries its stamp; the two languages agree (DECISIONS round 34) ----------------
+# --- (3b) Every changelog entry carries its stamp; the two languages agree (DESIGN round 34) ----------------
 
 def changelog_stamps(rel: str) -> List[Tuple[str, str, str, Optional[str]]]:
     """(version, type, entry's first line, stamp "YYYY-MM-DD HH:MM vX.Y.Z" or None) for every entry, in order."""
@@ -712,7 +712,7 @@ def test_changelog_header_links_twin_and_roadmap(changelog):
         assert problem is None, problem
 
 
-# --- (3a) The blueprint is three files and a short index (DECISIONS round 34) --------------------------------
+# --- (3a) The blueprint is three files and a short index (DESIGN round 34) --------------------------------
 
 @pytest.mark.parametrize("english,german", BLUEPRINT_FILES + [BLUEPRINT_INDEX])
 def test_the_blueprint_files_and_their_twins_exist(english, german):
@@ -762,7 +762,7 @@ def test_nothing_of_the_old_blueprint_is_lost(index):
     assert not problems, "\n  ".join(problems)
 
 
-# --- (3c) The blueprint is scrubbed, and every component of the design has its decisions (DECISIONS round 35) ------
+# --- (3c) The blueprint is scrubbed, and every component of the design has its decisions (DESIGN round 35) ------
 
 BLUEPRINT_TEXTS = [rel for pair in BLUEPRINT_FILES for rel in pair]
 # Addresses that may appear: the documentation ranges (RFC 5737, RFC 3849) and the well-known special addresses; a
@@ -829,7 +829,7 @@ def test_the_scrub_finds_private_data():
     assert scrub_findings(kept) == []
 
 
-# The maintainer's own devices stay private (DECISIONS round 35): the blueprint names hardware classes and example
+# The maintainer's own devices stay private (DESIGN round 35): the blueprint names hardware classes and example
 # boards, never which hardware the maintainer owns or how much memory or storage their board has.
 MAINTAINER_DEVICE_WORDING = [
     re.compile(r"maintainer'?s (?:own )?(?:hardware|boards?|radxa|devices?|gpus?|computers?|machines?)", re.I),
@@ -892,15 +892,15 @@ def test_the_design_components_match_in_both_languages():
 # --- (3d) The decision log: one entry per round, in the design, in both languages ----------------------------------
 
 # Every round of the maintainer's decisions has its entry in the design's decision log, with the anchor
-# decision-round-N (the same in both languages), and every reference to a round in the repository ("DECISIONS round
-# 25 Q2", "DECISIONS rounds 29, 32 and 33", "maintainer decisions rounds 2-4") has its entry there. An entry may cover
+# decision-round-N (the same in both languages), and every reference to a round in the repository ("DESIGN round
+# 25 Q2", "DESIGN rounds 29, 32 and 33", "maintainer DESIGN rounds 2-4") has its entry there. An entry may cover
 # several rounds ("### Rounds 60 to 64") and then carries one anchor per round.
 DECISION_LOG = {"docs/DESIGN.md": ("decision-log", "Decision log"),
                 "docs/DESIGN_DE.md": ("entscheidungsprotokoll", "Entscheidungsprotokoll")}
 _ROUND_ANCHOR = re.compile(r'<a id="decision-round-(\d+)"></a>')
 _ROUND_HEADING = re.compile(r"^### (?:Rounds?|Runden?) (\d+(?:(?:, | and | und | to | bis )\d+)*)$")
 _ROUND_NUMBERS = r"\d+(?:\s*(?:,|and|to|-|–)\s*\d+)*"
-_ROUND_REFERENCE = re.compile(r"\bDECISIONS[,:]?\s+(?:Runden?|rounds?)\s+(" + _ROUND_NUMBERS + ")", re.I)
+_ROUND_REFERENCE = re.compile(r"\bDESIGN[,:]?\s+(?:Runden?|rounds?)\s+(" + _ROUND_NUMBERS + ")", re.I)
 # A reference may break over two lines of a comment or docstring.
 _LINE_BREAK = re.compile(r"\n[ \t]*(?:#+|//|\*)?[ \t]*")
 
@@ -925,7 +925,7 @@ def decision_log_entries(rel: str) -> List[Tuple[str, List[int]]]:
 
 
 def round_references(text: str) -> Set[int]:
-    """Every round a text names as "DECISIONS round N" (or rounds), also across a line break of a comment."""
+    """Every round a text names as "DESIGN round N" (or rounds), also across a line break of a comment."""
     flat = _LINE_BREAK.sub(" ", text)
     return {n for m in _ROUND_REFERENCE.finditer(flat) for n in round_numbers(m.group(1))}
 
@@ -978,10 +978,30 @@ def test_every_round_a_reference_names_has_its_entry():
         "; ".join(f"{n}: {', '.join(files[:5])}" for n, files in sorted(missing.items()))
 
 
+# The rounds live in the design's decision log, so a reference names it: "DESIGN round N". The old form "DECISIONS
+# round N" pointed to a separate decisions file, which never belongs in the repository; this file alone keeps it, as
+# the example the checks must find.
+_OLD_ROUND_REFERENCE = re.compile(r"\bDECISIONS[,:]?\s+(?:(?:#+|//|\*)[ \t]*)?(?:Runden?|rounds?)\s+\d", re.I)
+
+
+def test_no_reference_names_a_separate_decisions_file():
+    found = []
+    for rel in _repository_texts():
+        if rel == "tests/test_docs.py":
+            continue
+        try:
+            text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if _OLD_ROUND_REFERENCE.search(text):
+            found.append(rel)
+    assert not found, 'references in the old form "DECISIONS round N" (now "DESIGN round N"): ' + ", ".join(found[:20])
+
+
 def test_the_reference_check_finds_every_form():
-    text = ("x (DECISIONS round 25 Q2) y\n# board (DECISIONS round\n# 23 item 5)\n"
-            "maintainer decisions rounds 2-4\n### Ditto's context (DECISIONS rounds 29, 32 and 33)\n"
-            "DECISIONS, eighth round; round 5 f\n")
+    text = ("x (DESIGN round 25 Q2) y\n# board (DESIGN round\n# 23 item 5)\n"
+            "maintainer design rounds 2-4\n### Ditto's context (DESIGN rounds 29, 32 and 33)\n"
+            "DESIGN, eighth round; round 5 f\n(DECISIONS round 40 Q1), the old form\n")
     assert round_references(text) == {25, 23, 2, 3, 4, 29, 32, 33}
     assert round_numbers("60 to 64") == [60, 61, 62, 63, 64] and round_numbers("14 and 15") == [14, 15]
 
@@ -1019,7 +1039,7 @@ def test_document_version_lines_match_the_package_and_their_twin():
     assert not problems, "\n  ".join(["version lines:"] + problems)
 
 
-# --- (5) No published framework image (DECISIONS round 5 h; design WP2) ---------------------------------------------
+# --- (5) No published framework image (DESIGN round 5 h; design WP2) ---------------------------------------------
 
 # Wording that promises or suggests a framework image to pull. There is none: people who want the framework in a
 # container build the image on their own computer (docs/Container_Setup.md), and Ditto reaches a framework on
@@ -1067,7 +1087,7 @@ def test_the_published_image_check_finds_the_old_wording():
         assert not any(pattern.search(line) for pattern in PUBLISHED_IMAGE_WORDING), line
 
 
-# --- (6) No cloud builds on the roadmap (DECISIONS round 8, Q-3) -------------------------------------------------
+# --- (6) No cloud builds on the roadmap (DESIGN round 8, Q-3) -------------------------------------------------
 
 # Remote compiling was never planned: the roadmap names builds in the cloud (AWS, Azure) or on rented machines only
 # in a "Not planned" line. If builds on another computer ever come, the framework builds them itself.
@@ -1188,7 +1208,7 @@ def test_the_working_log_check_finds_every_form():
     for line in ("the decision of 2026-10-22 replaced it", "a round trip", "one more round of checks",
                  "Key decisions", "eine Runde später"):
         assert not working_log_mentions("x.md", line), line
-    design = "intro\n## Decision log\n### Round 25\nDECISIONS round 25 Q2\n## Versioning\nround 25\n"
+    design = "intro\n## Decision log\n### Round 25\nDESIGN round 25 Q2\n## Versioning\nround 25\n"
     assert [m.split(":")[1] for m in working_log_mentions("docs/DESIGN.md",
                                                           without_decision_log("docs/DESIGN.md", design))] == ["6"]
 

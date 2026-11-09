@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The convert statistics of a finished build (DECISIONS round 25 Q8): how long the conversion and the quantization
+"""The convert statistics of a finished build (DESIGN round 25 Q8): how long the conversion and the quantization
 ran and the size before and after, from the build's build_info.json, in the build record the CLI's `build status` and
 the GUI's Build History show."""
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The framework's own documents in the knowledge base, for AI callers: `index_framework_docs` (DECISIONS round 8, N12).
+The framework's own documents in the knowledge base, for AI callers: `index_framework_docs` (DESIGN round 8, N12).
 
 Ditto (and every AI client) can then search the framework's internals with search_knowledge (kind `docs`): how a probe
 value reaches a build script, what a setting does, which tool to use. It is an explicit knowledge action, as in the GUI

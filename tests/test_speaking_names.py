@@ -1,4 +1,4 @@
-"""Speaking names in what the person sees (DECISIONS round 4 item 1; delegation design 5.2 rule R7, WP3).
+"""Speaking names in what the person sees (DESIGN round 4 item 1; delegation design 5.2 rule R7, WP3).
 
 Exact framework ids in a text (outside code) and masked values are shown as their speaking names; near matches,
 unknown ids and code stay as written; the original words can always be shown again, and code gets a legend.

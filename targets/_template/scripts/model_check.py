@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The checks of the convert stage (modules/convert_module.sh): what the convert module of version 1.x promised in the
-maintainer's design (DECISIONS round 16, U9 addendum) and never had.
+maintainer's design (DESIGN round 16, U9 addendum) and never had.
 
 - Format detection: a Hugging Face model folder (SafeTensors or PyTorch weights), a GGUF file (nothing to convert),
   an ONNX model, a single weights file, a folder of GGUF files. What the format of the build cannot use is refused
@@ -90,7 +90,7 @@ TEST_TOKENS = 8
 # failure. SIGILL: the tool uses instructions this CPU lacks, which says nothing about the GGUF. Numbers, not the
 # signal module's names, so the file runs the same everywhere (the container is Linux).
 STOP_SIGNALS = (1, 2, 9, 15)
-# Loop protection of the functional test (DECISIONS round 25 Q8): the end of the generated text one piece repeated
+# Loop protection of the functional test (DESIGN round 25 Q8): the end of the generated text one piece repeated
 # REPEAT_TIMES times, REPEAT_LEAST characters in all, within the last REPEAT_WINDOW characters
 REPEAT_TIMES = 4
 REPEAT_LEAST = 24
@@ -539,7 +539,7 @@ class WatchedRun:
 
 
 def watched_run(args: List[str], seconds: int) -> WatchedRun:
-    """Runs the functional test without a hard time limit (DECISIONS round 25 Q8): it is stopped when it prints
+    """Runs the functional test without a hard time limit (DESIGN round 25 Q8): it is stopped when it prints
     nothing for `seconds` (FUNCTIONAL_TEST_SECONDS, the idle limit) or when the model repeats itself; past `seconds`
     while it still prints, it goes on (one note in the log). The token count (-n) ends it by itself."""
     import threading

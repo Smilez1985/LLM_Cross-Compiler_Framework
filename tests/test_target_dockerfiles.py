@@ -167,7 +167,7 @@ class TestTheRecipeInTheDockerfiles:
         assert 'LABEL org.llm-framework.cuda-source="${CUDA_SOURCE}"' in gpu
 
 
-# --- the stages of the Rockchip image (DECISIONS round 23 items 14 and 15) -------------------------------------------
+# --- the stages of the Rockchip image (DESIGN round 23 items 14 and 15) -------------------------------------------
 
 def stages(dockerfile_text: str) -> list:
     """(FROM arguments, [(INSTRUCTION, arguments), ...]) of every stage, in order."""

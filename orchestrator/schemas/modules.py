@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The parts of a target module definition that add vendor software (MCP design 2.6, DECISIONS round 3 (d) and round 4
+The parts of a target module definition that add vendor software (MCP design 2.6, DESIGN round 3 (d) and round 4
 item 4): an apt repository with its signing key, and a pinned download. Shared by Ditto's ModuleDefinition and the
 MCP tool create_target_module; the module generator checks every value again (orchestrator/Core/module_generator.py).
 No field is named like a credential: a key here is a public signing key, given by its address and fingerprint.

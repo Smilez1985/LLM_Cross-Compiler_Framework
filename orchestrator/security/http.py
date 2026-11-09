@@ -10,7 +10,7 @@ connect to exactly that address (DNS rebinding): a name that resolves to any non
 crawler and the registry client mount it for http and https; each checks every URL with validate_public_url before
 it asks, and follows redirects by hand.
 
-LocalOnlyAdapter is the same pinned connection for offline mode (chain offline-lan, DECISIONS round 24 L-NET): it
+LocalOnlyAdapter is the same pinned connection for offline mode (chain offline-lan, DESIGN round 24 L-NET): it
 connects only to hosts the network-locality rule counts as local (utils/locality.connect_addresses, with the person's
 opt-outs), at the local addresses that rule checked (tried in turn; a name with local and public addresses only at its
 local ones, round 26 Q4), so a DNS answer that changes after the check cannot reach a public host (LocalityRefused, a

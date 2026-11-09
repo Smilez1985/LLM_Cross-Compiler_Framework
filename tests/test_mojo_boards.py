@@ -1,5 +1,5 @@
 """Mojo Oracle's lines for the boards the person trusted (eighth round N6, next-fixes 130) and for Ditto's image in
-Docker mode (DECISIONS round 7 D).
+Docker mode (DESIGN round 7 D).
 
 A default Mojo Oracle run makes no network contact with any board (W1 of 2026-10-16): it reports what was recorded
 (the host key in the framework's known_hosts, the last deploy, verify, benchmark or probe that could not reach a

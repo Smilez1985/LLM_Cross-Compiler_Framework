@@ -1,5 +1,5 @@
 {
-  "about": "The shared list of CMake flag words with their expected verdicts (DECISIONS round 25 Q6): recipe.cmake_flag_verdicts and the shell's module_flag_verdicts of targets/*/modules/target_module.sh give exactly these, per context (module, package, call). Each verdict is [option as cmake reads it, allowed | refused | decision]. prefetched names the dependencies llmcf fetched and mounted for the build.",
+  "about": "The shared list of CMake flag words with their expected verdicts (DESIGN round 25 Q6): recipe.cmake_flag_verdicts and the shell's module_flag_verdicts of targets/*/modules/target_module.sh give exactly these, per context (module, package, call). Each verdict is [option as cmake reads it, allowed | refused | decision]. prefetched names the dependencies llmcf fetched and mounted for the build.",
   "vectors": [
     {"words": ["-DGGML_NATIVE=OFF"], "module": [["-DGGML_NATIVE=OFF", "allowed"]], "package": [["-DGGML_NATIVE=OFF", "allowed"]], "call": [["-DGGML_NATIVE=OFF", "allowed"]]},
     {"words": ["-D", "GGML_CUDA=ON"], "module": [["-DGGML_CUDA=ON", "allowed"]], "package": [["-DGGML_CUDA=ON", "allowed"]], "call": [["-DGGML_CUDA=ON", "allowed"]]},

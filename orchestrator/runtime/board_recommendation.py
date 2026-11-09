@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The board a hardware probe points to, as a recommendation only (DECISIONS round 8, N9, N9', N9'').
+The board a hardware probe points to, as a recommendation only (DESIGN round 8, N9, N9', N9'').
 
 The board comes from the probe: the probe's SoC named like one of the target's boards (source "probe"), or the
 probe's board name found in the target's list of known boards (`examples` in target.yml capabilities, or

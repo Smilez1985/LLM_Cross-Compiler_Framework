@@ -1,4 +1,4 @@
-"""The Deployment tab's container table decides what a package with Docker images carries (DECISIONS round 23, item
+"""The Deployment tab's container table decides what a package with Docker images carries (DESIGN round 23, item
 6): the table lists the containers of deployment_manager.package_containers, the list `llmcf deploy package --docker`
 packs (the image of the setting image_inference_runtime, the hardware access of the target profile), and the person's
 ticks reach the one package step (make_package, person_steps.deploy_build) through package_docker_config. Every

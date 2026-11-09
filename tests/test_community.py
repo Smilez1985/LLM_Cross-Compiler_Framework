@@ -54,7 +54,7 @@ class TestSwarmRemoval:
         cm.knowledge_dir.mkdir(parents=True)
         (cm.knowledge_dir / "swarm_old.json").write_text('{"swarm_encrypted": true, "payload": "x", "hash": "y"}')
         (cm.knowledge_dir / "plain.json").write_text('[{"source": "s", "content": "c", "metadata": {}}]')
-        # DECISIONS round 23 item 1: a loose file is never imported unsorted; it is sorted first, through the checks
+        # DESIGN round 23 item 1: a loose file is never imported unsorted; it is sorted first, through the checks
         assert cm.sync_knowledge_base() == 0 and ingested == []
         with pytest.raises(PackError, match="old 'swarm' format"):
             cm.prepare_sort("swarm_old.json", topic="old")

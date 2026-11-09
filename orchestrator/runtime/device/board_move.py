@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-A board's data moves with its new host key (DECISIONS round 22, P6). The device ID derives from the host key
+A board's data moves with its new host key (DESIGN round 22, P6). The device ID derives from the host key
 (remote/trust.py device_id_for), so when the person confirms a new host key for a board (Q5,
 person_steps.change_board), the board's data moves from the old device ID to the new one:
 

@@ -525,7 +525,7 @@ def test_the_gh_and_git_runner_never_reads_stdin(tmp_path):
 
 def test_the_build_question_shows_every_image_a_confirmed_build_remembers(zoo):
     """A vendor image pulled by a later stage (COPY --from) is shown in the build question; only then may a confirmed
-    build remember it as confirmed (DECISIONS round 3: an image from another registry is shown plainly)."""
+    build remember it as confirmed (DESIGN round 3: an image from another registry is shown plainly)."""
     debian = "debian@sha256:" + "b" * 64
     zoo.world.add(zoo.world.target_pack(dockerfile=f"FROM {debian}\nCOPY --from={L4T} /opt /opt\nRUN echo ok\n"),
                   trust="verified")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Deep Ingest for AI callers: `crawl_docs_site` (MCP design 2.5, work package T7; DECISIONS round 1 item 1).
+Deep Ingest for AI callers: `crawl_docs_site` (MCP design 2.5, work package T7; DESIGN round 1 item 1).
 
 The client adds documentation to the knowledge base Ditto uses, exactly as a person does in the GUI's Deep Ingest:
 the same crawler, the same machine-readable opt-out checks (robots.txt, robots meta and X-Robots-Tag incl. noai,

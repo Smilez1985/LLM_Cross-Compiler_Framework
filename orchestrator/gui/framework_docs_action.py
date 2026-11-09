@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tools > Index the Framework's Documentation... (DECISIONS round 8, N12).
+Tools > Index the Framework's Documentation... (DESIGN round 8, N12).
 
 The person adds the framework's own documentation (README, CONTRIBUTING, docs) to the knowledge base, and with the
 box ticked also its code and configuration, so Ditto can search the framework's internals. The question says how many

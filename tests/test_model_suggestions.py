@@ -1,6 +1,6 @@
 """The model list of the source catalogue (configs/project_sources.yml, sections tiny_models and models) is current,
 checked by scripts/validate_ssot.py and wired as the model suggestions of the Builder, `llm-cli models suggestions`
-and the MCP resource lcf://models/suggestions (DECISIONS round 23 item 10)."""
+and the MCP resource lcf://models/suggestions (DESIGN round 23 item 10)."""
 
 import subprocess
 import sys

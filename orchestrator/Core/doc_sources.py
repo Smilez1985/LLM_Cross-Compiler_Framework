@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 The documentation links of the source catalogue (configs/project_sources.yml, section hardware_targets) that fit a
-board (DECISIONS round 8, N10).
+board (DESIGN round 8, N10).
 
 The catalogue keeps the vendors' SDK documentation as docs_* links. This module picks the links of the vendors a
 hardware probe names (its SoC and NPU vendor and its accelerator switches: CUDA, Intel NPU, Hailo, ...) or that an SDK
@@ -11,7 +11,7 @@ links and starts the crawl, with the usual confirmation, robots.txt and the othe
 
 Only https links are used, from the catalogue in this installation; a probe value never becomes a link.
 
-The catalogue's sections models and tiny_models are the model suggestions (DECISIONS round 23 item 10): exact Hugging
+The catalogue's sections models and tiny_models are the model suggestions (DESIGN round 23 item 10): exact Hugging
 Face repository ids with their size, recommended quantization, licence and gating, and the day they were checked.
 model_suggestions() gives them in order (small models first, gated ones only on request), for the Builder's model
 field (free text stays allowed), `llm-cli models suggestions` and the read-only resource lcf://models/suggestions;

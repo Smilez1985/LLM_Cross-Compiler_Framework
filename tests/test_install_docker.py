@@ -1,4 +1,4 @@
-"""install.sh installs Docker only with a checksum (DECISIONS round 23, item 3).
+"""install.sh installs Docker only with a checksum (DESIGN round 23, item 3).
 
 Before, a missing Docker made install.sh download get.docker.com and run it as root, unchecked. Now Docker comes only
 from Docker's official apt repository (Debian, Ubuntu, Raspberry Pi OS): Docker's signing key is trusted only when the
@@ -6,7 +6,7 @@ downloaded file holds exactly one key and its primary fingerprint is the one Doc
 the script); apt then checks every package against the signed package lists (SHA256). No downloaded script runs. A
 family without a package manager the installer uses, ARMv6, a key that does not match, a key that cannot be
 downloaded or a failing apt stops in plain words with Docker's manual install link, and nothing unchecked is written.
-The other families (dnf, zypper, pacman, apk; DECISIONS round 24 PKG) are in tests/test_install_distros.py.
+The other families (dnf, zypper, pacman, apk; DESIGN round 24 PKG) are in tests/test_install_distros.py.
 
 Every run here is in a sandbox: install.sh is sourced, its system paths (os-release, keyring, sources) point into the
 test folder, and curl, apt-get, dpkg and uname are fakes that write down their calls. gpg is the real one, with a key

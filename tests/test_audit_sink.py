@@ -1,4 +1,4 @@
-"""One audit sink for the person's board decisions (DECISIONS round 25 Q3, consolidation stage C wave 3c-2, chain
+"""One audit sink for the person's board decisions (DESIGN round 25 Q3, consolidation stage C wave 3c-2, chain
 boards).
 
 The CLI, the GUI (the Deployment tab, the Boards window, the remote hardware scan) and the person's consents behind the

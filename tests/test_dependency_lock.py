@@ -1,5 +1,5 @@
 """The dependency lock (sixth round, decision 14): pyproject.toml in PEP 621 form, uv.lock instead of poetry.lock, and
-the hash-pinned exports requirements.txt, requirements-gui.txt (with the optional extra 'gui', PySide6; DECISIONS
+the hash-pinned exports requirements.txt, requirements-gui.txt (with the optional extra 'gui', PySide6; DESIGN
 round 11, A3) and requirements-dev.txt that the installers and the CI install from.
 
 These checks need no uv and no network: they read the files. The CI job "Lock files" runs uv itself."""
@@ -90,7 +90,7 @@ def test_pyproject_is_pep621_and_poetry_is_gone():
     assert not (REPO_ROOT / "Docker Setup" / "pyproject.toml").exists(), "the stale copy must not come back"
 
 
-# The one exact pin (DECISIONS round 65): pyrage encrypts and decrypts user data.
+# The one exact pin (DESIGN round 65): pyrage encrypts and decrypts user data.
 EXACT_PINS = {"pyrage"}
 # 0.x packages whose minor release breaks (the range ends before the next minor), each with its reason in pyproject.
 MINOR_CAPPED = {"fastembed", "qdrant-edge-py", "agent-client-protocol", "ruff", "shellcheck-py", "uv"}

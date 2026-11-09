@@ -1,4 +1,4 @@
-"""The config and target stages of the maintainer's four-module design (HOW2_ORIGINAL; DECISIONS round 16, U9
+"""The config and target stages of the maintainer's four-module design (HOW2_ORIGINAL; DESIGN round 16, U9
 addendum), run in the simulated Rockchip image of tests/test_build_stages.py with stub toolchains
 (tests/board_toolchain.py).
 
@@ -591,7 +591,7 @@ def test_the_manifest_holds_every_build_detail_and_the_checksums_cover_every_fil
         "board": "rk3588"}
     assert manifest["build"]["llama_cpp"]["tag"] == "b11429" and manifest["build"]["source_model"] == "granite.fp16.gguf"
     assert manifest["build"]["input_format"] == "gguf" and isinstance(manifest["build"]["jobs"], int)
-    # the convert statistics (DECISIONS round 25 Q8): durations, sizes and tool versions, numbers and words only; a
+    # the convert statistics (DESIGN round 25 Q8): durations, sizes and tool versions, numbers and words only; a
     # GGUF input still has the convert stage's numbers of its check
     build = manifest["build"]
     assert all(isinstance(build[k], int) and build[k] >= 0 for k in ("convert_seconds", "quantize_seconds",
@@ -649,7 +649,7 @@ def test_the_functional_test_runs_the_model_on_the_build_machine(image, fail, ou
 
 @needs_bash
 def test_the_warning_of_a_silent_functional_test_names_the_idle_limit(image):
-    """FUNCTIONAL_TEST_SECONDS is the time the test may print nothing (DECISIONS round 25 Q8), not a time to finish:
+    """FUNCTIONAL_TEST_SECONDS is the time the test may print nothing (DESIGN round 25 Q8), not a time to finish:
     the package stage's warning says so."""
     _script(image.llama / "build" / "bin" / "llama-completion", COMPLETION_STUB)
     short_functional_test(image)
@@ -978,7 +978,7 @@ def _verdict(*words):
     (["-DLLAMA_BUILD_BORINGSSL=OFF"], "-DLLAMA_BUILD_BORINGSSL=OFF (LLAMA_BUILD_BORINGSSL downloads at configure time "
                                       "and is never set)", "same"),
     (["-P", "x.cmake"], "-P (CMake runs a script with -C or -P, and a script can set any option)", "same"),
-    # A module's own cmake call may name its folders; the module's flags may not (DECISIONS round 25 Q6: -S and -B
+    # A module's own cmake call may name its folders; the module's flags may not (DESIGN round 25 Q6: -S and -B
     # are the plan's), so the package refuses them there.
     (["-DLLAMA_BUILD_TESTS=OFF", "-DGGML_NATIVE=OFF", "-S", "src", "--build", "b"], "",
      "-S src (a switch llmcf never allows in a module's flags)"),

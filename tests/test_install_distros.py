@@ -1,4 +1,4 @@
-"""install.sh on every Linux family through the family's own package manager (DECISIONS round 24 PKG, round 23 item 3).
+"""install.sh on every Linux family through the family's own package manager (DESIGN round 24 PKG, round 23 item 3).
 
 The family comes from ID and ID_LIKE in /etc/os-release (the table of the hardware probe, tables.os_families):
 apt (Debian, Ubuntu, Raspberry Pi OS and the systems built on them), dnf (Fedora, RHEL, CentOS Stream, Rocky Linux,
@@ -892,7 +892,7 @@ class TestPython:
 
 @needs_bash_and_gpg
 class TestRhelRebuilds:
-    """DECISIONS round 26 Q1: on the RHEL rebuilds Docker CE from Docker's RHEL repository is the standard (its key
+    """DESIGN round 26 Q1: on the RHEL rebuilds Docker CE from Docker's RHEL repository is the standard (its key
     checked against the pinned fingerprint, as for Fedora, RHEL and CentOS); Podman (podman-docker) is the fallback
     when Docker CE cannot be installed or when the person says no to the packages dnf would have to remove."""
 

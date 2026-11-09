@@ -1,5 +1,5 @@
 """
-The keys of hardware probe 3.1.0 (decisions round 23 item 11, O-PREP and O-HAILO; HAILO_PLAN.md section 2): the
+The keys of hardware probe 3.1.0 (DESIGN round 23 item 11, O-PREP and O-HAILO; HAILO_PLAN.md section 2): the
 largest level-2 cache, the Vulkan instance version and the OpenCL platforms, the Hailo keys and the vendor runtime
 keys. Each is read the way the existing keys are read; the .py and the .sh run on the same fixture machines with the
 same fake tools and must agree, and the .ps1 carries the same rules. A profile of probe 3.0.0, which has none of these

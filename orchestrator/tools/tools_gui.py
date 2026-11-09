@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The GUI tool: the AI's hands in the open framework window (DECISIONS round 8, "HYBRID CLARIFIED" (2); W4 of
+The GUI tool: the AI's hands in the open framework window (DESIGN round 8, "HYBRID CLARIFIED" (2); W4 of
 2026-10-16: external AI apps get the same hands, with the same harness).
 
 One tool, `gui`, with an `action` field (one tool instead of five, so an MCP client still lists at most

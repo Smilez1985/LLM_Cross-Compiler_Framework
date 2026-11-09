@@ -975,7 +975,7 @@ class TestCommunityRoundtrip:
         assert all("chunk_hash" in e["metadata"] and e["metadata"]["shared_as"] == "full_text" for e in data)
 
         rag.clear_knowledge_base()
-        # Handed back as a loose file (DECISIONS round 23 item 1): never imported unsorted, sorted into a topic first
+        # Handed back as a loose file (DESIGN round 23 item 1): never imported unsorted, sorted into a topic first
         community.knowledge_dir.mkdir(parents=True, exist_ok=True)
         shutil.move(str(export), str(community.knowledge_dir / export.name))
         shutil.rmtree(export.parent, ignore_errors=True)

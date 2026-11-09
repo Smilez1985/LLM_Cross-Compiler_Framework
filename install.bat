@@ -82,7 +82,7 @@ foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
 if ($ModeChoice -notin @("", "private", "enterprise")) {
     Write-Error "Unbekannter Wert fuer --mode: '$ModeChoice' (private oder enterprise)."
 }
-# Dependencies (DECISIONS round 65): every run resolves the newest compatible versions fresh (step [3/5]); --offline (for
+# Dependencies (DESIGN round 65): every run resolves the newest compatible versions fresh (step [3/5]); --offline (for
 # unattended runs also LCF_OFFLINE=1) installs the shipped tested lock without resolving.
 $Offline = ($env:LCF_OFFLINE -eq "1")
 foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
@@ -175,7 +175,7 @@ Set-Location $InstallDir
 $Pip = ".venv\Scripts\pip.exe"
 $PythonVenv = ".venv\Scripts\python.exe"
 
-# Dependencies (DECISIONS round 65). Every run, every update too, resolves the newest compatible versions fresh
+# Dependencies (DESIGN round 65). Every run, every update too, resolves the newest compatible versions fresh
 # (scripts\fresh_deps.py resolve: uv lock --upgrade in a copy, inside the ranges of pyproject.toml and with the 5-day
 # cooldown), audits them with pip-audit, installs them with hashes and checks the new environment itself
 # (fresh_deps.py selfcheck: pip check, every dependency and the core modules import, llm-cli --help). When any of

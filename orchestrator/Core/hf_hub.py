@@ -3,7 +3,7 @@
 Hugging Face for AI callers (MCP design 2.4, work package T6): search with the gated filter, one lookup per model
 (licence, gating, access of the stored token, files, size, commit), and one cancellable, resumable fetcher checked
 against the Hub's sha256. The person's own downloads in the GUI's Hugging Face browser go through the same fetcher into
-the same folders (download_for_person, DECISIONS round 11 A6): one code path for both.
+the same folders (download_for_person, DESIGN round 11 A6): one code path for both.
 
 Rules that hold for every call here:
 
@@ -15,7 +15,7 @@ Rules that hold for every call here:
   or the audit log, and it is sent only to huggingface.co: every API call goes there (hub_api; never to the host in
   HF_ENDPOINT), and a redirect to the Hub's file storage carries no token (requests drops the header on a cross-host
   redirect, and the fetcher refuses any other host).
-- The token goes only where Hugging Face needs one (DECISIONS round 25 Q2): searches, listings and the files of a
+- The token goes only where Hugging Face needs one (DESIGN round 25 Q2): searches, listings and the files of a
   public repository are fetched without it. A repository whose information says it is gated or private
   (needs_token), or a request the Hub answered with 401 or 403 without a token (refused_without_token), gets it:
   then one request with the token (tokenless_first; HubFetcher's token_needed).
@@ -626,7 +626,7 @@ class HubFetcher(PinnedDownloader):
             return dest, digest
 
 
-# --- fastembed's models (DECISIONS round 25 Q2: through the framework's fetcher into fastembed's cache) --------------
+# --- fastembed's models (DESIGN round 25 Q2: through the framework's fetcher into fastembed's cache) --------------
 
 def cache_folder(cache_dir: Path, repo: str) -> Path:
     """`<cache_dir>/models--<owner>--<name>`: where huggingface_hub's cache layout (the one fastembed reads) keeps a
@@ -816,7 +816,7 @@ def reserve_space(ledger: Any, folder: Path, size: int, owner: str, label: str, 
     return LedgerReservation(ledger, rid)
 
 
-# --- the person's own download (the GUI's Hugging Face browser, DECISIONS round 11 A6) -------------------------------
+# --- the person's own download (the GUI's Hugging Face browser, DESIGN round 11 A6) -------------------------------
 
 def _api_for(api: Any) -> Callable[[Any], Any]:
     """`api` as a factory of the Hub's API per token: a factory as it is, an API object (a test's stand-in) for every

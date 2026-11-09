@@ -1,4 +1,4 @@
-"""hadolint at build time (BuildEngine._validate_dockerfile_hadolint; DECISIONS round 23, item 4).
+"""hadolint at build time (BuildEngine._validate_dockerfile_hadolint; DESIGN round 23, item 4).
 
 Before, every outcome was reported as "Hadolint check skipped (tool not found or failed)" and the findings were thrown
 away. The check stays advisory (nothing in the settings makes it stop a build): the build always goes on. Three cases

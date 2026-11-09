@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 The Builder tab's choice when offline mode is on and the model named by its Hugging Face id is not on this computer
-(DECISIONS round 25 Q1): nothing is downloaded. The window lists the models already here (BuildService.models_here:
+(DESIGN round 25 Q1): nothing is downloaded. The window lists the models already here (BuildService.models_here:
 the models folder, the folders shared with the AI, the Builder's own copies of Hugging Face models, the inputs of
 earlier builds) and offers an open dialog for a model file or folder of the person's own (a sideloaded model). What the
 person picks becomes the Builder's model, and the build starts with it. A file pick is the person's only; an AI never

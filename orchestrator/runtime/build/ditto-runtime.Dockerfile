@@ -1,7 +1,7 @@
 # Ditto's local model server in a container (orchestrator/runtime/container_server.py, runtime mode "docker").
 #
 # Built locally on the user's machine, never pulled as a finished image and never pushed anywhere: the framework
-# shares this recipe, not an image (decision D21, DECISIONS round 7 D). BASE is a Docker Official Image of
+# shares this recipe, not an image (decision D21, DESIGN round 7 D). BASE is a Docker Official Image of
 # configs/llama_runtime.yml (build_bases), pinned by digest: the base the builder container compiled the programs on,
 # or, for programs built natively on this machine, a base with the same C library that is at least as new. The image
 # build has network for the base's own signed package archive (runtime libraries only). Nothing here downloads

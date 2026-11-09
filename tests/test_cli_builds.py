@@ -945,7 +945,7 @@ class TestTargets:
         assert cli_targets.invoke("targets", "validate", "Nope").code == 1
 
     def test_boards_shows_each_profile_and_marks_unmeasured_benchmarks(self, cli_targets):
-        # DECISIONS round 23 item 10: the optimization profiles and benchmark rows are shown, every row marked
+        # DESIGN round 23 item 10: the optimization profiles and benchmark rows are shown, every row marked
         result = cli_targets.invoke("targets", "boards", "rockchip")
         assert result.code == 0, result.out
         out = " ".join(result.out.split())

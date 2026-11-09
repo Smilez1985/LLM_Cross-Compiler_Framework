@@ -1,4 +1,4 @@
-"""The end record of the stage runner (targets/*/modules/build.sh, DECISIONS round 40 TASK 1) and its Cancel note
+"""The end record of the stage runner (targets/*/modules/build.sh, DESIGN round 40 TASK 1) and its Cancel note
 (TASK 7): one record per run, written as the very last step; "done" only after the last stage's marker, "failed"
 through the same writer for every other end; a person's Cancel is not counted by the loop protection.
 

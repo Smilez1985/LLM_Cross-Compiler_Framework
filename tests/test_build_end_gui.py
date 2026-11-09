@@ -1,4 +1,4 @@
-"""The Builder's progress panel ends on the build's end reason and says it in plain words (DECISIONS round 40,
+"""The Builder's progress panel ends on the build's end reason and says it in plain words (DESIGN round 40,
 TASK 3), in the person's language."""
 
 from types import SimpleNamespace

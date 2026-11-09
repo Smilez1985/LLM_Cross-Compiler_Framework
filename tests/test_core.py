@@ -323,7 +323,7 @@ class TestDependencyApiRegressions:
 
     def test_hub_file_download_uses_current_hub_api(self, tmp_path, monkeypatch):
         # The Hugging Face browser's download (the tiny-model snapshot download it replaced was removed). Since A6
-        # (DECISIONS round 11) it goes through the framework's verified fetcher into models/hf/<owner>--<name>/
+        # (DESIGN round 11) it goes through the framework's verified fetcher into models/hf/<owner>--<name>/
         # <commit[:12]>/ instead of huggingface_hub's cache: this test pinned hf_hub_download(cache_dir=models) before.
         import inspect
         import huggingface_hub

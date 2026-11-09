@@ -1,4 +1,4 @@
-"""Standing approvals: "yes, and do not ask again" (MCP design S9a, section 6.10; maintainer decisions rounds 2-4).
+"""Standing approvals: "yes, and do not ask again" (MCP design S9a, section 6.10; maintainer DESIGN rounds 2-4).
 
 Created only by a person in the framework's own window; the scope is computed from facts the framework looked up;
 never for the tools of the design's "never" list; packs only for knowledge and recipe packs (both trust levels) and

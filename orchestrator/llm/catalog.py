@@ -140,7 +140,7 @@ class ProviderPreset(BaseModel):
     def is_local(self, base_url: Optional[str] = None) -> bool:
         """Where the server stands, the preset's location label (the privacy filter follows it): its `location`, or for
         "auto" (a server whose address the person sets) the network-locality rule for the address WITHOUT the person's
-        opt-outs (utils/locality.check_location, DECISIONS round 26 Q3): a public host the person counts as local for
+        opt-outs (utils/locality.check_location, DESIGN round 26 Q3): a public host the person counts as local for
         offline mode keeps the label "cloud" and the privacy filter, online and offline. Whether offline mode may reach
         the server is offline_refusal's question."""
         if self.location != "auto":
@@ -231,7 +231,7 @@ class Catalog(BaseModel):
 
 def is_local_url(url: Optional[str]) -> bool:
     """Where a server stands: whether its address counts as local by the one network-locality rule WITHOUT the
-    person's opt-outs (utils/locality.check_location; DECISIONS round 24 L-NET, round 26 Q3): a name by the addresses
+    person's opt-outs (utils/locality.check_location; DESIGN round 24 L-NET, round 26 Q3): a name by the addresses
     it resolves to (a .local or .lan name only when it has local ones; a name with local and public addresses by its
     local ones, which are the only ones a connection then uses), loopback, private and link-local addresses, a
     Tailscale address only with the person's own Headscale; anything else (or nothing) counts as cloud. The opt-outs

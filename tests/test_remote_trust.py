@@ -1,4 +1,4 @@
-"""The trust in a board's host key (consolidation stage C, c2-remote-trust; DECISIONS round 10 Q5).
+"""The trust in a board's host key (consolidation stage C, c2-remote-trust; DESIGN round 10 Q5).
 
 orchestrator/remote/trust.py is the read-only host-key store (TrustStore: status, status_of, check,
 read_presented_key); orchestrator/remote/pairing.py holds the person's writers (trust a key with its audit row in one
@@ -566,7 +566,7 @@ def test_the_import_guard_bites():
 TRUST_WRITERS = ("trust_host_key", "save_host_keys", "install_public_key")
 # The only places a module an AI can reach names one of them: ssh_trust itself (their definitions) and the session's
 # pair(), which only the person's OneTimePassword credentials reach (every AI path logs in with KeyOnly). The deprecated
-# DeploymentManager.trust_host names none since P5 (DECISIONS round 22): it delegates to pairing.trust_presented_key
+# DeploymentManager.trust_host names none since P5 (DESIGN round 22): it delegates to pairing.trust_presented_key
 # through the person's PersonChannel, and nothing calls it.
 WRITER_PLACES = {("orchestrator.remote.session", "RemoteSession.pair")}
 
@@ -611,7 +611,7 @@ def test_no_module_an_ai_can_reach_writes_trust_except_the_person_s_one_time_pas
 
 
 class TestTrustHostDelegate:
-    """P5 (DECISIONS round 22): DeploymentManager.trust_host is deprecated and a thin delegate to
+    """P5 (DESIGN round 22): DeploymentManager.trust_host is deprecated and a thin delegate to
     pairing.trust_presented_key, for the person only: with the channel's PersonChannel it stores the key in the deploy's
     known_hosts and writes the same audit row; without one nothing is trusted."""
 
@@ -932,7 +932,7 @@ class TestBoardChange:
         assert paired is logs_in and moved.paired is logs_in
         assert b.store.get(b.device.device_id) is None and b.store.list() == [moved]
         assert b.store.key_status(moved) == "known"
-        # P6 (DECISIONS round 22): the board's data moves with its new key (before, the probe stayed under the old ID)
+        # P6 (DESIGN round 22): the board's data moves with its new key (before, the probe stayed under the old ID)
         assert b.profiles.list_devices() == [new_id], "the stored probe moved to the new device ID"
         assert b.profiles.device_info(new_id)["label"] == "Desk board"
         assert b.logins in ([(HOST, 22, "radxa", None)], [])
@@ -981,7 +981,7 @@ OTHER_BOARD = "0123456789abcdef"
 
 
 class TestTheBoardsDataMoves:
-    """P6 (DECISIONS round 22): after the person confirms a new host key for a board, the board's data moves to its new
+    """P6 (DESIGN round 22): after the person confirms a new host key for a board, the board's data moves to its new
     device ID: its stored probe, deploy settings, measured limits, deployed runtime, deploy record and "tested on"
     records. Each part is copied and checked before known_hosts changes, the old copies go only after the change, and nothing is lost
     when a step fails."""

@@ -1,4 +1,4 @@
-"""Mojo closes the circle (DECISIONS round 27): after Mojo Oracle at a terminal, Mojo Miracle ends with the crystal ball
+"""Mojo closes the circle (DESIGN round 27): after Mojo Oracle at a terminal, Mojo Miracle ends with the crystal ball
 and one line, "[Mojo] Miracle managed. The oracle is pleased." when it repaired everything, "[Mojo] 404 - miracle not
 found" when there was nothing to repair. Only at a terminal: never with --json, never without a terminal, never for
 an AI tool, not in the GUI. "After Mojo Oracle": the Oracle run's question answered yes, or `llmcf mojo --miracle`

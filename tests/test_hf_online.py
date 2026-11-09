@@ -210,7 +210,7 @@ class TestTheTokenGoesOnlyToHuggingFace:
     host in HF_ENDPOINT, and the browser's search, licence check and file list sent the implicit HF_TOKEN there. Every
     caller now goes through hf_hub.hub_api.
 
-    Changed on purpose (DECISIONS round 25 Q2): the token goes only where Hugging Face needs one. Before, every call
+    Changed on purpose (DESIGN round 25 Q2): the token goes only where Hugging Face needs one. Before, every call
     of these callers carried the stored (or typed) token to huggingface.co; now a public repository's look-ups,
     listings and files carry none, also with a token stored. A gated repository's access check and files get it, and
     a private one's calls get it after the Hub refused them without one (401), one request each time; still only at

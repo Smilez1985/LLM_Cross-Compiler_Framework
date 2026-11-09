@@ -1,4 +1,4 @@
-"""hadolint, the Dockerfile linter, run on one Dockerfile; the result in plain words (DECISIONS round 23, item 4).
+"""hadolint, the Dockerfile linter, run on one Dockerfile; the result in plain words (DESIGN round 23, item 4).
 
 `run_hadolint` tells four outcomes apart and never raises for any of them:
 

@@ -94,7 +94,7 @@ class BuildRequest:
     # Board within the target family (e.g. rk3588 vs rk3566) and model kind
     target_board: Optional[str] = None
     # The board's hardware probe by its id in the probe store (runtime/probe_service.py): the build engine hands it to
-    # every build container read-only, and the config stage plans the build for it (DECISIONS round 23 item 5)
+    # every build container read-only, and the config stage plans the build for it (DESIGN round 23 item 5)
     hardware_probe: Optional[str] = None
     model_task: str = "LLM"
     max_context_length: Optional[int] = None

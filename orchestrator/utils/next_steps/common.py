@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Next steps of the framework as a whole (Mojo, the trash, Docker, the settings, the main window) and the one table of
-the main window's menu structure, MENU_LAYOUT (wave 6, chain a0; DECISIONS round 10 Q2 and V2).
+the main window's menu structure, MENU_LAYOUT (wave 6, chain a0; DESIGN round 10 Q2 and V2).
 
 MENU_LAYOUT names every menu by its objectName and title key, and every entry by its objectName and label key, in
 the order the person sees them: (objectName, title key, entries) for a menu or submenu, (objectName, label key) for
@@ -114,7 +114,7 @@ STEPS = (
     Step("settings.knowledge_on", person_only="permission", window="ai_settings", target="act_ditto_settings"),
     Step("settings.sandbox_on", person_only="permission", window="settings", target="act_file_settings"),
     Step("settings.pin_image", person_only="permission", window="settings", target="act_file_settings"),
-    # the person's opt-out of offline mode's locality rule (DECISIONS round 24, "L-NET final"): never an AI
+    # the person's opt-out of offline mode's locality rule (DESIGN round 24, "L-NET final"): never an AI
     Step("settings.local_network", cli="config local-network", person_only="permission", window="settings",
          target="act_file_settings"),
     # the person's MQTT broker for the build doorbell (Core/doorbell.py): never an AI

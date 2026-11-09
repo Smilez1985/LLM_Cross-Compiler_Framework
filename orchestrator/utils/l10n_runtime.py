@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Texts of Ditto's runtime mode in the AI settings and in Ditto > Local Runtime... (bare metal or Docker, DECISIONS
+Texts of Ditto's runtime mode in the AI settings and in Ditto > Local Runtime... (bare metal or Docker, DESIGN
 round 7 D), English and German; the newer texts of that window are in l10n_ditto_runtime.
 LocalizationManager merges them (localization.TEXT_MODULES); a key that exists already is refused there.
 

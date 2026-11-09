@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The MQTT doorbell (DECISIONS round 40, TASK 5): every build end, published to an MQTT broker the person points to,
+The MQTT doorbell (DESIGN round 40, TASK 5): every build end, published to an MQTT broker the person points to,
 so the person's phone, a home automation or an external AI client wakes up and fetches the details over MCP. Until
 the gateway's built-in broker (rumqttd, ROADMAP) exists the person brings a broker (Mosquitto, NanoMQ, ...); the
 built-in broker takes over the same topics and payload.

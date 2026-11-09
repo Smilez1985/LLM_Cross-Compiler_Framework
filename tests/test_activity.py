@@ -1,4 +1,4 @@
-"""AI activity in the core (wave 6, design B; DECISIONS round 9, U1 and consequence b).
+"""AI activity in the core (wave 6, design B; DESIGN round 9, U1 and consequence b).
 
 What Ditto or an AI app does through the framework's tools becomes one signed chat-feed row per event, written by the
 process that did the work (the GUI, llmcf, every stdio MCP server, the HTTP child), so the GUI shows it whichever
@@ -397,7 +397,7 @@ class TestRows:
         for kind in ("grant_used", "approval", "approval_end", "refused_before_question"):
             assert row_for_event(kind, data) is None
         assert row_for_job({"job_id": JOB, "kind": "crawl", "owner": actor, "state": "done"}) is None
-        # A build's end is the exception (DECISIONS round 40): every build gets its row, the person's from the framework
+        # A build's end is the exception (DESIGN round 40): every build gets its row, the person's from the framework
         own = row_for_build({"request_id": REQ, "status": "completed", "owner": actor or ""})
         assert (own.caller, own.text_key) == ("", "activity.build.ready")
 
@@ -434,7 +434,7 @@ class TestRows:
         assert rows(store)[0].refs.window == "knowledge_snapshots"
 
     def test_build_ends(self):
-        """Every build's end, with the fixed vocabulary only (DECISIONS round 40): the folder, the counts and any
+        """Every build's end, with the fixed vocabulary only (DESIGN round 40): the folder, the counts and any
         other fact stay out of the row; the details come over MCP."""
         ready = row_for_build({"request_id": REQ, "status": "completed", "end_reason": "done", "owner": "mcp",
                                "saved": "output:Rockchip/m/Q4", "completed": 1, "failed": 0})

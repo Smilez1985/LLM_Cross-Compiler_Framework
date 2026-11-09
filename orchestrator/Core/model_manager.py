@@ -85,7 +85,7 @@ class ModelManager:
         """Models matching `query`, most downloaded first. gated: False only models that download without accepting
         conditions, True only gated ones, None all. Each result keeps the gating mode (`gating`: false, auto,
         manual) next to the plain `gated` flag. Raises on any failure: an error is never an empty list. Asks
-        huggingface.co only (hf_hub.hub_api) without any token: a listing is public (DECISIONS round 25 Q2), and an
+        huggingface.co only (hf_hub.hub_api) without any token: a listing is public (DESIGN round 25 Q2), and an
         implicit token is never sent. Refused in offline mode (hf_hub.offline_refusal)."""
         self._check_online()
         from orchestrator.Core.hf_hub import gating
@@ -144,7 +144,7 @@ class ModelManager:
                       progress: Optional[Callable[[str, int, int], None]] = None,
                       stop: Optional[threading.Event] = None) -> str:
         """Downloads one file for the GUI's Hugging Face browser (the person's own action) through the framework's
-        verified fetcher, the same as an AI's download_hf_file (DECISIONS round 11 A6, hf_hub.download_for_person):
+        verified fetcher, the same as an AI's download_hf_file (DESIGN round 11 A6, hf_hub.download_for_person):
         the commit is resolved first and exactly that commit's file is fetched, resumable, checked against the Hub's
         size and sha256, into <models_dir>/hf/<owner>--<name>/<commit[:12]>/, under the one disk rule with its own
         reservation in the per-user ledger while it runs. `token`: the one the person typed, else the one stored in

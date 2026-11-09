@@ -2,7 +2,7 @@
 LLM Cross-Compiler Framework - Update Manager
 
 An update is a fresh run of the installer: it is idempotent and resolves the newest compatible dependencies on
-every run (DECISIONS round 65), so the updater only brings the source checkout forward (git fast-forward) and starts
+every run (DESIGN round 65), so the updater only brings the source checkout forward (git fast-forward) and starts
 the installer of this platform from there with the person's flags (for example --offline).
 
 The installed copy (/opt/llm-cross-compiler-framework, or Program Files on Windows) has no .git and cannot update

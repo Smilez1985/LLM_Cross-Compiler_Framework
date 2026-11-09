@@ -162,7 +162,7 @@ class TestBuild:
         assert "pinned commit" in question and "self-built" in question and "cpu build" in question
 
     def test_the_build_of_an_ai_stops_at_its_soft_cap(self, fw, fake_rt, monkeypatch):
-        """An AI-started runtime build is never extended past its soft cap (DECISIONS round 25 Q8): the tool builds
+        """An AI-started runtime build is never extended past its soft cap (DESIGN round 25 Q8): the tool builds
         with ai_started=True."""
         rt = fake_rt["rt"]
         seen = []

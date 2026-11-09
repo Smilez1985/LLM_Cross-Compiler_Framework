@@ -1,4 +1,4 @@
-"""Offline mode and Docker images (DECISIONS round 24 L-NET, round 25; the cs-c4-v review's open item).
+"""Offline mode and Docker images (DESIGN round 24 L-NET, round 25; the cs-c4-v review's open item).
 
 In offline mode a package with Docker images (DeploymentManager._export_docker_images: the CLI's --docker, the
 Deployment tab, the AI's create_deploy_package with include_docker_images) and the target image of a build use only

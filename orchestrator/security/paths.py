@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Paths in text an AI reads (design 6.4, DECISIONS round 4 item 1: ids and labels toward an AI, readable names for the
+Paths in text an AI reads (design 6.4, DESIGN round 4 item 1: ids and labels toward an AI, readable names for the
 person; D0: a board's account never reaches an AI). Qt-free and below every other layer, so the Core, the tools and
 the utils use one implementation (consolidation chain c1-paths; moved here from orchestrator/tools/tools_runtime.py,
 which keeps the old names).
@@ -245,7 +245,7 @@ def label_paths(text: str, roots: Dict[str, str]) -> str:
     otherwise when the longer path exists or the next word is clearly part of it), so neither a user name nor a piece
     of a host path is left. Paths of both systems are recognised on any computer, with either separator (and a
     Windows path in any case), and the home folder by every name it has here (home_folders). Ids and labels instead of
-    paths toward an AI, readable names for the person (design 6.4, DECISIONS round 4 item 1)."""
+    paths toward an AI, readable names for the person (design 6.4, DESIGN round 4 item 1)."""
     pairs = set()
     for folder, label in roots.items():
         if folder:

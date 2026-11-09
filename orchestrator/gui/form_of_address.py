@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Language and the German form of address (wave 6, f-words; DECISIONS round 10, Q1).
+Language and the German form of address (wave 6, f-words; DESIGN round 10, Q1).
 
 German has two forms: "du" (the default text of every window) and "Sie" (each text module's FORMAL overlay, see
 utils/localization.py). The setting `form_of_address` ("du" or "sie") chooses; set_form_of_address() applies it and

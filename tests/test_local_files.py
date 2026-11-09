@@ -670,7 +670,7 @@ class TestReviewS6:
             server.close()
 
     def test_refusals_for_ai_callers_name_the_label_never_the_real_path(self, area, framework):
-        """Toward the AI: ids and labels, never the person's real paths (DECISIONS round 4 item 1)."""
+        """Toward the AI: ids and labels, never the person's real paths (DESIGN round 4 item 1)."""
         files = LocalFiles(area.state, {"models": area.tmp / "missing-models"})
         assert str(area.tmp) not in str(refused(files, "models:m.gguf"))
         first, second = area.tmp / "first", area.tmp / "second"

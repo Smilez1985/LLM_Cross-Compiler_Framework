@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Texts of offline mode's locality rule, English and German (DECISIONS round 24, L-NET and "L-NET final";
+Texts of offline mode's locality rule, English and German (DESIGN round 24, L-NET and "L-NET final";
 orchestrator/utils/locality.py): why a host counts as local or not, the VPN check, and File > Settings... > Local
 network with the person's opt-outs (orchestrator/Core/local_network.py; `llmcf config local-network` prints the same
 texts). LocalizationManager merges TEXTS and FORMAL (localization.TEXT_MODULES); a key that exists already is refused

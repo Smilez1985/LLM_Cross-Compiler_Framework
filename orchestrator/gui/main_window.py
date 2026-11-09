@@ -174,7 +174,7 @@ class MainOrchestrator(QMainWindow):
         return action
 
     def _setup_menu(self):
-        """The menu bar (wave 6, DECISIONS round 10 Q2): every entry is created with its object name and a translated
+        """The menu bar (wave 6, DESIGN round 10 Q2): every entry is created with its object name and a translated
         label; the order of the menus and their entries is one table, MENU_LAYOUT (orchestrator/utils/next_steps/
         common.py), applied by place.arrange() once the area modules and the chat dock added theirs. The AI
         administration lives in the Ditto menu ("Set up Ditto..." first, Ditto's local runtime, models and evaluation

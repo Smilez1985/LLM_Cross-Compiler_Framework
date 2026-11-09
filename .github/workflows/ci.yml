@@ -300,7 +300,7 @@ jobs:
             python -m pytest -ra tests/test_pair_pake.py
 
   test-headless:
-    # The install without the optional extra 'gui' (DECISIONS round 11, A3): a headless or server install and the
+    # The install without the optional extra 'gui' (DESIGN round 11, A3): a headless or server install and the
     # framework image without --gui. No PySide6 and no Qt libraries: the Qt-free checks (tests/test_qt_free_core.py:
     # the core's texts, `llmcf --help`, `llmcf mcp serve` and the plain message of llm-gui) and the non-GUI suite run;
     # the GUI's tests skip themselves.

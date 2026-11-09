@@ -67,7 +67,7 @@ def request_rows(request: Dict[str, Any]) -> List[Tuple[str, Any]]:
 
 def statistics_text(output_dir: Any) -> str:
     """The convert statistics of a finished build in one line (its build_info.json: how long the conversion and the
-    quantization ran, the size before and after; DECISIONS round 25 Q8), "" when the build wrote none."""
+    quantization ran, the size before and after; DESIGN round 25 Q8), "" when the build wrote none."""
     import json
     from orchestrator.Core.deletion import size_text
     if not output_dir:

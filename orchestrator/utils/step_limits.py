@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Time limits of a build step (DECISIONS round 25 Q8): no hard time limit. A step takes as long as it takes; what stops
+Time limits of a build step (DESIGN round 25 Q8): no hard time limit. A step takes as long as it takes; what stops
 it is a step that has stopped working, not the clock.
 
 - **Soft cap** (setting `build_timeout`, now a soft cap; its old meaning, a hard limit, is delegated here): when a step
@@ -17,7 +17,7 @@ seconds at a time, and asks check() after each wait. check() raises StepTimedOut
 stop and returns the soft-cap warning once for a person's step. The texts name the setting, never a path.
 
 A step that has said it is done (the stage runner's end record "status done", Core/build_end.py) is never stopped by
-a clock: finish() switches the clock off, check() returns None from then on (DECISIONS round 40).
+a clock: finish() switches the clock off, check() returns None from then on (DESIGN round 40).
 """
 
 import time

@@ -1,4 +1,4 @@
-"""The optional one-time Take over of the old Hugging Face download cache (DECISIONS round 11, A6;
+"""The optional one-time Take over of the old Hugging Face download cache (DESIGN round 11, A6;
 orchestrator/Core/hf_takeover.py): what earlier versions of the GUI's browser saved in huggingface_hub's cache inside
 the models folder is copied into the new folder, each file checked, and the old copies go only with the person's yes
 to the exact list (the deletion dialog, trash or for good, audited first). No test reaches the network."""

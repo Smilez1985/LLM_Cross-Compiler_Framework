@@ -1009,7 +1009,7 @@ class BuilderTab(QWidget):
         self.format_combo.clear()
         # build_formats.offered_formats: exactly the declared formats, else every format (UNCHECKED_FORMATS), the
         # list the CLI's `build start --format` takes for this target too. With the board's probe and this build
-        # computer they follow probe_formats (DECISIONS round 23 item 15): an NPU format only with that NPU, RKLLM
+        # computer they follow probe_formats (DESIGN round 23 item 15): an NPU format only with that NPU, RKLLM
         # only on an x86_64 computer; the build service refuses the others with the reason.
         offered = offered_formats(caps)
         if caps is not None:
@@ -1368,7 +1368,7 @@ class BuilderTab(QWidget):
         self._start_or_reuse(values, found)
 
     def _model_on_this_computer(self, values) -> bool:
-        """Offline mode (DECISIONS round 25 Q1): a Hugging Face model that is not on this computer is never
+        """Offline mode (DESIGN round 25 Q1): a Hugging Face model that is not on this computer is never
         downloaded. The person chooses a model already here or a model file or folder of their own (the choice window,
         gui/offline_model.py); the build then starts with it. False: nothing starts. Reads the disk only."""
         from orchestrator.Core.build_service import BuildService, ModelNotHere
@@ -1419,7 +1419,7 @@ class BuilderTab(QWidget):
             try:
                 rid = self._submit(service, values, recipe, options)
             except BuildServiceError as e:
-                # A module's CMake options outside the allowlist (DECISIONS round 25 Q6): the person decides here,
+                # A module's CMake options outside the allowlist (DESIGN round 25 Q6): the person decides here,
                 # after what each one does and the recommendation; then the same request is submitted once more.
                 question = getattr(e, "flag_question", None)
                 if question is None:

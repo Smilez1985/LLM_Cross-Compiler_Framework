@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Texts of the main window's menu bar and tabs (wave 6, chain a0; DECISIONS round 10 Q2): the menu titles with their
+Texts of the main window's menu bar and tabs (wave 6, chain a0; DESIGN round 10 Q2): the menu titles with their
 mnemonics (Alt+letter), the entries the main window creates itself, the submenus of the regrouped menus (Ditto >
 Advanced, Tools > Knowledge, Tools > Maintenance) and the tab titles, in English and German.
 

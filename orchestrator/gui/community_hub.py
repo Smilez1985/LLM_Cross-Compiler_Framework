@@ -13,7 +13,7 @@ to accept (zoo install --file --passphrase / --from: prepare_install_file), Chec
 verify_installed), Check a pack file... (zoo verify FILE: verify_file), Export... (zoo export target|recipe|knowledge
 with --id, --topic/--target, --to, --passphrase, --out: export_pack), Sort loose knowledge... (knowledge loose and
 knowledge sort: loose_knowledge, prepare_sort; a loose knowledge file is never imported until it is sorted into a topic
-or target folder, DECISIONS round 23 item 1) and My public keys... (zoo keys: UserKeys.export_public). Downloads,
+or target folder, DESIGN round 23 item 1) and My public keys... (zoo keys: UserKeys.export_public). Downloads,
 checks, exports and the keys run off the GUI thread; passphrases are never stored or shown.
 
 The second tab, Maintainer (gui/community_maintainer.py), holds the maintainer's actions on the community repository
@@ -605,7 +605,7 @@ class CommunityExportDialog(QDialog):
         self.id_edit = QLineEdit()
         self.id_edit.setObjectName("edt_zoo_export_id")
         self.id_edit.setPlaceholderText(self._t("zoo.export.id.hint"))
-        self.scope = None   # a knowledge pack's topic or target (DECISIONS round 23 item 1: --topic / --target)
+        self.scope = None   # a knowledge pack's topic or target (DESIGN round 23 item 1: --topic / --target)
         if kind == "knowledge":
             form.addRow(plain_label(self._t("zoo.export.id"), wrap=False), self.id_edit)
             from orchestrator.gui.community_dialogs import ScopeChooser

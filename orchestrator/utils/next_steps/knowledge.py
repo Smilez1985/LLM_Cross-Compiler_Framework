@@ -44,7 +44,7 @@ STEPS = (
     Step("knowledge.sources", cli="knowledge sources", tool="list_knowledge_sources", window="knowledge_sources",
          target="act_knowledge_sources", runnable=True),
     Step("hub.open", cli="zoo", tool="list_packs", window="community_hub", target=_HUB),
-    # loose knowledge files are never imported until the person sorts them (DECISIONS round 23 item 1)
+    # loose knowledge files are never imported until the person sorts them (DESIGN round 23 item 1)
     Step("knowledge.loose", cli="knowledge loose", person_only="permission", window="community_hub",
          target="btn_zoo_sort", runnable=True),
     Step("hub.refresh", cli="zoo list --refresh", cli_args=("--refresh",), tool="list_packs", window="community_hub",

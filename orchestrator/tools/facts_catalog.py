@@ -3,7 +3,7 @@
 The facts catalogue (delegation design 4.1-4.3, work package WP4): every hard blocker and every warning the framework
 can find before a question, with its fixed kind, and which of them belong to which tool.
 
-Three kinds of findings decide who answers a question (DECISIONS round 5 a):
+Three kinds of findings decide who answers a question (DESIGN round 5 a):
 - **Blockers** refuse the call before any question, for the AI and the person alike. Each has a reason code
   (normalize.REASON_CODES), separate texts for the AI (`next`) and for the person (`person_action`, what they can do,
   GUI place first), and, when an AI tool clears it, that tool (`resolved_by`; the reason code is then
@@ -31,7 +31,7 @@ from orchestrator.tools.spec import CallWarning
 
 # Raised whenever SECURITY_LEGAL or a blocker's reason code changes (the snapshot test pins it): every delegation made
 # under an older version is outdated and must be renewed by the person. 2: the remote mode's codes are gone
-# (artifact_from_other_computer, transfer_unsupported; DECISIONS round 8). 3: snapshot_no_room (eighth round, answer
+# (artifact_from_other_computer, transfer_unsupported; DESIGN round 8). 3: snapshot_no_room (eighth round, answer
 # 2) and why a board cannot be reached (device_host_down, device_port_closed, device_auth_failed,
 # device_host_key_changed instead of device_unreachable and host_key_changed; N6). 4: gui_not_open (W4: the GUI tool of an
 # AI app when no framework window is open).
@@ -83,7 +83,7 @@ BLOCKERS: Dict[str, BlockerSpec] = {
     "offline_mode": BlockerSpec("needs_person", person_action="action.offline_off", also=("not_supported",),
                                 step="settings.offline_off"),
     "sandbox_off": BlockerSpec("needs_person", person_action="action.sandbox_on", step="settings.sandbox_on"),
-    # a module's CMake options outside the allowlist: only the person decides (DECISIONS round 25 Q6)
+    # a module's CMake options outside the allowlist: only the person decides (DESIGN round 25 Q6)
     "module_flags_undecided": BlockerSpec("needs_person", person_action="action.decide_module_flags",
                                           step="build.decide_flags"),
     "knowledge_off": BlockerSpec("not_supported", person_action="action.knowledge_on", also=("needs_person",),

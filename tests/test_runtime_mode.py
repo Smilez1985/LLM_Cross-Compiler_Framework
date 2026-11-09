@@ -1,5 +1,5 @@
 """
-Ditto's runtime mode, bare metal or Docker (DECISIONS round 7 D): the image built on this computer from the same pinned
+Ditto's runtime mode, bare metal or Docker (DESIGN round 7 D): the image built on this computer from the same pinned
 recipe (never pulled, never pushed), the server container under the one launch policy (port on 127.0.0.1 only, models
 read-only, no root, no capabilities), detection of both modes, `ditto runtime ensure` (idempotent, bare metal by
 default, Docker when chosen or when bare metal is not possible), switching that reuses the models and repackages
@@ -1481,7 +1481,7 @@ class TestAISettings:
         monkeypatch.setattr(box_module, "ask", lambda parent, title, question: False)
         box._token, box._pending = object(), ("docker", "bare-metal")
         box._on_relay(box._token, ("error", "no"))
-        # Wave 6 (DECISIONS round 9 U2): the window says the mode can be made again here; it named the CLI command
+        # Wave 6 (DESIGN round 9 U2): the window says the mode can be made again here; it named the CLI command
         # (`ditto runtime ensure --mode bare-metal`) before and never tells a command now.
         assert "You can make it again here later." in shown[-1] and "llm-cli" not in shown[-1]
         assert len(started) == 1

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The person's writers of a board's trust (consolidation stage C, c2-remote-trust; MCP design 2.7, decision 2; DECISIONS
+The person's writers of a board's trust (consolidation stage C, c2-remote-trust; MCP design 2.7, decision 2; DESIGN
 round 10 Q5). Only the person's own channels call these: the GUI and the CLI, and the person's board and scan steps
 behind them (orchestrator/runtime/device/person_steps.py, orchestrator/runtime/scan_steps.py). No module an AI can
 reach imports this one: tests/test_remote_trust.py follows every import of the tool modules, the MCP server, Ditto and
@@ -100,7 +100,7 @@ PERSON_CHANNELS = ("cli", "gui")
 
 @dataclass(frozen=True)
 class PersonChannel:
-    """The person's channel as the deprecated DeploymentManager.trust_host takes it (DECISIONS round 22, P5): `via`
+    """The person's channel as the deprecated DeploymentManager.trust_host takes it (DESIGN round 22, P5): `via`
     (cli or gui), the audit log or a function that opens it, and the actor of its rows. Only the person's channels
     make one: no module an AI can reach imports this module (tests/test_remote_trust.py). trust_presented_key() is the
     one implementation above, with its audit row."""

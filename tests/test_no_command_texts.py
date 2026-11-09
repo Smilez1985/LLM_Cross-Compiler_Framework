@@ -1,5 +1,5 @@
 """The GUI never tells a person to type a command, and no text hand-writes a menu path (wave 6, design A.1 and A.9;
-DECISIONS round 9 U2, round 10 V2).
+DESIGN round 9 U2, round 10 V2).
 
 Two guards:
 

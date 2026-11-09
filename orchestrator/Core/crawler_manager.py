@@ -5,7 +5,7 @@ LLM Cross-Compiler Framework - Crawler Manager
 Deep Ingest of documentation: crawls web pages breadth-first, extracts text from HTML and PDFs and prepares
 it for the knowledge base. Rate-limited, behind the SSRF guard (every request and every redirect hop).
 
-Which addresses a crawl may read (DECISIONS round 26 Q5): online, public addresses only, for every crawl
+Which addresses a crawl may read (DESIGN round 26 Q5): online, public addresses only, for every crawl
 (validate_public_url, PublicOnlyAdapter). In offline mode a crawl the person starts (actor "gui" or "cli", the
 person's channels) reads only sites on this computer or in the own network, by the one network-locality rule with the
 person's opt-outs, over a pinned connection without a proxy (validate_own_network_url, LocalOnlyAdapter with crawl):

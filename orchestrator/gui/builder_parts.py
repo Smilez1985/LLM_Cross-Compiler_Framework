@@ -216,7 +216,7 @@ class BuildProgressPanel(QWidget):
         self.bar.setValue(0)
         self.bar.setAccessibleName(ui_text("gui.progress.bar", self.lang))
         layout.addWidget(self.bar)
-        # The running build container's CPU and memory (DECISIONS round 12, item 6); hidden while none runs
+        # The running build container's CPU and memory (DESIGN round 12, item 6); hidden while none runs
         self.lbl_resources = plain_label("", self)
         self.lbl_resources.setObjectName("lbl_build_resources")
         self.lbl_resources.setVisible(False)

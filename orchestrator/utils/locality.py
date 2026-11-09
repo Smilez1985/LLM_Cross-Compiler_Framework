@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The one network-locality rule of offline mode (DECISIONS round 24, L-NET and "L-NET final"; round 26 Q3-Q5): in
+The one network-locality rule of offline mode (DESIGN round 24, L-NET and "L-NET final"; round 26 Q3-Q5): in
 offline mode the framework reaches only hosts on this computer or in the person's own network, and the person decides
 what their own network allows (no patronizing). Every offline decision that reaches out asks this module: the AI
 provider's address (llm/client.py, llm/settings_change.py), Ollama's or a custom server's address, the pinned
@@ -106,7 +106,7 @@ VPNS: Dict[str, Tuple[IPNetwork, ...]] = {"tailscale": VPN_NETWORKS}
 # The person's opt-outs (rule d); only Core/local_network.py writes them.
 OPT_OUT_SETTINGS = ("offline_local_vpns", "offline_local_hosts", "offline_local_ranges")
 # The mirrors and caches in the own network an offline build of the build container image may fetch apt and pip
-# packages through (DECISIONS round 36; Core/build_image.py judges them by this rule on every build). Person-only like
+# packages through (DESIGN round 36; Core/build_image.py judges them by this rule on every build). Person-only like
 # the opt-outs: AISettingsChange and MCP update_settings refuse them.
 BUILD_SOURCE_SETTINGS = ("build_apt_mirror", "build_apt_proxy", "build_pip_index")
 

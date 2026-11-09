@@ -24,7 +24,7 @@ SettingsOverlay and fallback parsing (gui/dialogs.py). Only the standard library
 only itself) are imported here at load time.
 
 The person's opt-outs of offline mode's locality rule (PERSON_ONLY_SETTINGS: offline_local_vpns, offline_local_hosts,
-offline_local_ranges; DECISIONS round 24, "L-NET final") are refused here for every channel that changes settings
+offline_local_ranges; DESIGN round 24, "L-NET final") are refused here for every channel that changes settings
 through this module (MCP update_settings, the coming `llmcf config set`): only the person sets them, in
 File > Settings... or with `llmcf config local-network` (Core/local_network.py).
 """

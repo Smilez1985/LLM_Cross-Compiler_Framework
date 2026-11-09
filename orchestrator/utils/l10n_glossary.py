@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The wording toolkit's texts and the glossary of technical terms (wave 6, f-words; DECISIONS round 10, V6, Q1, Q7).
+The wording toolkit's texts and the glossary of technical terms (wave 6, f-words; DESIGN round 10, V6, Q1, Q7).
 LocalizationManager merges TEXTS and FORMAL (localization.TEXT_MODULES); a key that exists already is refused there.
 This module imports nothing from the framework and nothing from Qt: it is plain data.
 

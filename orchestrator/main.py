@@ -6,7 +6,7 @@ The GUI's start-up lives in orchestrator/gui/app.py. This module stays where the
 install.bat, scripts/start-llm_cross_compiler_framework.bat, `llm-gui` in pyproject.toml) and is the GUI module itself
 once it is imported (`import orchestrator.main` gives orchestrator.gui.app, so existing callers and tests keep working).
 
-PySide6 is the optional 'gui' extra (DECISIONS round 11, A3). Without it this prints how to install it instead of a
+PySide6 is the optional 'gui' extra (DESIGN round 11, A3). Without it this prints how to install it instead of a
 traceback; the command line (llmcf) and the MCP server work without it.
 """
 

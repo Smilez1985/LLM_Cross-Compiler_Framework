@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The glossary of technical terms, Qt-free (wave 6, f-words; DECISIONS round 10, V6).
+The glossary of technical terms, Qt-free (wave 6, f-words; DESIGN round 10, V6).
 
 The data lives in orchestrator/utils/l10n_glossary.py (TERMS, and the explanations "term.<id>" in TEXTS). This module
 reads it for the hover card (gui/explain.py), for a CLI or an AI that wants the same explanation, and for tests:

@@ -169,7 +169,7 @@ def place_menu_before(menubar: Any, before: Optional[QMenu], menu: QMenu) -> Non
         menubar.addMenu(menu)
 
 
-# --- the menu structure of MENU_LAYOUT (wave 6, DECISIONS round 10 Q2 and V2) --------------------------------------
+# --- the menu structure of MENU_LAYOUT (wave 6, DESIGN round 10 Q2 and V2) --------------------------------------
 
 def _layout_menus(layout) -> Dict[str, tuple]:
     found: Dict[str, tuple] = {}

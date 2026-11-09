@@ -1,4 +1,4 @@
-"""Deleting and exporting knowledge snapshots (DECISIONS round 6: no limit, no automatic deletion; the person deletes
+"""Deleting and exporting knowledge snapshots (DESIGN round 6: no limit, no automatic deletion; the person deletes
 with multiple choice from the full list or exports them; WP7), and where Docker keeps the framework's images
 (round 7 item 12).
 """

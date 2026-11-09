@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build > Build Container Images... (DECISIONS round 36; the mouse path of `llm-cli build image plan / sources /
+Build > Build Container Images... (DESIGN round 36; the mouse path of `llm-cli build image plan / sources /
 export / import`).
 
 The build container image is the Docker image with a target's toolchain (Core/builder.py); the target artifact,

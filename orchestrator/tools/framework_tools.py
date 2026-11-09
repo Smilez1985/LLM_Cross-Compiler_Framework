@@ -174,7 +174,7 @@ KNOWN_TOOLS = frozenset({
     "list_devices", "create_deploy_package", "deploy_to_device",
     "list_packs", "add_pack_from_index", "export_pack", "start_recipe_build",
     "run_mojo_oracle", "run_mojo_miracle", "get_status", "get_settings", "update_settings", "report_cannot_do",
-    # the AI's hands in the open window (DECISIONS round 8, W4): one tool with an action field, the same for Ditto and
+    # the AI's hands in the open window (DESIGN round 8, W4): one tool with an action field, the same for Ditto and
     # MCP clients (orchestrator/tools/tools_gui.py)
     "gui",
     # hidden: the 3.0.0 name of run_mojo_oracle, callable but never listed
@@ -273,7 +273,7 @@ def healing_facts(service, request_id: str, approve: bool) -> CallFacts:
     fingerprint, to which the decision is bound. A destructive strategy is asked even when the tool is allowed."""
     proposal = service.healing_proposal(request_id, approve)
     strategy = proposal["strategy"]
-    # The build by its speaking name too: the first line is what the person reads first (DECISIONS round 4 item 1).
+    # The build by its speaking name too: the first line is what the person reads first (DESIGN round 4 item 1).
     named = f"{request_id} ({proposal['request']})" if proposal.get("request") else request_id
     if approve:
         consequence = HEALING_CONSEQUENCES.get(strategy, "Applies the proposed fix and retries build request {rid} "

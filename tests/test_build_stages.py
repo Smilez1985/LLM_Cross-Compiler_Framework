@@ -228,7 +228,7 @@ def image(tmp_path):
 # functional test). The characterization tests here compare build_info.json as it was before; the statistics are
 # pinned in tests/test_convert_stage.py.
 # The build's statistics in build_info.json: the convert stage's ("conversion") and the target stage's
-# ("quantize_seconds", DECISIONS round 25 Q8); they vary from run to run and are checked on their own
+# ("quantize_seconds", DESIGN round 25 Q8); they vary from run to run and are checked on their own
 _CONVERSION = re.compile(rb'(?:, "conversion": \{[^{}]*\})?(?:, "quantize_seconds": \d+)?(?=\}\s*$)')
 
 
@@ -486,7 +486,7 @@ def test_rkllm_outcomes(image, values, code, message):
 @needs_bash
 @pytest.mark.parametrize("machine", ["aarch64", "armv7l"])
 def test_rkllm_is_refused_on_a_build_computer_its_toolkit_has_no_wheels_for(image, machine):
-    """DECISIONS round 23 item 15: RKLLM-Toolkit 1.3.1 has Linux x86_64 wheels only. An image built on an ARM computer
+    """DESIGN round 23 item 15: RKLLM-Toolkit 1.3.1 has Linux x86_64 wheels only. An image built on an ARM computer
     has no RKLLM venv; the helper refuses with the build service's sentence (build_formats.format_refusal) before it
     looks for one, and no converter runs."""
     from orchestrator.Core.build_formats import build_host_arch, format_refusal
@@ -567,12 +567,12 @@ READ_TODAY = {
 NEW_FOR_THE_STAGE_RUNNER = {"MODEL_REVISION", "HARDWARE_CONFIG_FILE", "LLAMA_CPP_REPO_OVERRIDE"}
 # Read only by stage code started by hand with an option (source_module.sh --clone-llama-cpp), never in a build.
 ONLY_ON_REQUEST = {"LLAMA_CPP_COMMIT"}
-# Set by the BuildEngine for the module's CMake flags (DECISIONS round 25 Q6): the person's decision on options outside
+# Set by the BuildEngine for the module's CMake flags (DESIGN round 25 Q6): the person's decision on options outside
 # the allowlist (LLMCF_ALLOWED_FLAGS, LLMCF_FLAG_DECISION) and the dependencies fetched before the build and mounted
 # read-only (LLMCF_DEPS); BUILD_PLAN is the calling stage's own plan path, read by build.sh's cmake shim (it runs in
 # the stage's shell) to keep only the toolchain the plan set.
 FOR_THE_MODULE_FLAGS = {"LLMCF_ALLOWED_FLAGS", "LLMCF_FLAG_DECISION", "LLMCF_DEPS", "BUILD_PLAN"}
-# The loop protection of the stage runner (DECISIONS round 25 Q8): how often a stage may start with the same inputs
+# The loop protection of the stage runner (DESIGN round 25 Q8): how often a stage may start with the same inputs
 # without finishing (default 3; tests and a person's own run may change it).
 FOR_THE_TIME_RULE = {"STAGE_RESTART_LIMIT"}
 # What the host hands the runtime layer's runner (builder.py _sandbox: the stage order from target.yml, the end folder,
@@ -791,7 +791,7 @@ def _stopped_starts(image, stage, count):
 
 @needs_bash
 def test_a_stage_that_keeps_restarting_is_not_started_again(image):
-    """Loop protection (DECISIONS round 25 Q8): a stage started STAGE_RESTART_LIMIT times with the same inputs that
+    """Loop protection (DESIGN round 25 Q8): a stage started STAGE_RESTART_LIMIT times with the same inputs that
     never finished is a loop; the runner stops before starting it again, --fresh forgets the count."""
     assert image.run("--to", "convert").returncode == 0
     _stopped_starts(image, "target", 3)
@@ -877,7 +877,7 @@ def test_the_options_of_the_1x_modules(image):
     assert image.calls() == [f"convert <root>/other-model --outfile {OUT}/granite-Q8_0.gguf --outtype q8_0"]
 
 
-# Each module on its own with its options, as in version 1.x (DECISIONS round 16, U9 addendum; HOW2_ORIGINAL:
+# Each module on its own with its options, as in version 1.x (DESIGN round 16, U9 addendum; HOW2_ORIGINAL:
 # `./convert_module.sh --input ... --output ... --model-name ...`, `./target_module.sh --input <F16 GGUF>
 # --quantization ... --model-name ...`, `./config_module.sh --hardware-config <profile>`).
 
@@ -1030,7 +1030,7 @@ def plan_of(image) -> dict:
     ("schema1_sh_rk3566.txt", None, "aarch64", "", "armv8.2-a+dotprod+fp16"),   # an older probe file: no core named
 ])
 def test_config_module_plans_the_board_from_the_file_the_probe_writes(image, fixture, text, arch, cpu, march):
-    """HOW2_ORIGINAL (DECISIONS round 16, U9 addendum): hardware_probe.sh on the board writes target_hardware_config.txt,
+    """HOW2_ORIGINAL (DESIGN round 16, U9 addendum): hardware_probe.sh on the board writes target_hardware_config.txt,
     and `config_module.sh --hardware-config` plans the board from it: -march and GGML_CPU_ARM_ARCH of the features
     the probe found, as the build recipe plans them (no -mcpu from the core's name).
     The probe writes ARCH and CPU_MODEL (configs/hardware_probe_schema.yml); version 1.x's own names

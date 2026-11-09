@@ -94,7 +94,7 @@ def model_to_download(rt: Any, tier: Optional[str] = None) -> Tuple[Any, Optiona
 
 def offline_refusal(rt: Any, model: Any, lang: Optional[str] = None) -> Optional[str]:
     """`ditto models download` (and every other download of a model for Ditto: Ditto > Local Models..., the runtime
-    tools) in offline mode (DECISIONS round 25 Q1): the plain refusal that names the models already on this computer,
+    tools) in offline mode (DESIGN round 25 Q1): the plain refusal that names the models already on this computer,
     before any request; None when offline mode is off or the download address is in the person's own network (a local
     mirror, by the framework's one locality rule, utils/locality.py)."""
     from orchestrator.utils.locality import check_url, offline_mode

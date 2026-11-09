@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Speaking names in what the person sees (DECISIONS round 4 item 1; delegation design 5.2 rule R7).
+Speaking names in what the person sees (DESIGN round 4 item 1; delegation design 5.2 rule R7).
 
 An AI writes the framework's ids ("I started job_k3j2h1g0f9e8d7c6"); the person reads names ("the Hugging Face
 download"). `SpeakingNames.render(text)` splits a text into segments and replaces, outside code, exactly the

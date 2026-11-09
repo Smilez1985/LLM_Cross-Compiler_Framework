@@ -15,7 +15,7 @@ what one CLI command shows or takes; the Community Hub calls the same core funct
   build_info.json, or the knowledge base; CommunityExportDialog then takes the author, licence, pack id, the topic or
   target of a knowledge pack, encryption and folder.
 - SortKnowledgeDialog (`llm-cli knowledge loose`, `llm-cli knowledge sort NAME --topic|--target`): every loose
-  knowledge file and the topic or target to sort the chosen one into (DECISIONS round 23 item 1); the Community Hub
+  knowledge file and the topic or target to sort the chosen one into (DESIGN round 23 item 1); the Community Hub
   then checks it like a knowledge pack (CommunityManager.prepare_sort) and shows the summary with "No" as default.
 
 Every text is plain text in the person's language (l10n_knowledge); names, addresses and notes from packs and the index

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The community zoo for AI callers (MCP design 2.8, work package T9; DECISIONS round 1 item 3, round 2 item 4, round 4
+The community zoo for AI callers (MCP design 2.8, work package T9; DESIGN round 1 item 3, round 2 item 4, round 4
 items 2, 3 and 5).
 
 - `list_packs` (read): the signed index and the installed packs, details of one pack and the verification of the
@@ -20,7 +20,7 @@ items 2, 3 and 5).
   file in the contributions folder, signed with the person's key; the question names the key and the author. It
   refuses when no signing key exists yet (creating one is the person's step: `llm-cli zoo keys`). It returns the file
   as a label and how many lines the privacy scrub changed per file, never the removed text. Nothing is uploaded and
-  no pull request is opened: there is no tool for that (DECISIONS round 1 item 3).
+  no pull request is opened: there is no tool for that (DESIGN round 1 item 3).
 """
 
 import json

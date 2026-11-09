@@ -31,7 +31,7 @@ A destination is refused when it is (or lies in) a system folder, the framework'
 its per-user folder. Artifacts saved outside the output folder are remembered (`saved_artifacts.json` in the per-user
 folder) so the listings keep showing them.
 
-Using an earlier identical build (DECISIONS round 23, item 9): "Use" before a build (the GUI's Builder tab and `llm-cli
+Using an earlier identical build (DESIGN round 23, item 9): "Use" before a build (the GUI's Builder tab and `llm-cli
 build start`) copies the earlier build, with its golden ZIP, into the chosen folder (`plan_copy`, `copy_artifact`):
 the earlier build stays where it is. The one disk rule is checked before the copy (with every process's
 reservations); every copy is checked against its original by sha256. When the folder there holds the identical build

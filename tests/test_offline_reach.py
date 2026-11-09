@@ -1,4 +1,4 @@
-"""Offline mode reaches only local hosts (DECISIONS round 24, L-NET and "L-NET final"): every reach-out decision of
+"""Offline mode reaches only local hosts (DESIGN round 24, L-NET and "L-NET final"): every reach-out decision of
 offline mode asks the one network-locality rule (orchestrator/utils/locality.py), and where a connection follows it
 goes to the checked address.
 

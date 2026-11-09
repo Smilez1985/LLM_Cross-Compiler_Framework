@@ -808,7 +808,7 @@ def validate_public_url(url: str) -> ValidationResult:
 
 
 def validate_own_network_url(url: str, config: Any = None) -> ValidationResult:
-    """The address check of a crawl the person starts in offline mode (DECISIONS round 26 Q5): the URL passes the same
+    """The address check of a crawl the person starts in offline mode (DESIGN round 26 Q5): the URL passes the same
     checks as validate_public_url, and its host counts as local by the one network-locality rule with the person's
     opt-outs in `config` (utils/locality.crawl_addresses: a name with local and public addresses by its local ones;
     never a cloud metadata service or a link-local IPv4 address, in any spelling). The message of a refusal is the

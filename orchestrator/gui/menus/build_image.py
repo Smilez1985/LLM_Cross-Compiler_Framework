@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build > Build Container Images... (DECISIONS round 36): the mouse path of `llm-cli build image plan / sources / export
+Build > Build Container Images... (DESIGN round 36): the mouse path of `llm-cli build image plan / sources / export
 / import` (orchestrator/gui/build_image_window.py over orchestrator/Core/build_image.py, the same functions as the CLI).
 
 CLI_PATHS names, for every command and option of this area, the object that does it by mouse; WINDOW_OBJECTS names the

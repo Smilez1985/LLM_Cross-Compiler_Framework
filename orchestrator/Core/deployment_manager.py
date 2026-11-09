@@ -503,7 +503,7 @@ class DeploymentManager:
                         raise
                     from orchestrator.utils.image_ref import offline_pull_refusal
                     refused = offline_pull_refusal(img_name, getattr(self.framework, "config", None))
-                    if refused:   # offline mode: no pull from outside the own network (DECISIONS round 24 L-NET)
+                    if refused:   # offline mode: no pull from outside the own network (DESIGN round 24 L-NET)
                         raise DeployError(refused, code="needs_person",
                                           next="Package while offline mode is off, or without Docker images.")
                     client.images.pull(img_name)
@@ -640,7 +640,7 @@ class DeploymentManager:
         return check.status, check.key
 
     def trust_host(self, target_ip: str, key, port: int = 22, *, person: Any = None) -> None:
-        """Deprecated (DECISIONS round 22, P5): a thin delegate to orchestrator/remote/pairing.py trust_presented_key,
+        """Deprecated (DESIGN round 22, P5): a thin delegate to orchestrator/remote/pairing.py trust_presented_key,
         the one writer of a confirmed host key, which stores it in this deploy's known_hosts under its lock and writes
         the trust's audit row in the same step. Only the person's: `person` is the pairing.PersonChannel of the
         calling channel (the CLI or the GUI, with its audit log). No module an AI can reach imports pairing

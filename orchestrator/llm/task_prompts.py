@@ -7,7 +7,7 @@ The system texts are framework-written constants. Everything from outside the fr
 names, target texts, knowledge-base excerpts, the person's own question) goes into wrap_untrusted blocks of a user
 turn, never into a system text: `*_parts()` build those turns for Ditto and the MCP prompts alike.
 
-Every task text carries the honest-"cannot" rule (design 1.3; DECISIONS round 3): a model that cannot do a task says
+Every task text carries the honest-"cannot" rule (design 1.3; DESIGN round 3): a model that cannot do a task says
 so with the specific reason (missing information, a missing capability or tool, a denied permission, unavailable
 hardware, a reached limit); "untested" is never a reason. Not being able to test a result on real hardware is a fact
 to state, not a reason to refuse.
@@ -223,7 +223,7 @@ def optimizer_parts(model: str, target: str, board: Optional[str], listing: str,
     return parts
 
 
-# --- base images of AI-proposed modules (DECISIONS round 3) ---------------------------------------------------------
+# --- base images of AI-proposed modules (DESIGN round 3) ---------------------------------------------------------
 # split_image and is_official_image live in orchestrator/utils/image_ref.py (consolidation chain c1-imports); the
 # names stay importable here.
 

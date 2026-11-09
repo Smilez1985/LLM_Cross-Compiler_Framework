@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The dependency cache of module CMake options (DECISIONS round 25 Q6 addendum; orchestrator/runtime/build/deps.py):
+"""The dependency cache of module CMake options (DESIGN round 25 Q6 addendum; orchestrator/runtime/build/deps.py):
 fetched before the build, pinned as llama.cpp declares it, the sha256 recorded on the first fetch and checked after,
 offline only from the cache, mounted read-only into the build with FETCHCONTENT_SOURCE_DIR_<NAME> and
 FETCHCONTENT_FULLY_DISCONNECTED=ON, listed and deleted only through Core/deletion.py. No network: a local git

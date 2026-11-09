@@ -1,4 +1,4 @@
-"""The build tools of MCP design work package T1 (G25, G26, G30, G37-G40; DECISIONS round 2 item 8).
+"""The build tools of MCP design work package T1 (G25, G26, G30, G37-G40; DESIGN round 2 item 8).
 
 start_build asks with the facts the framework looked up (the commit, the download size, the disk rule with the
 conversion margin and the reservations of other calls, a hardware estimate, licence, gating and token access,
@@ -153,7 +153,7 @@ class TestQuestion:
         assert env.orch.requests[0].model_revision == COMMIT_A, "G30: exactly the commit the question showed"
 
     def test_a_72b_class_download_is_allowed_when_the_disk_holds_it(self, env):
-        """No size cap (DECISIONS round 2 item 8): 145 GB on a disk with 610 GB free builds, and the hardware
+        """No size cap (DESIGN round 2 item 8): 145 GB on a disk with 610 GB free builds, and the hardware
         estimate shows 'does not fit' for the importance matrix without refusing."""
         env.service.hub = facts(size=145 * GB, parameters=72 * 10 ** 9)
         env.service.free = 610 * GB
@@ -380,7 +380,7 @@ class TestStaging:
         assert engine.staging_folder(MODEL, COMMIT_A, None) != engine.staging_folder(MODEL, COMMIT_B, None)
 
     def test_the_stored_token_is_used(self, engine, monkeypatch):
-        # Changed on purpose (DECISIONS round 25 Q2): the stored token goes only where Hugging Face needs one. A gated
+        # Changed on purpose (DESIGN round 25 Q2): the stored token goes only where Hugging Face needs one. A gated
         # repository's files get it; its look-ups are public and carry none (before, every call carried it).
         hub = FakeHub().install(monkeypatch)
         hub.gated = "manual"
@@ -390,7 +390,7 @@ class TestStaging:
         assert {c[-1] for c in hub.calls if c[0] == "model_info"} == {False}
 
     def test_a_public_repositorys_files_never_get_the_stored_token(self, engine, monkeypatch):
-        # Regression (DECISIONS round 25 Q2): the stored token went with every file of a public repository.
+        # Regression (DESIGN round 25 Q2): the stored token went with every file of a public repository.
         hub = FakeHub().install(monkeypatch)
         engine.secrets_manager = SimpleNamespace(get_secret=lambda key: "stored-value" if key == "hf_token" else None)
         engine._stage_model(config(), BuildProgress("b1", BuildStatus.QUEUED, ""))

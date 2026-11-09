@@ -271,7 +271,7 @@ def test_lazy_names_are_the_real_objects():
 
 
 def test_build_format_choices_still_come_from_the_engine():
-    """Changed on purpose by DECISIONS round 23 item 7: --format offers what the installed targets build (read when
+    """Changed on purpose by DESIGN round 23 item 7: --format offers what the installed targets build (read when
     its help or completion is shown, never at import), no longer every format of the engine. What a target without
     capabilities is offered is still the engine's own list: every ModelFormat but hf (build_formats.ModelFormat is
     builder.ModelFormat)."""

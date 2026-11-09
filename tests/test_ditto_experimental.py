@@ -1,4 +1,4 @@
-"""Ditto is optional and experimental (DECISIONS round 8, Q-2): the "Experimental" badge on Ditto's panel and in its
+"""Ditto is optional and experimental (DESIGN round 8, Q-2): the "Experimental" badge on Ditto's panel and in its
 setup, the one-time notice "Use at your own risk and responsibility. The creator of LLMCF is not liable." (shown once
 per person, in English and German, never blocking anything else), and `llm-cli ditto` printing it once."""
 

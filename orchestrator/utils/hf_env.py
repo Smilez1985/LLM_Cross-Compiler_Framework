@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-huggingface_hub's own switches for the whole process (DECISIONS round 25 Q2): tokens leave this computer only on
+huggingface_hub's own switches for the whole process (DESIGN round 25 Q2): tokens leave this computer only on
 Hugging Face's own encrypted way and only when Hugging Face needs one, and nothing is sent that does not have to be.
 
 - HF_HUB_DISABLE_IMPLICIT_TOKEN=1: no library that uses huggingface_hub (fastembed in rag/embeddings.py and

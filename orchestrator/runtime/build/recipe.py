@@ -478,7 +478,7 @@ def check_download_options(options: Mapping[str, str], prefetched: Sequence[str]
             raise PlanError(problem)
 
 
-# --- the CMake flags of a target module (DECISIONS round 25 Q6) ---------------------------------------------------
+# --- the CMake flags of a target module (DESIGN round 25 Q6) ---------------------------------------------------
 # One verdict for every place that judges a module's CMake flags: the module generator (validate_module_data), the
 # folder check of a target others build (module_generator.validate_target_folder: config_module.sh and a Dockerfile's
 # LLAMA_CMAKE_ARGS), the build plan and the AI's facts (Core/build_plan.py, Core/module_flags.py). The shell's

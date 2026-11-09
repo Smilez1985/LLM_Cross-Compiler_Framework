@@ -1,4 +1,4 @@
-"""The convert stage's features of the maintainer's design (HOW2_ORIGINAL, DECISIONS round 16, U9 addendum), which the
+"""The convert stage's features of the maintainer's design (HOW2_ORIGINAL, DESIGN round 16, U9 addendum), which the
 convert module of version 1.x promised and never had: format detection, input and output validation with integrity
 checks, conversion statistics (log and build manifest), a functional test of the written GGUF, and cleanup on failure.
 
@@ -581,7 +581,7 @@ def test_a_run_that_cannot_finish_here_is_a_note_not_a_failure(tmp_path, monkeyp
 
 @needs_posix
 def test_a_model_that_repeats_itself_is_stopped_and_is_no_failure(tmp_path, monkeypatch, capsys):
-    """Loop protection (DECISIONS round 25 Q8): the text ends in one piece repeated again and again: the run is
+    """Loop protection (DESIGN round 25 Q8): the text ends in one piece repeated again and again: the run is
     stopped, which says nothing against the GGUF."""
     monkeypatch.setenv("STUB_LOG", str(tmp_path / "calls.log"))
     monkeypatch.setenv("STUB_FAIL", "completion-repeat")

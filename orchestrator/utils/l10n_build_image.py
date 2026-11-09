@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Texts of the build container image window and of the person's build sources, English and German (DECISIONS round
+Texts of the build container image window and of the person's build sources, English and German (DESIGN round
 36; orchestrator/Core/build_image.py, Core/local_network.set_build_source, orchestrator/gui/build_image_window.py).
 The build container image is the Docker image with a target's toolchain; the target artifact, package or bundle is
 what goes to the board. LocalizationManager merges TEXTS and FORMAL (localization.TEXT_MODULES); a key that exists

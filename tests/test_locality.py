@@ -1,4 +1,4 @@
-"""The one network-locality rule of offline mode (DECISIONS round 24, L-NET and "L-NET final";
+"""The one network-locality rule of offline mode (DESIGN round 24, L-NET and "L-NET final";
 orchestrator/utils/locality.py).
 
 (a) a host counts by every address it resolves to (loopback, RFC 1918 / fc00::/7 and link-local are local; a name

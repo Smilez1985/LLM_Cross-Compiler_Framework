@@ -1,4 +1,4 @@
-"""The MQTT doorbell (DECISIONS round 40, TASK 5): one publish per build end with fixed topics and a payload of fixed
+"""The MQTT doorbell (DESIGN round 40, TASK 5): one publish per build end with fixed topics and a payload of fixed
 fields only; TLS for every broker that is not this computer, offline mode only to a local broker, the password only
 from the credential vault and never in a log; a broker that is down never blocks a build; the settings are the
 person's alone. A fake client factory, and one loopback test against a minimal MQTT 3.1.1 server in the test (a socket

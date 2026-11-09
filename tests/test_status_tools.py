@@ -1,4 +1,4 @@
-"""Status, settings and honest limits (MCP design 2.9, work package T2; DECISIONS round 1 item 4, round 3).
+"""Status, settings and honest limits (MCP design 2.9, work package T2; DESIGN round 1 item 4, round 3).
 
 get_status shows the framework's state in sections without a secret, key fragment, account, endpoint key, URL user
 info or host path; get_settings reads an explicit list with URLs reduced to scheme and host and folders as labels;

@@ -197,7 +197,7 @@ class TestCatalog:
                                             (None, False), ("http://8.8.8.8/v1", False),
                                             ("http://proxy.local:8000", False), ("http://100.64.0.5:8000", False)])
     def test_custom_location_follows_the_host(self, url, local, monkeypatch):
-        """Since offline-lan (DECISIONS round 24 L-NET) a name counts by the addresses it resolves to: box.local is
+        """Since offline-lan (DESIGN round 24 L-NET) a name counts by the addresses it resolves to: box.local is
         local because it resolves to a private address, a .local name with a public address is not (it was by its
         suffix before), and a Tailscale address only with the person's own Headscale (utils/locality.py)."""
         from orchestrator.utils import locality

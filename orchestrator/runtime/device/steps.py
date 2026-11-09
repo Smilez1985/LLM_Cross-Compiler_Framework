@@ -142,7 +142,7 @@ def build_runtime(state_dir: Path, device_id: str, profile: Any, plan: Any, sour
     start script, ensure_package). `settings`: the framework's settings; in offline mode the source comes only from the
     person's own network (a local mirror), at its checked address (runtime/build/source.offline_reach).
     `ai_started`: a tool caller (an AI) started it, so the soft caps of the build's steps stop it
-    (utils/step_limits.py, DECISIONS round 25 Q8); the idle timeout of its steps is the settings' build_idle_timeout,
+    (utils/step_limits.py, DESIGN round 25 Q8); the idle timeout of its steps is the settings' build_idle_timeout,
     as for the stage containers."""
     from orchestrator.runtime.build.executor import BuildExecutor, DockerEngine
     from orchestrator.runtime.build.source import cached_source, fetch_source

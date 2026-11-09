@@ -1,4 +1,4 @@
-"""Shared build state (MCP design T11; DECISIONS round 2 item 9).
+"""Shared build state (MCP design T11; DESIGN round 2 item 9).
 
 Every framework process writes its build requests' summaries into the per-user folder, so the GUI, the CLI and every
 MCP server see the same builds: a request started in one process is visible in another (also while it still waits in

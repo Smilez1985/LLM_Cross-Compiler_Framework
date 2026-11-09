@@ -1,4 +1,4 @@
-"""The remote mode is gone (DECISIONS round 8, "HYBRID CLARIFIED"): Ditto's hands are the framework's own tools on
+"""The remote mode is gone (DESIGN round 8, "HYBRID CLARIFIED"): Ditto's hands are the framework's own tools on
 this computer, the same ones every MCP client gets; Ditto never connects to a framework on another computer.
 
 - The modules, the `llm-cli ditto remote` group, the GUI section and the settings are removed; nothing imports them.

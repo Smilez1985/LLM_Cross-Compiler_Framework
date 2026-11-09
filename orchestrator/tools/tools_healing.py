@@ -2,7 +2,7 @@
 """
 The client's own healing proposal (MCP design 2.3, work package T4): `propose_healing_fix`.
 
-An AI client that takes over Ditto's job (DECISIONS round 1 item 5) analyses a failed build itself (prompt
+An AI client that takes over Ditto's job (DESIGN round 1 item 5) analyses a failed build itself (prompt
 `diagnose_build_failure`) and hands its proposal to the framework. It passes the same checks as Ditto's own analysis:
 the HealingAnalysis model (summary up to 300 characters, cause and step up to 2000, confidence 0-1, HOST or DEVICE)
 and the dangerous-command filter. It is kept with the build as a manual step for the person, shown in

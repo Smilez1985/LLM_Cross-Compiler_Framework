@@ -1925,7 +1925,7 @@ These are real limitations of the current state. Most are scheduled in the [road
 
 Every round of the maintainer's decisions, in order: what it decided, and where that decision now lives in this
 design. The log grows with every round; a new round gets its entry here, with an anchor `decision-round-N`, in the
-same commit that writes its decisions into the components. References in code and tests such as "DECISIONS round 25
+same commit that writes its decisions into the components. References in code and tests such as "DESIGN round 25
 Q2" point to the entry of that round here; Q, item and letter numbers are the numbers of the questions within a
 round. What is decided always stands at its component; where the two differ, the component wins.
 

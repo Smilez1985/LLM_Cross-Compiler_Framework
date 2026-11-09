@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""No hard time limit for a build step (DECISIONS round 25 Q8; orchestrator/utils/step_limits.py): the soft cap
+"""No hard time limit for a build step (DESIGN round 25 Q8; orchestrator/utils/step_limits.py): the soft cap
 (build_timeout) stops only an AI-started build, a person's goes on with one note; the idle timeout
 (build_idle_timeout) stops a step that prints nothing; an AI may only lower both; the runtime build's executor
 follows the same rule."""

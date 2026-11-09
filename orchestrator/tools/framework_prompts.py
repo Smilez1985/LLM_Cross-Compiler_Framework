@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 The framework's MCP prompts (design 4.3): Ditto's tasks for an external client in Ditto's role, with the same task
-text (orchestrator/llm/task_prompts.py) and the same knowledge context Ditto gets (DECISIONS round 1 item 5).
+text (orchestrator/llm/task_prompts.py) and the same knowledge context Ditto gets (DESIGN round 1 item 5).
 
 A prompt grants nothing: every step still goes through the tools and their permissions. Each prompt is two user
 messages: first its instructions, a constant written by the framework (no argument value, no external text), then

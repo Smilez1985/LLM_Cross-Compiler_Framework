@@ -1,4 +1,4 @@
-"""Deep Ingest for AI callers (MCP design T7; DECISIONS round 1 item 1): crawl_docs_site as a job through
+"""Deep Ingest for AI callers (MCP design T7; DESIGN round 1 item 1): crawl_docs_site as a job through
 CrawlJobService, asked every time with every start address in the question, refused while the one-time notice is
 needed, with the GUI's opt-out checks that no input can switch off, the caps of the limits table, a stop that keeps
 what is stored, and no page text in the result. The knowledge base is a stand-in; no test reaches the network."""

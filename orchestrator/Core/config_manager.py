@@ -508,7 +508,7 @@ class ConfigManager:
                          "private (default) or enterprise: enterprise mode takes only OpenSSH with sudo on a "
                          "board (the root-owned key line) and refuses the weaker Dropbear tier and home gate",
                          ["regex:^(private|enterprise)$"], enterprise_only=False),
-            # What offline mode counts as local besides this computer and the own network (DECISIONS round 24,
+            # What offline mode counts as local besides this computer and the own network (DESIGN round 24,
             # "L-NET final"): the person's opt-outs, written only by Core/local_network.py (GUI and CLI), never by an
             # AI (AISettingsChange and MCP update_settings refuse them).
             ConfigSchema("offline_local_vpns", list, False, [],
@@ -521,7 +521,7 @@ class ConfigManager:
                          "Address ranges counted as local in offline mode (e.g. 203.0.113.0/24); set only by you, never "
                          "by an AI"),
             # Where an offline build of the build container image fetches apt and pip packages in the own network
-            # (DECISIONS round 36; Core/build_image.py judges each by the locality rule on every build): person-only
+            # (DESIGN round 36; Core/build_image.py judges each by the locality rule on every build): person-only
             # like the opt-outs (AISettingsChange and MCP update_settings refuse them).
             ConfigSchema("build_apt_mirror", str, False, "",
                          "apt mirror in your own network for offline builds of the build container image (http or "
@@ -532,7 +532,7 @@ class ConfigManager:
             ConfigSchema("build_pip_index", str, False, "",
                          "pip index in your own network (a PyPI mirror) for offline builds of the build container "
                          "image, e.g. http://192.0.2.10:3141/simple; set only by you, never by an AI"),
-            # The MQTT doorbell (Core/doorbell.py, DECISIONS round 40): every build end to the person's broker.
+            # The MQTT doorbell (Core/doorbell.py, DESIGN round 40): every build end to the person's broker.
             # Person-only (llm/settings_change.PERSON_ONLY_SETTINGS): an AI may not redirect or silence it. The
             # password is never here: the credential vault holds it (secret mqtt_password).
             ConfigSchema("mqtt_broker_url", str, False, "",

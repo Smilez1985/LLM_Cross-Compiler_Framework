@@ -1,4 +1,4 @@
-"""Copyright and licences of crawled pages (DECISIONS round 8, Q-1 and Q-1'): what a crawl records per page, what
+"""Copyright and licences of crawled pages (DESIGN round 8, Q-1 and Q-1'): what a crawl records per page, what
 the knowledge base shows, and what a knowledge pack or a target's knowledge snapshot may carry. Fake pages only, no
 network: the crawler's session is replaced, and the knowledge base is a stand-in that returns stored records."""
 

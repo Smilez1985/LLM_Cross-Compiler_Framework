@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The CMake flags of a target module (DECISIONS round 25 Q6): one verdict in Python (recipe.cmake_flag_verdicts) and
+"""The CMake flags of a target module (DESIGN round 25 Q6): one verdict in Python (recipe.cmake_flag_verdicts) and
 the same verdicts in the build container (module_flag_verdicts of targets/*/modules/target_module.sh), over one shared
 list of words (tests/data/cmake_flag_vectors.json)."""
 

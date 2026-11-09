@@ -237,7 +237,7 @@ class TestAIConfigurationDialog:
 
     def test_offline_mode_accepts_a_custom_server_only_on_the_local_network(self, qapp, framework,
                                                                               message_boxes, monkeypatch):
-        """Since offline-lan (DECISIONS round 24 L-NET) a server name counts by the addresses it resolves to; the
+        """Since offline-lan (DESIGN round 24 L-NET) a server name counts by the addresses it resolves to; the
         dialog looks it up in a worker thread first (never on the GUI thread) and saves or refuses when it is in."""
         import threading
         from orchestrator.utils import locality
@@ -1463,7 +1463,7 @@ class TestMainWindowWiring:
         try:
             qapp.processEvents()
             assert opened == [True], "the permissions are asked once at the first start"
-            # Wave 6 (DECISIONS round 10 Q2, changed on purpose): the AI administration moved into the Ditto menu
+            # Wave 6 (DESIGN round 10 Q2, changed on purpose): the AI administration moved into the Ditto menu
             # ("Set up Ditto..." first, runtime/models/evaluation under Ditto > Advanced), Tools has submenus, the
             # titles carry mnemonics; menus are named by their object names, entries compared without separators.
             menus = {m.objectName(): [a.text() for a in m.actions() if not a.isSeparator()]

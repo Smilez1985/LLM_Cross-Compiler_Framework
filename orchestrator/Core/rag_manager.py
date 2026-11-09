@@ -75,7 +75,7 @@ RERANK_INPUT_CHARS = 1500  # of each candidate; about what fits next to the quer
 # Windows above about 49 days).
 MAX_MODEL_IDLE_SECONDS = 7 * 24 * 3600.0
 MAX_CODE_FILE_BYTES = 512 * 1024
-# The framework's own documents (DECISIONS round 8, N12): its documentation always, its code and configuration only when
+# The framework's own documents (DESIGN round 8, N12): its documentation always, its code and configuration only when
 # asked for. Indexed only by an explicit action of the person or of an AI they confirmed, never by itself.
 FRAMEWORK_DOC_PATTERNS = ("README*.md", "CONTRIBUTING*.md", "docs/*.md")
 _CODE_FOLDERS = ("orchestrator", "targets", "scripts", "configs", "Docker Setup")
@@ -286,7 +286,7 @@ class SearchResult:
 
 def fetch_model_files(cache_dir: Path, repo: str, required, optional=(), *, offline: bool = False, ledger: Any = None):
     """The knowledge base's models come from Hugging Face through the framework's own fetcher into fastembed's cache
-    (DECISIONS round 25 Q2): hf_hub.fetch_snapshot, without any token; in offline mode only a copy that is there.
+    (DESIGN round 25 Q2): hf_hub.fetch_snapshot, without any token; in offline mode only a copy that is there.
     With `ledger` (the per-user disk_plan.ReservationLedger) the download follows the one disk rule and holds its
     reservation there while it runs; a refusal of the disk rule is an EmbeddingError with its text."""
     from orchestrator.Core.disk_plan import InsufficientSpace

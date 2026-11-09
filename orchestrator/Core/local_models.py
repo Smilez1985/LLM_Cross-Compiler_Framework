@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Models already on this computer, for a build in offline mode (DECISIONS round 25 Q1).
+Models already on this computer, for a build in offline mode (DESIGN round 25 Q1).
 
 Offline means nobody can load from Hugging Face. A build the person starts in offline mode never tries to download its
 model: a model named by its Hugging Face repository id is used from a copy on this computer (local_copy), without any

@@ -18,7 +18,7 @@ git bundle.
 Git runs with an argument list (never a shell), a cleared environment, no user or system git configuration, no hooks,
 no credential helpers or prompts, and only the https transport (plus local files for bundles and local mirrors).
 
-Offline mode (fetch_source, export_source and upstream_tag_commit with `settings`; DECISIONS round 24 L-NET, round 26
+Offline mode (fetch_source, export_source and upstream_tag_commit with `settings`; DESIGN round 24 L-NET, round 26
 Q4, f, g): a network repository is reached only in the person's own network (a local mirror), judged by the one
 network-locality rule (utils/locality.check_reach, with the person's opt-outs), and git connects only to the local
 addresses that were checked (http.curloptResolve, git 2.37 or newer; a name with local and public addresses only to its

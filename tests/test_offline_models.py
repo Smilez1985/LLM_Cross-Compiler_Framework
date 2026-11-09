@@ -1,4 +1,4 @@
-"""Offline builds pick a model already on this computer (DECISIONS round 25 Q1).
+"""Offline builds pick a model already on this computer (DESIGN round 25 Q1).
 
 A build the person starts in offline mode never tries to download its model: a model named by its Hugging Face id is
 used from a copy on this computer (Core/local_models.local_copy: an earlier build's copy, the Hugging Face browser's

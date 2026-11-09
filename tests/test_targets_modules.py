@@ -704,7 +704,7 @@ class TestRegistryRedirects:
 
 
 class TestSoftCapsAreNeverHardBlocks:
-    """DECISIONS round 4 item 4: counts of vendor sources, pip packages and downloads are soft caps; going above one
+    """DESIGN round 4 item 4: counts of vendor sources, pip packages and downloads are soft caps; going above one
     is a warning the person overrides, never a refusal (the question's own length is the only bound on the MCP path)."""
 
     def test_the_generator_refuses_no_count(self):
@@ -735,7 +735,7 @@ class TestSamePathForDitto:
 
     def test_ditto_save_refuses_a_vendor_image_without_a_reason(self, tmp_path, monkeypatch):
         """llm-cli module generate-ai (Ditto's save_module) follows the same rule as create_target_module: a base
-        image that is not a Docker Official Image needs the AI's reason (DECISIONS round 3 (d))."""
+        image that is not a Docker Official Image needs the AI's reason (DESIGN round 3 (d))."""
         from orchestrator.Core import ditto_manager
         captured = []
 

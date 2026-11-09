@@ -10,10 +10,10 @@ process and MCP clients alike, through the one tool registry (policy, questions,
   this computer and 16 hex characters for a board's probe the person imported (`llm-cli scan --import FILE`, the GUI)
   or took over SSH. Probe values are external text; no tool reads a probe from a path.
 - create_target_module: a board nobody here may have tested gets a target module from an AI's definition, through the
-  module generator's validation (DECISIONS round 1 item 5, round 3). Two-phase: the question shows the base image
+  module generator's validation (DESIGN round 1 item 5, round 3). Two-phase: the question shows the base image
   pinned to the digest its tag points at now (any registry; a non-official one shown plainly; the image build runs
   with network), the platforms in its manifest, the vendor software with every address, fingerprint and hash, a
-  warning for every soft limit gone above (DECISIONS round 4 item 4: approving overrides it), the values the AI
+  warning for every soft limit gone above (DESIGN round 4 item 4: approving overrides it), the values the AI
   guessed and that the module is untested; the module is then written with exactly the digest shown. It is always
   asked (max decision ask) and never covered by a standing approval. The module gets support level community,
   provenance ai-generated and the runtime: block planned from the board's probe; it never uses a prebuilt llama.cpp

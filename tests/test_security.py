@@ -1291,7 +1291,7 @@ class TestCrawlerLimits:
 
 
 class TestCrawlsStayWithTheUser:
-    """Deep Ingest reaches AI callers in one way only (MCP design T7, DECISIONS round 1 item 1): the tool
+    """Deep Ingest reaches AI callers in one way only (MCP design T7, DESIGN round 1 item 1): the tool
     crawl_docs_site, through CrawlJobService, asked every time. Nothing automated reaches the crawler any other way,
     nothing automated acknowledges the one-time notice in the person's place, no tool but crawl_docs_site takes an
     address to read, and no input or options dict switches an opt-out check off."""
@@ -1365,7 +1365,7 @@ class TestCrawlsStayWithTheUser:
             if spec.name != "crawl_docs_site":
                 assert not re.search(r"crawl|ingest|fetch", spec.name + spec.description, re.I), spec.name
             # create_target_module takes vendor addresses (a pip index; apt sources and downloads inside its lists)
-            # that only the person-approved image build fetches (MCP design 2.6, DECISIONS round 4 item 4); the
+            # that only the person-approved image build fetches (MCP design 2.6, DESIGN round 4 item 4); the
             # tool itself never fetches them (test_targets_modules.py). crawl_docs_site takes its start addresses.
             urls = [f for f in spec.input_model.model_fields if "url" in f.lower()]
             allowed = {"create_target_module": ["pip_index_url"], "crawl_docs_site": ["start_urls"]}

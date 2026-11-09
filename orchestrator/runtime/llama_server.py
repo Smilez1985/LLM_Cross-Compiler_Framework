@@ -17,7 +17,7 @@ never receives the key, the auth check or a prompt, and another port is tried; u
 the provider layer (read_endpoint; LLMClient uses it for the "local" provider). The server never gets its own tools,
 agent mode, MCP servers or web UI: Ditto's tools run inside the framework, where approval is enforced.
 
-Ditto's server runs bare metal (above) or in Docker (runtime mode "docker", DECISIONS round 7 D): then start() starts
+Ditto's server runs bare metal (above) or in Docker (runtime mode "docker", DESIGN round 7 D): then start() starts
 Ditto's image, built and verified on this computer (container_server.py, runtime_mode.py), with the same launch policy,
 the port published on 127.0.0.1 only and the models folder mounted read-only; stop(), status() and read_endpoint()
 follow the container instead of a process.
@@ -832,7 +832,7 @@ class LocalLLMRuntime:
         cancelled install activates nothing more (the step running at that moment finishes, its result is kept in the
         store but not made active). Returns the HostInstallResult; raises LocalRuntimeError when the CPU build cannot be
         built or the install was cancelled before it was activated (nothing is activated then). `ai_started`: a tool
-        caller (an AI) started it, so the soft caps of its steps stop it (utils/step_limits.py, DECISIONS round 25
+        caller (an AI) started it, so the soft caps of its steps stop it (utils/step_limits.py, DESIGN round 25
         Q8); a person's install goes on past them with a note."""
         from orchestrator.runtime.build.host import HostBuildError, install_host_runtime
         from orchestrator.runtime.build.store import smoke_model_file

@@ -1,4 +1,4 @@
-"""The optimization profiles and benchmark rows of target.yml are usable data (DECISIONS round 23 item 10).
+"""The optimization profiles and benchmark rows of target.yml are usable data (DESIGN round 23 item 10).
 
 - Every board's profile agrees with the build recipe's plan for its SoC (the recipe stays the one planner): no -mfpu
   on aarch64, GGML_NATIVE OFF for a cross build, no download option, the same -march.

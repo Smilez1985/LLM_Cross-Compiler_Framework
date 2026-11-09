@@ -2037,7 +2037,7 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
 Jede Runde der Entscheidungen des Maintainers, der Reihe nach: was sie entschied und wo diese Entscheidung jetzt in
 diesem Design steht. Das Protokoll wächst mit jeder Runde; eine neue Runde bekommt ihren Eintrag hier, mit einem Anker
 `decision-round-N`, im selben Commit, der ihre Entscheidungen in die Bausteine schreibt. Verweise in Code und Tests wie
-„DECISIONS round 25 Q2“ zeigen auf den Eintrag dieser Runde hier; Q-, Punkt- und Buchstabennummern sind die Nummern
+„DESIGN round 25 Q2“ zeigen auf den Eintrag dieser Runde hier; Q-, Punkt- und Buchstabennummern sind die Nummern
 der Fragen innerhalb einer Runde. Was entschieden ist, steht immer bei seinem Baustein; weichen beide voneinander ab,
 gilt der Baustein.
 

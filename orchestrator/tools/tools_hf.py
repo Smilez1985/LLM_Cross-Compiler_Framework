@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hugging Face and local files for AI callers (MCP design 2.4, work package T6; DECISIONS round 2 items 7 and 8).
+Hugging Face and local files for AI callers (MCP design 2.4, work package T6; DESIGN round 2 items 7 and 8).
 
 - `search_hf_models`: the gated filter `free|any|gated`, default `free` (only models that download without accepting
   conditions or asking for access), so a small model only sees what it can use; the note says what was left out.
@@ -327,7 +327,7 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
             lines.append(Fact("Warning", "PyTorch pickle weights: they can run code when loaded"))
         bound = {"model": inp.model, "filename": name, "commit": facts.commit, "size": file.size,
                  "sha256": file.sha256 or "",
-                 # the token goes only to a gated or private repository (DECISIONS round 25 Q2)
+                 # the token goes only to a gated or private repository (DESIGN round 25 Q2)
                  "token_needed": facts.needs_token,
                  # the facts a standing approval is matched against (grants.DOWNLOAD_RULE), never the AI's words
                  "grant": {"repo": inp.model, "filename": name, "size_bytes": file.size,

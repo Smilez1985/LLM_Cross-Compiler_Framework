@@ -16,7 +16,7 @@ Updates v2.3.0:
 from collections import ChainMap
 from typing import Any, Dict, FrozenSet, Mapping, Optional, Sequence
 
-# Qt-free (DECISIONS round 11, A3): the command line, the MCP server and the core read their texts here without
+# Qt-free (DESIGN round 11, A3): the command line, the MCP server and the core read their texts here without
 # PySide6. The GUI's Qt object (LocalizationManager with the language_changed signal that makes the windows
 # retranslate, and get_instance) lives in orchestrator/gui/localization.py; both names resolve to it on first use
 # (__getattr__ at the end of this module), so `from orchestrator.utils.localization import get_instance` keeps working.
@@ -624,7 +624,7 @@ def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,
     return table
 
 
-# --- German form of address (DECISIONS round 10, Q1) -----------------------------------------------------------------
+# --- German form of address (DESIGN round 10, Q1) -----------------------------------------------------------------
 # German texts say "du" (every TEXTS table and the table above). A module may add FORMAL = {"de": {key: text}}: the
 # "Sie" form of the texts that differ, and only those. The setting form_of_address ("du" or "sie", File > Settings...,
 # asked at the first start) chooses; the GUI applies it with set_form_of_address(), and ui_text(), tr() and

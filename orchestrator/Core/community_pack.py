@@ -5,7 +5,7 @@ Community packs: manifest, Ed25519 signatures, privacy scrub, and encryption for
 A pack is a zip file:
   pack.json   manifest: schema_version, kind, id, version, author, license, lcf_min_version, created (UTC)
               and files [{path, sha256, size, mode}]; a knowledge pack also names the topic or the target its pages
-              belong to (topic or target; DECISIONS round 23 item 1). A pack made before that names neither: the
+              belong to (topic or target; DESIGN round 23 item 1). A pack made before that names neither: the
               field is absent from its manifest and from the bytes its signature covers, so it still verifies
   pack.sig    optional author signature: {"v": 1, "alg": "Ed25519", "key_id": "...", "sig": "<base64url>",
               "pubkey": "<base64>"} (the public key is optional; it lets anyone check the signature, and the
@@ -1055,7 +1055,7 @@ def pack_base_images(folder: Path) -> List[Tuple[str, str]]:
 
 
 def base_image_line(image: str) -> str:
-    """One base image, plainly (DECISIONS round 3): registry, image, tag, digest, and whether it is a Docker Official
+    """One base image, plainly (DESIGN round 3): registry, image, tag, digest, and whether it is a Docker Official
     Image or a prebuilt image from another registry."""
     from orchestrator.utils.image_ref import split_image
     if "$" in image:

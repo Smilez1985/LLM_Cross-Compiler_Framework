@@ -19,7 +19,7 @@ Rules:
 - tool calls go through the user's tool permissions; "ask" needs the confirmation callback's yes;
 - the chat history is append-only: a long conversation is summarized into a new conversation, earlier turns
   of the current one are never rebuilt or edited;
-- Ditto's hands are the framework's own tools on this computer (DECISIONS round 8): the same registry, permissions
+- Ditto's hands are the framework's own tools on this computer (DESIGN round 8): the same registry, permissions
   and audit log every MCP client gets; Ditto never connects to a framework on another computer.
 """
 
@@ -231,7 +231,7 @@ class DittoCannot(DittoError):
     """Ditto did not do the task and says why. `confirmed`: the framework's own check of the task input agrees
     (e.g. neither a probe nor a board was given); otherwise the reason is only the model's statement."""
 
-    # What the person reads for each reason code (speaking names, DECISIONS round 4 item 1); the code stays on .cannot.
+    # What the person reads for each reason code (speaking names, DESIGN round 4 item 1); the code stays on .cannot.
     REASON_TEXT = {"missing_information": "information is missing", "not_supported": "not supported",
                    "no_tool": "no tool for it", "permission_denied": "not allowed by your permissions",
                    "needs_person": "needs you", "hardware_unavailable": "hardware not available",
@@ -400,7 +400,7 @@ def ai_module_description(name: str, assumptions: Sequence[Any], lead: str = "")
 
 def pin_base_image(definition: "ModuleDefinition", offline: bool = False, client: Any = None,
                    config: Any = None) -> "ModuleDefinition":
-    """The proposal with its base image pinned to the digest its tag points at now (DECISIONS round 3), before the
+    """The proposal with its base image pinned to the digest its tag points at now (DESIGN round 3), before the
     person is asked: the module is written with exactly the digest shown (`llm-cli module generate-ai` and the
     module wizard's AI import alike). A reference with a digest stays as it is. Raises ImageLookupError (with
     .next) when the tag cannot be resolved (offline mode, the registry cannot be reached). `config`: the settings
@@ -957,7 +957,7 @@ class DittoCoder:
         data = definition.model_dump() if isinstance(definition, BaseModel) else dict(definition)
         if PREBUILT_CUDA_IMAGE.search(str(data.get("base_os") or "")):
             raise ValueError(f"base_os: {PREBUILT_CUDA_REFUSAL}")
-        # The same rule as create_target_module (DECISIONS round 3 (d)): an image that is not a Docker Official Image
+        # The same rule as create_target_module (DESIGN round 3 (d)): an image that is not a Docker Official Image
         # needs the AI's reason, which the person reads before approving.
         from orchestrator.utils.image_ref import is_official_image
         base = str(data.get("base_os") or "debian:bookworm-slim").strip()

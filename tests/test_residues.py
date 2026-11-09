@@ -1,4 +1,4 @@
-"""Residues decided one by one (DECISIONS round 8, N15: remove what is really no longer needed, use what is useful).
+"""Residues decided one by one (DESIGN round 8, N15: remove what is really no longer needed, use what is useful).
 
 - The Qdrant sidecar in device packages is gone (tests/test_deployment.py proves it on a package), and the deployment
   window no longer offers it.

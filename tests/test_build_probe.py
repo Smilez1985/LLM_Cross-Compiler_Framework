@@ -1,4 +1,4 @@
-"""The board's hardware probe drives every build (stage C wave 3c-2, DECISIONS round 23 items 5 and 15).
+"""The board's hardware probe drives every build (stage C wave 3c-2, DESIGN round 23 items 5 and 15).
 
 - The build service takes the probe the request names, else the newest stored probe of a board of the request's SoC
   (HardwareProbes.for_board), refuses a named probe of another board, and hands its id to the build engine.

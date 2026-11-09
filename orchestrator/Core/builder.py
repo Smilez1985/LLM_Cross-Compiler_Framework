@@ -162,7 +162,7 @@ from orchestrator.Core.build_formats import ModelFormat, OptimizationLevel  # no
 TERMINAL_STATES = ("completed", "failed", "cancelled")
 IMAGE_LABEL = "org.llm-framework.target"
 # What a build container image was built from (its target folder, Dockerfile and build arguments, as one sha256): an
-# offline build uses an image of the target built earlier from exactly these first (DECISIONS round 24 L-NET, round 25),
+# offline build uses an image of the target built earlier from exactly these first (DESIGN round 24 L-NET, round 25),
 # else builds one from local sources only (round 36, Core/build_image.py).
 INPUTS_LABEL = "org.llm-framework.inputs"
 # The stable name of each target's newest build image (llm-framework/<target>:last-build): the next build reuses its
@@ -378,7 +378,7 @@ class BuildEngine:
         self.target_manager = None
 
         # Docker Client Fallback. Without a Docker daemon the person's Podman socket (DOCKER_HOST, set for this process
-        # and the processes it starts; utils/docker_engine.py, DECISIONS round 26 Q1).
+        # and the processes it starts; utils/docker_engine.py, DESIGN round 26 Q1).
         engine = ensure_docker_host()
         if engine.set_here:
             self.logger.info("No Docker daemon here: the framework uses Podman's Docker-compatible interface "
@@ -1740,7 +1740,7 @@ class BuildEngine:
         # The token stored in the framework, or none at all: never an implicit token (HF_TOKEN, the Hugging Face home
         # folder's token file) the person did not give the framework (G37), and only to huggingface.co, never to the
         # host in HF_ENDPOINT (hf_hub.hub_api, the one Hub API of the framework); and only where Hugging Face needs
-        # it (DECISIONS round 25 Q2): a gated or private repository, never a public one's files.
+        # it (DESIGN round 25 Q2): a gated or private repository, never a public one's files.
         auth = self._hf_token() or None
         # one API without a token, made first; one with the token only when the Hub refuses a request without it
         apis: Dict[Any, Any] = {False: hub_api(False)}
@@ -1811,7 +1811,7 @@ class BuildEngine:
 
     def _download_meter(self, config: BuildConfiguration, progress: BuildProgress, dest: Path,
                         sizes: Dict[str, Optional[int]]):
-        """The model download's progress (DECISIONS round 23 item 12): bytes done of the total over all files of the
+        """The model download's progress (DESIGN round 23 item 12): bytes done of the total over all files of the
         snapshot, from the fetcher's progress callback, as the build's stage ("Fetching model 37 % (1.2 GB of
         3.4 GB)", the bytes alone when a size is unknown) and its percent within the download's band (40-50), which
         the build status, the Builder's progress bar, `build start --follow` and get_build_status show. At most once
@@ -1844,7 +1844,7 @@ class BuildEngine:
 
     def _stage_local_copy(self, config: BuildConfiguration, progress: BuildProgress,
                           source: str) -> Tuple[str, Dict[str, Dict[str, str]]]:
-        """Offline mode (DECISIONS round 25 Q1): a model named by its Hugging Face id is never downloaded. Its complete
+        """Offline mode (DESIGN round 25 Q1): a model named by its Hugging Face id is never downloaded. Its complete
         copy on this computer (local_models.local_copy: an earlier build's, the Hugging Face browser's, the old cache's)
         is mounted read-only, at the commit asked for when the branch is a commit; without one the build stops naming
         what to do (the build service refuses such a build before it is queued and lists the models already here)."""
@@ -2122,7 +2122,7 @@ class BuildEngine:
 
     def _hardware_probe_mount(self, config: BuildConfiguration, progress: BuildProgress,
                               build_temp: Path) -> Tuple[Dict[str, Dict[str, str]], Dict[str, str]]:
-        """(volumes, environment) that hand the board's hardware probe to a build container (DECISIONS round 23 item
+        """(volumes, environment) that hand the board's hardware probe to a build container (DESIGN round 23 item
         5): the stored probe, written as a schema-2 file into the build's own folder and mounted read-only, with
         HARDWARE_CONFIG_FILE naming it. The config stage then plans the build for that board (its CPU flags, the
         toolchain, the package for the board). Nothing without a probe; a probe that is gone or damaged stops the
@@ -2377,7 +2377,7 @@ class BuildEngine:
         progress.add_log("Starting Main Build Container...")
         
         build_temp = self.cache_dir / "builds" / config.build_id
-        # The board's hardware probe, read-only (DECISIONS round 23 item 5): the config stage plans the build for it
+        # The board's hardware probe, read-only (DESIGN round 23 item 5): the config stage plans the build for it
         probe_vols, probe_env = self._hardware_probe_mount(config, progress, build_temp)
         sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp, target_path=target_path, job="build",
                                                            progress=progress)
@@ -2394,7 +2394,7 @@ class BuildEngine:
         vols.update(sandbox_vols)
         vols.update(probe_vols)
         # What a download option of the module would fetch: fetched before the build, outside the sandbox, pinned and
-        # checked (runtime/build/deps.py; never in offline mode), and mounted read-only (DECISIONS round 25 Q6
+        # checked (runtime/build/deps.py; never in offline mode), and mounted read-only (DESIGN round 25 Q6
         # addendum); the build itself stays without network
         dep_vols, dep_env = self._build_dependencies(config, progress, target_path)
         vols.update(dep_vols)

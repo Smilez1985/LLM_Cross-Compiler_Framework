@@ -39,7 +39,7 @@ STEPS = (
          target="btn_builder_check_target"),
     Step("build.history", cli="build status", tool="list_build_requests", window="build_history",
          target="act_build_history", runnable=True),
-    # a module's CMake options outside the allowlist (DECISIONS round 25 Q6): the person decides when they start the
+    # a module's CMake options outside the allowlist (DESIGN round 25 Q6): the person decides when they start the
     # build in the Builder (or with build start --module-flags)
     Step("build.decide_flags", cli="build start --module-flags", cli_args=("--module-flags", "{decision}"),
          params={"decision": Param("choice", choices=("allow", "standard"))}, person_only="permission",

@@ -17,7 +17,7 @@ updates:
     target-branch: development
     schedule:
       interval: weekly
-    # The same 5-day cooldown as pyproject.toml [tool.uv] exclude-newer (DECISIONS round 65): a newer version would
+    # The same 5-day cooldown as pyproject.toml [tool.uv] exclude-newer (DESIGN round 65): a newer version would
     # not resolve there. The scheduled update run (.github/workflows/deps-update.yml) takes the whole lock forward.
     cooldown:
       default-days: 5

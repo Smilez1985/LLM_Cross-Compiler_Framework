@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The person's decision on a module's CMake options outside the allowlist (DECISIONS round 25 Q6): the question with
+"""The person's decision on a module's CMake options outside the allowlist (DESIGN round 25 Q6): the question with
 what each option does and a recommendation, person-only, remembered per module version and flag set in the store of
 the person's build confirmations, handed to the build container."""
 

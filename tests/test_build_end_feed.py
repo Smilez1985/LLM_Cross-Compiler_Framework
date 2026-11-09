@@ -1,4 +1,4 @@
-"""The chat feed's build-end event (DECISIONS round 40, TASK 4): edge-triggered, exactly one row per build end
+"""The chat feed's build-end event (DESIGN round 40, TASK 4): edge-triggered, exactly one row per build end
 (deduplicated by request id), for every build (the person's own from the framework, an AI's in its name), with the
 fixed vocabulary and the framework's ids only: never log text, a model's name or a path."""
 

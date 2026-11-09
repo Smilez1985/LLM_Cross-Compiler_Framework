@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The error box for the person (wave 6, f-words; DECISIONS round 10, Q7).
+The error box for the person (wave 6, f-words; DESIGN round 10, Q7).
 
 What happened, in the person's language and in plain words first; why, when it is known; ONE next step: catalogue
 steps (chain a0's StepsRow with its [Open] buttons), a plain sentence, or one button. The English technical detail

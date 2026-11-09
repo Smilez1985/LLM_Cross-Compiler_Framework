@@ -1,4 +1,4 @@
-"""Offline mode follow-ups (DECISIONS round 26 Q3, Q4, Q5; round 24 L-NET "every reach-out on the rule", items d-i).
+"""Offline mode follow-ups (DESIGN round 26 Q3, Q4, Q5; round 24 L-NET "every reach-out on the rule", items d-i).
 
 - Q3: the person's opt-outs count only for offline mode's reach (locality.check_reach); the privacy filter and the
   provider's local/cloud label ask where the server stands (locality.check_location) and never count them.

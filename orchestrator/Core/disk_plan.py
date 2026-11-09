@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Disk rule and hardware estimate for builds (MCP design 6.5, DECISIONS round 2 item 8)
+LLM Cross-Compiler Framework - Disk rule and hardware estimate for builds (MCP design 6.5, DESIGN round 2 item 8)
 
 There is no fixed size cap for a model download: a 72B model must be possible when the disk and the hardware can take
 it. Instead, before a build is asked about, the framework computes what lands on each file system (the download in

@@ -1023,7 +1023,7 @@ class TestGenerator:
         readme = (target / "knowledge" / "README.md").read_text(encoding="utf-8")
         for claim in ("vectorized", "Qdrant", "automatically"):   # this computer never imports initial_knowledge.json
             assert claim not in readme
-        # DECISIONS round 23 item 8: a target pack's snapshot is imported at the recipient, under its target
+        # DESIGN round 23 item 8: a target pack's snapshot is imported at the recipient, under its target
         for fact in ("initial_knowledge.json", "privacy scrub", "source", "does not import this file",
                      "recipient's framework imports it", "under this target", "llm-cli zoo export knowledge"):
             assert fact in readme
@@ -1173,7 +1173,7 @@ class TestCli:
 def test_mcp_and_ditto_have_no_zoo_or_upload_tools(booted_framework):
     names = {spec.name for spec in booted_framework.tool_registry.list()}
     assert not any(word in name for name in names for word in ("zoo", "community", "upload", "install"))
-    # Packs reach AI callers only from the signed index and only to a local file (MCP design T9; DECISIONS round 1
+    # Packs reach AI callers only from the signed index and only to a local file (MCP design T9; DESIGN round 1
     # item 3): never a pull request, never a publication, never a pack from a file.
     assert not any(word in name for name in names for word in ("submit", "publish", "pull_request"))
     assert {"list_packs", "add_pack_from_index", "export_pack"} <= names

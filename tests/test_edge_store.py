@@ -146,7 +146,7 @@ class TestStoreContract:
         assert sorted(r.payload["chunk_index"] for r in store.records()) == [0]
 
     def test_delete_origin_stale_removes_only_the_older_version_of_one_pack(self, backend):
-        """DECISIONS round 23 item 2: after a pack's import, its excerpts with another digest (or none: imported before
+        """DESIGN round 23 item 2: after a pack's import, its excerpts with another digest (or none: imported before
         excerpts carried it) go; other packs' excerpts and your own pages stay."""
         store = backend.make()
         store.ensure()
@@ -935,7 +935,7 @@ def test_the_snapshots_window_tries_a_failed_conversion_again(qapp, tmp_path, mo
     try:
         assert not dialog.btn_convert.isHidden() and dialog.btn_convert.isEnabled()
         text = dialog.storage.text()
-        # Wave 6 (DECISIONS round 9 U2, round 10 V2): the window never tells the person to type a command, so the
+        # Wave 6 (DESIGN round 9 U2, round 10 V2): the window never tells the person to type a command, so the
         # retry text names only the button here (it named the CLI command too before; the CLI and Mojo still do).
         assert "on the next start" not in text and "llm-cli" not in text and "llmcf" not in text
         assert "Umwandlung erneut versuchen" in text

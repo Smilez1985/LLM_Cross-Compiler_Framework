@@ -207,7 +207,7 @@ class DockerEngine(ContainerEngine):
         if self._client is None:
             import docker
             from orchestrator.utils.docker_engine import ensure_docker_host
-            ensure_docker_host()   # no Docker daemon: the person's Podman socket (DECISIONS round 26 Q1)
+            ensure_docker_host()   # no Docker daemon: the person's Podman socket (DESIGN round 26 Q1)
             self._client = docker.from_env(timeout=120)
         return self._client
 
@@ -329,7 +329,7 @@ class BuildExecutor:
         self.per_job_mib = per_job_mib or _catalog_per_job_mib
         self.runner = runner or default_process_runner
         self.engine = engine
-        # The time limits of configure and build (DECISIONS round 25 Q8, utils/step_limits.py): soft caps that stop
+        # The time limits of configure and build (DESIGN round 25 Q8, utils/step_limits.py): soft caps that stop
         # only an AI-started build, and the idle timeout for a step whose log stops growing
         self.configure_timeout = configure_timeout
         self.build_timeout = build_timeout

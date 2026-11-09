@@ -4,7 +4,7 @@ Model formats and optimization levels of a build, and the formats the installed 
 They live in this small module so the CLI can build its --format choices without importing the build engine and
 the Docker SDK (lazy loading). orchestrator.Core.builder re-exports both: builder.ModelFormat is this class.
 
-What a target offers (DECISIONS round 23, item 7): exactly the formats its target.yml capabilities declare; a target
+What a target offers (DESIGN round 23, item 7): exactly the formats its target.yml capabilities declare; a target
 without a (valid) capabilities block is built unchecked and offered every format but hf (unchecked_formats). The
 Builder tab's format list (offered_formats) and the CLI's `build start --format` (its help text, its completion and
 its refusal, format_problem) read the same lists; nothing here imports the schema before a list is asked for.
@@ -154,7 +154,7 @@ def format_problem(fmt: Optional[str], found: Iterable[TargetFormats], target: s
     return f"The target {target} does not build the format {shown}{why}. What each installed target builds: {listing}."
 
 
-# --- formats and the board's probe (DECISIONS round 23 item 15) ----------------------------------------------------
+# --- formats and the board's probe (DESIGN round 23 item 15) ----------------------------------------------------
 #
 # A format that runs on an NPU is offered and chosen only when the board's probe shows that NPU; otherwise GGUF (the
 # board's CPU). The conversion runs on the build computer: a vendor toolkit without wheels for its architecture is
@@ -211,7 +211,7 @@ def format_refusal(fmt: Optional[str], *, profile: Any = None, board: Optional[s
     """Why `fmt` is not built for this board on this build computer, as one plain sentence; None when nothing stands
     against it. `profile`: the board's probe (None: not known, no NPU check); `board`: the board id of the request
     (else the probe's SoC); `host_arch`: the build computer (build_host_arch(); None: not checked). The one verdict of
-    DECISIONS round 23 item 15: an NPU format only with that NPU in the probe; RKLLM only for its SoCs and only on an
+    DESIGN round 23 item 15: an NPU format only with that NPU in the probe; RKLLM only for its SoCs and only on an
     x86_64 build computer; GGUF always."""
     fid = str(fmt or "").strip().lower()
     label = fid.upper()

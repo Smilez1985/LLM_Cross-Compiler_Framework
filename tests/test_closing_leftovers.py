@@ -366,7 +366,7 @@ class TestRuntimeEnds:
         assert "not activated: 1 checks passed, 1 failed" in end["detail"] and "Living room board" in end["detail"]
 
     def test_a_board_runtime_deploy_of_an_ai_stops_at_its_soft_cap(self, board, monkeypatch):
-        """The deploy tool's build of the device runtime is AI-started: its soft cap stops it (DECISIONS round 25
+        """The deploy tool's build of the device runtime is AI-started: its soft cap stops it (DESIGN round 25
         Q8)."""
         from orchestrator.runtime.device import service
         fm, rtt, device = board

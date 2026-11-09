@@ -2,7 +2,7 @@
 """
 The knowledge tools (MCP design 2.5, work package T3): the knowledge base Ditto uses, for every AI caller.
 
-An external client takes over Ditto's job (DECISIONS round 1 item 5), so it gets what Ditto gets from the local
+An external client takes over Ditto's job (DESIGN round 1 item 5), so it gets what Ditto gets from the local
 knowledge base: a search with the provenance of every excerpt (`search_knowledge`), the list of what the knowledge
 base holds (`list_knowledge_sources`) and one source's excerpts in their order (`read_knowledge_source`), plus the
 resource `lcf://knowledge/sources/{source_id}`. Every excerpt, address and title is external text: cleaned, capped

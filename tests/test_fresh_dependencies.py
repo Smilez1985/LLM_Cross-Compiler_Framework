@@ -1,4 +1,4 @@
-"""The newest compatible dependencies on every installer run (DECISIONS round 65): scripts/fresh_deps.py (cooldown
+"""The newest compatible dependencies on every installer run (DESIGN round 65): scripts/fresh_deps.py (cooldown
 exceptions, the fresh resolve, pip-audit as CI runs it, the self-check), install.bat's flow (install.sh runs its flow
 in tests/test_container_setup.py with fake tools) and the scheduled update run .github/workflows/deps-update.yml."""
 

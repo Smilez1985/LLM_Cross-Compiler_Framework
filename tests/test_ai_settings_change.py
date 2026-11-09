@@ -287,7 +287,7 @@ class TestRules:
     def test_offline_mode_accepts_a_custom_server_only_on_the_local_network(self, catalog, config, monkeypatch):
         """The rule of the LLM layer at request time (preset.offline_refusal of the address): a custom server outside
         this computer and the local network is refused at save already, not only when Ditto is asked. Since
-        offline-lan (DECISIONS round 24 L-NET) a name counts by every address it resolves to (utils/locality.py):
+        offline-lan (DESIGN round 24 L-NET) a name counts by every address it resolves to (utils/locality.py):
         llm-box.local is local because it resolves to a private address, not because of its suffix."""
         from orchestrator.utils import locality
         monkeypatch.setattr(locality, "_system_lookup", lambda host: {

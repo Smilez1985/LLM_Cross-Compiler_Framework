@@ -1,4 +1,4 @@
-"""The mouse and command-line paths of DECISIONS round 23 items 1 and 2 (offscreen; the core is in
+"""The mouse and command-line paths of DESIGN round 23 items 1 and 2 (offscreen; the core is in
 test_knowledge_order.py):
 
 - the Community Hub's Sort loose knowledge... lists the loose knowledge files, takes the topic or target, checks the

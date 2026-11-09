@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Looks up a container image in its registry, anonymously, for the question before an AI-created target module is
-written (MCP design 6.6 rule 11, DECISIONS round 3): the digest a tag points at now (the module is written pinned to
+written (MCP design 6.6 rule 11, DESIGN round 3): the digest a tag points at now (the module is written pinned to
 exactly that digest), the platforms in the image's manifest and whether one matches this computer.
 
 Only the registry's public read API is used (Docker Registry HTTP API v2 / OCI distribution), with an anonymous pull

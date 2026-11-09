@@ -1,4 +1,4 @@
-"""The framework's own OpenSSH settings file (DECISIONS round 25 Q4 and Q5; stage C wave 3c-2, chain boards).
+"""The framework's own OpenSSH settings file (DESIGN round 25 Q4 and Q5; stage C wave 3c-2, chain boards).
 
 - Every OpenSSH call passes <state>/ssh_config with -F (remote/transport.py openssh_options, the one argv builder), so
   OpenSSH reads neither ~/.ssh/config nor /etc/ssh/ssh_config. The file is created on first use, readable by this

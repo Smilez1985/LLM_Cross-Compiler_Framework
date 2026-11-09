@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Next steps: what a person (or an AI) can do about a message, as data instead of a hand-written command
-(wave 6, design A; DECISIONS round 9 U2 and round 10 V1, V2, Q7).
+(wave 6, design A; DESIGN round 9 U2 and round 10 V1, V2, Q7).
 
 A message says what is wrong (the facts). A separate *step* says what to do. The step names everything the three
 audiences need, and one renderer turns it into the words each of them reads:

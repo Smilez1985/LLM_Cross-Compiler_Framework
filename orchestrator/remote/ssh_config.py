@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-llmcf's own OpenSSH configuration file (DECISIONS round 25 Q4 and Q5; consolidation stage C wave 3c-2, chain boards).
+llmcf's own OpenSSH configuration file (DESIGN round 25 Q4 and Q5; consolidation stage C wave 3c-2, chain boards).
 
 Every OpenSSH call of the framework passes this file with -F (orchestrator/remote/transport.py openssh_options, the one
 argv builder), so OpenSSH reads neither ~/.ssh/config nor /etc/ssh/ssh_config: the framework is sealed off from this
@@ -167,7 +167,7 @@ def config_path(state_dir: Path) -> Path:
 
 
 def tokens(text: str) -> str:
-    """`text` with each '%' written as '%%' (DECISIONS round 25 Q5): OpenSSH expands %-tokens in IdentityFile (also
+    """`text` with each '%' written as '%%' (DESIGN round 25 Q5): OpenSSH expands %-tokens in IdentityFile (also
     -i's path), UserKnownHostsFile, ControlPath and a few more, so a '%' in one of the framework's own paths would
     otherwise name another file or stop OpenSSH ("unknown key")."""
     return str(text).replace("%", "%%")

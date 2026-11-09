@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Ditto is experimental: the one-time notice (DECISIONS round 8, Q-2)
+LLM Cross-Compiler Framework - Ditto is experimental: the one-time notice (DESIGN round 8, Q-2)
 
 Ditto stays optional and is marked experimental. The first time a person uses Ditto, the framework shows this notice
 once: "Use at your own risk and responsibility. The creator of LLMCF is not liable." It repeats the no-warranty terms

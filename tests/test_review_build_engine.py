@@ -1080,7 +1080,7 @@ class TestWaitErrors:
         _connection_error_after_retries,
     ], ids=["read-timeout", "connection-error-wrapping-read-timeout", "chained-through-max-retries"])
     def test_a_read_timeout_is_a_build_timeout(self, engine, client, tmp_path, make_error):
-        """An AI-started build stops at its soft cap (DECISIONS round 25 Q8: never extended)."""
+        """An AI-started build stops at its soft cap (DESIGN round 25 Q8: never extended)."""
         container, _, run = self.run_stage(engine, client, tmp_path, make_error, build_timeout=0.2, owner="mcp#s1")
         with pytest.raises(TimeoutError, match=r"ran longer than 0.2 s and was stopped \(setting build_timeout\): "
                                                r"an AI started this build"):
@@ -1098,7 +1098,7 @@ class TestWaitErrors:
 
     def test_a_person_s_build_goes_on_past_the_soft_cap_with_one_warning(self, engine, client, tmp_path,
                                                                         monkeypatch):
-        """No hard time limit (DECISIONS round 25 Q8): a build the person started goes on past build_timeout; the
+        """No hard time limit (DESIGN round 25 Q8): a build the person started goes on past build_timeout; the
         person is told once, and Cancel stops it."""
         from orchestrator.Core import builder as builder_module
         monkeypatch.setattr(builder_module, "CONTAINER_WAIT_POLL", 0.05)

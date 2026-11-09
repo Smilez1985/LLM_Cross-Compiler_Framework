@@ -468,7 +468,7 @@ def test_a_removed_menu_entry_is_found(qapp, window):
         "btn_trash_gone: not in the window act_file_trash opens (TrashDialog)"]
 
 
-# --- the next steps' mouse paths (wave 6, chain a0; DECISIONS round 10 V2) -------------------------------------------
+# --- the next steps' mouse paths (wave 6, chain a0; DESIGN round 10 V2) -------------------------------------------
 
 def test_every_next_step_names_a_real_command_object_tool_window_and_text():
     """Every catalogue step's command is a CLI_PATHS key whose object is the step's target, its tool is a known tool,

@@ -13,7 +13,7 @@ notice again.
 
 Only a person acknowledges it, in the GUI's notice dialog or with `llm-cli tools crawl-notice` in a terminal. No tool,
 resource or prompt can: an AI client that wants to crawl (crawl_docs_site) is refused while the notice is needed and
-is told those two places (MCP design 2.5, DECISIONS round 1 item 1).
+is told those two places (MCP design 2.5, DESIGN round 1 item 1).
 """
 
 from typing import Optional, Tuple

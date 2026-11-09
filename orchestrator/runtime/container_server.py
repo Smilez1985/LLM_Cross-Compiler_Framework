@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Ditto's local model server in a container: the runtime mode "docker" (DECISIONS round 7 D).
+Ditto's local model server in a container: the runtime mode "docker" (DESIGN round 7 D).
 
 The image is built on this computer from the same pinned llama.cpp recipe as the bare-metal server. It is never pulled
 as a finished image and never pushed: there is no push code at all. build/ditto-runtime.Dockerfile has two stages on a
@@ -167,7 +167,7 @@ class DittoDocker(DockerEngine):
         if self._client is None:
             import docker
             from orchestrator.utils.docker_engine import ensure_docker_host
-            ensure_docker_host()   # no Docker daemon: the person's Podman socket (DECISIONS round 26 Q1)
+            ensure_docker_host()   # no Docker daemon: the person's Podman socket (DESIGN round 26 Q1)
             self._client = docker.from_env(timeout=self._timeout)
         return self._client
 
@@ -313,7 +313,7 @@ def gpu_passthrough(docker: Any, hardware: Any, backend: str, dri: Optional[Path
     notes = []
     engine = docker.engine() if "nvidia" in vendors and callable(getattr(docker, "engine", None)) else ""
     if "nvidia" in vendors and engine == "podman":
-        # Podman's Docker-compatible interface drops Docker's GPU request without a word (DECISIONS round 26 Q1).
+        # Podman's Docker-compatible interface drops Docker's GPU request without a word (DESIGN round 26 Q1).
         notes.append("the NVIDIA GPU is not passed through: under Podman, Docker's GPU request does not reach the "
                      "container (with Docker CE it does)")
     elif "nvidia" in vendors:

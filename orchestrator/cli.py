@@ -641,7 +641,7 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
         console.print(f"[bold red]AI generation failed:[/bold red] {escape(_printable(e))}")
         sys.exit(1)
 
-    # The base image is pinned to the digest its tag points at now, before the question (DECISIONS round 3): the
+    # The base image is pinned to the digest its tag points at now, before the question (DESIGN round 3): the
     # module is written with exactly the digest shown (the module wizard's AI import pins it the same way).
     from orchestrator.Core.ditto_manager import pin_base_image
     from orchestrator.utils.image_registry import ImageLookupError
@@ -857,13 +857,13 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
             _use_earlier(ctx, found[0], output_dir)
             return
 
-        # A module's CMake options outside the allowlist (DECISIONS round 25 Q6): you decide, after what each one
+        # A module's CMake options outside the allowlist (DESIGN round 25 Q6): you decide, after what each one
         # does and the recommendation for this model and quantization (a decision remembered before is used).
         module_flags, remember_flags = _ask_module_flags(service, request, module_flags, remember_flags)
         if module_flags == "cancel":
             console.print("Nothing was started.")
             return
-        # What the build fetches before it starts (pinned, checked, then mounted read-only; DECISIONS round 25 Q6
+        # What the build fetches before it starts (pinned, checked, then mounted read-only; DESIGN round 25 Q6
         # addendum): part of the plan you see; in offline mode one that is not in the cache stops here
         from orchestrator.runtime.build.deps import DependencyMissing
         try:
@@ -1091,7 +1091,7 @@ def _listed_model(ctx: FrameworkContext, model: str) -> str:
 
 
 def _offline_model_choice(ctx: FrameworkContext, service, error) -> Optional[str]:
-    """Offline mode and a Hugging Face model that is not on this computer (DECISIONS round 25 Q1): the models already
+    """Offline mode and a Hugging Face model that is not on this computer (DESIGN round 25 Q1): the models already
     here, as the Builder tab's choice window lists them (BuildService.models_here); at a terminal the person types a
     listed label or a local path (the same --model input), else the command ends with exit code 2. None: cancelled."""
     from orchestrator.Core.local_models import choice_for
@@ -1662,7 +1662,7 @@ def _print_client_proposals(proposals: list) -> None:
 
 
 
-# --- build image: the build container image (DECISIONS round 36) ---------------------------------------------------
+# --- build image: the build container image (DESIGN round 36) ---------------------------------------------------
 
 @build.group('image')
 def build_image_group():
@@ -4439,7 +4439,7 @@ def _mojo_print_miracle(result) -> None:
 
 
 def _mojo_print_circle(result) -> None:
-    """Mojo closes the circle (DECISIONS round 27): after Mojo Oracle at a terminal, the crystal ball and one line,
+    """Mojo closes the circle (DESIGN round 27): after Mojo Oracle at a terminal, the crystal ball and one line,
     "[Mojo] Miracle managed. The oracle is pleased." or "[Mojo] 404 - miracle not found" (Core/mojo/banner.circle_line;
     nothing for any other outcome). Printed as rich Text, never as markup ("[Mojo]", the brackets and the drawing's
     backslashes stay as they are), through the console, which shows colour only where the console can show it (no
@@ -6263,7 +6263,7 @@ def _board_change_failed(ctx: FrameworkContext, host: str, port: int, error: Bas
     sys.exit(1)
 
 
-# --- the framework's own OpenSSH settings (DECISIONS round 25 Q4) ---------------------------------------------------
+# --- the framework's own OpenSSH settings (DESIGN round 25 Q4) ---------------------------------------------------
 
 @deploy.group('ssh-config', invoke_without_command=True)
 @click.pass_context

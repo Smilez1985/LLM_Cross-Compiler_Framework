@@ -1,4 +1,4 @@
-"""The Docker manager and the build containers' CPU and memory (DECISIONS round 12, item 6).
+"""The Docker manager and the build containers' CPU and memory (DESIGN round 12, item 6).
 
 DockerManager came first, with a build path of its own (start, a monitor thread, container stats, a healing signal,
 stop). Builds now run through one path (BuildService -> LLMOrchestrator -> BuildEngine). What only the old path

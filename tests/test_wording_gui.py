@@ -1,4 +1,4 @@
-"""The wording toolkit's GUI parts (wave 6, f-words; DECISIONS round 10, V6, Q1, Q7), offscreen.
+"""The wording toolkit's GUI parts (wave 6, f-words; DESIGN round 10, V6, Q1, Q7), offscreen.
 
 The hover card explains a technical term while the mouse rests on it, stays while the mouse is on the card and opens
 its link only on a click; F1 and a "?" button open it for the keyboard. The error box says what happened in the

@@ -23,7 +23,7 @@ not packs.
 The framework never uploads anything and never asks for or reads a repository token: a contribution is handed to
 the browser or to an installed GitHub CLI, which keeps its own credentials.
 
-Knowledge always belongs to a topic or a target (DECISIONS round 23 items 1, 2 and 8). An installed knowledge pack
+Knowledge always belongs to a topic or a target (DESIGN round 23 items 1, 2 and 8). An installed knowledge pack
 lives in the folder of its topic or target, community/knowledge/<topic or target>/<pack>/ (a pack installed before
 topic folders stays in community/knowledge/<pack>/), and its pages reach the knowledge base with that topic or target
 on every excerpt. A loose knowledge file (a .json file in community/knowledge/ or in a topic folder, or a
@@ -335,7 +335,7 @@ class PreparedInstall:
 
 @dataclass(frozen=True)
 class LooseKnowledge:
-    """A loose knowledge file (DECISIONS round 23 item 1), never imported until the person sorts it into a topic or
+    """A loose knowledge file (DESIGN round 23 item 1), never imported until the person sorts it into a topic or
     target folder (CommunityManager.prepare_sort). label: its place below community/knowledge/ ('/'-separated), the
     name `llmcf knowledge sort` takes."""
     path: Path
@@ -900,7 +900,7 @@ class CommunityManager:
                 f"{self.LINK_REASON}. Move the folder there instead of linking it.")
 
     def loose_knowledge(self) -> List[LooseKnowledge]:
-        """Every loose knowledge file (DECISIONS round 23 item 1): not imported until the person sorts it into a topic
+        """Every loose knowledge file (DESIGN round 23 item 1): not imported until the person sorts it into a topic
         or target folder (prepare_sort). Reads the folder only."""
         found = []
         for path in self._knowledge_layout()[1]:
@@ -1907,7 +1907,7 @@ class CommunityManager:
 
         imported_count = 0
         waiting = self.last_sync_waiting   # installed folder -> why its pack waits
-        # Only installed packs, never a loose file (DECISIONS round 23 item 1: loose_knowledge lists them, the person
+        # Only installed packs, never a loose file (DESIGN round 23 item 1: loose_knowledge lists them, the person
         # sorts them, prepare_sort); a pack whose files changed since it was installed is not imported either.
         pending = []
         for item in self._knowledge_imports():

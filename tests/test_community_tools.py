@@ -1,4 +1,4 @@
-"""The community zoo for AI callers (MCP design T9; DECISIONS round 1 item 3, round 2 item 4, round 4 items 2, 3, 5):
+"""The community zoo for AI callers (MCP design T9; DESIGN round 1 item 3, round 2 item 4, round 4 items 2, 3, 5):
 list_packs with verify, add_pack_from_index two-phase with quarantine (every base image of a target pack shown
 plainly), standing approvals for packs, and export_pack to a local file, always asked. No pull request, no pack from a
 file. Offline: the index and the packs come from the fake network of tests/test_zoo.py."""
@@ -255,7 +255,7 @@ def test_the_cap_is_ask_even_when_allowed(env):
     assert not (env.cm.targets_dir / "demo-board").exists() and quarantined(env) == []
 
 
-# --- standing approvals (DECISIONS round 2 item 4, round 4 item 3) --------------------------------------------------
+# --- standing approvals (DESIGN round 2 item 4, round 4 item 3) --------------------------------------------------
 
 def grant(env, kind, pack, actor="ditto"):
     spec = env.registry.get("add_pack_from_index")
@@ -286,7 +286,7 @@ def test_a_knowledge_standing_approval_installs_the_next_such_pack_without_a_que
 
 
 def test_a_pack_made_before_topics_is_always_asked_and_named_after_its_id(env):
-    """DECISIONS round 23 item 1: an older knowledge pack names no topic; its topic comes from its id, and only with
+    """DESIGN round 23 item 1: an older knowledge pack names no topic; its topic comes from its id, and only with
     the person's confirmation, so no standing approval covers it."""
     env.world.add(knowledge_pack(env.world, "rk-docs"), kind="knowledge", pack_id="rk-docs", version="1.0.0")
     env.world.add(knowledge_pack(env.world, "old-docs", topic=None), kind="knowledge", pack_id="old-docs",

@@ -102,7 +102,7 @@ def look_up(repo: str, revision: Optional[str], token: Optional[str], api: Any =
     from huggingface_hub.utils import GatedRepoError, HfHubHTTPError, RepositoryNotFoundError
     from orchestrator.Core.hf_hub import tokenless_first
     # huggingface.co only, never the host in HF_ENDPOINT; without the token, and with it only when the Hub refuses
-    # that (a private repository; DECISIONS round 25 Q2). A gated repository's facts are public; its access is
+    # that (a private repository; DESIGN round 25 Q2). A gated repository's facts are public; its access is
     # checked with the token below.
     api_for = (lambda _t: api) if api is not None else hub_api
     sent = []

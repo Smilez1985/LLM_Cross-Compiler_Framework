@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The GUI surface: the forms of the open GUI that the AI's hands reach (DECISIONS round 8, "HYBRID CLARIFIED" (2), and
+The GUI surface: the forms of the open GUI that the AI's hands reach (DESIGN round 8, "HYBRID CLARIFIED" (2), and
 W4 of 2026-10-16: external AI apps get the same hands, with the same harness).
 
 The framework's tools are an AI's hands, also in the GUI. The open forms register their fields here (the build form,

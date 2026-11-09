@@ -438,7 +438,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                                      "the pin changed); nothing was built. Next: call build_local_runtime again.")
                 cancelled = lambda: stop.is_set() or handle.cancelled  # noqa: E731
                 try:
-                    # an AI started it: the soft caps of its steps stop it (DECISIONS round 25 Q8)
+                    # an AI started it: the soft caps of its steps stop it (DESIGN round 25 Q8)
                     result = rt.install(plan, fetch_source=lambda: True, cancelled=cancelled, ai_started=True,
                                         log=lambda msg: handle.progress(None, None, scrub(msg)[:200]))
                 except LocalRuntimeError as e:
@@ -936,7 +936,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                                      say=lambda msg: handle.progress(None, None, device_text(msg, users,
                                                                                              folder_labels())[:200]),
                                      on_event=board_events(handle, device), config=getattr(framework, "config", None),
-                                     ai_started=True, signer=_board_signer, mode=framework_mode())   # its build stops at the soft caps (DECISIONS round 25 Q8)
+                                     ai_started=True, signer=_board_signer, mode=framework_mode())   # its build stops at the soft caps (DESIGN round 25 Q8)
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set() or handle.cancelled:
                         raise JobCancelled() from None

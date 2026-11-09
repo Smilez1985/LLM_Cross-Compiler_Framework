@@ -394,7 +394,7 @@ def test_an_invalid_runtime_block_in_a_pack_is_reported(tmp_path, change):
     assert any("invalid runtime block" in p for p in validate_target_folder(target))
 
 
-# --- the convert stage's format helpers (DECISIONS round 23 item 5) ---------------------------------------------
+# --- the convert stage's format helpers (DESIGN round 23 item 5) ---------------------------------------------
 # The template's rknn_module.sh was a stub: it cloned rknn-toolkit2 at its newest commit and pip-installed a wheel at
 # build time (a build container has no network) and then converted nothing ("Dummy call for template");
 # rkllm_module.sh cloned rknn-llm the same way. Both are now the Rockchip helpers, which use the image's venv

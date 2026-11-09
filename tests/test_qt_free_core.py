@@ -1,4 +1,4 @@
-"""The core is Qt-free (DECISIONS round 11, A3: PySide6 is the optional 'gui' extra; consolidation chain qt).
+"""The core is Qt-free (DESIGN round 11, A3: PySide6 is the optional 'gui' extra; consolidation chain qt).
 
 Only orchestrator/gui imports PySide6. The text table and its helpers (ui_text, tr, current_language, the du/Sie
 overlay) live in orchestrator/utils/localization.py without Qt; the Qt object that tells the windows about a language

@@ -1,4 +1,4 @@
-"""The framework in a container that a person builds on their own computer (DECISIONS round 5 h; task 25).
+"""The framework in a container that a person builds on their own computer (DESIGN round 5 h; task 25).
 
 - No framework image is published or pulled: no workflow, Makefile target, script, compose file or document pushes an
   image or pulls a framework image; the compose file never pulls (pull_policy: never), the CI only builds.
@@ -230,7 +230,7 @@ def test_the_image_is_headless_by_default_and_the_gui_is_an_explicit_option():
     assert gui and "libxcb" in gui.group(1) and "libgl1" in gui.group(1)
     outside = text.replace(gui.group(0), "")
     assert "libxcb" not in outside and "libgl1" not in outside, "desktop libraries only with WITH_GUI=1"
-    # Changed on purpose (chain qt, DECISIONS round 11, A3): the headless image has no Qt, so not even libglib, and
+    # Changed on purpose (chain qt, DESIGN round 11, A3): the headless image has no Qt, so not even libglib, and
     # installs without the 'gui' extra
     always, gui_only = _apt_packages(text)
     assert "libglib2.0-0t64" in gui_only and "libglib2.0-0t64" not in always, (always, gui_only)

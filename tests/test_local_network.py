@@ -1,4 +1,4 @@
-"""The person's opt-outs of offline mode's locality rule (DECISIONS round 24, "L-NET final", rule d;
+"""The person's opt-outs of offline mode's locality rule (DESIGN round 24, "L-NET final", rule d;
 orchestrator/Core/local_network.py, `llmcf config local-network`, File > Settings... > Local network).
 
 The person counts a VPN, a host or an address range as local, each only after reading what can then leave the

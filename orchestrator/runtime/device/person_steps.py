@@ -880,7 +880,7 @@ def remove_board_builds(shell: Any, accepted: Any, prune: BoardPrune, device_id:
                                audit=audit)
 
 
-# --- the framework's own OpenSSH settings (DECISIONS round 25 Q4) --------------------------------------------------
+# --- the framework's own OpenSSH settings (DESIGN round 25 Q4) --------------------------------------------------
 
 SSH_BLOCK_QUESTION = "Write these settings into the framework's own SSH settings file?"
 SSH_KNOWINGLY_QUESTION = "These lines connect through another computer or run a command (see above). Add them anyway?"

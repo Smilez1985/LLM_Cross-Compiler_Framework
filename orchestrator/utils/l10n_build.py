@@ -13,14 +13,14 @@ nothing from the framework.
 
 TEXTS = {
     "en": {
-        # a module's CMake options outside the allowlist: the person decides (DECISIONS round 25 Q6; Core/module_flags)
+        # a module's CMake options outside the allowlist: the person decides (DESIGN round 25 Q6; Core/module_flags)
         "bld.builder.start": "🚀 Start Build Pipeline",
         "bld.flags.title": "CMake options of the module",
         "bld.flags.allow": "Allow these options",
         "bld.flags.standard": "Use the standard flags",
         "bld.flags.remember": "Remember this decision for this module version",
         "bld.flags.cancelled": "Nothing was started: no decision on the module's CMake options.",
-        # offline mode: a model that is not on this computer (DECISIONS round 25 Q1; Core/local_models.py)
+        # offline mode: a model that is not on this computer (DESIGN round 25 Q1; Core/local_models.py)
         "bld.offline.not_here": "Offline mode is on, so {repo} is not downloaded from Hugging Face, and it is not on "
                                 "this computer.",
         "bld.offline.pinned.title": "The recipe pins another commit",

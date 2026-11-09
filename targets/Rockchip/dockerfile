@@ -8,7 +8,7 @@
 #   /opt/venv-rknn   RKNN-Toolkit2 (torch <= 2.4); x86_64 and arm64 (its wheels exist for both)
 # Debian Bookworm (Python 3.11) because the Rockchip wheels exist only for cp310-cp312.
 #
-# Two stages (DECISIONS round 23 item 14). The builder stage has what fetches and builds llama.cpp's tools and installs
+# Two stages (DESIGN round 23 item 14). The builder stage has what fetches and builds llama.cpp's tools and installs
 # the venvs (build-essential, python3-dev, the compilers' headers). The final image gets what the build stages run:
 # the venvs and the llama.cpp source tree with its tools (build/bin), copied to the same paths onto the same base image
 # and Python; CMake, make, gcc and g++ with the aarch64 compilers for the package's cross build and the config stage's

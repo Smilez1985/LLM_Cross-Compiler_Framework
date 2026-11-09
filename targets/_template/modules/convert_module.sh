@@ -18,7 +18,7 @@
 # BuildEngine hands to the build job (USE_IMATRIX, IMATRIX_PATH).
 #
 # Around every conversion, what the convert module of version 1.x promised in the maintainer's design (HOW2_ORIGINAL;
-# DECISIONS round 16, U9 addendum), done by scripts/model_check.py (the image's python3, standard library only; the
+# DESIGN round 16, U9 addendum), done by scripts/model_check.py (the image's python3, standard library only; the
 # same file as in the Rockchip target):
 #   detection   the input is a Hugging Face folder (SafeTensors or PyTorch weights), a GGUF file (nothing to convert),
 #               an ONNX model, a single weights file or a folder of GGUF files; what this target cannot use is refused

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Where the person sees what an AI did (wave 6, design B.2; DECISIONS round 9, U1 and consequence b).
+Where the person sees what an AI did (wave 6, design B.2; DESIGN round 9, U1 and consequence b).
 
 What Ditto or an AI app does through a tool shows up in the framework's own windows. This module is the one
 vocabulary for that, without Qt, so the core (Core/activity.py, in every process) and the GUI (the activity router)

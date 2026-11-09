@@ -1,4 +1,4 @@
-"""The Builder's board recommendation, the documentation links for Deep Ingest and the build progress (DECISIONS round
+"""The Builder's board recommendation, the documentation links for Deep Ingest and the build progress (DESIGN round
 8: N9, N9', N9'', N10, N8).
 
 - The board comes from the hardware probe and is only a recommendation with its source and how sure it is; a weak

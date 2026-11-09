@@ -1,4 +1,4 @@
-"""The next-step catalogue (wave 6, chain a0; design A, DECISIONS round 10 V1, V2, Q7): steps as data instead of
+"""The next-step catalogue (wave 6, chain a0; design A, DESIGN round 10 V1, V2, Q7): steps as data instead of
 hand-written commands, one renderer per audience, mouse paths from the menu layout, the carriers, the allow-to-run
 proposals (exact argv, validated values, secrets through stdin, deletions never run blind) and the error report.
 

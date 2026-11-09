@@ -1167,7 +1167,7 @@ def test_clearing_the_input_history_lists_every_file_it_deletes(tmp_path, monkey
     assert not history.path.exists() and damaged.exists()
 
 
-# --- after the remote mode was removed (DECISIONS round 8: Ditto's hands are this computer's tools) ----------------
+# --- after the remote mode was removed (DESIGN round 8: Ditto's hands are this computer's tools) ----------------
 
 def _registry_with(title):
     return SimpleNamespace(audit=RecordingAudit(), get=lambda name: SimpleNamespace(title=title))

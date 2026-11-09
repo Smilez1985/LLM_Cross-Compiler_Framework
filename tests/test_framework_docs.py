@@ -1,4 +1,4 @@
-"""The framework's own documents in the knowledge base (DECISIONS round 8, N12): an explicit knowledge action in the
+"""The framework's own documents in the knowledge base (DESIGN round 8, N12): an explicit knowledge action in the
 GUI (Tools > Index the Framework's Documentation...), the CLI (`llm-cli knowledge index-docs`) and the MCP tool
 `index_framework_docs` (asked every time). The documentation first, the code only when asked for; a snapshot first, as
 before a Deep Ingest; Ditto then finds the framework's internals in search_knowledge (kind docs). Nothing indexes
@@ -323,7 +323,7 @@ class TestTheTool:
     def test_without_an_earlier_snapshot_the_knowledge_base_itself_gives_the_size(self, make_rag,  # noqa: F811
                                                                                   tmp_path):
         """The first snapshot has no earlier one to go by: the knowledge base's own storage gives its size, so a
-        disk without room refuses before any question here too (DECISIONS round 8, answer 2)."""
+        disk without room refuses before any question here too (DESIGN round 8, answer 2)."""
         rag = make_rag()
         fill(rag)
         assert not list(Path(rag.snapshot_dir).glob("*.jsonl.gz")), "no earlier snapshot"

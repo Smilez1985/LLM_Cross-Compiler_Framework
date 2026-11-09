@@ -1,4 +1,4 @@
-"""The build container image on every surface (DECISIONS round 36): the CLI (`build image plan / sources / export /
+"""The build container image on every surface (DESIGN round 36): the CLI (`build image plan / sources / export /
 import`), the MCP read-only status (get_target_capabilities with check_image: labels only) and the GUI window (Build >
 Build Container Images...). The same Core functions (Core/build_image.py) stand behind all three; every address here
 is a documentation address."""

@@ -1,4 +1,4 @@
-"""The GUI tool: the AI's hands in the window (DECISIONS round 8, "HYBRID CLARIFIED" (2); W4 of 2026-10-16).
+"""The GUI tool: the AI's hands in the window (DESIGN round 8, "HYBRID CLARIFIED" (2); W4 of 2026-10-16).
 
 Forms register their fields (the build form, the target module wizard page by page, the AI settings dialog); the one
 tool `gui` reads what the person entered (secrets only as set or not set, paths as labels), fills fields visibly

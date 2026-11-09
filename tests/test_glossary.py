@@ -1,4 +1,4 @@
-"""The wording toolkit's Qt-free parts (wave 6, f-words; DECISIONS round 10, V6, Q1, Q7).
+"""The wording toolkit's Qt-free parts (wave 6, f-words; DESIGN round 10, V6, Q1, Q7).
 
 The glossary (utils/l10n_glossary.py, utils/glossary.py): every term has an English and a German explanation and an
 https link; the links into the framework's own manual name headings that exist. The German form of address: du is the

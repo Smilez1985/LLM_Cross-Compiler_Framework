@@ -656,10 +656,10 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
     if plan.support_level != "official" or plan.target_trust != "shipped" or not all(_official(i) for _, i in pairs):
         plan.base_image = _base_image(target_folder)
         plan.base_image_class = registry_class(plan.base_image) if plan.base_image else ""
-        # every image, not only the first FROM: a later stage can pull a vendor image too (DECISIONS round 3)
+        # every image, not only the first FROM: a later stage can pull a vendor image too (DESIGN round 3)
         plan.base_images = pairs
 
-    # the module's CMake options outside the allowlist (DECISIONS round 25 Q6): only the person decides; an AI-started
+    # the module's CMake options outside the allowlist (DESIGN round 25 Q6): only the person decides; an AI-started
     # build goes on only with the decision the person remembered for this module version and flag set
     try:
         question, kept = service.flag_question(BuildRequestIn(**base), local_paths=False)
@@ -696,7 +696,7 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
         plan.mounts.append(f"model cache: {req.model}" + "@commit")
         from orchestrator.utils.locality import offline_mode
         if offline_mode(getattr(framework, "config", None)):
-            # DECISIONS round 25 Q1: never a download; the copy on this computer, or the models already here by label
+            # DESIGN round 25 Q1: never a download; the copy on this computer, or the models already here by label
             copy = service.local_copy(req.model, req.revision)
             if copy is not None:
                 # a full commit pins the build to this copy; a browser download's folder names only its first 12

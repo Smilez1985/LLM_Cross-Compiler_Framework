@@ -48,7 +48,7 @@ class KnowledgeSourcesDialog(QDialog):
             self.kind.addItem(self._t(f"sources.filter.{value}"), value)
         self.kind.currentIndexChanged.connect(lambda _index: self.reload())
         row.addWidget(self.kind)
-        # the topic or target a source belongs to (`llm-cli knowledge sources --topic`; DECISIONS round 23 item 1)
+        # the topic or target a source belongs to (`llm-cli knowledge sources --topic`; DESIGN round 23 item 1)
         row.addWidget(plain_label(self._t("sources.topic"), wrap=False, selectable=False))
         self.topic = QLineEdit(self)
         self.topic.setObjectName("edt_knowledge_sources_topic")

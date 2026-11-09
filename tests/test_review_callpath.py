@@ -1,4 +1,4 @@
-"""Adversarial review of the call path (MCP design S5 and S8, DECISIONS round 4 item 1).
+"""Adversarial review of the call path (MCP design S5 and S8, DESIGN round 4 item 1).
 
 Attacks on the two-phase confirmation and the question rounds (a client that sends an answer with its very first
 call, a question too long for a form, a fact that makes an allowed call ask), on the binding of a decision to the
@@ -187,7 +187,7 @@ def test_resolve_healing_decides_nothing_without_the_facts_it_was_shown(tmp_path
             "Q4_K_M)); the failed build is not retried."),
 ])
 def test_the_healing_questions_first_line_names_the_build_not_only_its_id(approve, first):
-    """DECISIONS round 4 item 1: what the person reads first names the build, not only a raw id."""
+    """DESIGN round 4 item 1: what the person reads first names the build, not only a raw id."""
     from orchestrator.tools.framework_tools import healing_facts
     proposal = {"strategy": "config_adjustment", "summary": "Out of memory", "root_cause": "Killed", "fix": "jobs",
                 "automatic": True, "ai_generated": False, "fingerprint": "f",

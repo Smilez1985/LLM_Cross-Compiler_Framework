@@ -1,6 +1,6 @@
 name: Dependency update
 
-# DECISIONS round 65: the newest compatible versions, inside the ranges of pyproject.toml and after the 5-day cooldown
+# DESIGN round 65: the newest compatible versions, inside the ranges of pyproject.toml and after the 5-day cooldown
 # ([tool.uv] exclude-newer), go through the same gates as every change: `uv lock --upgrade`, the exports with hashes,
 # the whole test matrix of ci.yml and pip-audit as security.yml runs it. Only when every job is green is the branch
 # deps/update pushed and a pull request to development opened (or the open one updated). Nothing is merged

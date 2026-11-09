@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The newest compatible dependencies, resolved fresh (DECISIONS round 65).
+"""The newest compatible dependencies, resolved fresh (DESIGN round 65).
 
 pyproject.toml gives each dependency a range (from the tested version up to the next major) and a 5-day cooldown
 ([tool.uv] exclude-newer = "5 days"); uv.lock is the tested set. Every installer run (install.sh, install.bat) and the

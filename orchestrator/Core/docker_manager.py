@@ -6,7 +6,7 @@ DIREKTIVE: Goldstandard, robust, thread-safe.
 Owns the framework's one BuildEngine (its Docker client) and checks that the Docker daemon answers. Without Qt: the
 command line, the MCP server and the GUI use it alike.
 
-Builds run through one path: BuildService -> LLMOrchestrator -> BuildEngine (DECISIONS round 12, item 6). This
+Builds run through one path: BuildService -> LLMOrchestrator -> BuildEngine (DESIGN round 12, item 6). This
 manager's older build path (start_build, a monitor thread, stop_build and six Qt signals nothing connected to) was
 covered by that path and removed; what only it could do lives on there:
 - the CPU and memory of the running build container: `container_resources()` below (Docker's own formulas, from the

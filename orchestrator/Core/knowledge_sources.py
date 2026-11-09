@@ -2,7 +2,7 @@
 """
 What the knowledge base holds, as the person sees it: every source with the licence and copyright notice it shows, and
 what a knowledge pack would carry of it (its full text, only its address and short facts, or nothing) and why
-(DECISIONS round 8, Q-1 and Q-1'), and how much hidden text was left out of it before it was stored (recon P1).
+(DESIGN round 8, Q-1 and Q-1'), and how much hidden text was left out of it before it was stored (recon P1).
 `llm-cli knowledge sources` and Tools > Knowledge Sources... show the same list through these functions (DECISIONS W1':
 the CLI is never the person's only way); the words of "In a pack" and of "Hidden text left out" are the same on both
 (the GUI has them in both languages, l10n_knowledge).
@@ -53,7 +53,7 @@ def knowledge_base(framework: Any) -> Any:
 def sources(rag: Any, kind: str = "any", topic: Optional[str] = None) -> List[Dict[str, Any]]:
     """Every source of the knowledge base `rag` (RAGManager.list_sources: source, title, kind, licence, copyright,
     pack_share, share_reason, topic, target, ...), only those of `kind` unless it is "any", and with `topic` only those
-    that belong to that topic or target (DECISIONS round 23 item 1; ignoring case). Raises KnowledgeBaseError when the
+    that belong to that topic or target (DESIGN round 23 item 1; ignoring case). Raises KnowledgeBaseError when the
     knowledge base cannot be read, ValueError for an unknown kind."""
     if kind not in KIND_CHOICES:
         raise ValueError(f"Unknown kind {kind!r}; one of {', '.join(KIND_CHOICES)}.")

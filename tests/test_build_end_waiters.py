@@ -1,4 +1,4 @@
-"""The waiters end on the end record (DECISIONS round 40, TASK 2 and 3): one end reason per request, carried in
+"""The waiters end on the end record (DESIGN round 40, TASK 2 and 3): one end reason per request, carried in
 WorkflowState, BuildStatusOut, the shared build state and build history; the CLI's wait says it in plain words with
 its exit code (0 done, 1 failed/soft_cap/idle, 2 cancelled, 3 still running); waits return at once on the end;
 runtime build jobs carry the same vocabulary."""

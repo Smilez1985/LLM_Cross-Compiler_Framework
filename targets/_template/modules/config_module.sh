@@ -10,7 +10,7 @@
 #         With a hardware profile of the board (HARDWARE_CONFIG_FILE, or $BUILD_CACHE_DIR/target_hardware_config.txt)
 #         it also generates the CMake toolchain from it, with the CPU and CMake flags of the module wizard: the
 #         target stage then packages llama-cli and llama-server for the board (version 1.x). The BuildEngine hands
-#         the board's stored probe to every build (read-only, HARDWARE_CONFIG_FILE=/build-cache/hardware/...; DECISIONS
+#         the board's stored probe to every build (read-only, HARDWARE_CONFIG_FILE=/build-cache/hardware/...; DESIGN
 #         round 23 item 5) when there is one; an x86_64 board's CPU is then planned as the build recipe plans it
 #         (plan_x86_cpu: -march=native only for this build machine, else the probe's own features).
 #         The compilers are CC and CXX of the image (default cc and c++; a module that cross-compiles sets them in its

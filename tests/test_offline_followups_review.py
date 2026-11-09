@@ -1,4 +1,4 @@
-"""Review of the offline-mode follow-ups (chain offline-followups, DECISIONS round 26 Q3, Q4 and item d).
+"""Review of the offline-mode follow-ups (chain offline-followups, DESIGN round 26 Q3, Q4 and item d).
 
 - The privacy filter and the client that carries the prompts come from ONE locality check: resolve() decides the
   filter (Target.local), and the adapter for that target is the pinned client whenever the filter is off, even when

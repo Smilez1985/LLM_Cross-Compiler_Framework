@@ -2,7 +2,7 @@
 """
 Fix proposals of AI clients for failed builds (MCP design 2.3, work package T4).
 
-An AI client that does Ditto's job (DECISIONS round 1 item 5) analyses a failed build itself and hands its proposal to
+An AI client that does Ditto's job (DESIGN round 1 item 5) analyses a failed build itself and hands its proposal to
 the framework with the tool `propose_healing_fix`. The proposal passes the same checks as Ditto's own analysis (the
 `HealingAnalysis` model and the dangerous-command filter) and is kept as a manual step for the person: the framework
 never runs it, and `resolve_healing` never applies it.

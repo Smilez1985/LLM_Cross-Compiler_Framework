@@ -1,5 +1,5 @@
 """Ditto's task texts in one module (orchestrator/llm/task_prompts.py) and the honest "cannot" (design 1.3, 6.11 D10;
-DECISIONS round 3): every task text carries the rule, "untested" is never a reason, a module or optimizer `cannot`
+DESIGN round 3): every task text carries the rule, "untested" is never a reason, a module or optimizer `cannot`
 the framework's check of the task input does not confirm is asked again and then shown as not confirmed, the healing
 task has no `cannot`, and an AI-proposed module may use any base image with its reason and registry shown plainly."""
 
@@ -95,7 +95,7 @@ class TestOneSourceAndTheRule:
 
     def test_module_text_allows_any_base_image_with_a_reason(self):
         text = task_prompts.MODULE_SYSTEM
-        assert "debian:* or ubuntu:*" not in text, "no hard block of other base images (DECISIONS round 3)"
+        assert "debian:* or ubuntu:*" not in text, "no hard block of other base images (DESIGN round 3)"
         for phrase in ("Docker Official Image", "base_image_reason", "assumptions", "never invent a digest",
                        "that is no reason to refuse", "untested"):
             assert phrase in text, phrase
@@ -160,7 +160,7 @@ class TestModuleProposal:
         assert caught.value.cannot.reason == "hardware_unavailable"
 
     def test_the_person_reads_a_speaking_reason_never_the_code(self):
-        """What the person sees uses speaking names (DECISIONS round 4 item 1), not the reason codes the model uses."""
+        """What the person sees uses speaking names (DESIGN round 4 item 1), not the reason codes the model uses."""
         for code in task_prompts.CANNOT_REASONS:
             text = str(DittoCannot(ditto_manager.CannotAnswer(reason=code, missing="m", next_step="n"),
                                    confirmed=True))

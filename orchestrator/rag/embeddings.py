@@ -8,7 +8,7 @@ with and, for models FastEmbed does not ship, where the ONNX export lives. BM25 
 identifiers such as -DGGML_CUDA=ON or rknn_toolkit2 also count by their parts.
 Models are cached under the framework's models directory. In offline mode nothing is downloaded.
 
-Where a model comes from Hugging Face, the framework fetches its files itself (DECISIONS round 25 Q2): the Core hands
+Where a model comes from Hugging Face, the framework fetches its files itself (DESIGN round 25 Q2): the Core hands
 each embedder a `fetch` function (Core/hf_hub.fetch_snapshot) that puts them into fastembed's cache through the
 framework's verified fetcher, without any token, and fastembed then loads that folder (specific_model_path) without
 contacting anybody. A model without a Hugging Face source, or an embedder made without `fetch`, is downloaded by

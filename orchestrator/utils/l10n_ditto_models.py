@@ -15,7 +15,7 @@ TEXTS = {
         "ditto_models.menu.eval": "Evaluation...",
 
         # Ditto > Local Models... (`ditto models list` / `ditto models download`)
-        # offline mode (DECISIONS round 25 Q1)
+        # offline mode (DESIGN round 25 Q1)
         "ditto_models.offline": "Offline mode is on, so {file} is not downloaded: {why}.",
         "ditto_models.offline.here": "Already on this computer: {models}.",
         "ditto_models.offline.none": "No model for Ditto is on this computer yet.",

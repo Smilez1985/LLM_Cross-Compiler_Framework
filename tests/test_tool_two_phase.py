@@ -1,4 +1,4 @@
-"""Call context, two-phase confirmation and confirmation text v2 (MCP design S5, G13, G41; DECISIONS round 4 item 1).
+"""Call context, two-phase confirmation and confirmation text v2 (MCP design S5, G13, G41; DESIGN round 4 item 1).
 
 A tool's `prepare` looks up the facts only the server knows before the question; the question shows the
 consequence first, who asks, the facts (external text labelled) and every argument with its speaking name; the
@@ -463,7 +463,7 @@ class TestQuestionRecord:
         assert any(r["kind"] == "name" and r["wrote"] == "ChangeItem" for r in record["repairs"])
 
 
-# --- speaking names for people, labels for AI callers (DECISIONS round 4 item 1) -------------------------------------
+# --- speaking names for people, labels for AI callers (DESIGN round 4 item 1) -------------------------------------
 
 def pin(ref="models:qwen/model.gguf"):
     return SimpleNamespace(model=SimpleNamespace(ref=ref), dataset=None)

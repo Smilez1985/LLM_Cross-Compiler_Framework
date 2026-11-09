@@ -19,11 +19,11 @@
 # BuildEngine hands to the build job (USE_IMATRIX, IMATRIX_PATH).
 #
 # Around every conversion, what the convert module of version 1.x promised in the maintainer's design (HOW2_ORIGINAL;
-# DECISIONS round 16, U9 addendum), done by scripts/model_check.py (the image's python3, standard library only):
+# DESIGN round 16, U9 addendum), done by scripts/model_check.py (the image's python3, standard library only):
 #   detection   the input is a Hugging Face folder (SafeTensors or PyTorch weights), a GGUF file (nothing to convert),
 #               an ONNX model, a single weights file or a folder of GGUF files; what the format of the build cannot
 #               use is refused with the reason before anything slow runs. ONNX for GGUF: llama.cpp has no converter
-#               from ONNX, and the refusal names the format rknn for the NPU instead (ONNX_NEXT, DECISIONS round 17).
+#               from ONNX, and the refusal names the format rknn for the NPU instead (ONNX_NEXT, DESIGN round 17).
 #   validation  the warnings of 1.x about missing files (validate_huggingface_model), the integrity of the input (its
 #               JSON files, SafeTensors headers against the file sizes, the shards an index lists, PyTorch archives, a
 #               GGUF header) and of the GGUF the converter wrote (every tensor's data inside the file)

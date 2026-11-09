@@ -1,4 +1,4 @@
-"""Knowledge always belongs to a topic or a target (DECISIONS round 23 items 1, 2 and 8).
+"""Knowledge always belongs to a topic or a target (DESIGN round 23 items 1, 2 and 8).
 
 - A loose knowledge file (a .json file in community/knowledge/ or a topic folder, a knowledge.json without the pack's
   provenance) is never imported: it is listed, and the person sorts it into a topic or target folder through the

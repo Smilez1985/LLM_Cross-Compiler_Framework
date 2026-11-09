@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Licences and copyright notices of crawled pages, and what a knowledge pack may carry of them (DECISIONS round 8,
+Licences and copyright notices of crawled pages, and what a knowledge pack may carry of them (DESIGN round 8,
 Q-1 and Q-1').
 
 Text and data mining lets the knowledge base keep the text of a page the crawl was allowed to read (the crawler checks

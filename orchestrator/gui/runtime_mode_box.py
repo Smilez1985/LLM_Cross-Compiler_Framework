@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Ditto's local server in the AI settings and in Ditto > Local Runtime...: where it runs (bare metal or Docker, DECISIONS
+Ditto's local server in the AI settings and in Ditto > Local Runtime...: where it runs (bare metal or Docker, DESIGN
 round 7 D), its installation and the switch.
 
 The button takes the same code path as `llm-cli ditto runtime ensure` with every option of it (W1'):

@@ -36,7 +36,7 @@ OPTIONAL = {"delete_artifact", "restore_knowledge_snapshot", "build_local_runtim
             "harness_report",   # the person's harness runs, read only and scrubbed
             "propose_bundle_block"}   # a block proposed from a model: read only, the person writes it
 LATER = {"probe_remote_device", "run_device_benchmark"}
-# The AI's hands in the open window (DECISIONS round 8, W4): one tool, the same for Ditto and every MCP caller.
+# The AI's hands in the open window (DESIGN round 8, W4): one tool, the same for Ditto and every MCP caller.
 GUI = {"gui"}
 # The five GUI tools of wave 3, never released (A20): replaced by the one tool, never registered any more.
 GUI_BEFORE = {"read_gui_form", "fill_gui_form", "wizard_state", "wizard_step", "show_gui"}

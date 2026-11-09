@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The board's temperature (DECISIONS round 23 item 16; stage C wave 3c-2, chain boards).
+The board's temperature (DESIGN round 23 item 16; stage C wave 3c-2, chain boards).
 
 Where a board shows its temperature, the framework reads it over the board session it already has (nothing is
 installed, nothing written): during the checks of a runtime deploy and of `device runtime verify`, before and after the

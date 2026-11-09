@@ -104,7 +104,7 @@ class BuildServiceError(WithSteps, ValueError):
 
 
 class ModelNotHere(BuildServiceError):
-    """Offline mode is on and the model named by its Hugging Face id is not on this computer (DECISIONS round 25 Q1):
+    """Offline mode is on and the model named by its Hugging Face id is not on this computer (DESIGN round 25 Q1):
     the build is not started, nothing is downloaded. `choices`: the models already here (local_models.models_here; for
     an AI caller only those it may name, by label), which the CLI lists and the Builder tab offers next to a file or
     folder of the person's own. The facts catalogue's blocker offline_mode goes with it."""
@@ -359,7 +359,7 @@ class BuildService:
     def live_resources(self, request_id: str) -> Optional[Dict[str, float]]:
         """The CPU and memory of the request's running build container (cpu_percent, memory_bytes,
         memory_limit_bytes; BuildEngine samples them while a stage container runs), or None while none runs or for a
-        request of another process. For the person's Builder under the progress bar (DECISIONS round 12, item 6);
+        request of another process. For the person's Builder under the progress bar (DESIGN round 12, item 6);
         not part of the AI's build status. Read from the orchestrator this service is bound to, like its status."""
         try:
             orchestrator = self._orchestrator
@@ -911,7 +911,7 @@ class BuildService:
             self.logger.warning(f"Could not record the confirmed build: {redact_secrets(str(e))}")
             return False
 
-    # --- the person's decision on a module's CMake flags (DECISIONS round 25 Q6) ---------------------------------
+    # --- the person's decision on a module's CMake flags (DESIGN round 25 Q6) ---------------------------------
 
     def _flag_store(self):
         from orchestrator.Core.build_plan import state_dir
@@ -1297,7 +1297,7 @@ class BuildService:
 
     def _board_probe(self, probe_id: Optional[str], board: Optional[str],
                      caps: Optional[TargetCapabilities], target: Optional[str] = None) -> Tuple[Optional[str], Any]:
-        """(probe id, profile) of the board the build is for (DECISIONS round 23 item 5): the probe the request names,
+        """(probe id, profile) of the board the build is for (DESIGN round 23 item 5): the probe the request names,
         else the newest stored probe of a board of this SoC (HardwareProbes.for_board); (None, None) when there is
         none. A named probe of another board is refused (another board of the target, a board of another SoC, or a
         system whose architecture is not the target's architecture_family): its CPU flags and its NPU are not this
@@ -1348,7 +1348,7 @@ class BuildService:
         return self.probes().text(probe_id) if probe_id else None
 
     def _refuse_what_the_engine_cannot(self, request: BuildRequestIn) -> None:
-        """Before anything is queued, a build the container engine cannot run as asked (DECISIONS round 26 Q1): a GPU
+        """Before anything is queued, a build the container engine cannot run as asked (DESIGN round 26 Q1): a GPU
         build that passes an NVIDIA GPU (nvidia-smi) into the container needs Docker's GPU request, which Podman's
         Docker-compatible interface drops without a word; the build would run on the CPU instead."""
         if not request.use_gpu or not shutil.which("nvidia-smi"):
@@ -1379,7 +1379,7 @@ class BuildService:
     def check_model_here(self, repo: str, revision: Optional[str] = None, *, for_ai: bool = False) -> None:
         """In offline mode (the framework's one offline check) a model named by its Hugging Face id must have a copy
         on this computer, else ModelNotHere with the models already here: nothing is ever downloaded then
-        (DECISIONS round 25 Q1). Nothing happens online."""
+        (DESIGN round 25 Q1). Nothing happens online."""
         from orchestrator.utils.locality import offline_mode
         if not offline_mode(getattr(self.framework, "config", None)):
             return

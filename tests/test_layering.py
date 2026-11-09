@@ -1,4 +1,4 @@
-"""The layers of orchestrator/ (DECISIONS round 11, A2: one repository, the layers enforced by this test).
+"""The layers of orchestrator/ (DESIGN round 11, A2: one repository, the layers enforced by this test).
 
 Each module belongs to a layer, and an import may only point to its own layer or a lower one:
 

@@ -1,4 +1,4 @@
-""""Use" of an identical earlier build (DECISIONS round 23, item 9): `llm-cli build start` asks the Builder tab's
+""""Use" of an identical earlier build (DESIGN round 23, item 9): `llm-cli build start` asks the Builder tab's
 question about a finished build with 100 % the same options, and "Use" copies that build into the chosen folder
 (--output, the prompt's answer or the output folder; in the GUI the folder dialog at the output folder), in the CLI and
 the GUI alike: artifact_output.plan_copy and copy_artifact, the one disk rule before the copy, every copy checked by

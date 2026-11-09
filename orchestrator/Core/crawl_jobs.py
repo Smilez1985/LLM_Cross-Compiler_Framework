@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Deep Ingest for AI callers (MCP design 2.5, work package T7; DECISIONS round 1 item 1).
+Deep Ingest for AI callers (MCP design 2.5, work package T7; DESIGN round 1 item 1).
 
 `crawl_docs_site` crawls documentation sites into the knowledge base Ditto uses, as a job, with exactly the GUI's
 crawler and its machine-readable opt-out checks (robots.txt, robots meta and X-Robots-Tag including noai, TDMRep):

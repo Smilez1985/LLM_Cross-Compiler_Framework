@@ -12,7 +12,7 @@ add_repo_override / remove_repo_override, the functions of `config repos`). A UR
 redacted. Removing one asks first with exactly what goes and where it is saved ("No" is the default); nothing else is
 removed. Every text is plain text.
 
-Local network (`config local-network`, Core/local_network.py; DECISIONS round 24, "L-NET final"): what offline mode
+Local network (`config local-network`, Core/local_network.py; DESIGN round 24, "L-NET final"): what offline mode
 counts as local besides this computer and the own network, the person's opt-outs (a VPN, a host, an address range),
 each added only after the person read what can then leave the network ("No" is the default), the VPN check of this
 computer and a check of any address. Both checks look names up and may run the tailscale command: in a worker thread,

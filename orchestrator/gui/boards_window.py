@@ -138,7 +138,7 @@ class BoardSteps:
     @property
     def audit(self) -> Any:
         """The audit log of the person's board decisions (trust, records, consents): the one sink of every surface
-        (DECISIONS round 25 Q3, person_steps.device_audit): the registry's log, else the per-user audit.db, so a
+        (DESIGN round 25 Q3, person_steps.device_audit): the registry's log, else the per-user audit.db, so a
         consent here works without a registry, as in the CLI."""
         from orchestrator.runtime.device.person_steps import device_audit
         return device_audit(self.framework, self.state_dir)

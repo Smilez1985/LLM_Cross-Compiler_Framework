@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The person's opt-outs of offline mode's locality rule (DECISIONS round 24, "L-NET final", rule d of
+The person's opt-outs of offline mode's locality rule (DESIGN round 24, "L-NET final", rule d of
 orchestrator/utils/locality.py): "count this VPN / this host / this address range as local", each shown with a plain
 explanation of what can then leave the network. The person decides what their own network allows; the framework does
 not patronize, and an AI never decides it.

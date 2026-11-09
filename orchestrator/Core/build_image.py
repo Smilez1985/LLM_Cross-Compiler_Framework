@@ -4,7 +4,7 @@ The build container image: the Docker image with a target's toolchain that the b
 Core/builder.py from the target's Dockerfile, labelled IMAGE_LABEL and INPUTS_LABEL). It is not the target artifact,
 package or bundle, which is what goes to the board.
 
-Offline builds of the build container image (DECISIONS round 36): offline mode means no internet; the own network may
+Offline builds of the build container image (DESIGN round 36): offline mode means no internet; the own network may
 be there. Offline mode may build the image when every source its Dockerfile needs is local by the one locality rule
 (utils/locality.py check_reach, the person's opt-outs included):
 
@@ -62,7 +62,7 @@ MIRROR_URL = re.compile(r"https?://(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::[0-9
 _URL = re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*://[^\s\"'`<>|;&)]+|\b[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}:"
                   r"[^\s\"'`<>|;&)]*", re.ASCII)
 # Package managers other than apt and pip: an offline build has no mirror setting for them, so a Dockerfile that uses
-# one fetches from the internet (DECISIONS round 36: apt and pip through the person's mirrors; anything else is named).
+# one fetches from the internet (DESIGN round 36: apt and pip through the person's mirrors; anything else is named).
 _OTHER_PACKAGES = re.compile(
     r"\b(?:apk\s+(?:-\S+\s+)*(?:add|update|upgrade|fetch)|(?:dnf|yum|microdnf|tdnf)\s+(?:-\S+\s+)*(?:install|update|"
     r"upgrade|makecache|groupinstall)|zypper\s+(?:-\S+\s+)*(?:in|install|ref|refresh|up|update)|pacman\s+-S\w*|"

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Technical terms explained on mouse-over (wave 6, f-words; DECISIONS round 10, V6).
+Technical terms explained on mouse-over (wave 6, f-words; DESIGN round 10, V6).
 
 A marked widget shows a hover card when the mouse rests on it: for each term the term itself, one or two plain
 sentences in the person's language and a link to the page that explains it best (utils/l10n_glossary.py). The card is

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Standing approvals: "yes, and do not ask again" (MCP design 6.10, maintainer decisions rounds 2-4).
+Standing approvals: "yes, and do not ask again" (MCP design 6.10, maintainer DESIGN rounds 2-4).
 
 A standing approval is a scoped "allow" in one caller's policy. It turns "ask" into "allow" only for calls whose
 facts fall inside its scope; outside it the tool asks as before. It never lifts a "deny", never covers another caller,

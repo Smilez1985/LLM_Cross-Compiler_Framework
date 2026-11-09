@@ -1,4 +1,4 @@
-"""The container engine the framework talks to (DECISIONS round 26 Q1, orchestrator/utils/docker_engine.py).
+"""The container engine the framework talks to (DESIGN round 26 Q1, orchestrator/utils/docker_engine.py).
 
 Docker CE is the standard; on Rocky Linux, AlmaLinux and Oracle Linux install.sh falls back to Podman (podman-docker and
 the person's rootless podman.socket). Without a Docker daemon the framework sets DOCKER_HOST to that socket itself, with

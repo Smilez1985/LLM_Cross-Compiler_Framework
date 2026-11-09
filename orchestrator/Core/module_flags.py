@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - The person's decision on a module's CMake flags (DECISIONS round 25 Q6)
+LLM Cross-Compiler Framework - The person's decision on a module's CMake flags (DESIGN round 25 Q6)
 
 A valid CMake option outside the allowlist of the build recipe (orchestrator/runtime/build/recipe.py
 cmake_flag_verdicts, verdict "decision": -G, -U, --log-level, --trace and the other switches of DECISION_SWITCHES) is

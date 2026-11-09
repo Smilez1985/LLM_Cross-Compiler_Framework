@@ -20,7 +20,7 @@
 #         It is made for a GGUF build with a hardware profile in the build plan (config_module.sh), and on request
 #         (build.sh --package: target_module.sh started by hand, the entrypoint modes target and pipeline) also without
 #         one, with the plain defaults of this target (plan_package_defaults), which the manifest names. A build of the
-#         BuildEngine gets the board's stored probe when there is one (DECISIONS round 23 item 5), and a GGUF build then
+#         BuildEngine gets the board's stored probe when there is one (DESIGN round 23 item 5), and a GGUF build then
 #         makes the package too; the board's own llama.cpp runtime still comes from the runtime builder (llm-cli device
 #         runtime build).
 
@@ -347,7 +347,7 @@ container_paths() {  # VALUE: every ';' part is an absolute folder inside the co
     [ "$found" = 1 ]
 }
 
-# The person's decision on a valid option outside the allowlist (DECISIONS round 25 Q6), as the framework hands it to
+# The person's decision on a valid option outside the allowlist (DESIGN round 25 Q6), as the framework hands it to
 # the build: LLMCF_ALLOWED_FLAGS (the options the person allowed, as cmake reads them, separated by the unit separator) and
 # LLMCF_FLAG_DECISION=standard (go on with the standard flags: such options are left out).
 flag_allowed_by_person() {  # OPTION
@@ -493,7 +493,7 @@ cross_compile_target() {
     if ! prefetched_dependency KLEIDIAI; then
         cmake_args+=("-DGGML_CPU_KLEIDIAI=OFF")
     fi
-    # The dependencies llmcf fetched before the build, pinned and checked, outside the sandbox (DECISIONS round 25
+    # The dependencies llmcf fetched before the build, pinned and checked, outside the sandbox (DESIGN round 25
     # Q6 addendum, orchestrator/runtime/build/deps.py): mounted read-only and named in LLMCF_DEPS. CMake takes each
     # from its folder (FETCHCONTENT_SOURCE_DIR_<NAME>) and, FETCHCONTENT_FULLY_DISCONNECTED=ON, fetches nothing.
     local entry

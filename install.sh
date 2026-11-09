@@ -1739,7 +1739,7 @@ old_installation_note() {
 }
 
 # --- SCHRITT 3: PYTHON VENV ---
-# Die Abhängigkeiten (DECISIONS Runde 65): Jeder Lauf, auch jede Aktualisierung, löst die neuesten verträglichen
+# Die Abhängigkeiten (DESIGN Runde 65): Jeder Lauf, auch jede Aktualisierung, löst die neuesten verträglichen
 # Versionen frisch auf (uv lock --upgrade in einer Kopie, in den Bereichen aus pyproject.toml und mit 5 Tagen
 # Wartezeit), prüft sie mit pip-audit, installiert sie mit Hashes und prüft die neue Umgebung selbst
 # (scripts/fresh_deps.py selfcheck: pip check, jede Abhängigkeit und die Kernmodule importieren, llm-cli --help).

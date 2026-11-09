@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Ditto's runtime mode: bare metal or Docker (DECISIONS round 7 D).
+Ditto's runtime mode: bare metal or Docker (DESIGN round 7 D).
 
 Ditto's local runtime (the self-built llama-server and its model) runs bare metal, the default (no Docker overhead,
 runtime decision D23), or in Docker (Ditto's image, container_server.py). ensure() is what `llm-cli ditto runtime

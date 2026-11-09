@@ -8,7 +8,7 @@ build (N11).
   nothing: the build stays in the framework's build folder, and "Save..." in the Deployment tab saves it later.
 - `ask_earlier`: before a build, an earlier build with 100 % the same options is named with its full path; the person
   uses it or builds again (Cancel builds nothing). Nothing is skipped by itself.
-- `ask_and_use`: "Use" (DECISIONS round 23, item 9): the folder dialog opens at the output folder, as for a finished
+- `ask_and_use`: "Use" (DESIGN round 23, item 9): the folder dialog opens at the output folder, as for a finished
   build, and the earlier build is copied there in a worker thread (artifact_output.plan_copy, copy_artifact: the one
   disk rule first, every copy checked by sha256; the earlier build stays where it is), as `llm-cli build start`'s
   "use" copies it to --output. The identical build there already is not copied again; anything else under its name

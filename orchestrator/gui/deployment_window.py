@@ -27,7 +27,7 @@ GUI parity (W1' of 2026-10-16, wave 5a): "Create package only..." makes the pack
 package..." uploads a ZIP made earlier (`deploy run PACKAGE_PATH`), and the Port, Name and "Wait for the board" fields
 are `--port`, `--label` and `--wait`. The host key is read off the GUI thread (gui/host_key.HostKeyCheck) and the
 question has "No" as its default; packaging and the deploy run in worker threads.
-Docker containers (DECISIONS round 23, item 6): the "Use Docker Containerization?" group lists the containers a package
+Docker containers (DESIGN round 23, item 6): the "Use Docker Containerization?" group lists the containers a package
 with Docker images carries for the chosen profile, from the list the CLI's `deploy package --docker` packs
 (deployment_manager.package_containers: the image of the settings, the hardware access of the target profile). The
 person's ticks decide which go into the package (package_docker_config); the CLI packs every one.
@@ -793,7 +793,7 @@ class DeploymentWindow(QWidget):
         self.btn_cancel.setVisible(False)
         plain_box(self, "information" if ok else "warning", ui_text("deploy.package.title"), text)
 
-    # --- the containers of a package with Docker images (DECISIONS round 23, item 6) ---
+    # --- the containers of a package with Docker images (DESIGN round 23, item 6) ---
 
     def _fill_containers(self) -> None:
         """The table lists the containers a package for the chosen profile carries (package_containers, as `llmcf

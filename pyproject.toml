@@ -6,7 +6,7 @@ authors = [{ name = "Smilez1985" }]
 readme = "README.md"
 # 3.10 is end-of-life (2026-10); lower bounds below exclude all versions with known advisories.
 requires-python = ">=3.11,<3.15"
-# Version policy (DECISIONS round 65): every dependency is a range from the tested version up to the next major
+# Version policy (DESIGN round 65): every dependency is a range from the tested version up to the next major
 # (0.x packages that break in a minor release: up to the next minor), never an old exact pin; uv.lock fixes the
 # tested set, the scheduled update run (.github/workflows/deps-update.yml) and every installer run resolve the newest
 # versions inside these ranges after a 5-day cooldown, test and audit them. One exact pin stays: pyrage, which
@@ -37,7 +37,7 @@ dependencies = [
 
     # --- 5. AI Agent & RAG (host side) ---
     # Ditto's provider layer uses the official SDKs only (OpenAI-compatible servers go through openai).
-    # LLM tooling is a supply-chain target: ranges up to the next major (DECISIONS round 65), and the lock, the
+    # LLM tooling is a supply-chain target: ranges up to the next major (DESIGN round 65), and the lock, the
     # scheduled update run and every installer run take a version only after the 5-day cooldown, the full tests and
     # pip-audit.
     "anthropic>=2.4.0,<3",
@@ -59,7 +59,7 @@ dependencies = [
     # each version through the cooldown, tests and pip-audit (as anthropic and openai).
     "mcp>=2.3.0,<3",
     # Agent Client Protocol (Zed/JetBrains, protocol version 1, Apache-2.0): Ditto as an ACP agent for editors and
-    # llmcf as an ACP client that runs agents the person picks (DECISIONS round 54). 0.x: its minor releases change
+    # llmcf as an ACP client that runs agents the person picks (DESIGN round 54). 0.x: its minor releases change
     # the protocol's types, so the range ends before the next minor.
     "agent-client-protocol>=0.12.1,<0.13",
 
@@ -85,7 +85,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The desktop GUI (DECISIONS round 11, A3): the installers install it (requirements-gui.txt); a headless or server
+# The desktop GUI (DESIGN round 11, A3): the installers install it (requirements-gui.txt); a headless or server
 # install, the framework image without --gui and the CLI and MCP server work without it (orchestrator/gui is the only
 # code that imports Qt). Only QtCore/QtGui/QtWidgets are used; the essentials wheel skips WebEngine, Pdf and the
 # add-ons. Qt keeps source and binary compatibility within a major (Qt 6), so the range ends before 7.
@@ -120,7 +120,7 @@ resolve = [
 ]
 
 [tool.uv]
-# The cooldown (DECISIONS round 65): uv takes only versions uploaded at least 5 days ago (uv computes now minus 5 days
+# The cooldown (DESIGN round 65): uv takes only versions uploaded at least 5 days ago (uv computes now minus 5 days
 # in UTC at every lock). It holds for every `uv lock` and `uv lock --upgrade`, in the scheduled update run
 # (.github/workflows/deps-update.yml), on the machine (install.sh, install.bat through scripts/fresh_deps.py) and for
 # `uv lock --check` in CI. Needs a uv that reads relative values (0.11.32, the version CI uses, does).

@@ -1,4 +1,4 @@
-"""Tokens leave this computer only on Hugging Face's own way and only when Hugging Face needs one (DECISIONS round 25 Q2).
+"""Tokens leave this computer only on Hugging Face's own way and only when Hugging Face needs one (DESIGN round 25 Q2).
 
 - The process runs with huggingface_hub's HF_HUB_DISABLE_IMPLICIT_TOKEN and HF_HUB_DISABLE_TELEMETRY on, set when the
   package `orchestrator` is imported (orchestrator/utils/hf_env.py), so no library (fastembed included) sends a token

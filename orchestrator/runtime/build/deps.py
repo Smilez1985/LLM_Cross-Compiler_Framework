@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The dependency cache of module CMake options (DECISIONS round 25 Q6 addendum): what a download option of the pinned
+The dependency cache of module CMake options (DESIGN round 25 Q6 addendum): what a download option of the pinned
 llama.cpp would fetch while it is built (a FetchContent dependency: a TLS library, a backend's third-party source) is
 fetched BEFORE the build, outside the build sandbox and never in offline mode, pinned exactly as the pinned llama.cpp
 declares it (source address and tag or version; DEPENDENCIES names the CMake lines), and kept in a local cache below

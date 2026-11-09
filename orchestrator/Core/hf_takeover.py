@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Taking over the old Hugging Face download cache (DECISIONS round 11, A6)
+LLM Cross-Compiler Framework - Taking over the old Hugging Face download cache (DESIGN round 11, A6)
 
 Before A6 the GUI's Hugging Face browser saved through huggingface_hub's hf_hub_download into that library's cache
 inside the models folder: `<models_dir>/models--<owner>--<name>/snapshots/<commit>/<file>`, each file a link to a blob

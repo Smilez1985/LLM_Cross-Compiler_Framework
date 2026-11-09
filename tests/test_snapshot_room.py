@@ -170,7 +170,7 @@ class PackRag:
 
 def installed_pack(cm, name, text, topic="docs"):
     """An installed knowledge pack as finish_install leaves it: community/knowledge/<topic>/<name>/ with its
-    knowledge.json and its provenance (a loose file is never imported: DECISIONS round 23 item 1)."""
+    knowledge.json and its provenance (a loose file is never imported: DESIGN round 23 item 1)."""
     from orchestrator.Core.community_manager import Provenance
     from orchestrator.Core.community_pack import PROVENANCE_NAME, tree_sha256, utc_now
     folder = cm.knowledge_dir / topic / name

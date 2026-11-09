@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Status, settings and honest limits (MCP design 2.9, work package T2; DECISIONS round 1 item 4, round 3).
+Status, settings and honest limits (MCP design 2.9, work package T2; DESIGN round 1 item 4, round 3).
 
 - get_status: the framework's state in one place, in sections (framework, host, local runtime, knowledge, AI access,
   permissions, audit). No section returns a secret, a key fragment, an account, an endpoint key, URL user info or a

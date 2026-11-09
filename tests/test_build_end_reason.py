@@ -1,4 +1,4 @@
-"""A build ends on its done marker (DECISIONS round 40, TASK 2): the BuildEngine reads the stage runner's end record
+"""A build ends on its done marker (DESIGN round 40, TASK 2): the BuildEngine reads the stage runner's end record
 from the mounted work folder, switches the step's clock off once it says done (no soft cap or idle stop after the
 marker), gives the container a short grace and then stops it (still done); an exit 0 without the record is failed;
 every build has one end reason (done, failed, cancelled, soft_cap, idle) in its progress, its record and its

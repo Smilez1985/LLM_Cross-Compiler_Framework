@@ -1,4 +1,4 @@
-"""Offline builds of the build container image and its air-gapped transfer (DECISIONS round 36).
+"""Offline builds of the build container image and its air-gapped transfer (DESIGN round 36).
 
 The build container image is the Docker image with a target's toolchain (Core/builder.py, IMAGE_LABEL and
 INPUTS_LABEL); the target artifact, package or bundle is what goes to the board. Offline mode means no internet, the

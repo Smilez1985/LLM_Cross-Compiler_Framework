@@ -14,7 +14,7 @@ Updates v2.3.0:
 - Improved threading and error handling.
 - Dark Mode Styling.
 
-A6 (DECISIONS round 11): a download goes through the framework's verified fetcher, the same as an AI's
+A6 (DESIGN round 11): a download goes through the framework's verified fetcher, the same as an AI's
 download_hf_file (ModelManager.download_file -> Core/hf_hub.py download_for_person), into
 <models_dir>/hf/<owner>--<name>/<commit[:12]>/, under the one disk rule with its own reservation while it runs; the
 window shows its progress and can stop it (the part downloaded so far is kept). "Take over old downloads..." copies

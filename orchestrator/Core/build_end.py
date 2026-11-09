@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-How a build ends (DECISIONS round 40): one end reason per build, from a fixed vocabulary, and the end record the
+How a build ends (DESIGN round 40): one end reason per build, from a fixed vocabulary, and the end record the
 stage runner writes as its very last step. Qt-free and import-light: the build engine, the orchestrator, the build
 service, the job service, the chat feed's producer, the MQTT doorbell, the CLI and the GUI all read it from here.
 
@@ -62,7 +62,7 @@ LAST_STAGE = {"build": "target", "imatrix": "convert"}
 CANCEL_NOTE = "cancelled"       # the framework's note to the stage runner: the running stage was a Cancel
 RUNNING_NOTE = "running"        # the stage runner's own note: the stage that runs now
 # A container that wrote "status done" exits by itself within this many seconds; then the framework stops it, and
-# the build is still done (DECISIONS round 40: 30 s)
+# the build is still done (DESIGN round 40: 30 s)
 END_GRACE = 30.0
 NO_RECORD_TEXT = "The build ended without its end record (build.end), so it is not counted as finished."
 FOREIGN_RECORD_TEXT = ("The end record (build.end) was not written by the stage runner (a module script may have "

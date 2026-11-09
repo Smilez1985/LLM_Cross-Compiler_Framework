@@ -1,4 +1,4 @@
-"""Hugging Face downloads by the person (DECISIONS round 11, A6): the GUI's Hugging Face browser downloads through the
+"""Hugging Face downloads by the person (DESIGN round 11, A6): the GUI's Hugging Face browser downloads through the
 same verified fetcher as the AI path (orchestrator/Core/hf_hub.py HubFetcher) into
 <models_dir>/hf/<owner>--<name>/<commit[:12]>/<file>, under the one disk rule (Core/disk_plan reserve and the
 reservation ledger) with its own reservation while it runs. Models downloaded before into the old huggingface_hub
@@ -311,7 +311,7 @@ class TestTheBrowsersDownload:
         assert all("Authorization" not in headers for _, headers in person.sessions[-1].seen)
 
     def test_the_stored_token_or_the_typed_one_goes_only_to_huggingface(self, person):
-        # Changed on purpose (DECISIONS round 25 Q2): the token goes only where Hugging Face needs one. A gated
+        # Changed on purpose (DESIGN round 25 Q2): the token goes only where Hugging Face needs one. A gated
         # repository's file gets it, at huggingface.co only; its look-up is public and carries none (before, the
         # look-up carried the token too). A public repository's file carries none, also with a token stored.
         from test_hf_tools import REPO, TOKEN, info
@@ -327,7 +327,7 @@ class TestTheBrowsersDownload:
         assert person.hub.tokens[-1] is False and person.sessions[-1].seen[-1][1]["Authorization"] == f"Bearer {typed}"
 
     def test_a_public_file_carries_no_token_even_with_one_stored(self, person):
-        # Regression (DECISIONS round 25 Q2): the stored token went with every file of the browser's download.
+        # Regression (DESIGN round 25 Q2): the stored token went with every file of the browser's download.
         from test_hf_tools import REPO, TOKEN
         person.vault["hf_token"] = TOKEN
         person.mm.download_file(REPO, "tiny-q4_k_m.gguf")
@@ -415,7 +415,7 @@ class TestTheTokenGoesOnlyToHuggingFace:
                 manager.download_file("acme/tiny-GGUF", "tiny-q4_k_m.gguf", token)
         with pytest.raises(ConnectionError):
             manager._hub_lookup()("acme/tiny-GGUF", "c" * 40)
-        # Changed on purpose (DECISIONS round 25 Q2): each look-up asks without a token first; the token (typed or
+        # Changed on purpose (DESIGN round 25 Q2): each look-up asks without a token first; the token (typed or
         # stored) follows only after the Hub refused that, in one request, and only to huggingface.co.
         assert mirror == [(HUB_URL, False), (HUB_URL, TOKEN), (HUB_URL, False), (HUB_URL, typed),
                           (HUB_URL, False), (HUB_URL, TOKEN)]

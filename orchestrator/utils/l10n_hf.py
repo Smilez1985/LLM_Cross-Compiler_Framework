@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Texts of the Hugging Face browser (Tools > Hugging Face Model Browser...), English and German: its download through
-the framework's verified fetcher and the optional one-time Take over of the old download cache (DECISIONS round 11,
+the framework's verified fetcher and the optional one-time Take over of the old download cache (DESIGN round 11,
 A6). LocalizationManager merges TEXTS and FORMAL (localization.TEXT_MODULES); a key that exists already is refused
 there. The window's older texts move here with the wave-6 chain deploy-hf.
 

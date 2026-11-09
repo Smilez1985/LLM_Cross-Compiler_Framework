@@ -1,4 +1,4 @@
-"""`build start --format` offers what the installed targets build (DECISIONS round 23, item 7): their target.yml
+"""`build start --format` offers what the installed targets build (DESIGN round 23, item 7): their target.yml
 capabilities, as the Builder tab's format list offers them (Core/build_formats.py offered_formats, one list for both);
 a target without capabilities takes every format unchecked, as the Builder tab offers it. A format the chosen target
 does not build is refused in plain words naming what each installed target builds; the help text lists them from the

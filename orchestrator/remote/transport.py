@@ -371,7 +371,7 @@ def config_value(path: Any) -> str:
 
 def openssh_file(path: Any) -> str:
     """`path` as the value of an OpenSSH option that expands %-tokens (IdentityFile, UserKnownHostsFile, ...): quoted
-    as config_value does, with each '%' written as '%%' (DECISIONS round 25 Q5), so a '%' in the framework's own
+    as config_value does, with each '%' written as '%%' (DESIGN round 25 Q5), so a '%' in the framework's own
     folder names that very file. A Windows path is written with forward slashes."""
     from orchestrator.remote import ssh_config
     text = path.as_posix() if isinstance(path, PureWindowsPath) else str(path)
@@ -402,7 +402,7 @@ def openssh_options(state_dir: Path, *, known_hosts: Optional[Path] = None, acce
     """The options of every OpenSSH call of the framework, all on the command line, which OpenSSH reads first (the
     first value it obtains for an option wins):
 
-    - -F with the framework's own configuration file (orchestrator/remote/ssh_config.py, DECISIONS round 25 Q4), so
+    - -F with the framework's own configuration file (orchestrator/remote/ssh_config.py, DESIGN round 25 Q4), so
       OpenSSH reads neither ~/.ssh/config nor /etc/ssh/ssh_config; it holds only what the person added (a ProxyJump,
       for example) and is checked before each use (SshConfigRefused, a local problem, when a hand edit put a line in
       it the framework never uses);

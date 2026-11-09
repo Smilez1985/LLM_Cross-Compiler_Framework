@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Mojo closes the circle: the crystal ball after Mojo Miracle (DECISIONS round 27)
+LLM Cross-Compiler Framework - Mojo closes the circle: the crystal ball after Mojo Miracle (DESIGN round 27)
 
 When Mojo Miracle ends after Mojo Oracle at a terminal, the console shows Mojo's crystal ball and one line under it:
 MANAGED_LINE when Mojo Miracle repaired at least one problem, left none and the check afterwards found nothing new;

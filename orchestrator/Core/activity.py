@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-What Ditto and AI apps do, as rows of the chat feed (wave 6, design B.1; DECISIONS round 9, U1 and consequence b).
+What Ditto and AI apps do, as rows of the chat feed (wave 6, design B.1; DESIGN round 9, U1 and consequence b).
 
 The person sees in the GUI what an AI did through the framework's tools. One producer per framework process writes
 it: FrameworkManager.initialize attaches it next to the chat feed, so the GUI, `llmcf`, every stdio MCP server and the
@@ -17,7 +17,7 @@ Rules:
   or blocked (refused_before_question, and report_cannot_do). Rows of the same refusal within BLOCKED_QUIET seconds
   are written once, so an AI that tries a refused tool in a loop cannot flood the chat; the audit log keeps every one.
 - The person's own calls (actor gui or cli) produce nothing; neither does a caller without a trusted caller id. A
-  build's end is the one exception (DECISIONS round 40): every build gets exactly one row, the person's own from the
+  build's end is the one exception (DESIGN round 40): every build gets exactly one row, the person's own from the
   framework, with the fixed vocabulary of Core/build_end.py only.
 - The sender is the trusted caller id (ditto, mcp, mcp:<token>). An app's own name appears only as its claim.
 - A row holds closed values only: tool, job kind, state and reason codes, setting keys (never their values), ids
@@ -276,7 +276,7 @@ def build_end_reason(data: Mapping[str, Any]) -> Optional[str]:
 
 
 def row_for_build(data: Mapping[str, Any]) -> Optional[Row]:
-    """The row of a build's end (job_result), for EVERY build (DECISIONS round 40): "Build ready" (done), "Error while
+    """The row of a build's end (job_result), for EVERY build (DESIGN round 40): "Build ready" (done), "Error while
     building" with the reason as a fixed word (failed, soft_cap, idle), "Build stopped" (cancelled). The caller is the
     AI that started it or cancelled it (its trusted caller id), else the framework ("" for the person's own build).
     Params only from the closed vocabulary (reason, the cancelling AI's caller id) and the framework's request id;

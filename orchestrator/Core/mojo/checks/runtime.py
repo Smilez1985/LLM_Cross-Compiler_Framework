@@ -21,7 +21,7 @@ def _ditto_docker():
 
 
 def _docker_mode(root: Path, pin) -> List[Finding]:
-    """Ditto's server in Docker mode (DECISIONS round 7 D): the image recorded in mode.json is there, was built on
+    """Ditto's server in Docker mode (DESIGN round 7 D): the image recorded in mode.json is there, was built on
     this computer (never pulled), is of the pinned commit and is the build that was verified. Asks Docker only; builds,
     pulls and removes nothing. Nothing in bare-metal mode."""
     from orchestrator.runtime import container_server as cs
