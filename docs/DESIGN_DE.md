@@ -609,9 +609,13 @@ kleines Sprachmodell herunter, prüft beide und betreibt sie nur auf deinem Rech
    Entpacken geprüft).
 3. **Modell laden.** `llm-cli ditto models list` zeigt die Stufen; `llm-cli ditto models download [STUFE]` lädt
    eine davon in ihrer festgelegten Hugging-Face-Revision und prüft Größe und SHA256. Die Empfehlung richtet sich
-   nach dem Speicher: das 9B-Modell ab 7,5 GiB Grafikspeicher, 2B mit 2 Bit bei höchstens 3 GiB RAM, 2B mit 4 Bit
-   bis 4,5 GiB, sonst 4B, jeweils nur, wenn das Modell neben dem System Platz hat. Die übrigen Stufen (4B und 9B
-   mit 2 Bit, IBM Granite 4.2 3B) werden nie empfohlen; du lädst sie über ihren Namen.
+   nach dem Speicher: das 9B-Modell ab 7,5 GiB Grafikspeicher, 2B mit 4 Bit bis 4,5 GiB, sonst 4B, jeweils nur,
+   wenn das Modell neben dem System Platz hat. Bei höchstens 3 GiB RAM wählt sie heute das 2B-Modell mit 2 Bit;
+   geplant (ROADMAP-Zeile „2-Bit-Stufen erst nach bestandener Evaluation“): Wie jede 2-Bit-Stufe wird dieses Modell
+   dort erst angeboten, wenn es Dittos Evaluation auf diesem Rechner bestanden hat, weil ein Modell mit 2 Bit für
+   Dittos Aufgaben zu schwach sein kann, und bis dahin nennt die Empfehlung es als Kandidaten, den du prüfen lässt.
+   Die übrigen Stufen (4B und 9B mit 2 Bit, IBM Granite 4.2 3B) werden nie empfohlen; du lädst sie über ihren Namen,
+   und die beiden 2-Bit-Stufen werden Ditto, wie das 2B-Modell mit 2 Bit, erst nach bestandener Evaluation angeboten.
 4. **Starten.** `llm-cli ditto runtime start` (`--model`, `--ctx`, `--sleep-idle`) startet `llama-server` auf
    127.0.0.1 mit einem freien Port, aber nur einen Build, der seine Prüfung auf diesem Rechner bestanden hat und noch
    zu seinem Manifest passt (sonst den CPU-Ersatz, sonst nichts; das vorgebaute Archiv nur nach `--prebuilt`).
@@ -833,7 +837,10 @@ früheren aufzuheben; der Crawler weicht davon absichtlich ab und bleibt auf der
 Quelle eine Seite vorbehalten, hebt nichts das wieder auf. Keine dieser Prüfungen lässt sich abschalten; die alte
 Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es nicht mehr.
 
-**Lizenzen und Urheberrecht** (`orchestrator/rag/licences.py`, achte Runde Q-1 und Q-1'). Text- und Data-Mining
+**Lizenzen und Urheberrecht** (`orchestrator/rag/licences.py`, achte Runde Q-1 und Q-1'). Dass eine Seite öffentlich
+ist, heißt nur, dass der Crawl sie lesen darf; was behalten und weitergegeben werden darf, entscheiden die Lizenz der
+Seite und ihre Vorbehalte, nie allein, dass sie öffentlich ist (die Entscheidung des Maintainers vom 2026-11-09, die eine
+frühe Aussage ersetzte, alles Öffentliche dürfe zitiert und verwendet werden). Text- und Data-Mining
 erlaubt der Wissensbasis, den Text zu behalten, den der Crawl lesen durfte; die Weitergabe wird je Seite entschieden.
 Bevor die Fußzeile entfernt wird, hält der Crawler je Seite fest: einen Lizenz-Link (`rel="license"` an einem Link oder
 im HTTP-Header `Link`), Lizenz-Metadaten (`<meta name="license">`, `dc.rights`, `dcterms.license`, schema.org `license`
@@ -1204,6 +1211,27 @@ der erste signierte Index liegt. Den Index auflisten und per ID installieren end
 prüft (`LCF_REF`), ist ein Platzhalter, den der Maintainer einträgt. Pakete lassen sich schon als Dateien austauschen
 (Vertrauen `local`) und zwischen Benutzern verschlüsselt weitergeben.
 
+**Das Herunterladen des Community-Wissens (geplant:** ROADMAP-Zeile „Community-Wissen als Opt-in zum
+Herunterladen“**).** Neben den Paketen, die du einzeln installierst, kann das Wissen der Community auch per Download zu
+dir kommen, aber erst, nachdem du es eingeschaltet hast: Die Einstellung `community_knowledge_download` ist
+standardmäßig aus, sie gehört dir allein (keine KI ändert sie), und solange sie aus ist, wird nichts heruntergeladen.
+Welche Wege die Community anbietet, wählt der Maintainer und schreibt es als Feld `knowledge_offer` in den signierten
+Index: `packs` (nur die einzeln installierten Pakete), `download` (nur das Archiv) oder `both`, der Startwert, weil
+das Herunterladen angeboten wird und die signierten Pakete vorerst bleiben. Der Maintainer ändert das Feld jederzeit
+von der Seite des Maintainers aus, mit einer neuen Auswahl in **Tools > Community Hub öffnen > Maintainer** und mit
+`llm-cli zoo maintainer offer packs|download|both`; das signiert einen neuen Index über denselben Pull Request wie
+jede andere Veröffentlichung, es braucht also kein Framework-Release, und jede Installation folgt mit ihrem nächsten
+Abruf des Index, während die Signatur dafür sorgt, dass nur der Maintainer das ändern kann. Das Archiv ist ein Eintrag
+des signierten Index mit Adresse, Größe, sha256 und Version, den die Veröffentlichung des Maintainers aus den
+veröffentlichten Wissens-Paketen macht. Bietet der Index es an und hast du das Herunterladen eingeschaltet, holt das
+Framework das Archiv, wenn die Wissensbasis genutzt wird, höchstens einmal am Tag wie den Index, festgelegt auf Größe
+und sha256 seines Eintrags und durch dieselbe Quarantäne wie ein Paket, macht vor dem Import einen Snapshot und
+importiert es unter einem eigenen Halter, sodass ein neueres Archiv seine ältere Version ersetzt und die Auszüge
+deiner Pakete und deiner eigenen Crawls in Ruhe lässt. Ein Index ohne das Feld oder mit einem Wert, den dieses
+Framework nicht kennt, gilt als `packs`, der sichere Weg von heute; zieht der Maintainer das Herunterladen zurück,
+hört das Framework auf zu holen und behält, was importiert ist, bis du es entfernst. Das Feld kommt mit dem ersten
+veröffentlichten signierten Index, kein älterer Client trifft also darauf.
+
 ### Zuletzt verwendete Eingaben
 
 In einfachen Worten: Die Eingabefelder der GUI merken sich, was du zuletzt verwendet hast, damit du es nicht neu
@@ -1295,7 +1323,8 @@ Targets in festen Plätzen läuft.
 | Ein Build, der nicht gelingen kann, stoppt, bevor er beginnt: Eine Prüfung vor dem Build vergleicht die Treiber, die die Hardware-Probe fand, mit dem, was das SDK des Targets braucht (etwa die CUDA- und Treiber-Matrix). | geplant: ROADMAP-Zeile „Prüfung vor dem Build“; `orchestrator/Core/consistency_manager.py` bleibt im Code, bis sie in den Build-Start verdrahtet ist. | Ein Build, der spät an einem unpassenden Treiber scheitert, kostet die Person Stunden; die Prüfung war unfertiger Code, kein Abfall. |
 | LoRA-Adapter werden unterstützt: in das Modell gemergt, als Adapter behalten oder beides, RKLLM-LoRA eingeschlossen. | geplant: ROADMAP-Zeile „LoRA-Adapter“. | Feinabgestimmte Varianten sind verbreitet, und niemand soll sie von Hand mergen müssen. |
 | Optionales LoRA-Training ist ein eigener, schlanker Trainer des Frameworks; Unsloth wird nie installiert oder benutzt; Ideen und Lösungen kommen aus Unsloths Repository nur im Rahmen seiner Lizenz: aus seinem Apache-2.0-Kern, nichts aus seinem LGPL-Teil (unsloth_zoo) oder seinem AGPL-Teil (Unsloth Studio). | geplant: ROADMAP-Zeile „Optionales LoRA-Training“. | Ein eigener Trainer bleibt klein und passt zur Pipeline; die Lizenz entscheidet, was übernommen werden darf. |
-| Große Modelle lassen sich quantisieren: Plattenplatz und RAM vor einem Build geprüft, F16-Zwischenstufen wiederverwendet, GGUF als Eingabe, Rezepte je Tensor per KL-Divergenz geprüft. | geplant: ROADMAP-Zeile „Große Modelle“; ob airllm bei großen Gewichten hilft (eine Laufzeit, kein Konverter, heute aus der Pipeline gelassen), ist eine offene Frage der ROADMAP, „airllm für große Gewichte?“. | Ein großes Modell muss vor dem Build scheitern, nicht nach Stunden, und darf nicht mehr Speicher brauchen, als der Rechner hat. |
+| Große Modelle lassen sich quantisieren: Plattenplatz und RAM vor einem Build geprüft, F16-Zwischenstufen wiederverwendet, GGUF als Eingabe, Rezepte je Tensor per KL-Divergenz geprüft. | geplant: ROADMAP-Zeile „Große Modelle“. | Ein großes Modell muss vor dem Build scheitern, nicht nach Stunden, und darf nicht mehr Speicher brauchen, als der Rechner hat. |
+| airllm wird mitgenommen, wo es Sinn macht und llmcf einen echten Mehrwert gibt, etwa wo sein schichtweises Laden ein Modell, das größer ist als der Speicher des Rechners, mit wenig Speicher laufen, prüfen oder umwandeln lässt. Ob und wo das so ist, entscheidet zuerst eine Evaluation, und nichts von airllm wird eingebaut, bevor diese Evaluation bestanden ist. | geplant: ROADMAP-Zeile „airllm, als Option evaluiert“. Die Evaluation vergleicht airllm mit dem eigenen Weg des Frameworks für große Modelle (die Prüfung von Platte und RAM, wiederverwendete F16-Zwischenstufen, GGUF als Eingabe) bei den Einsätzen, wo es helfen könnte: große Gewichte auf einem Rechner mit wenig Speicher umwandeln, und ein großes umgewandeltes Modell Schicht für Schicht prüfen, etwa mit einem Rauchtest oder dem KL-Divergenz-Vergleich eines Quantisierungsrezepts. Ein Einsatz, der besteht, wird ein optionaler Teil in seiner eigenen festgelegten Umgebung, wie jede Toolchain, und die Pipeline arbeitet weiter auch ohne ihn; ein Einsatz, der nicht besteht, wird mit seinen Zahlen festgehalten, und airllm bleibt dort draußen. | airllm ist eine Laufzeit für Inferenz und Training, kein Konverter, darum blieb es zuerst aus der Pipeline; sein schichtweises Laden zielt aber genau auf den Fall eines großen Modells auf einem kleinen Rechner, den das Framework bedienen will. Erst zu messen stellt sicher, dass eine neue Abhängigkeit nur dort kommt, wo sie etwas kann, was das Framework nicht schon kann. |
 
 **Geschichte**
 
@@ -1585,8 +1614,8 @@ Hände sind die eigenen Tools des Frameworks; sein lokales Modell läuft auf ein
 | Dittos Server in Docker ist nur von diesem Rechner aus erreichbar und bekommt die GPU, wo es geht; ein erzwungener Moduswechsel nutzt die Modelle weiter und baut nur llama-server neu; erzwingen geht im Installer, in der CLI und in der GUI. | `runtime/container_server.py`: der Port nur auf 127.0.0.1 veröffentlicht, der Modellordner schreibgeschützt eingehängt, `--gpus all` für NVIDIA und `/dev/dri` mit seinen Render-Gruppen für AMD und Intel, ein ehrlicher Hinweis, wo es nicht geht. | Der Port des lokalen Modells darf nicht zum Netz zeigen; ein Modell zweimal zu laden kostet Zeit und Platz. |
 | Ein echtes Upsert in Dittos Archiv ersetzt auch einen Eintrag, den die Person geprüft hat, aber der geprüfte Text bleibt als Kopie, mit Hinweis und Rückgängig. | geplant: ROADMAP-Zeile „Dittos Archiv, Phase 1: Fakten aus Tool-Ergebnissen.“ | Eine neuere Tatsache muss gewinnen, und die eigene Prüfung der Person darf nicht still verloren gehen. |
 | Die Person muss für Dittos Arbeit nie einen Prompt schreiben: Anbieter, Modell und die Wahlmöglichkeiten einer Aufgabe wählt sie in der GUI aus Listen (Dropdown-Menüs), und die Aufgabentexte sind die des Frameworks; der Chat bleibt für Fragen und Aufträge in eigenen Worten. | „Ditto einrichten...“ mit den Anbieter-Vorgaben aus `configs/llm_providers.yml` und der live geladenen Modellliste; die Vorlagen- und Assistenten-Auswahl des Modul-Assistenten; die Aufgabentexte in `orchestrator/llm/task_prompts.py`. | Ein Laie weiß nicht, was er schreiben soll; eine Wahl aus einer Liste lässt sich nicht falsch formulieren. |
-| Ein 2-Bit-Modell (Q2) muss erst in Dittos Evaluation auf dem Rechner der Person zeigen, dass es klug genug für Dittos Aufgaben ist; es ist nie Dittos Standard, und die Stufen 4B und 9B mit 2 Bit werden erst nach einer bestandenen Evaluation angeboten. | Heute misst es `llm-cli ditto eval --tier small --tier small-q2`, und die Stufen 4B und 9B mit 2 Bit werden nie empfohlen, nur per Namen geladen; die Sperre ist geplant: ROADMAP-Zeile „2-Bit-Stufen erst nach bestandener Evaluation“. Ob das 2B-Modell mit 2 Bit, das heute bei 3 GiB RAM oder weniger empfohlen wird, die Sperre ebenfalls braucht, ist eine offene Frage der ROADMAP. | Das 9B-Modell mit 2 Bit war größer und langsamer als das 4B-Modell mit 4 Bit, und ein Modell, das die Aufgaben nicht schafft, macht Ditto schlechter als keines. |
-| Ein großer Kontext (bis zu 1M Token) und automatisches Prompt-Caching sind der Standard, wo immer der Anbieter sie bietet. | geplant: ROADMAP-Zeilen „Das echte Kontextfenster je Modell“ und „Cloud-Caching so, wie der Anbieter es vorsieht“; ob der 1M-Kontext ein fester Standard für Cloud-Modelle ist oder das Fenster jedem Modell mit Verdichtung folgt, ist eine offene Frage der ROADMAP. | Ein großes Fenster hält das ganze Gespräch ohne Zusammenfassungen, und Caching senkt die Kosten jeder Anfrage. |
+| Ein 2-Bit-Modell (Q2) muss erst in Dittos Evaluation auf dem Rechner der Person zeigen, dass es klug genug für Dittos Aufgaben ist, und es ist nie Dittos Standard. Jede 2-Bit-Stufe wird erst nach einer solchen bestandenen Evaluation angeboten: das 2B-Modell mit 2 Bit genauso wie die Modelle 4B und 9B mit 2 Bit. | Heute misst es `llm-cli ditto eval --tier small --tier small-q2`; die Stufen 4B und 9B mit 2 Bit werden nie empfohlen und nur per Namen geladen, während die Empfehlung das 2B-Modell mit 2 Bit (`small-q2`) bei 3 GiB RAM oder weniger noch ohne Evaluation wählt. Die Sperre für alle drei ist geplant: ROADMAP-Zeile „2-Bit-Stufen erst nach bestandener Evaluation“. Bis eine 2-Bit-Stufe auf diesem Rechner bestanden hat, nennt die Empfehlung sie nur als Kandidaten zum Prüfen, und nach einer nicht bestandenen Evaluation sagt sie das und lässt Ditto bei einem Cloud-Anbieter oder bei einer größeren Stufe, die die Person wählt. | Das 9B-Modell mit 2 Bit war größer und langsamer als das 4B-Modell mit 4 Bit, und ein Modell, das die Aufgaben nicht schafft, macht Ditto schlechter als keines. Das 2B-Modell mit 2 Bit ist die kleinste und ungenaueste Stufe, braucht den Nachweis also am meisten, und eine Regel für jede 2-Bit-Stufe ist leichter zu befolgen als eine Ausnahme für die schwächsten Rechner. |
+| Jedes Modell arbeitet mit seinem eigenen Kontextfenster, und ein Gespräch, das darüber hinauswächst, wird zu einer Zusammenfassung verdichtet und fortgesetzt, wie heute gebaut; einen festen Standard von 1M Token gibt es nicht. Prompt-Caching wird genutzt, wo immer der Anbieter es bietet, auf die eigene Art des Anbieters. | Dittos lokaler Server nimmt seine Kontextlänge aus der gemessenen Hardware (das Speicherbudget, höchstens 32768 Token, und `/props` des Servers meldet die echte); ein Gespräch, das länger ist als die Einstellung `chat_context_limit`, wird mit `SUMMARY_SYSTEM` zusammengefasst und geht als neues Gespräch weiter. Das Fenster von API-Modellen, beim Server des Anbieters erfragt, das Zählen und das Budget sind geplant: ROADMAP-Zeile „Das echte Kontextfenster je Modell“; das Caching des Anbieters: ROADMAP-Zeile „Cloud-Caching so, wie der Anbieter es vorsieht“. | Modelle unterscheiden sich in ihren Fenstern stark, ein fester 1M-Standard wäre also für die meisten falsch und ließe einem lokalen Modell den Speicher ausgehen; ein Fenster, das vom Modell kommt, und eine Verdichtung halten jedes Gespräch in dem, was das Modell wirklich lesen kann. Caching senkt die Kosten jeder Anfrage, wo ein Anbieter es bietet. |
 
 #### Gemessene Token-Zahlen
 
@@ -1668,14 +1697,16 @@ deployt.
 ### Wissensbasis und Deep Ingest
 
 Die Wissensbasis ist lokal: FastEmbed-Embeddings auf der CPU und Qdrant Edge im Prozess. Deep Ingest liest öffentliche
-Doku-Seiten, nachdem die Person es startet (oder die Anfrage einer KI bestätigt), und prüft jeden Vorbehalt.
+Doku-Seiten, nachdem die Person es startet (oder die Anfrage einer KI bestätigt), und prüft jeden Vorbehalt. Dass eine
+Seite öffentlich ist, lässt den Crawl sie lesen; was behalten und geteilt werden darf, entscheiden die Lizenz der Seite
+und ihr Vorbehalt.
 
 #### Entscheidungen
 
 | Was | Wie | Warum |
 |---|---|---|
 | Deep Ingest über MCP: ja, auf „fragen“ begrenzt, die Frage zeigt jede Adresse, und die Prüfungen der Vorbehalte, die Grenzen und der einmalige Hinweis gelten wie in der GUI. | `crawl_docs_site` in `tools/tools_crawl.py`; ein Wächtertest hält jeden anderen Weg zum Crawler fern. Unter einer Delegation läuft der Crawl ohne eigene Frage, nur für die Startadressen, die die Delegation nennt (geplant: ROADMAP-Zeile „Deep Ingest unter einer Delegation“); jeder andere Crawl fragt. | Text in einem Log oder einer Seite könnte eine KI zum Crawlen bringen. |
-| Geteilt wird nur öffentlich zugängliches Wissen, robots.txt und die anderen Vorbehalte beachtet; das Urheberrecht bleibt erhalten, wo es erkennbar ist, und Lizenzen entscheiden (keine Lizenz heißt alle Rechte vorbehalten: nur Link und kurze Fakten); ein Paket, das Text unter einer Lizenz trägt, die ihren Text verlangt, liefert diesen Text mit. | `orchestrator/rag/licences.py`, die Lizenztexte aus der SPDX-Liste, der Paket-Export; ob alles Öffentliche zitiert und verwendet werden darf, wie eine frühe Entscheidung sagte, ist eine offene Frage der ROADMAP, „Öffentliche Inhalte: zitiert und verwendet, oder entscheidet die Lizenz?“. | Wir halten uns an das Recht und brauchen trotzdem die Informationen, die Ditto nutzen darf. |
+| Geteilt wird nur öffentlich zugängliches Wissen, und für jede Seite entscheiden ihre Lizenz und ihr eigener Vorbehalt, was behalten und weitergegeben werden darf, nicht schon die Tatsache, dass die Seite öffentlich ist. robots.txt und die anderen maschinenlesbaren Vorbehalte werden beachtet, das Urheberrecht bleibt erhalten, wo es erkennbar ist, eine Seite ohne Lizenz gilt als alle Rechte vorbehalten und geht nur als ihr Link mit kurzen Fakten hinaus, und ein Paket, das Text unter einer Lizenz trägt, die ihren Text verlangt, liefert diesen Text mit. | `orchestrator/rag/licences.py` erkennt die Lizenz und den Urheberrechtshinweis einer Seite, die Lizenztexte kommen aus der SPDX-Liste, und der Paket-Export entscheidet je Seite zwischen dem vollen Text mit seiner Namensnennung und dem Link mit kurzen Fakten (siehe „Lizenzen und Urheberrecht“ unter Deep Ingest); das ist gebaut. Eine frühe Aussage, alles öffentlich Zugängliche dürfe zitiert und verwendet werden, ersetzte der Maintainer am 2026-11-09, der Crawler zitiert also nicht jede öffentliche Seite frei. | Im Netz erreichbar zu sein gibt niemandem das Recht, eine Seite zu kopieren; ihr Autor sagt mit der Lizenz und dem Vorbehalt, was erlaubt ist. Das zu befolgen hält das Projekt im Recht, und Ditto bekommt trotzdem die Informationen, die es nutzen darf, weil eine Seite, die es nicht weitergeben darf, immer noch als ihre Adresse mit den Fakten reist, die ein Empfänger unter eigenen Prüfungen neu crawlen kann. |
 | Die lokale Wissensbasis liegt in Qdrant Edge (die Rust-Engine im Prozess), mit geprüfter Umwandlung; qdrant-client bleibt nur für einen optionalen Qdrant-Server. | `orchestrator/rag/` mit `qdrant-edge-py`; die Umwandlung behält den alten Ordner, bis die Person ihn löscht. | Der alte lokale Modus verglich jede Anfrage in Python mit jedem Punkt. |
 | Eine neuere Nebenversion von Qdrant Edge kommt erst nach einem Test über Versionen hinweg und einem automatischen Schnappschuss. | Der Bereich bleibt innerhalb von 0.9 (`>=0.9.0,<0.10`): Patch-Versionen kommen mit dem Lock, dem Update-Lauf und den Installern nach der Wartezeit und den Tests; die nächste Nebenversion folgt geplant: ROADMAP-Zeile „Schritt 7“. | Das Wissen der Person muss ein Update der Engine überstehen. |
 | Versteckte HTML-Träger werden beim Deep Ingest entfernt und der Text bereinigt, mit Testseiten in der CI. | `orchestrator/rag/html_text.py`, `RAGManager.ingest_page`; die nächtliche Abruf-Evaluation. | Versteckter Text ist ein häufiger Weg, Anweisungen einzuschleusen. |
@@ -1689,14 +1720,17 @@ Doku-Seiten, nachdem die Person es startet (oder die Anfrage einer KI bestätigt
 ### Community, Rezepte und Pakete
 
 Leute teilen Target-Vorlagen, Rezepte und Wissen als Pakete über ein öffentliches Git-Repository; das Framework holt den
-signierten Index und installiert über eine Quarantäne.
+signierten Index und installiert über eine Quarantäne. Das Wissen der Community kann auch als Download kommen, den die
+Person einschaltet (geplant), und der Maintainer entscheidet im signierten Index, welcher der beiden Wege angeboten
+wird.
 
 #### Entscheidungen
 
 | Was | Wie | Warum |
 |---|---|---|
 | Ein Rezept ist eine Target-Vorlage: Es enthält den Build-Code, und Modell, Quantisierung, Format und Deployment sind Variablen, die die Person im Build-Menü wählt, nie an die Wahl des Erstellers gebunden; was ein Rezept enthält, muss der Builder nutzen; reine Datenpakete sind „getestete Einstellungen“; vorhandene Vorlagen werden korrigiert und verbessert, nicht neu erfunden. | `schemas/recipes.py` und der Rezept-Lader; Rezepte als Vorlagen sind geplant: ROADMAP-Zeile „Rezepte als Target-Vorlagen“. | Eine Vorlage betrifft die Hardware; den Rest entscheidet, wer sie holt. |
-| Geteilt werden Target-Vorlagen über das öffentliche Community-Repository (Übergabe als Pull Request); nichts Image-Artiges kommt in den Hub, nie Modelle zu Hugging Face; eigene Images der Person sind frei; das Framework holt die Liste fertiger Vorlagen automatisch; Firmen bauen Cluster-Images selbst aus den Dockerfiles in ihre eigene Registry. | `Core/community_manager.py` (`submit_contribution`, der Index), der Community-Hub; ob das Framework das Wissen der Community auch selbst herunterlädt, wenn die Wissensbasis genutzt wird, ist eine offene Frage der ROADMAP, „Ein Community-Archiv, das das Framework selbst herunterlädt?“. | Vorlagen sind klein und prüfbar; Images müssten für jedes Update neu gebaut werden. |
+| Geteilt werden Target-Vorlagen über das öffentliche Community-Repository (Übergabe als Pull Request); nichts Image-Artiges kommt in den Hub, nie Modelle zu Hugging Face; eigene Images der Person sind frei; das Framework holt die Liste fertiger Vorlagen automatisch; Firmen bauen Cluster-Images selbst aus den Dockerfiles in ihre eigene Registry. | `Core/community_manager.py` (`submit_contribution`, der Index), der Community-Hub; wie das Wissen der Community zur Person kommt, sagt die nächste Zeile. | Vorlagen sind klein und prüfbar; Images müssten für jedes Update neu gebaut werden. |
+| Das Wissen der Community kann auch per Download kommen: Wer das Herunterladen einschaltet, bekommt das Wissensarchiv der Community von selbst geholt und importiert, wenn die Wissensbasis genutzt wird, und bevor die Person es einschaltet, wird nichts heruntergeladen. Die signierten Pakete, die einzeln installiert werden, bleiben vorerst daneben. Welchen der beiden Wege die Community anbietet, wählt der Maintainer, und er kann das jederzeit von der Seite des Maintainers im Community-Repository ändern, ohne Aufwand und ohne Framework-Release. | geplant: ROADMAP-Zeile „Community-Wissen als Opt-in zum Herunterladen“. Der signierte Index bekommt das Feld `knowledge_offer` mit `packs`, `download` oder `both` (der Startwert); der Maintainer setzt es in Tools > Community Hub öffnen > Maintainer oder mit `llm-cli zoo maintainer offer`, was einen neuen Index über den üblichen Pull Request der Veröffentlichung signiert. Das Archiv ist ein Index-Eintrag mit Adresse, Größe, sha256 und Version; das Framework holt es nur, wenn der Index es anbietet und die Einstellung `community_knowledge_download` (standardmäßig aus, allein Sache der Person) an ist, höchstens einmal am Tag, festgelegt und durch die Quarantäne, mit einem Snapshot vor dem Import und unter einem eigenen Halter. Ein Index ohne das Feld oder mit einem unbekannten Wert gilt als `packs`; ein zurückgezogenes Herunterladen beendet das Holen und behält, was importiert ist, bis die Person es entfernt. Der ganze Ablauf steht unter „Community-Pakete: Format, Vertrauen und Austausch“. | Eine frühe Entscheidung wollte, dass das Wissen der Community von selbst kommt, und der Maintainer hat das behalten, aber als Wahl jeder Person, weil ein Download von selbst die Wissensbasis der Person ändert und ihr Netz nutzt. Die signierten Pakete zu behalten bewahrt den geprüften Weg von heute, und ein signiertes Feld im Index lässt den Maintainer sofort und für jede Installation darauf reagieren, wie sich die Community entwickelt, während nur der Schlüssel des Maintainers das ändern kann. |
 | Das Community-Repository ist das Wissensbasis-Repository des Projekts (Vorgabe von `community_repo`); die Index-Adresse folgt, sobald der erste signierte Index existiert; Workflows von Fork-Pull-Requests brauchen eine Freigabe für alle Beitragenden von außen. | Vorgabe von `community_repo`; den Index zu veröffentlichen ist geplant: ROADMAP-Zeile „Community-Repository und Index veröffentlicht“. | Ein Pull Request von außen darf die Prüfungen des Repositorys nicht ungeprüft ausführen. |
 | Board-Wissen in einem Target-Paket wird beim Empfänger importiert. | Der Paket-Installer importiert das `knowledge/` eines Targets in die Wissensbasis. | Die Doku der Vorlage gehört zu ihr. |
 | Ein Rezept nennt sein Target über den eigenen Inhalts-Digest des Target-Pakets, und ein installiertes Target-Paket gilt als dieses Target, solange es seit der Installation unverändert ist, auch wo das Dateisystem kein Ausführungsbit hält (Windows); ein bearbeitetes Target ist ein anderes Target. | Ein Helfer in `Core/community_manager.py`: `installed_digest` (was ein Build festhält) und `same_content` (was eine Rezeptprüfung vergleicht), über `Provenance.installed_unchanged`; der Builder, die Prüfung auf gleiche Builds im Build-Service, die Rezept-Tools und die Rezeptprüfung bei der Installation nutzen ihn alle. | Ein unter Linux gemachtes Rezept muss unter Windows bestehen und umgekehrt; die Inhaltsprüfung selbst bleibt das Sicherheitstor. |
@@ -1850,6 +1884,7 @@ das getestete Lock; jede Linux-Distribution über ihren eigenen Paketmanager.
 | Die Sicherheitsprüfung von Images liest ein gespeichertes Image-Archiv und bekommt keinen Docker-Socket. | Der Trivy-Schritt des Builders prüft das Archiv. | Der Socket gäbe dem Scanner die Kontrolle über Docker. |
 | Die mit Hashes festgelegten Exporte werden überall mit `--no-deps` installiert: Ein Export ist vollständig, jedes Paket mit seinem Hash, und pip löst nichts neu auf. | `install.sh`, `install.bat` und die Installationsschritte der CI (`pip install --require-hashes --no-deps -r ...`). | Eine zweite Auflösung durch pip könnte ein Paket holen, das der Lock nie geprüft hat. |
 | Die Rust-Teile des Frameworks kommen fertig gebaut und signiert: Release-Dateien dieses Repositorys, von der CI gebaut und schlüssellos mit Sigstore signiert, ihre Prüfsummen im Repository, Signatur und Prüfsumme vom Installer geprüft, bevor ein Programm benutzt wird; sie selbst zu bauen bleibt ein Opt-in. | geplant: ROADMAP-Zeilen „Die Rust-Teile des Frameworks fertig gebaut und signiert ausgeliefert.“ und „Fertig gebaute, signierte Rust-Programme für Boards“; heute werden sie auf diesem Rechner gebaut. | Der Rechner der Person braucht keine Rust-Toolchain; ausgeschlossen sind nur fertige Container-Images. |
+| Das Framework läuft auf dem Host mit Python 3.11 bis 3.14, und eine Festlegung auf Python 3.12 gibt es nicht. Eine frühe Festlegung auf 3.12 gab es nur, weil eine nötige Abhängigkeit für 3.13 noch nicht verfügbar war, zu einer Zeit, als 3.13 und 3.14 noch gar nicht erschienen waren; dieser Grund ist weg. Der Bereich wandert mit neuen Python-Versionen nach denselben Regeln wie jede andere Abhängigkeit. | `requires-python = ">=3.11,<3.15"` in `pyproject.toml`, die Testmatrix der CI von 3.11 bis 3.14 und beide Installer, die ein Python zwischen 3.11 und 3.14 suchen und sonst sagen, wie man eines bekommt. Eine neue Version wie 3.15 kommt in den Bereich, sobald die Abhängigkeiten und die volle Testmatrix sie tragen, über die ROADMAP-Zeile „Schritt 7“; das ist die Regel für Abhängigkeiten, kein eigener Schritt. Die Build-Images bleiben vom Host unabhängig und behalten Python 3.11 für die Rockchip-Wheels (siehe Wichtige Entscheidungen). | Eine Festlegung auf ein älteres Python schlösse die Systeme aus, die ein neueres mitbringen, und hielte alte Versionen mit ihren Sicherheitsmeldungen fest. Die Images folgen den Toolkits, die sie tragen, der Host kann also aktuell bleiben, ohne einen Build zu brechen. |
 
 **Geschichte**
 
@@ -1963,7 +1998,8 @@ Dateien, die sich nicht löschen lassen), wird auch unter Linux sichtbar.
 ### Dokumentation und der Bauplan
 
 Jedes Dokument gibt es auf Englisch und Deutsch; der Bauplan besteht aus drei Dateien: diesem Design, der Roadmap und
-dem Changelog.
+dem Changelog. Dieses Design ist so geschrieben, dass man danach bauen kann: Jede Entscheidung steht bei ihrem Baustein
+als erklärender Text mit ihrem Was, Wie und Warum, nie als Liste von Stichworten.
 
 #### Entscheidungen
 
@@ -1974,6 +2010,7 @@ dem Changelog.
 | Was außerhalb des Repositorys liegt, ist nicht sicher: Was bleiben muss (Entscheidungen, Rechercheergebnisse, das Entscheidungsprotokoll, Skripte, auf die sich die Arbeit stützt), kommt sofort ins Repository und wird mit dem nächsten Bündel gepusht. Rechercheergebnisse kommen nach `docs/recherche/`, auf Englisch und Deutsch. | `docs/recherche/` (die ACP-Recherche, MCP und ACP im Vergleich, die RKNN-Vision-Recherche). | Das frühere Arbeitsprotokoll der Entscheidungen lag nur im Arbeitsbereich einer Sitzung und ging mit ihm verloren. |
 | Eine Behauptung, die eine Websuche prüfen kann, wird recherchiert und nicht als „unbestätigt“ stehen gelassen. | Das Ergebnis kommt mit seiner Quelle ins Dokument (etwa der Abschnitt zu Android Studio in der Anleitung für Editoren). | Eine offene Markierung, die eine Suche schließen würde, lässt den Leser mit weniger zurück, als das Projekt weiß. |
 | Die Dokumente bekommen einen Aufräum-Durchgang (Keep a Changelog, Roadmap); Auto-Tuning ist geplant (ROADMAP-Zeile „Auto-Tuning“); Fachbegriffe bleiben in den deutschen Texten englisch. | Die Dokumentationsregeln in diesem Design und in CONTRIBUTING; `tests/test_docs.py`. | Leser brauchen eine einheitliche Gliederung in beiden Sprachen. |
+| Jede Entscheidung kommt ins DESIGN bei ihrem Baustein als zusammenhängender, erklärender Text, der sagt, was entschieden ist, wie es funktioniert und warum, sodass man danach bauen kann; eine Entscheidung wird nie als Liste von Stichworten festgehalten. Hat ein Baustein eine Entscheidungstabelle, liest sich jede Zelle der Zeile als ganze Sätze, und wo die Entscheidung ändert, wie sich der Baustein verhält, wird auch sein Fließtext umgeschrieben, sodass der Abschnitt sich als eine Erklärung liest und kein Satz darin der Entscheidung widerspricht. | Jede neue oder geänderte Zeile wird in allen drei Spalten in ganzen Sätzen geschrieben, auf Englisch und im deutschen Zwilling (in der Du-Form) mit demselben Tabellenaufbau, den `tests/test_docs.py` vergleicht; die Absätze und Abläufe des Bausteins werden im selben Commit angepasst, Text, den die Entscheidung falsch macht, wird entfernt, und was noch nicht gebaut ist, sagt „geplant“ mit seiner ROADMAP-Zeile. Die ROADMAP behält nur die Aufgaben und der CHANGELOG nur, was gebaut ist. | Eine Liste von Stichworten behält eine Entscheidung, verliert aber ihre Gründe und ihre Zusammenhänge, sodass ein Leser den Baustein weder danach bauen noch eine spätere Änderung daran messen kann; das Design ist der Bauplan, und ein Plan muss erklären. |
 
 **Geschichte**
 
@@ -2176,9 +2213,10 @@ voneinander abweichen und keine spätere Entscheidung es klärte, fragt die Road
   API-Schlüssel oder persönliche Daten, und „alle uploads sind opt-in!“ (das Framework hat keinen eigenen Upload mehr:
   Geteilt wird über einen Pull Request, den die Person öffnet); Ditto verlangt keinen Prompt, „der user wählt in der
   gui aus einem dropdown menü“; nur öffentlich zugängliche Inhalte kommen in die Wissensbasis, „was öffentlich
-  zugänglich ist darf zitiert und verwendet werden“ (eine offene Frage gegenüber den Lizenzregeln), und gecrawltes
-  Wissen kommt in ein Archiv der Community, das das Framework herunterlädt, wenn die Wissensbasis genutzt wird (eine
-  offene Frage gegenüber den signierten Paketen); Self-Healing wächst, weil die Fehler der Nutzer, bereinigt von
+  zugänglich ist darf zitiert und verwendet werden“ (in [Runde 68](#decision-round-68) ersetzt: Lizenz und Opt-out der
+  Seite entscheiden), und gecrawltes
+  Wissen kommt in ein Archiv der Community, das das Framework herunterlädt, wenn die Wissensbasis genutzt wird (in
+  [Runde 68](#decision-round-68) geklärt: ein Download, den die Person einschaltet, neben den signierten Paketen); Self-Healing wächst, weil die Fehler der Nutzer, bereinigt von
   persönlichen Daten, geteilt werden; Ditto und die Wissensbasis sind jeweils Opt-in; das Deployment über SSH oder WLAN
   genügt für Edge-Boards. „kannst du es fertig stellen? die lücken füllen? die fehlende verdrahtung erledigen?“: Das
   Framework wird fertig, indem verdrahtet wird, was da ist; Phase 1 des Plans: „ja“. Nicht widersprochen: ein
@@ -2197,14 +2235,15 @@ voneinander abweichen und keine spätere Entscheidung es klärte, fragt die Road
   (kein Image wird ohne die Person gelöscht).
 - 2026-10-10 11:03, die Antworten auf den Plan: „Reihenfolge > angenommen“ (Pipeline, MCP-Server, Ditto, Formate und
   Targets); jeden Fund beheben und jedes lose Ende verdrahten; Python war auf 3.12 festgelegt, weil einer Abhängigkeit
-  3.13 fehlte (eine offene Frage); die ersten Targets sind RK3566-Boards, RTX-GPUs der Serien 20 und 30 und der Ryzen
+  3.13 fehlte (in [Runde 68](#decision-round-68) geklärt: keine Festlegung, der Host bleibt bei 3.11 bis 3.14); die ersten Targets sind RK3566-Boards, RTX-GPUs der Serien 20 und 30 und der Ryzen
   Z1 Extreme, dort ROCm über inoffizielle Umwege („ist die sache des users ob es brauchbar ist oder nicht“), jedes
   andere Target aus der Community; „Erzwungene JSON-Ausgaben: wir brauchen Schemas“; Tool-Freigaben bei der ersten
   Einrichtung von Ditto gefragt und gespeichert; ein winziges oder 2-Bit-Modell soll für Ditto reichen; „1 Million
-  Token Kontext und automatisches Prompt-Caching: ja, woillen wir als standard“ (eine offene Frage zu einem festen
-  Standard); lokale Embeddings und ein fester Gesundheitscheck (heute Mojo) nach dem Vorbild eines anderen Projekts des
+  Token Kontext und automatisches Prompt-Caching: ja, woillen wir als standard“ (in [Runde 68](#decision-round-68)
+  geklärt: das Kontextfenster je Modell mit Verdichtung); lokale Embeddings und ein fester Gesundheitscheck (heute Mojo) nach dem Vorbild eines anderen Projekts des
   Maintainers; reparieren, was neuere Modelle kaputt machten; „MCP: JA“; Sicherheit nach bewährter Praxis; erst
-  schauen, planen, rückfragen, dann bauen; airllm für große Gewichte vorgeschlagen (eine offene Frage), Ideen von
+  schauen, planen, rückfragen, dann bauen; airllm für große Gewichte vorgeschlagen (in [Runde 68](#decision-round-68) geklärt: eine Option nach einer
+  Evaluation), Ideen von
   Unsloth ohne Abschreiben, LoRA-Adapter. Nicht widersprochen: Fremder Code wird nur gelesen, nie ausgeführt.
 - 2026-10-10 14:14 bis 15:03, die Rückfragen: Dittos Grundlage „können wir weder noch nutzen und entweder was
   leicheres nehmen oder was eigenes bauen?“ (heute die eigene Anbieter-Schicht auf den offiziellen SDKs); das lokale
@@ -4013,6 +4052,38 @@ ein.
 Steht jetzt in: [Tests, CI und die Windows-Fallen](#tests-ci-und-die-windows-fallen),
 [Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest),
 [Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung)
+
+### Runde 68
+
+<a id="decision-round-68"></a>
+Entschieden am 2026-11-09. Der Maintainer beantwortete die sechs offenen Fragen, die die Auswertung der frühen
+Entscheidungen in die Roadmap gestellt hatte. F1 Öffentliche Inhalte: zitiert und verwendet, oder entscheidet die
+Lizenz? „Lizenz und Opt-out der Seite entscheiden“ – wie gebaut: Lizenz und Vorbehalt der Seite entscheiden, was
+behalten und geteilt wird; die frühe Aussage, alles Öffentliche dürfe zitiert und verwendet werden, ist ersetzt. F2 Ein
+Community-Archiv, das das Framework selbst herunterlädt? „Opt-in herunterladen, signierte pakete bleiben aber vorerst,
+mit der möglichkeit das von unserer admin seite (als maintainer) jederzeit ohne aufwand zu ändern“ – das Herunterladen
+wird ein Opt-in, das die Person einschaltet, die signierten Pakete bleiben vorerst, und ein signiertes Feld des
+Community-Index, von der Seite des Maintainers gesetzt, sagt, welcher Weg angeboten wird (geplant; das Feld und der
+Ablauf sind der Entwurf des Assistenten). F3 Python und die alte 3.12-Festlegung: „was soll ich heute noch mit 3.12?
+damals gab es 3.13 und 3.14 noch gar nicht...“ – keine Festlegung; der Host bleibt bei 3.11 bis 3.14 und wandert nach
+der Regel für Abhängigkeiten mit neuen Versionen mit; die Frage ist geschlossen. F4 airllm für große Gewichte? „gerne
+mitnehmen, wenn es sinn macht und wir / llmcf dadurch einen mehrwert hat“ – eine Option nach einer Evaluation, die
+entscheidet, wo es Mehrwert bringt, etwa große Modelle Schicht für Schicht mit wenig Speicher laufen lassen oder
+umwandeln (geplant). F5 1M Kontext als fester Standard? „das Kontextfenster je Modell mit Verdichtung, wie heute“ –
+kein fester 1M-Standard; Prompt-Caching, wo der Anbieter es bietet, bleibt wie entschieden. F6 Das 2B-Modell mit 2 Bit
+ohne Evaluation? „wird wie die anderen 2-Bit-Stufen erst nach bestandener Prüfung angeboten“ (geplant). Dazu setzte
+der Maintainer eine Regel für das Design: Eine Entscheidung kommt bei ihrem Baustein als zusammenhängender, erklärender
+Text mit ihrem Was, Wie und Warum hinein, sodass man danach bauen kann, nie als Sammlung von Stichworten; wo eine
+Entscheidung einen Baustein ändert, wird auch sein Fließtext angepasst.
+
+Steht jetzt in: [Wissensbasis und Deep Ingest](#wissensbasis-und-deep-ingest),
+[Community, Rezepte und Pakete](#community-rezepte-und-pakete),
+[Community-Pakete: Format, Vertrauen und Austausch](#community-pakete-format-vertrauen-und-austausch),
+[Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten),
+[Build-Pipeline und Target-Module](#build-pipeline-und-target-module),
+[Ditto, die lokale Laufzeit und die LLM-Schicht](#ditto-die-lokale-laufzeit-und-die-llm-schicht),
+[Das lokale Modell für den Offline-Modus](#das-lokale-modell-für-den-offline-modus),
+[Dokumentation und der Bauplan](#dokumentation-und-der-bauplan)
 
 ## Versionierung und Dokumentationsregeln
 
