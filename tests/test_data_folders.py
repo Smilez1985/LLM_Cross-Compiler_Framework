@@ -327,7 +327,9 @@ class TestInstallSh:
         run = deploy()
         assert run.returncode == 0, run.stdout + run.stderr
         assert {p.relative_to(install).as_posix() for p in install.rglob("*") if p.is_file()} == \
-            set(shipped) | {".lcf-installed-files"}, "only the files the repository ships"
+            set(shipped) | {".lcf-installed-files", ".install_source"}, "only the files the repository ships"
+        # the updater (llm-cli update) starts from the checkout the installer ran from; the copy has no .git
+        assert (install / ".install_source").read_text().strip() == str(repo)
 
         created = {"targets/my-board/target.yml": "module wizard", "targets/zoo-board/.lcf-provenance.json": "pack",
                    "targets/Rockchip/modules/my_step.sh": "added by the user",
