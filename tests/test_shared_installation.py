@@ -451,3 +451,14 @@ def test_the_shipped_target_list_matches_the_repository():
     from orchestrator.Core.community_manager import SHIPPED_TARGET_FOLDERS
     shipped = {p.name for p in (REPO_ROOT / "targets").iterdir() if p.is_dir()}
     assert im.SHIPPED_TARGETS == shipped and SHIPPED_TARGET_FOLDERS | {"_template"} == shipped
+
+
+def test_the_framework_declares_that_it_writes_nothing_into_the_installation():
+    """install.sh hands the installation to root only on this line, which the framework sets because no runtime write
+    goes there any more (the read-only copy test above proves it)."""
+    import re
+    from pathlib import Path
+    init = (Path(__file__).resolve().parents[1] / "orchestrator" / "__init__.py").read_text(encoding="utf-8")
+    assert re.search(r"^INSTALL_READ_ONLY\s*=\s*True\b", init, re.M)
+    import orchestrator
+    assert orchestrator.INSTALL_READ_ONLY is True
