@@ -651,6 +651,12 @@ board...**).
   was hot at its last checks until a cooler reading replaces it. A hot board fails no check. An AI gets the same
   facts in English (`temperature`, `temperature_note`), without a path or an account. The temperature is no key of
   the hardware probe: it is a moment, not a property of the board.
+- **The board's clock**: a board without a battery-backed clock that is offline cannot know the time. At every
+  contact the framework reads the board's time, its RTC and what keeps its time across a restart with one read-only
+  command over the session it already has; off by more than a minute, it sets it from this computer's time with your
+  standing yes for that board (asked once after pairing), as root only through llmcf-install's typed clock action,
+  written to the audit log, else a warning names the offset. `llm-cli device clock` and the Boards window's
+  *Board clock...* show it and set it once by hand ([CLI](CLI_Usage.md#device-clock)).
 - **Measured** with real programs instead of a board: `llama-server` and `llama-bench` built natively with the device
   plan's options for an x86-64 machine (GCC 13.3, `-j4`, about 8 minutes on 4 shared cores) gave 30 MB of programs
   and an 11.6 MB tarball; the format check (glibc 2.38 needed, no shared C++ runtime), the deployment to a local

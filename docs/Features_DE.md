@@ -712,6 +712,13 @@ entfernen...**, **Ältere Builds auf dem Board entfernen...**).
   scheitern. Eine KI bekommt dieselben Fakten auf Englisch (`temperature`, `temperature_note`), ohne Pfad und ohne
   Konto. Die Temperatur ist kein Schlüssel der Hardware-Untersuchung: Sie ist ein Moment, keine Eigenschaft des
   Boards.
+- **Die Uhr des Boards**: Ein Board ohne batteriegepufferte Uhr, das offline ist, kann die Zeit nicht kennen. Bei
+  jedem Kontakt liest das Framework die Zeit des Boards, seine RTC und das, was seine Zeit über einen Neustart behält,
+  mit einem nur lesenden Befehl über die Sitzung, die es schon hat; weicht sie um mehr als eine Minute ab, stellt es
+  sie von der Zeit dieses Rechners mit deinem dauerhaften Ja für dieses Board (einmal nach dem Pairing gefragt), als
+  root nur über die typisierte Uhr-Aktion von llmcf-install, ins Audit-Log geschrieben, sonst nennt eine Warnung die
+  Abweichung. `llm-cli device clock` und *Uhr des Boards...* im Boards-Fenster zeigen sie und stellen sie einmal von
+  Hand ([CLI](CLI_Usage_DE.md#device-clock)).
 - **Gemessen** mit echten Programmen statt eines Boards: `llama-server` und `llama-bench`, nativ mit den Optionen des
   Geräte-Bauplans für einen x86-64-Rechner gebaut (GCC 13.3, `-j4`, etwa 8 Minuten auf 4 geteilten Kernen), ergaben
   30 MB Programme und einen Tarball von 11,6 MB; die Formatprüfung (glibc 2.38 nötig, keine geteilte C++-Laufzeit),
