@@ -90,9 +90,10 @@ def test_a_persons_board_is_never_overwritten_by_a_later_detection(builder):
 
 def test_a_recipes_board_counts_as_the_persons_choice(builder):
     from orchestrator.gui.builder_parts import after_probe
-    recipe = SimpleNamespace(id="r1", target=SimpleNamespace(id="Rockchip"), format="gguf", board="rk3568",
-                             quantization="Q4_0", model=SimpleNamespace(repo="org/m", revision="c" * 40),
-                             options=SimpleNamespace(use_imatrix=False, dataset=None))
+    recipe = SimpleNamespace(id="r1", author="a", results=[], format="gguf", board="rk3568", quantization="Q4_0",
+                             target=SimpleNamespace(id="Rockchip", pack_sha256="a" * 64, pack_version=None),
+                             model=SimpleNamespace(repo="org/m", revision="c" * 40, license="mit"),
+                             options=SimpleNamespace(use_imatrix=False, dataset=None, max_context_length=None))
     builder.apply_recipe(recipe)
     assert builder.board_combo.currentData() == "rk3568"
     assert after_probe(builder, Profile(SOC_MODEL="rk3588"), "Rockchip") == "kept"

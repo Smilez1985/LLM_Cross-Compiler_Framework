@@ -248,7 +248,10 @@ class TestEveryBuildStartRunsIt:
     def test_a_recipe_build_runs_it_too(self, service, monkeypatch):
         recipe = SimpleNamespace(id="r", options=SimpleNamespace(dataset=None))
         monkeypatch.setattr(service, "recipe_request",
-                            lambda rid, dataset_path=None, use_gpu=False: (rknn(None), recipe, None))
+                            lambda rid, dataset_path=None, use_gpu=False, **kw: (rknn(None), recipe, None))
+        # a stand-in recipe: nothing changed, an empty record (the record itself: tests/test_recipe_templates.py)
+        monkeypatch.setattr(service, "recipe_changes", lambda *a, **k: [], raising=False)
+        monkeypatch.setattr(service, "recipe_record", lambda *a, **k: {}, raising=False)
         with pytest.raises(PreflightStopped):
             service.start_recipe("r", local_paths=True, probe=service.bad)
         service.start_recipe("r", local_paths=True, probe=service.bad, ignore_preflight=True)

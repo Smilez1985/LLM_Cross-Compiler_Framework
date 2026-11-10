@@ -242,7 +242,10 @@ class TestTheBuildServiceTakesTheBoardsProbe:
         the probe the build runs with, not the newest stored probe of the board's SoC."""
         recipe = SimpleNamespace(id="r", options=SimpleNamespace(dataset=None))
         monkeypatch.setattr(service, "recipe_request",
-                            lambda rid, dataset_path=None, use_gpu=False: (request(board="rk3588"), recipe, None))
+                            lambda rid, dataset_path=None, use_gpu=False, **kw: (request(board="rk3588"), recipe, None))
+        # a stand-in recipe: nothing changed, an empty record (the record itself: tests/test_recipe_templates.py)
+        monkeypatch.setattr(service, "recipe_changes", lambda *a, **k: [], raising=False)
+        monkeypatch.setattr(service, "recipe_record", lambda *a, **k: {}, raising=False)
         service.start_recipe("r", local_paths=True, probe=service.ids["rk3588"])
         assert service.framework.orchestrator.requests[-1].hardware_probe == service.ids["rk3588"]
         service.start_recipe("r", local_paths=True)   # none named: the board's newest probe, as for start_build
@@ -371,7 +374,8 @@ def test_the_builder_s_recipe_build_names_the_probe_too(builder_tab, monkeypatch
             return SimpleNamespace(request_id="r1")
 
     monkeypatch.setattr(builder_tab, "_build_service", lambda: Service())
-    monkeypatch.setattr(builder_tab, "_recipe_as_pinned", lambda values: True)
+    monkeypatch.setattr(builder_tab, "_recipe_choices", lambda values: (None, None))
+    monkeypatch.setattr(builder_tab, "_log_recipe_changes", lambda *a: None)
     monkeypatch.setattr(builder_tab, "_recipe_expect", lambda values: {})
     for name in ("_track_build", "_remember_build"):
         monkeypatch.setattr(builder_tab, name, lambda *a, **k: None)

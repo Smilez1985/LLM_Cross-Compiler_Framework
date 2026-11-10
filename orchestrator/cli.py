@@ -737,10 +737,17 @@ class _FormatOption(click.Option):
 
 
 @build.command('start')
-@click.option('--model', '-m', required=True, help='Model name (HuggingFace) or local path')
-@click.option('--target', '-t', required=True, help='Target id or folder name in targets/ (llm-cli targets list)')
-@click.option('--format', '-f', default='gguf', type=_TargetFormat(), cls=_FormatOption, show_default=True,
-              help='Target format, one the target builds')
+@click.option('--model', '-m', help='Model name (HuggingFace) or local path. With --recipe: another model than the '
+                                    "recipe's (default: the recipe's model at its commit)")
+@click.option('--target', '-t', help="Target id or folder name in targets/ (llm-cli targets list). With --recipe: the "
+                                     "recipe's target (another one is refused)")
+@click.option('--recipe', 'recipe_id', default=None, metavar='ID',
+              help="Build with an installed community recipe ('llm-cli zoo list --kind recipe'), a target template: "
+                   "its target, and its values for every option you leave out; --model, --format, --board, "
+                   "--quantization, --imatrix/--no-imatrix and --dataset/--no-dataset change them. Built unchanged, "
+                   "the result is compared with the recipe's reference")
+@click.option('--format', '-f', default=None, type=_TargetFormat(), cls=_FormatOption,
+              help="Target format, one the target builds (default: gguf; with --recipe the recipe's)")
 @click.option('--board', '-b', help='Board within the target family, e.g. rk3588, rk3576, rk3566')
 @click.option('--probe', 'probe', default=None, metavar='ID',
               help="The board's hardware probe by its id ('llm-cli device list'; 'local' is this computer): the "
@@ -783,11 +790,12 @@ class _FormatOption(click.Option):
                    "build or the board needs). Your decision for this one build; at a terminal without it you are "
                    "asked, with No as the default")
 @pass_context
-def start_build(ctx: FrameworkContext, model: str, target: str, format: str, board: Optional[str],
-                probe: Optional[str], quantization: Optional[str], output_dir: Optional[str], 
+def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[str], format: Optional[str],
+                board: Optional[str], probe: Optional[str], quantization: Optional[str], output_dir: Optional[str],
                 optimization: Optional[str], priority: str, parallel: bool, follow: bool, gpu: bool,
                 imatrix: Optional[bool], dataset: Optional[str], no_dataset: bool = False,
-                module_flags: Optional[str] = None, remember_flags: bool = False, ignore_preflight: bool = False):
+                module_flags: Optional[str] = None, remember_flags: bool = False, ignore_preflight: bool = False,
+                recipe_id: Optional[str] = None):
     """Start a new build job. Ctrl+C cancels it (its container is stopped) and exits with code 130.
 
     When a finished build with exactly the same options exists, you are asked first, as in the Builder tab: use it
@@ -801,7 +809,12 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
     Before anything starts, the pre-flight check compares the hardware probes with what the build needs (the NVIDIA
     driver of this computer for a GPU build, the board's NPU driver and runtime for an NPU format) and prints what it
     found. A build that cannot succeed as asked stops there; --ignore-preflight (or your yes at the terminal) builds it
-    anyway."""
+    anyway.
+
+    With --recipe ID the build uses an installed community recipe as a target template: the recipe's target holds the
+    build code, and model, format, board, quantization, importance matrix and calibration file are the recipe's unless
+    you give them. A --dataset file with the sha256 the recipe pins is the recipe's; any other file is your own. A build
+    that changes nothing is compared with the recipe's reference result when it ends."""
     from orchestrator.Core.build_service import BuildServiceError, ModelNotHere, PreflightStopped
     ctx.require_framework()
     if parallel:
@@ -809,11 +822,39 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
     if dataset and no_dataset:
         console.print("[red]--dataset and --no-dataset exclude each other.[/red]")
         sys.exit(2)
+    if recipe_id is None:
+        missing = [name for name, value in (("--model", model), ("--target", target)) if not value]
+        if missing:
+            console.print(f"[red]Missing option {' and '.join(missing)} (or name a recipe with --recipe).[/red]")
+            sys.exit(2)
 
     try:
         fm = ctx.framework_manager
-        # The one build path (BuildService.start_build), as for the Builder tab and AI callers.
+        # The one build path (BuildService.start_build, start_recipe for a recipe), as for the Builder tab and AI
+        # callers.
         service = _build_service(ctx)
+        recipe = None
+        if recipe_id is not None:
+            try:
+                recipe, _provenance = service.installed_recipe(recipe_id)
+            except BuildServiceError as e:
+                console.print(f"[red]{escape(str(e))}[/red]")
+                sys.exit(2)
+            known = getattr(getattr(fm, "target_manager", None), "resolve", None)
+            chosen_target = (known(target) if callable(known) else target) if target else None
+            if target and str(chosen_target or target).casefold() != recipe.target.id.casefold():
+                console.print(f"[red]The recipe {escape(recipe.id)} is a template of the target "
+                              f"{escape(recipe.target.id)}; another target is another template. Leave --target out."
+                              "[/red]")
+                sys.exit(2)
+            named = recipe.options.dataset
+            if named is not None and not dataset and not no_dataset:
+                console.print(f"[red]The recipe {escape(recipe.id)} was calibrated with {escape(named.name)} (sha256 "
+                              f"{named.sha256[:16]}...): give that file with --dataset, a file of your own with "
+                              "--dataset, or --no-dataset.[/red]")
+                sys.exit(2)
+            target, format = recipe.target.id, format or recipe.format
+        format = format or "gguf"
         tm = getattr(fm, "target_manager", None)
         if tm:
             # The registered id (also for its folder name or another letter case), so `-t rockchip` is checked
@@ -834,14 +875,24 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
         # Checked by the service against the target's declared capabilities (a target without them is built
         # unchecked), with its defaults filled: the values the build really runs with (canonical spellings, the
         # scripts' default board).
-        def checked(model_value: str):
+        recipe_dataset, choices = None, None
+
+        def checked(model_value: Optional[str]):
+            nonlocal recipe_dataset, choices
+            if recipe is not None:   # the recipe's request with your choices (BuildService.recipe_request)
+                recipe_dataset, choices = _recipe_choices(recipe, model_value, format, board, quantization, imatrix,
+                                                          dataset, no_dataset)
+                request, _r, _p = service.recipe_request(recipe.id, recipe_dataset, gpu, choices=choices)
+                return service.validate(request.model_copy(update={"probe": probe}) if probe else request,
+                                        local_paths=True)
             return service.validate(service.request_in(
                 model=model_value, target=target, format=format, board=board, quantization=quantization,
                 use_imatrix=imatrix, use_gpu=gpu,
                 dataset_path=str(Path(dataset).resolve()) if dataset else ("" if no_dataset else None),
                 probe=probe), local_paths=True)
 
-        model = _listed_model(ctx, model)   # a label of the models already here (models:...) names its file
+        # a label of the models already here (models:...) names its file
+        model = _listed_model(ctx, model) if model else None
         try:
             try:
                 request = checked(model)
@@ -855,7 +906,9 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
             for problem in getattr(e, "problems", None) or [str(e)]:
                 console.print(f"[red]{escape(problem)}[/red]")
             sys.exit(2)
-        board, quantization = request.board, request.quantization
+        board, quantization, model = request.board, request.quantization, model or request.model
+        if recipe is not None:   # what the recipe is, what you changed, its reference and its target
+            _print_recipe(service, recipe, request, choices)
         # the importance matrix and calibration text as the build runs them (your choice, else the defaults)
         from orchestrator.Core.build_defaults import describe
         calibration_line = describe(bool(request.use_imatrix), Path(request.dataset_path).name
@@ -911,11 +964,14 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
         # The orchestrator runs on the framework's background loop (as for the GUI and the build service), so the
         # build service can cancel the build from here on Ctrl+C.
         try:
-            request_id = service.start_build(request, local_paths=True, optimization=optimization, priority=priority,
-                                             output_dir=output_dir, flag_decision=module_flags,
-                                             remember_flags=remember_flags, flag_channel="framework-cli",
-                                             ignore_preflight=ignore_preflight,
-                                             description=f"CLI build: {model} -> {target} ({format})").request_id
+            options = dict(local_paths=True, optimization=optimization, priority=priority, output_dir=output_dir,
+                           flag_decision=module_flags, remember_flags=remember_flags, flag_channel="framework-cli",
+                           ignore_preflight=ignore_preflight, description=f"CLI build: {model} -> {target} ({format})")
+            if recipe is not None:
+                request_id = service.start_recipe(recipe.id, dataset_path=recipe_dataset, use_gpu=gpu, probe=probe,
+                                                  choices=choices, **options).request_id
+            else:
+                request_id = service.start_build(request, **options).request_id
         except PreflightStopped as e:   # a probe changed since the check above: the new stop, nothing started
             _print_preflight(e.preflight)
             console.print("Nothing was started. Give --ignore-preflight to build anyway.")
@@ -943,6 +999,48 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
     except Exception as e:
         console.print(f"[red]Build failed: {escape(str(e))}[/red]")
         sys.exit(1)
+
+
+def _recipe_choices(recipe, model: Optional[str], fmt: Optional[str], board: Optional[str],
+                    quantization: Optional[str], imatrix: Optional[bool], dataset: Optional[str], no_dataset: bool):
+    """(the recipe's own calibration file or None, schemas.recipes.RecipeChoices) of `build start --recipe`: the
+    options given are the variables. A --dataset file with the sha256 the recipe pins is the recipe's; any other
+    file is your own, and --no-dataset builds without one."""
+    from orchestrator.schemas.recipes import RecipeChoices
+    from orchestrator.utils.helpers import digest_matches, sha256_file
+    named, pinned, own = recipe.options.dataset, None, None
+    if dataset:
+        path = str(Path(dataset).resolve())
+        try:
+            same = named is not None and digest_matches(sha256_file(path), named.sha256)
+        except OSError:
+            same = False
+        pinned, own = (path, None) if same else (None, path)
+    elif no_dataset:
+        own = ""
+    if model and str(model).casefold() == recipe.model.repo.casefold():
+        model = None
+    changed_format = fmt if fmt and fmt.casefold() != recipe.format.casefold() else None
+    return pinned, RecipeChoices(model=model or None, format=changed_format, board=board or None,
+                                 quantization=quantization or None, use_imatrix=imatrix, own_dataset_path=own)
+
+
+def _print_recipe(service, recipe, request, choices) -> None:
+    """`build start --recipe`: the recipe, the variables changed (each with the recipe's value), its reference
+    results and a target whose files are not the recipe's."""
+    console.print(f"Recipe {escape(recipe.id)} by {escape(recipe.author)}: {escape(recipe.model.repo)} at commit "
+                  f"{recipe.model.revision[:12]}, model licence {escape(recipe.model.license)}, context length "
+                  f"{recipe.options.max_context_length or 'the target default'}.")
+    changed = service.recipe_changes(recipe, request, choices)
+    if changed:
+        console.print("Changed from the recipe: " + escape(", ".join(changed)) + ".")
+    else:
+        console.print("Built as the recipe pins it: the result is compared with the recipe's reference.")
+    for line in service.recipe_reference_lines(recipe):
+        console.print(f"Recipe reference: {escape(line)}")
+    note = service.recipe_target_note(recipe)
+    if note:
+        console.print(f"[yellow]{escape(note)}[/yellow]")
 
 
 BUILD_POLL_SECONDS = 2

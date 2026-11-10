@@ -121,6 +121,9 @@ class BuildRequest:
     # What the pre-flight check before the build found and the build goes on with (its warnings, and the stops the
     # person overrode; Core/consistency_manager.py Preflight.notes): the request's warnings from the start
     preflight_notes: List[str] = field(default_factory=list)
+    # A recipe build (BuildService.recipe_record): the recipe, the variables the person changed, its target pin and
+    # reference results; the build engine compares the result with them and records it in build_info.json
+    recipe: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if not self.request_id:
@@ -609,6 +612,7 @@ class LLMOrchestrator:
             # the engine records in it what has landed on disk (the request releases it when it ends)
             disk_reservation=getattr(req, "disk_reservation", "") or "",
             module_flags=getattr(req, "flag_decision", None),
+            recipe=dict(req.recipe) if getattr(req, "recipe", None) else None,
         )
 
     @staticmethod

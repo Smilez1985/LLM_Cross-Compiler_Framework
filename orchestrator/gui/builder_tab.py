@@ -1321,8 +1321,10 @@ class BuilderTab(QWidget):
             CommunityExportDialog(self.framework, "recipe", path, self).exec()
 
     def apply_recipe(self, recipe):
-        """Fills the build settings from a community recipe (the model at its pinned commit, target, format,
-        board, quantization, IMatrix); the user reviews them and starts the build."""
+        """Fills the build menu from a community recipe, a target template (DESIGN "Community, recipes and packs"):
+        its target, and its tested values as the start of every variable (the model at its pinned commit, format,
+        board, quantization, importance matrix). Every field stays the person's to change; the recipe stays while its
+        target is selected, and Start Build builds through BuildService.start_recipe with what was changed."""
         idx = next((i for i in range(self.target_combo.count())
                     if str(self.target_combo.itemData(i)).casefold() == recipe.target.id.casefold()), -1)
         if idx < 0:
@@ -1340,12 +1342,26 @@ class BuilderTab(QWidget):
             self.quant_combo.setCurrentText(recipe.quantization)
             self._quant_user_set = True
         self.chk_imatrix.setChecked(recipe.options.use_imatrix)
+        self._imatrix_user_set = True   # the recipe's value, kept when quantization or format change (a variable)
         # The recipe the person chose to build: its values are the person's (an AI never overwrites them)
         self.gui_form.person_chose(["model", "target", "format", "board", "quantization", "imatrix"])
-        self._log(f"Recipe {recipe.id}: {recipe.model.repo} at commit {recipe.model.revision[:12]}.")
+        self._log(f"Recipe {recipe.id} by {recipe.author}: {recipe.model.repo} at commit "
+                  f"{recipe.model.revision[:12]}, context length "
+                  f"{recipe.options.max_context_length or 'the target default'}, model licence "
+                  f"{recipe.model.license}. Model, format, board, quantization, importance matrix and calibration "
+                  "file are yours to change; the target is the recipe's.")
         if recipe.options.dataset:
             self._log(f"The recipe was calibrated with {recipe.options.dataset.name} (sha256 "
-                      f"{recipe.options.dataset.sha256[:16]}...); choose that file as calibration dataset.")
+                      f"{recipe.options.dataset.sha256[:16]}...); choose that file to build with it, or a file of "
+                      "your own.")
+        from orchestrator.Core.build_service import BuildService
+        service = self._build_service() or BuildService(self.framework)
+        for line in BuildService.recipe_reference_lines(recipe):
+            self._log(f"Recipe reference: {line}")
+        note_of = getattr(service, "recipe_target_note", None)
+        note = note_of(recipe) if callable(note_of) else ""
+        if note:
+            self._log(note)
 
     def _browse_model(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select Model", "", "Models (*.bin *.gguf *.safetensors);;All Files (*)")
@@ -1426,8 +1442,9 @@ class BuilderTab(QWidget):
                 QMessageBox.warning(self, "Build settings", "\n".join(problems))
                 return
         
-        recipe = self._recipe if self._recipe and self.model_input.currentText().strip() == self._recipe.model.repo \
-            else None
+        # A recipe stays while its target is selected: the target is the template, every other value a variable
+        recipe = self._recipe if self._recipe and str(self.target_combo.currentData() or "").casefold() == \
+            self._recipe.target.id.casefold() else None
         try:
              target_fmt = ModelFormat(self.format_combo.currentData())
              opt_lvl = OptimizationLevel[self.opt_combo.currentText()]
@@ -1461,7 +1478,7 @@ class BuilderTab(QWidget):
             return True   # a local file or folder: used as it is
         service = self._build_service() or BuildService(self.framework)
         try:
-            service.check_model_here(model, recipe.model.revision if recipe else None, for_ai=False)
+            service.check_model_here(model, self._recipe_commit(values), for_ai=False)
             return True
         except ModelNotHere as e:
             from orchestrator.gui.offline_model import OfflineModelDialog
@@ -1485,7 +1502,7 @@ class BuilderTab(QWidget):
             return True
         self.model_input.setEditText(chosen)
         self.gui_form.person_edited("model")  # the person's pick: never overwritten by an AI
-        values["model"], values["recipe"] = chosen, (recipe if recipe and chosen == recipe.model.repo else None)
+        values["model"] = chosen   # with a recipe: the model is one of its variables
         return True
 
     def _start_or_reuse(self, values, found):
@@ -1607,40 +1624,76 @@ class BuilderTab(QWidget):
         return None
 
     def _submit(self, service, values, recipe, options):
-        """Submits exactly `values` (the recipe as pinned, or the person's own values) and returns the request id."""
+        """Submits exactly `values` and returns the request id. With a recipe: BuildService.start_recipe, the one path
+        of a recipe build, with the form's values as the template's variables (_recipe_choices); the recipe is read as
+        installed now (refused when the community index revoked it or it changed since it filled the form)."""
         # The one build path (BuildService), as for the CLI and AI callers: the service checks the request again
         # and queues it; the build keeps running on the framework's background loop after this slot returns.
-        if recipe is not None and self._recipe_as_pinned(values):
-            # Exactly the recipe: the recipe as installed now (refused when the community index revoked it or it
-            # changed since it filled the form), with its calibration dataset checked against its pin.
-            rid = service.start_recipe(recipe.id, dataset_path=values["dataset"], use_gpu=values["use_gpu"],
-                                       expect=self._recipe_expect(values), probe=values.get("probe"),
-                                       **options).request_id
+        if recipe is not None:
+            dataset, choices = self._recipe_choices(values)
+            self._log_recipe_changes(service, recipe, values, choices)
+            return service.start_recipe(recipe.id, dataset_path=dataset, use_gpu=values["use_gpu"],
+                                        expect=self._recipe_expect(values), probe=values.get("probe"),
+                                        choices=choices, **options).request_id
+        return service.start_build(self._service_request(values), **options).request_id
+
+    def _log_recipe_changes(self, service, recipe, values, choices) -> None:
+        """One line in the Builder log before a recipe build: built as the recipe pins it, or what the person changed
+        (each with the recipe's value)."""
+        pins = getattr(service, "recipe_pins", None)
+        fmt, board, quant = pins(recipe) if callable(pins) else (recipe.format, recipe.board, recipe.quantization)
+        same = lambda a, b: str(a or "").casefold() == str(b or "").casefold()  # noqa: E731
+        changes = [f"{name} {now or 'default'} (recipe: {pin or 'default'})" for name, now, pin in (
+            ("model", values["model"], recipe.model.repo), ("format", values["target_fmt"].value, fmt),
+            ("board", values["board"], board), ("quantization", values["quant"], quant),
+            ("importance matrix", "yes" if values["use_imatrix"] else "no",
+             "yes" if recipe.options.use_imatrix else "no")) if not same(now, pin)]
+        if choices.own_dataset_path is not None and (choices.own_dataset_path or recipe.options.dataset is not None):
+            own = choices.own_dataset_path
+            changes.append(f"calibration file {Path(own).name if own else 'none'}")
+        if changes:
+            self._log(f"Recipe {recipe.id} with your choices: " + ", ".join(changes) + ".")
         else:
-            if recipe is not None:  # the person's own values at the recipe's commit: still never a revoked one
-                service.installed_recipe(recipe.id)
-            rid = service.start_build(self._service_request(values), **options).request_id
-        return rid
+            self._log(f"Recipe {recipe.id} as it pins it: the result is compared with the recipe's reference.")
 
-    def _recipe_pins(self, recipe):
-        """(format, board, quantization) a recipe builds with, normalized like the form (the board's default type)."""
-        caps = self._capabilities()
-        if caps is None:
-            return recipe.format, recipe.board, recipe.quantization
-        return caps.normalize(recipe.format, recipe.board, recipe.quantization)
+    @staticmethod
+    def _recipe_commit(values):
+        """The commit a build of the form pins: the recipe's, while the recipe's own model is selected."""
+        recipe = values.get("recipe")
+        if recipe is None or str(values["model"]).casefold() != recipe.model.repo.casefold():
+            return None
+        return recipe.model.revision
 
-    def _recipe_as_pinned(self, values) -> bool:
-        """The form still holds exactly the recipe's values (target, format, board, quantization, importance
-        matrix, and a calibration dataset exactly when the recipe names one), so Start Build builds the recipe itself.
-        A dataset the recipe does not name, or none for a recipe that names one, is the person's own choice: their
-        values are built at the recipe's commit, as the Builder always did."""
+    def _recipe_choices(self, values):
+        """(the recipe's own calibration file or None, schemas.recipes.RecipeChoices) of the form: model, format,
+        board, quantization and importance matrix as the form holds them. A calibration file with the sha256 the
+        recipe pins is the recipe's (checked again by the build); any other file, or none for a recipe that names
+        one, is the person's own choice, and the log says so."""
+        from orchestrator.schemas.recipes import RecipeChoices
+        from orchestrator.utils.helpers import digest_matches, sha256_file
         recipe = values["recipe"]
-        fmt, board, quant = self._recipe_pins(recipe)
-        same = [(values["target"], recipe.target.id), (values["target_fmt"].value, fmt), (values["board"], board),
-                (values["quant"], quant)]
-        return (all(str(a or "").casefold() == str(b or "").casefold() for a, b in same)
-                and bool(values["use_imatrix"]) == bool(recipe.options.use_imatrix)
-                and bool(values["dataset"]) == (recipe.options.dataset is not None))
+        named, path = recipe.options.dataset, values["dataset"]
+        pinned, own = None, None
+        if path and named is not None:
+            try:
+                same = digest_matches(sha256_file(path), named.sha256)
+            except OSError:
+                same = False   # the build refuses a file it cannot read
+            if same:
+                pinned = path
+            else:
+                own = path
+                self._log(f"The calibration file is not the one the recipe {recipe.id} pins (its sha256 differs): it "
+                          "is your own choice, and the result is not compared with the recipe's.")
+        elif path:
+            own = path
+        elif named is not None:
+            own = ""   # no calibration file: the person's choice for a recipe that names one
+        model = values["model"]
+        return pinned, RecipeChoices(
+            model=None if str(model).casefold() == recipe.model.repo.casefold() else model,
+            format=values["target_fmt"].value, board=values["board"] or None,
+            quantization=values["quant"] or None, use_imatrix=bool(values["use_imatrix"]), own_dataset_path=own)
 
     @staticmethod
     def _recipe_expect(values):
@@ -1648,17 +1701,18 @@ class BuilderTab(QWidget):
         recipe has not changed since."""
         from orchestrator.Core.build_service import BuildService
         recipe = values["recipe"]
-        return {"model": recipe.model.repo, "revision": recipe.model.revision, "target": values["target"],
+        model = values["model"]
+        return {"model": model, "revision": BuilderTab._recipe_commit(values), "target": values["target"],
                 "format": values["target_fmt"].value, "board": values["board"], "quantization": values["quant"],
                 "recipe_sha256": BuildService.recipe_digest(recipe)}
 
     @staticmethod
     def _service_request(values):
-        """The build request of the checked form values (BuildRequestIn): a recipe pins the model commit (and context
-        length) while its model is still selected."""
+        """The build request of the checked form values (BuildRequestIn): a recipe pins the model commit while its
+        model is selected, and its context length (not a field of the form)."""
         from orchestrator.Core.build_service import BuildService
         recipe = values["recipe"]
-        return BuildService.request_in(model=values["model"], revision=recipe.model.revision if recipe else None,
+        return BuildService.request_in(model=values["model"], revision=BuilderTab._recipe_commit(values),
                                        target=values["target"], format=values["target_fmt"].value,
                                        board=values["board"], quantization=values["quant"],
                                        use_imatrix=values["use_imatrix"], dataset_path=values["dataset"],

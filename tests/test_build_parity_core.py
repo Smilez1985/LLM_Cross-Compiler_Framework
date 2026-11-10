@@ -500,6 +500,7 @@ class TestGuiSubmission:
         assert req.max_context_length == 4096 and req.dataset_path == str(dataset.resolve())
         assert req.dataset_sha256 == recipe.options.dataset.sha256
         assert req.parallel_builds is True and req.description == "Builder Tab Job" and req.owner == ""
+        assert req.recipe["id"] == recipe.id and req.recipe["changed"] == [], "built as the recipe pins it"
 
     def test_a_recipe_revoked_after_it_filled_the_form_is_not_built(self, tab, tmp_path, monkeypatch,
                                                                    gui_messages):
@@ -513,8 +514,11 @@ class TestGuiSubmission:
         tab.quant_combo.setEditText("Q8_0")  # the person's own values at the recipe's commit: still refused
         assert submit(tab) is None and "revoked" in gui_messages[-1][1]
 
-    def test_another_calibration_file_than_the_recipe_pins_is_refused(self, tab, tmp_path, monkeypatch,
-                                                                    gui_messages):
+    # Changed on purpose with "Recipes as target templates" (CHANGELOG 3.4.0): the calibration file is one of the
+    # template's variables. A file with another sha256 than the recipe pins was refused; it is now the person's own
+    # choice, built without the recipe's pin, recorded as the changed variable "dataset" and said in the log.
+    def test_another_calibration_file_than_the_recipe_pins_is_the_persons_own(self, tab, tmp_path, monkeypatch,
+                                                                            gui_messages):
         from test_review_capabilities_paths import submit
         recipe, _dataset = self.recipe(tmp_path)
         self.installed(monkeypatch, tab, recipe)
@@ -522,8 +526,11 @@ class TestGuiSubmission:
         other.write_text("other text\n", encoding="utf-8")
         tab.apply_recipe(recipe)
         tab.dataset_path = str(other)
-        assert submit(tab) is None
-        assert "not the file the recipe" in gui_messages[-1][1]
+        req = submit(tab)
+        assert req is not None, gui_messages
+        assert req.dataset_path == str(other.resolve()) and req.dataset_sha256 is None
+        assert req.recipe["changed"] == ["dataset"] and req.model_revision == recipe.model.revision
+        assert "your own choice" in tab.log_area.toPlainText()
 
     def test_a_changed_form_builds_the_persons_values_at_the_recipes_commit(self, tab, tmp_path, monkeypatch):
         from test_review_capabilities_paths import submit
@@ -535,7 +542,11 @@ class TestGuiSubmission:
         req = submit(tab)
         assert req is not None and calls == [recipe.id], "the use-time check ran"
         assert req.quantization_options == ["Q8_0"] and req.model_revision == recipe.model.revision
-        assert req.dataset_sha256 is None, "not the recipe any more: no recipe pin"
+        # Changed on purpose with "Recipes as target templates": the recipe's own calibration file keeps its pin
+        # when another variable changes (one path, start_recipe); before, any change dropped the pin.
+        assert req.dataset_sha256 == recipe.options.dataset.sha256
+        assert req.recipe["changed"] == ["quantization"]
+        assert "quantization Q8_0 (recipe: Q4_K_M)" in tab.log_area.toPlainText()
 
     # The calibration dataset is one of the form's values too (review of c3-build-path): the Builder always built a
     # recipe with a dataset the person chose for a recipe that names none, and without one for a recipe that names

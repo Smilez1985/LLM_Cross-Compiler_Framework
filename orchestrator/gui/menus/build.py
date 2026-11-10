@@ -55,6 +55,9 @@ CLI_PATHS: Dict[str, str] = {
     "build start --remember-flags": "btn_builder_start",
     # the pre-flight check: the Builder's own button, and its question (Build anyway) when Start Build is pressed
     "build start --ignore-preflight": "btn_builder_start",
+    # a recipe as a target template: the Community Hub's Build on an installed recipe fills the Builder, whose fields
+    # stay the variables (the Community Hub, then the row's Build button)
+    "build start --recipe": "act_knowledge_hub",
     "build preflight": "btn_builder_preflight",
     "build preflight --target": "combo_builder_target",
     "build preflight --format": "combo_builder_format",

@@ -1144,7 +1144,7 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `list_packs` | read | Community packs of the signed index and the installed ones with trust; details, verification of installed packs ([details](#packs-for-ai-clients)) |
 | `add_pack_from_index` | external | Add a knowledge, target or recipe pack from the signed index, as a job; always asked with the checked summary and every base image of a target pack |
 | `export_pack` | local write | Export a target, recipe or knowledge pack to a local file signed with your key; always asked, nothing uploaded |
-| `start_recipe_build` | local write | Build an installed community recipe exactly as pinned (model commit, target, format, board, quantization), with the question and checks of `start_build` |
+| `start_recipe_build` | local write | Build with an installed community recipe as a target template: its target, and its values (model commit, format, board, quantization, importance matrix) unless the client changes them, with the question and checks of `start_build` |
 | `crawl_docs_site` | local write | Deep Ingest of 1 to 5 public documentation sites into the knowledge base, as a job; always asked with every start address, only after a person read the notice ([details](#deep-ingest-by-an-ai-client)) |
 | `index_framework_docs` | local write | Add the framework's own documentation (with `include_code` also its code and configuration) to the knowledge base, as a job; always asked, a snapshot is taken first; then search it with `search_knowledge`, kind `docs` |
 | `start_build` | local write | Start a build (must match the target's capabilities); the question shows commit, size, disk and hardware estimate |
@@ -3272,8 +3272,15 @@ rebuilt, never downloaded as a model.
 - At installation a recipe is checked against the capabilities of its target, if that target is installed. A note
   says when the target is missing or when your copy differs from the one the recipe was built with.
 - **Build** on an installed recipe in the hub fills in the Builder (model at its pinned commit, target, format, board,
-  quantization, importance matrix). You check the settings and start the build; a recipe maps to a normal build
-  request.
+  quantization, importance matrix). A recipe is a target template: its target holds the build code, and every value
+  is yours to change before you start (model, format, board, quantization, importance matrix, calibration file; the
+  context length stays the recipe's). The Builder keeps the recipe while its target is selected, logs what you changed,
+  and builds through the same path as `llm-cli build start --recipe ID` and the tool `start_recipe_build`.
+- The builder uses everything a recipe holds: its values build; its calibration file is checked by sha256 when you use
+  the recipe's file (another file is your own choice); its target's digest is compared with your installed target (a
+  different target is a warning, never a refusal); its reference results are shown, and a build that changes nothing
+  on the recipe's own target is compared with them when it ends (`build_info.json`: `recipe` with the changed
+  variables and `reproduced`; a differing result is a warning naming both framework versions and toolchain images).
 
 ### The signed index
 
@@ -3479,15 +3486,19 @@ and leave this computer only as a local file you publish yourself.
   most 30 days are offered. An install under it must leave the larger disk reserve of a standing approval free (20 GiB
   or 10 %), or it asks. Every import takes a reservation (twice the pack size) in the shared reservation ledger,
   checked again under its lock when the import starts.
-- **`start_recipe_build`** (local write): builds an installed recipe exactly as it is pinned: its Hugging Face model
-  at the recipe's commit, target, format, board, quantization, importance matrix and context length. It takes the
+- **`start_recipe_build`** (local write): builds with an installed recipe as a target template: its target, and for
+  every value the client leaves out the recipe's (its Hugging Face model at the recipe's commit, format, board,
+  quantization, importance matrix; the context length is always the recipe's). `model`, `revision`, `format`,
+  `board`, `quantization`, `use_imatrix` and `own_dataset_path` change a value; the question lists what changed
+  ("nothing" for the recipe as pinned, whose result is compared with its reference) and the recipe's reference
+  results. It takes the
   same two-phase path as `start_build` (the question shows the recipe, whether the installed target is the one the
   recipe was made with, its importance matrix and context length, the commit, download size, disk, hardware
   estimate, licence, gating and image build; the
   same disk reservation and quotas). `probe` names the board's hardware probe as for `start_build` (checked before
-  the question; omitted: the newest stored probe of a board of the recipe's SoC). `dataset_path` only when the
-  recipe names a calibration dataset, and then it
-  must be exactly that file (sha256): the build copies the file into its own folder while it hashes it and uses only
+  the question; omitted: the newest stored probe of a board of the recipe's SoC). `dataset_path` only for the
+  recipe's own calibration file, and then it
+  must be exactly that file (sha256; a file of the client's own is `own_dataset_path`): the build copies the file into its own folder while it hashes it and uses only
   that copy, so a file swapped after the question is never used. A recipe changed in any field after the question is
   not built. "Yes, and do not ask again"
   has the scope of `start_build`; a recipe installed under a standing approval is covered only after you confirmed

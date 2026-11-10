@@ -3,13 +3,18 @@
 Building an installed community recipe (MCP design 2.8, work package T9): `start_recipe_build`, and the optional
 `lcf://packs/index` resource.
 
-A recipe pins a Hugging Face model at a commit, a target, format, board, quantization, importance matrix and context
-length. `start_recipe_build` maps an installed recipe to exactly that build request (BuildService.recipe_request) and
+A recipe is a target template: it names a target (the build code) and the values one person tested with it, a Hugging
+Face model at a commit, format, board, quantization, importance matrix and context length. Each of those values is a
+variable the caller may change (model, revision, format, board, quantization, use_imatrix, own_dataset_path) except
+the context length, which the recipe tuned to the board's memory; a value left out is the recipe's.
+`start_recipe_build` maps an installed recipe and the changes to a build request (BuildService.recipe_request) and
 takes start_build's normal two-phase path: the same plan with the commit, download size, disk rule, hardware estimate,
 licence, gating, mounts, target trust and image build in the question, the same disk reservation, the same standing
 approval scope (grants.BUILD_RULE). A recipe pack installed under a standing approval (`installed_via: grant:<id>`) is
 covered by a build standing approval only after the person confirmed one build of it (confirmed_builds). A calibration
-dataset is taken only when the recipe names one, and must be exactly the file it pins (sha256).
+dataset given as dataset_path is the recipe's own and must be exactly the file it pins (sha256); a file of the
+caller's own is named as own_dataset_path. The question lists the changed variables, a target whose files are not the
+recipe's, and the recipe's reference results, which the build compares its result with.
 
 Recipe values (model, target, ids) come from a community pack: the question labels them as pack text.
 """
@@ -40,6 +45,35 @@ class RecipeBuildIn(BaseModel):
                                  description="The board's hardware probe by its id (get_hardware_probe), as for "
                                              "start_build: the build is tuned to it (a recipe pins none). Omitted: "
                                              "the newest stored probe of a board of the recipe's SoC, if there is one")
+    # The variables of the template: left out, the recipe's value (DESIGN "Community, recipes and packs")
+    model: Optional[str] = Field(default=None, min_length=1, max_length=512,
+                                 description="Another model instead of the recipe's: a Hugging Face repo id or a local "
+                                             "model as <label>:<relative path> or its file id; never a path. Omitted: "
+                                             "the recipe's model at its commit")
+    revision: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{40}$",
+                                    description="Commit of the model; omitted: the recipe's commit for the recipe's "
+                                                "model, the default branch for another model")
+    format: Optional[str] = Field(default=None, min_length=1, max_length=32,
+                                  description="Another output format of the recipe's target; omitted: the recipe's")
+    board: Optional[str] = Field(default=None, max_length=64,
+                                 description="Another board of the recipe's target; omitted: the recipe's")
+    quantization: Optional[str] = Field(default=None, max_length=32,
+                                        description="Another quantization type; omitted: the recipe's (the target's "
+                                                    "default when the format is changed)")
+    use_imatrix: Optional[bool] = Field(default=None,
+                                        description="Importance matrix yes or no; omitted: the recipe's (the "
+                                                    "person's default when the format is changed)")
+    own_dataset_path: Optional[str] = Field(default=None, max_length=1024,
+                                            description="A calibration file of your own instead of the recipe's, as "
+                                                        "<label>:<relative path> or its file id (\"\" for none); "
+                                                        "never together with dataset_path")
+
+    def choices(self):
+        """The variables this call changes (schemas.recipes.RecipeChoices)."""
+        from orchestrator.schemas.recipes import RecipeChoices
+        return RecipeChoices(model=self.model, revision=self.revision, format=self.format, board=self.board,
+                             quantization=self.quantization, use_imatrix=self.use_imatrix,
+                             own_dataset_path=self.own_dataset_path)
 
 
 def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_out) -> List[Any]:
@@ -58,7 +92,8 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
     def mapped(inp: RecipeBuildIn):
         from orchestrator.Core.build_service import BuildServiceError
         try:
-            request, recipe, prov = service.recipe_request(inp.recipe_id, inp.dataset_path, inp.use_gpu)
+            request, recipe, prov = service.recipe_request(inp.recipe_id, inp.dataset_path, inp.use_gpu,
+                                                           choices=inp.choices())
         except BuildServiceError as e:
             raise refusal(e) from None
         if inp.probe:   # checked by the plan like start_build's (another board's probe is refused)
@@ -73,22 +108,28 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
         plan = service.plan(StartBuildIn(**request.model_dump()), recipe=record)
         if plan.problems:
             raise problem_error(plan.problems)
-        if recipe.options.dataset is not None:
-            try:
-                validated, _ = service._validated(request, False)
+        try:
+            validated, _ = service._validated(request, False)
+            if recipe.options.dataset is not None and inp.own_dataset_path is None:
                 service.check_recipe_dataset(recipe, validated.dataset_path)
-            except BuildServiceError as e:
-                raise refusal(e) from None
+        except BuildServiceError as e:
+            raise refusal(e) from None
+        changed = service.recipe_changes(recipe, validated, inp.choices())
         base = plan.call_facts()
-        facts = [Fact("Recipe", f"{recipe.id} by {recipe.author} (trust {prov.trust}"
+        facts = [Fact("Recipe", f"{recipe.id} by {recipe.author}, made {recipe.created:%Y-%m-%d}, model licence "
+                      f"{recipe.model.license} (trust {prov.trust}"
                       + (", installed under a standing approval" if record["installed_via"] else "") + ")",
                       RECIPE_TEXT),
                  Fact("Recipe options", f"importance matrix {'yes' if recipe.options.use_imatrix else 'no'}, context "
-                      f"length {recipe.options.max_context_length or 'the target default'}")]
-        target_note = target_match(recipe)
+                      f"length {recipe.options.max_context_length or 'the target default'}"),
+                 Fact("Changed from the recipe", ", ".join(changed) if changed else
+                      "nothing: built as the recipe pins it, and the result is compared with its reference")]
+        target_note = service.recipe_target_note(recipe)
         if target_note:
             facts.append(Fact("Target files", target_note))
-        if recipe.options.dataset is not None:
+        for line in service.recipe_reference_lines(recipe)[:3]:
+            facts.append(Fact("Recipe reference", line, RECIPE_TEXT))
+        if recipe.options.dataset is not None and inp.own_dataset_path is None:
             facts.append(Fact("Calibration dataset", f"{recipe.options.dataset.name}, sha256 "
                                                      f"{recipe.options.dataset.sha256} (checked)", RECIPE_TEXT))
         bound = dict(base.bound)
@@ -102,22 +143,6 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
             facts=tuple(facts) + tuple(base.facts), bound=bound,
             digest_keys=tuple(base.digest_keys) + ("recipe_id", "recipe_sha256"),
             names={**dict(base.names), "recipe": recipe.id}, tool="")
-
-    def target_match(recipe) -> str:
-        """Whether the installed target's files are the ones the recipe was built with (a different result is
-        possible otherwise; never a refusal)."""
-        try:
-            from orchestrator.Core.community_manager import same_content
-            tm = getattr(service.framework, "target_manager", None)
-            folder = tm.folder_of(recipe.target.id) if tm is not None and hasattr(tm, "folder_of") else None
-            if folder is None:
-                return ""
-            if same_content(folder, recipe.target.pack_sha256):
-                return "the installed target is exactly the one the recipe was made with"
-        except Exception:  # noqa: BLE001 - a hint only
-            return ""
-        return ("the installed target's files differ from the ones the recipe was made with; the result may differ "
-                "from the recipe's artifact hashes")
 
     def start_recipe_build(inp: RecipeBuildIn, ctx):
         bound = ctx.facts.bound if ctx.facts is not None else {}
@@ -133,7 +158,8 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
             try:
                 return service.start_recipe(bound["recipe_id"], dataset_path=inp.dataset_path, use_gpu=inp.use_gpu,
                                             owner=ctx.owner, disk_reservation=reservation, expect=expect,
-                                            probe=inp.probe, preflight_accepted=list(bound.get("preflight") or []))
+                                            probe=inp.probe, choices=inp.choices(),
+                                            preflight_accepted=list(bound.get("preflight") or []))
             except BuildServiceError as e:
                 raise refusal(e) from None
         return start_accepted(service, bound, ctx, start)
@@ -145,17 +171,26 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
 
     return [ToolSpec(
         "start_recipe_build", "Build a community recipe",
-        "Builds an installed community recipe exactly as it is pinned: its Hugging Face model at the recipe's "
-        "commit, target, format, board, quantization, importance matrix and context length. Same question and checks "
-        "as start_build (download size, disk, hardware estimate, licence, gating, image build). dataset_path only when "
-        "the recipe names a calibration dataset; probe names the board's hardware probe (get_hardware_probe) as for "
-        'start_build. Returns a request id. Example: {"recipe_id": '
-        '"qwen2.5-0.5b-instruct-rk3588-gguf-q4_k_m"}',
+        "Builds with an installed community recipe, a target template: its target and, for every value you leave "
+        "out, the recipe's (its Hugging Face model at the recipe's commit, format, board, quantization, importance "
+        "matrix, context length). model, revision, format, board, quantization, use_imatrix and own_dataset_path "
+        "change a value; built unchanged, the result is compared with the recipe's reference. Same "
+        "question and checks as start_build (download size, disk, hardware estimate, licence, gating, image build). "
+        "dataset_path only for the recipe's own calibration file; probe names the board's hardware probe "
+        '(get_hardware_probe) as for start_build. Returns a request id. Example: {"recipe_id": '
+        '"qwen2.5-0.5b-instruct-rk3588-gguf-q4_k_m", "quantization": "Q8_0"}',
         ToolTier.LOCAL_WRITE, RecipeBuildIn, handle_out, start_recipe_build, takes_context=True, open_world=True,
         prepare=prepare_recipe, limits=limits,
         fields={"recipe_id": FieldMeta(kind="id", list_tool="list_packs"), "dataset_path": fields["dataset_path"],
-                "probe": FieldMeta(kind="id", list_tool="get_hardware_probe")},
-        examples=({"recipe_id": "qwen2.5-0.5b-instruct-rk3588-gguf-q4_k_m"},),
+                "probe": FieldMeta(kind="id", list_tool="get_hardware_probe"),
+                # the variables: checked by the service against the recipe's target (no target among the arguments)
+                "model": fields["model"], "revision": fields["revision"],
+                "format": FieldMeta(list_tool="get_target_capabilities"),
+                "board": FieldMeta(list_tool="get_target_capabilities"),
+                "quantization": FieldMeta(list_tool="get_target_capabilities"),
+                "own_dataset_path": fields["dataset_path"]},
+        examples=({"recipe_id": "qwen2.5-0.5b-instruct-rk3588-gguf-q4_k_m"},
+                  {"recipe_id": "qwen2.5-0.5b-instruct-rk3588-gguf-q4_k_m", "quantization": "Q8_0"}),
         grant=GrantRule(rule=BUILD_RULE, facts=build_grant_facts,
                         warning="build community recipes on shipped or verified targets (safetensors or GGUF "
                                 "weights of ungated Hugging Face models with a permissive licence; no image from "

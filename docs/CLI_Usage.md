@@ -544,6 +544,7 @@ target install.
 
 ```
 llm-cli build start -m MODEL -t TARGET [options]
+llm-cli build start --recipe ID [options]
 ```
 
 Converts and quantizes a model for a target in Docker. The request is checked by the build service first, the same
@@ -554,8 +555,9 @@ target's defaults. A target without a capabilities block is built unchecked.
 
 | Option | Meaning |
 |---|---|
-| `-m, --model TEXT` | **Required.** Hugging Face ID (e.g. `HuggingFaceTB/SmolLM2-135M-Instruct`) or a local folder or file. |
-| `-t, --target TEXT` | **Required.** Target id as listed by `targets list`, e.g. `Rockchip`, or the target's folder name. Not case-sensitive. An unknown target stops with exit code 2 and the list of known targets. |
+| `--recipe ID` | Build with an installed community recipe (`zoo list --kind recipe`) as a target template: its target holds the build code, and every option you leave out takes the recipe's value (the model at the recipe's commit, format, board, quantization, importance matrix; the context length is always the recipe's). `--model`, `--format`, `--board`, `--quantization`, `--imatrix/--no-imatrix` and `--dataset/--no-dataset` change a value; `--target` may only name the recipe's target. A revoked or unreadable recipe stops with exit code 2. |
+| `-m, --model TEXT` | **Required** without `--recipe`. Hugging Face ID (e.g. `HuggingFaceTB/SmolLM2-135M-Instruct`) or a local folder or file. |
+| `-t, --target TEXT` | **Required** without `--recipe`. Target id as listed by `targets list`, e.g. `Rockchip`, or the target's folder name. Not case-sensitive. An unknown target stops with exit code 2 and the list of known targets. |
 | `-f, --format FORMAT` | Output format (default `gguf`): one the target builds, as its `target.yml` capabilities declare it (the formats the Builder tab offers for it). `--help` and the shell completion list what each installed target builds (Rockchip: `gguf`, `rkllm`, `rknn`). A target without capabilities takes any format but `hf`, unchecked. A format the target does not build stops with exit code 2 and names what each installed target builds. Not case-sensitive. |
 | `-b, --board TEXT` | Board of the target family, e.g. `rk3588`, `rk3576`, `rk3566`. Default: the target's default board (Rockchip: `rk3588`). Not case-sensitive. |
 | `-q, --quantization TEXT` | Quantization, e.g. `Q4_K_M`, `IQ4_XS`, `F16` (GGUF), `w8a8`, `w4a16` (RKLLM), `fp16`, `i8` (RKNN). Default: the format's default for the board. Common spellings such as `INT8` are translated. |
@@ -624,6 +626,14 @@ Behaviour:
   board's NPU driver below what the format needs) starts nothing unless you override it; warnings (a newer CUDA
   minor version, no NVIDIA GPU, a board runtime older than the toolkit) are printed and kept in the build's
   warnings, and the build starts.
+- With `--recipe` the command first prints the recipe (author, model and commit, model licence, context length),
+  what you changed from it, its reference results (artifact, sha256, framework version, toolchain image, a device
+  test) and, when the installed target's files differ from the ones the recipe was made with, a warning. A `--dataset`
+  file with the sha256 the recipe pins is the recipe's own; any other file is yours (the variable `dataset`). A recipe
+  that names a calibration file needs `--dataset` or `--no-dataset`. A build that changes nothing on the recipe's own
+  target is compared with the reference when it ends: `build_info.json` records the recipe, the changed variables and
+  `reproduced` (true or false; null when there was nothing to compare), and a differing result is a warning naming
+  both framework versions and toolchain images.
 
 In the GUI: the **Builder** tab: model, target (**Targets...** shows every target), format (exactly the formats the
 target declares, the list `--format` takes for it; a target without capabilities offers every format, with the note
@@ -649,6 +659,9 @@ llm-cli build start -m ./detector.onnx -t Rockchip -f rknn -b rk3588 -q i8 --dat
 
 # Results into a folder of your choice
 llm-cli build start -m ./my-model -t Rockchip -o ./builds -F
+
+# A community recipe as a template: its target and values, another quantization
+llm-cli build start --recipe smollm2-135m-instruct-rk3588-gguf-q4_k_m -q Q8_0 -F
 ```
 
 ### build preflight
@@ -2978,7 +2991,7 @@ packs to it. Its contribution workflow, its signed index and the maintainer's ke
 stops with a message, and packs are also shared as files (`zoo install --file`).
 
 AI clients and Ditto use the same zoo through the tools `list_packs`, `add_pack_from_index` (signed index only,
-always asked), `start_recipe_build` (an installed recipe, exactly as pinned, with the question of `start_build`)
+always asked), `start_recipe_build` (an installed recipe as a template: its values or the client's changes, with the question of `start_build`)
 and `export_pack` (to a local file, always asked); they cannot install a pack from a file, open a pull
 request or create your keys ([details](Features.md#packs-for-ai-clients)).
 
@@ -3120,7 +3133,9 @@ passphrase field and the sender key files); the summary asks with "No" as the de
 
 A recipe needs its target: install the target first, so the recipe is also checked against the target's
 capabilities (without the target, the summary only notes that it is missing). "Build" on an installed recipe in
-the Community Hub fills in the Builder, including the model's pinned commit.
+the Community Hub fills in the Builder, including the model's pinned commit; every field stays yours to change (the
+recipe is a target template, kept while its target is selected), and `build start --recipe ID` does the same at the
+command line.
 
 ### zoo verify
 
@@ -3429,6 +3444,7 @@ llm-cli models take-over
   `configs/community_keys.yml` lists no key): `zoo list` shows only installed packs, and `zoo install <id>` stops
   with a message. Packs can be shared as files.
 - `build start` has no option for a model commit: the pinned commit of a recipe is used when the Builder is filled
-  from the Community Hub, or when an AI client passes `revision` to the MCP tool `start_build`.
+  from the Community Hub, with `build start --recipe`, or when an AI client passes `revision` to the MCP tool
+  `start_build`.
 - There is no CLI command for Deep Ingest (adding documentation pages to the knowledge base); it runs in the GUI's
   module wizard (**Tools > Create Hardware Module...**).

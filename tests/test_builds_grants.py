@@ -7,7 +7,8 @@
   a build of the target with exactly that image; a tag never does.
 - Calls under a standing approval leave the larger disk reserve (20 GiB or 10 %), checked inside the cross-process
   reservation ledger under its lock, for start_build, download_hf_file and add_pack_from_index.
-- start_recipe_build builds an installed recipe exactly as pinned, through start_build's two-phase path.
+- start_recipe_build builds with an installed recipe as a target template (its values, or the caller's changes),
+  through start_build's two-phase path.
 - lcf://packs/index mirrors list_packs; run_benchmark runs the very file it hashed; the gh/git runner of
   submit_contribution never reads stdin.
 """
@@ -390,6 +391,29 @@ def test_a_recipe_that_names_a_dataset_needs_exactly_that_file(recipes, monkeypa
     with pytest.raises(Exception) as e:
         recipes.service.check_recipe_dataset(with_dataset("demo-recipe")[0], str(other))
     assert "sha256 differs" in str(e.value)
+
+
+def test_a_recipe_is_a_template_its_values_are_variables(recipes):
+    """Recipes as target templates: the caller changes a value, the question says what changed and shows the recipe's
+    reference, and the build carries the recipe record with the changed variable."""
+    install_recipe(recipes)
+    _, shown = ask(recipes, "start_recipe_build", {"recipe_id": "demo-recipe", "quantization": "Q8_0"})
+    assert "Changed from the recipe: quantization" in shown[0]
+    assert "Recipe reference (from the recipe pack, not checked): Qwen3.5-2B-w8a8.rkllm" in shown[0]
+    request = recipes.orch.requests[-1]
+    assert request.quantization_options == ["Q8_0"] and request.model_revision == COMMIT
+    assert request.recipe["id"] == "demo-recipe" and request.recipe["changed"] == ["quantization"]
+    _, shown = ask(recipes, "start_recipe_build", {"recipe_id": "demo-recipe"})
+    assert "Changed from the recipe: nothing: built as the recipe pins it" in shown[0]
+    assert recipes.orch.requests[-1].recipe["changed"] == []
+
+
+def test_a_recipe_build_names_its_own_dataset_apart_from_the_recipes(recipes):
+    install_recipe(recipes)
+    with pytest.raises(ToolError) as e:
+        ask(recipes, "start_recipe_build", {"recipe_id": "demo-recipe", "dataset_path": "datasets:a.txt",
+                                            "own_dataset_path": "datasets:b.txt"})
+    assert e.value.field in ("own_dataset_path", "dataset_path") and recipes.orch.requests == []
 
 
 def test_a_recipe_changed_after_the_question_is_not_built(recipes):

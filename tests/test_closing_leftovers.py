@@ -801,8 +801,11 @@ class TestRecipeDataset:
         request = SimpleNamespace(model="m", revision="c" * 40, dataset_path=str(ds))
         service = BuildService.__new__(BuildService)
         validated = SimpleNamespace(dataset_path=str(ds), target="t", format="gguf", board="b", quantization="q")
-        monkeypatch.setattr(service, "recipe_request", lambda rid, dataset_path, use_gpu: (request, recipe, None),
+        monkeypatch.setattr(service, "recipe_request", lambda rid, dataset_path, use_gpu, **kw: (request, recipe, None),
                             raising=False)
+        # a stand-in recipe: nothing changed, an empty record (the record itself: tests/test_recipe_templates.py)
+        monkeypatch.setattr(service, "recipe_changes", lambda *a, **k: [], raising=False)
+        monkeypatch.setattr(service, "recipe_record", lambda *a, **k: {}, raising=False)
         monkeypatch.setattr(service, "_validated", lambda req, local: (validated, None), raising=False)
         seen = {}
         monkeypatch.setattr(service, "start_build", lambda req, **kw: seen.update(kw) or "handle", raising=False)

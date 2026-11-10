@@ -1111,27 +1111,126 @@ class BuildService:
         return recipe, prov
 
     def recipe_request(self, recipe_id: str, dataset_path: Optional[str] = None,
-                       use_gpu: bool = False) -> Tuple[BuildRequestIn, Any, Any]:
-        """The build request an installed recipe pins: its model at its commit, target, format, board, quantization,
-        importance matrix and context length. A calibration dataset is taken only when the recipe names one (and
-        then it is required). Returns (request, recipe, provenance)."""
+                       use_gpu: bool = False, choices: Any = None) -> Tuple[BuildRequestIn, Any, Any]:
+        """The build request of an installed recipe as a target template (DESIGN "Community, recipes and packs"): the
+        recipe's model at its commit, target, format, board, quantization, importance matrix and context length, with
+        the person's `choices` (schemas.recipes.RecipeChoices) in place of any of them. A variable left out takes the
+        recipe's value, never a build default (the context length is always the recipe's: tuned to the board's memory); a changed format takes the target's default quantization and the build
+        defaults' importance matrix unless they are chosen too (the recipe chose them for its own format); the recipe's
+        commit belongs to its own model only. `dataset_path` is the recipe's own calibration file (required when it
+        names one, refused when it names none, its sha256 checked later); `choices.own_dataset_path` is the person's
+        own file instead ("" for none). Returns (request, recipe, provenance)."""
+        from orchestrator.schemas.recipes import RecipeChoices
         recipe, prov = self.installed_recipe(recipe_id)
-        named = recipe.options.dataset
-        if named is not None and not dataset_path:
+        choices = choices if choices is not None else RecipeChoices()
+        named, own = recipe.options.dataset, choices.own_dataset_path
+        if own is not None and dataset_path:
+            raise BuildServiceError("Give either the recipe's calibration file or a file of your own, not both.",
+                                    code="invalid_value", field="own_dataset_path",
+                                    next="Leave dataset_path out when own_dataset_path names your own file.")
+        if own is None and named is not None and not dataset_path:
             raise BuildServiceError(f"The recipe {recipe.id} was calibrated with {named.name} (sha256 "
                                     f"{named.sha256[:16]}...); give that file as dataset_path.",
                                     code="missing_argument", field="dataset_path",
-                                    next="Call list_local_files with kind dataset and pass its reference.")
+                                    next="Call list_local_files with kind dataset and pass its reference, or name "
+                                         "a file of your own as own_dataset_path (\"\" for none).")
         if named is None and dataset_path:
             raise BuildServiceError(f"The recipe {recipe.id} names no calibration dataset; leave dataset_path out.",
                                     code="invalid_value", field="dataset_path",
-                                    next="Call start_recipe_build without dataset_path.")
-        request = BuildRequestIn(model=recipe.model.repo, revision=recipe.model.revision, target=recipe.target.id,
-                                 format=recipe.format, board=recipe.board, quantization=recipe.quantization,
+                                    next="Call start_recipe_build without dataset_path, or name your own file as "
+                                         "own_dataset_path.")
+        model = choices.model or recipe.model.repo
+        own_model = model.casefold() == recipe.model.repo.casefold()
+        revision = choices.revision or (recipe.model.revision if own_model else None)
+        fmt = choices.format or recipe.format
+        new_format = fmt.strip().casefold() != recipe.format.casefold()
+        quantization = choices.quantization if choices.quantization is not None else \
+            (None if new_format else recipe.quantization)
+        use_imatrix = choices.use_imatrix if choices.use_imatrix is not None else \
+            (None if new_format else bool(recipe.options.use_imatrix))
+        board = choices.board if choices.board is not None else recipe.board
+        request = BuildRequestIn(model=model, revision=revision, target=recipe.target.id, format=fmt,
+                                 board=board or None, quantization=quantization or None, use_imatrix=use_imatrix,
                                  # "" when the recipe names no dataset: a recipe never takes the person's default
-                                 use_imatrix=bool(recipe.options.use_imatrix), dataset_path=dataset_path or "",
+                                 dataset_path=(own if own is not None else dataset_path) or "",
                                  use_gpu=bool(use_gpu), max_context_length=recipe.options.max_context_length)
         return request, recipe, prov
+
+    def recipe_pins(self, recipe) -> Tuple[str, Optional[str], Optional[str]]:
+        """(format, board, quantization) a recipe builds with, normalized as a request is (the board the scripts use
+        when it names none, the board's default type); its own spelling when its target has no capabilities."""
+        try:
+            caps = self._targets().get_capabilities(self.resolve_target(recipe.target.id))
+        except Exception:  # noqa: BLE001 - an unknown target is refused by the request's own check
+            caps = None
+        if caps is None:
+            return recipe.format, recipe.board, recipe.quantization
+        return caps.normalize(recipe.format, recipe.board, recipe.quantization)
+
+    def recipe_changes(self, recipe, validated: BuildRequestIn, choices: Any = None) -> List[str]:
+        """The variables (schemas.recipes.RECIPE_VARIABLES) whose value in the checked request is not the recipe's:
+        the model (another repo or commit), format, board, quantization, importance matrix, and the calibration file
+        when it is the person's own."""
+        fmt, board, quant = self.recipe_pins(recipe)
+        same = lambda a, b: str(a or "").casefold() == str(b or "").casefold()  # noqa: E731
+        changed = []
+        if not same(validated.model, recipe.model.repo) or not same(validated.revision, recipe.model.revision):
+            changed.append("model")
+        for name, now, pin in (("format", validated.format, fmt), ("board", validated.board, board),
+                               ("quantization", validated.quantization, quant)):
+            if not same(now, pin):
+                changed.append(name)
+        if bool(validated.use_imatrix) != bool(recipe.options.use_imatrix):
+            changed.append("use_imatrix")
+        own = getattr(choices, "own_dataset_path", None)
+        if own is not None and (own or recipe.options.dataset is not None):
+            changed.append("dataset")
+        return changed
+
+    def recipe_target_note(self, recipe) -> str:
+        """Empty when the installed target is exactly the one the recipe names (its content digest); otherwise the
+        warning every path shows before a recipe build: the result may differ from the recipe's reference. Never a
+        refusal (a target is fixed and improved over time; the person chose the one installed)."""
+        try:
+            from orchestrator.Core.community_manager import same_content
+            tm = self._targets()
+            folder = tm.folder_of(self.resolve_target(recipe.target.id)) if hasattr(tm, "folder_of") else None
+            if folder is None or same_content(Path(folder), recipe.target.pack_sha256):
+                return ""
+        except Exception:  # noqa: BLE001 - a folder that cannot be read: said as differing
+            pass
+        version = f" version {recipe.target.pack_version}" if recipe.target.pack_version else ""
+        return (f"The installed target's files differ from the ones the recipe {recipe.id} was made with "
+                f"({recipe.target.id}{version}); the result may differ from the recipe's reference.")
+
+    @staticmethod
+    def recipe_reference_lines(recipe) -> List[str]:
+        """The recipe's reference results as lines for the person (the Builder log, `build start`, the start question):
+        the artifact, the framework version and toolchain image it was made with, and a device test."""
+        lines = []
+        for result in recipe.results:
+            a = result.artifact
+            line = (f"{a.file}, {a.size} bytes, sha256 {a.sha256[:16]}..., framework {result.lcf_version}"
+                    + (f", toolchain image {result.toolchain_image[-19:]}" if result.toolchain_image else ""))
+            test = result.device_test
+            if test is not None:
+                line += (f"; on {test.board_model} with {test.runtime}: "
+                         + (f"{test.tokens_per_s:g} tokens/s, " if test.tokens_per_s is not None else "")
+                         + (f"{test.ram_mb} MB RAM, " if test.ram_mb is not None else "")
+                         + ("smoke test passed" if test.smoke_passed else "smoke test failed"))
+            lines.append(line)
+        return lines
+
+    @staticmethod
+    def recipe_record(recipe, changed: List[str]) -> Dict[str, Any]:
+        """What a recipe build carries to the build engine (BuildRequest.recipe, BuildConfiguration.recipe): the
+        recipe, the variables changed, the target pin and the reference results, for build_info.json's `recipe`."""
+        return {"id": recipe.id, "sha256": BuildService.recipe_digest(recipe), "author": recipe.author,
+                "changed": list(changed), "target_sha256": recipe.target.pack_sha256,
+                "target_version": recipe.target.pack_version,
+                "results": [{"file": r.artifact.file, "size": r.artifact.size, "sha256": r.artifact.sha256,
+                             "lcf_version": r.lcf_version, "toolchain_image": r.toolchain_image}
+                            for r in recipe.results]}
 
     @staticmethod
     def recipe_digest(recipe) -> str:
@@ -1159,14 +1258,17 @@ class BuildService:
     def start_recipe(self, recipe_id: str, *, dataset_path: Optional[str] = None, use_gpu: bool = False,
                      owner: str = "", local_paths: bool = False, disk_reservation: str = "",
                      expect: Optional[Dict[str, Any]] = None, probe: Optional[str] = None,
-                     **build_options: Any) -> BuildHandle:
-        """Builds an installed recipe exactly as pinned, through start_build: the use-time revocation check, the
-        calibration-dataset pin. `expect`: the request values the person was shown (model, revision, target, format,
-        board, quantization, recipe_sha256); a recipe changed since is refused. `probe`: the board's hardware probe the
-        caller named (BuildRequestIn.probe; a recipe pins none), checked like start_build's; without one the board's
-        newest stored probe. `build_options`: start_build's optimization, priority, output_dir, parallel_builds and
-        description (the Builder tab's)."""
-        request, recipe, _prov = self.recipe_request(recipe_id, dataset_path, use_gpu)
+                     choices: Any = None, **build_options: Any) -> BuildHandle:
+        """Builds an installed recipe as a target template, through start_build: the one path of every recipe build
+        (the Builder, `build start --recipe`, start_recipe_build). The use-time revocation check, the person's
+        `choices` (schemas.recipes.RecipeChoices; recipe_request), the calibration-dataset pin when the recipe's own
+        file is used, and the recipe record the build engine compares the result with (recipe_record). `expect`: the
+        request values the person was shown (model, revision, target, format, board, quantization, recipe_sha256); a
+        recipe changed since is refused. `probe`: the board's hardware probe the caller named (BuildRequestIn.probe; a
+        recipe pins none), checked like start_build's; without one the board's newest stored probe. `build_options`:
+        start_build's optimization, priority, output_dir, parallel_builds, description and its pre-flight and flag
+        answers."""
+        request, recipe, _prov = self.recipe_request(recipe_id, dataset_path, use_gpu, choices=choices)
         if probe:
             request = request.model_copy(update={"probe": probe})
         validated, _ = self._validated(request, local_paths)
@@ -1180,12 +1282,16 @@ class BuildService:
                 raise BuildServiceError(f"The recipe {recipe.id} changed after the question ({', '.join(changed)}); "
                                         "nothing was started.", code="failed",
                                         next="Call start_recipe_build again; the person is asked again.")
-        self.check_recipe_dataset(recipe, validated.dataset_path)
+        own_dataset = getattr(choices, "own_dataset_path", None) is not None
+        if not own_dataset:
+            self.check_recipe_dataset(recipe, validated.dataset_path)
         # checked now for an early answer; the build engine checks the bytes it uses again (a copy in its own folder
         # with exactly the pinned sha256), so a file swapped after this check is never used
         named = recipe.options.dataset
+        record = self.recipe_record(recipe, self.recipe_changes(recipe, validated, choices))
         return self.start_build(request, local_paths=local_paths, owner=owner, disk_reservation=disk_reservation,
-                                dataset_sha256=named.sha256 if named is not None else None, **build_options)
+                                dataset_sha256=named.sha256 if named is not None and not own_dataset else None,
+                                recipe=record, **build_options)
 
     # --- the board's optimization profile (Core/board_profiles.py) ----------------------------------------------
 
@@ -1544,7 +1650,8 @@ class BuildService:
                     output_dir: Optional[str] = None, parallel_builds: bool = False,
                     description: str = "Build service request", flag_decision: Optional[str] = None,
                     remember_flags: bool = False, flag_channel: str = "", ignore_preflight: bool = False,
-                    preflight_accepted: Optional[List[str]] = None) -> BuildHandle:
+                    preflight_accepted: Optional[List[str]] = None,
+                    recipe: Optional[Dict[str, Any]] = None) -> BuildHandle:
         """Validates and queues a build: the one build-submission path of the CLI, the GUI and AI callers. `owner` is
         the tool caller that starts it (ToolContext.owner; empty for the person's own CLI and GUI, whose builds the
         queue limit for tool callers never refuses); `disk_reservation` the reservation an AI caller's accepted build
@@ -1558,7 +1665,8 @@ class BuildService:
         set, recorded with `flag_channel` (framework-cli or framework-gui). The pre-flight check runs after the
         request's checks (_preflight_gate): a stop refuses the build with PreflightStopped unless the person overrides it
         (`ignore_preflight`, their own callers only) or, for an AI caller, the person accepted exactly these stops in
-        the start question (`preflight_accepted`)."""
+        the start question (`preflight_accepted`). `recipe`: start_recipe's recipe record (recipe_record), which the
+        build engine compares the result with; a warning names a target whose files are not the recipe's."""
         try:
             level = OptimizationLevel(str(optimization).lower()) if optimization else None
         except ValueError:
@@ -1602,6 +1710,7 @@ class BuildService:
             disk_reservation=disk_reservation,
             flag_decision=flags,
             preflight_notes=notes,
+            recipe=dict(recipe) if recipe else None,
         )
         if disk_reservation:
             self._orchestrator.disk_ledger = self.disk_ledger()

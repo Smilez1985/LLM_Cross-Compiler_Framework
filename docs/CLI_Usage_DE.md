@@ -558,6 +558,7 @@ nach der Installation eines Targets aus dem Community Hub.
 
 ```
 llm-cli build start -m MODELL -t TARGET [Optionen]
+llm-cli build start --recipe ID [Optionen]
 ```
 
 Konvertiert und quantisiert ein Modell für ein Target in Docker. Die Anfrage prüft zuerst der Build-Dienst, mit
@@ -569,8 +570,9 @@ Target ohne Capabilities-Block wird ungeprüft gebaut.
 
 | Option | Bedeutung |
 |---|---|
-| `-m, --model TEXT` | **Pflicht.** Hugging-Face-ID (z. B. `HuggingFaceTB/SmolLM2-135M-Instruct`) oder ein lokaler Ordner bzw. eine Datei. |
-| `-t, --target TEXT` | **Pflicht.** Target-ID, wie `targets list` sie zeigt, z. B. `Rockchip`, oder der Ordnername des Targets. Groß- und Kleinschreibung spielt keine Rolle. Ein unbekanntes Target stoppt mit Exit-Code 2 und der Liste der bekannten Targets. |
+| `--recipe ID` | Mit einem installierten Community-Rezept (`zoo list --kind recipe`) als Target-Vorlage bauen: Sein Target enthält den Build-Code, und jede Option, die du weglässt, nimmt den Wert des Rezepts (das Modell beim Commit des Rezepts, Format, Board, Quantisierung, Importance Matrix; die Kontextlänge ist immer die des Rezepts). `--model`, `--format`, `--board`, `--quantization`, `--imatrix/--no-imatrix` und `--dataset/--no-dataset` ändern einen Wert; `--target` darf nur das Target des Rezepts nennen. Ein widerrufenes oder unlesbares Rezept stoppt mit Exit-Code 2. |
+| `-m, --model TEXT` | **Pflicht** ohne `--recipe`. Hugging-Face-ID (z. B. `HuggingFaceTB/SmolLM2-135M-Instruct`) oder ein lokaler Ordner bzw. eine Datei. |
+| `-t, --target TEXT` | **Pflicht** ohne `--recipe`. Target-ID, wie `targets list` sie zeigt, z. B. `Rockchip`, oder der Ordnername des Targets. Groß- und Kleinschreibung spielt keine Rolle. Ein unbekanntes Target stoppt mit Exit-Code 2 und der Liste der bekannten Targets. |
 | `-f, --format FORMAT` | Ausgabeformat (Standard `gguf`): eines, das das Target baut, wie seine Capabilities in `target.yml` es angeben (die Formate, die der Builder-Tab dafür anbietet). `--help` und die Shell-Vervollständigung nennen, was jedes installierte Target baut (Rockchip: `gguf`, `rkllm`, `rknn`). Ein Target ohne Capabilities nimmt jedes Format außer `hf`, ungeprüft. Ein Format, das das Target nicht baut, stoppt mit Exit-Code 2 und nennt, was jedes installierte Target baut. Groß- und Kleinschreibung spielt keine Rolle. |
 | `-b, --board TEXT` | Board der Target-Familie, z. B. `rk3588`, `rk3576`, `rk3566`. Standard: das Standard-Board des Targets (Rockchip: `rk3588`). Groß- und Kleinschreibung spielt keine Rolle. |
 | `-q, --quantization TEXT` | Quantisierung, z. B. `Q4_K_M`, `IQ4_XS`, `F16` (GGUF), `w8a8`, `w4a16` (RKLLM), `fp16`, `i8` (RKNN). Standard: der Standard des Formats für das Board. Gängige Schreibweisen wie `INT8` werden übersetzt. |
@@ -646,6 +648,15 @@ Verhalten:
   startet nichts, wenn du ihn nicht übergehst; Warnungen (eine neuere CUDA-Nebenversion, keine NVIDIA-GPU, eine
   Runtime auf dem Board, die älter als das Toolkit ist) werden ausgegeben und in den Warnungen des Builds behalten,
   und der Build startet.
+- Mit `--recipe` gibt der Befehl zuerst das Rezept aus (Autor, Modell und Commit, Lizenz des Modells, Kontextlänge),
+  was du daran geändert hast, seine Referenzergebnisse (Artefakt, sha256, Framework-Version, Toolchain-Image, ein
+  Gerätetest) und eine Warnung, wenn die Dateien des installierten Targets von denen abweichen, mit denen das Rezept
+  entstand. Eine `--dataset`-Datei mit dem sha256, den das Rezept festlegt, ist die des Rezepts; jede andere Datei ist
+  deine (die Variable `dataset`). Ein Rezept, das eine Kalibrierdatei nennt, braucht `--dataset` oder `--no-dataset`.
+  Ein Build, der auf dem eigenen Target des Rezepts nichts ändert, wird an seinem Ende mit der Referenz verglichen:
+  `build_info.json` vermerkt das Rezept, die geänderten Variablen und `reproduced` (true oder false; null, wenn es
+  nichts zu vergleichen gab), und ein abweichendes Ergebnis ist eine Warnung, die beide Framework-Versionen und
+  Toolchain-Images nennt.
 
 In der GUI: der Tab **Builder**: Modell, Target (**Targets…** zeigt jedes Target), Format (genau die Formate, die das
 Target angibt, die Liste, die `--format` dafür nimmt; ein Target ohne Fähigkeiten bietet jedes Format, mit dem Hinweis,
@@ -671,6 +682,9 @@ llm-cli build start -m ./detector.onnx -t Rockchip -f rknn -b rk3588 -q i8 --dat
 
 # Ergebnisse in einen Ordner deiner Wahl
 llm-cli build start -m ./my-model -t Rockchip -o ./builds -F
+
+# Ein Community-Rezept als Vorlage: sein Target und seine Werte, eine andere Quantisierung
+llm-cli build start --recipe smollm2-135m-instruct-rk3588-gguf-q4_k_m -q Q8_0 -F
 ```
 
 ### build preflight
@@ -3118,8 +3132,8 @@ veröffentlicht: `community_index_url` bleibt leer, bis in diesem Repository der
 Installieren per ID bricht mit einer Meldung ab, und Pakete werden auch als Dateien geteilt (`zoo install --file`).
 
 KI-Clients und Ditto nutzen denselben Zoo über die Tools `list_packs`, `add_pack_from_index` (nur signierter Index,
-immer gefragt), `start_recipe_build` (ein installiertes Rezept, genau wie festgelegt, mit der Frage von
-`start_build`) und `export_pack` (in eine lokale Datei, immer gefragt); sie können kein Paket aus einer Datei
+immer gefragt), `start_recipe_build` (ein installiertes Rezept als Vorlage: seine Werte oder die Änderungen des Clients, mit der
+Frage von `start_build`) und `export_pack` (in eine lokale Datei, immer gefragt); sie können kein Paket aus einer Datei
 installieren, keinen Pull Request öffnen und deine Schlüssel nicht anlegen
 ([Details](Features_DE.md#packs-für-ki-clients)).
 
@@ -3267,7 +3281,9 @@ Vorgabe.
 
 Ein Rezept braucht sein Target: Installiere zuerst das Target, damit das Rezept auch gegen die Capabilities des
 Targets geprüft wird (ohne das Target vermerkt die Zusammenfassung nur, dass es fehlt). „Build“ bei einem
-installierten Rezept im Community Hub füllt den Builder aus, einschließlich des festgelegten Commits des Modells.
+installierten Rezept im Community Hub füllt den Builder aus, einschließlich des festgelegten Commits des Modells; jedes
+Feld bleibt deins (das Rezept ist eine Target-Vorlage und bleibt, solange sein Target gewählt ist), und
+`build start --recipe ID` tut dasselbe auf der Kommandozeile.
 
 ### zoo verify
 
@@ -3593,7 +3609,7 @@ llm-cli models take-over
   (`community_index_url` ist leer, `configs/community_keys.yml` enthält keinen Schlüssel): `zoo list` zeigt nur
   installierte Pakete, und `zoo install <ID>` bricht mit einer Meldung ab. Pakete lassen sich als Dateien teilen.
 - `build start` hat keine Option für einen Modell-Commit: Der festgelegte Commit eines Rezepts wird genutzt, wenn der
-  Builder aus dem Community Hub ausgefüllt wird oder wenn ein KI-Client dem MCP-Tool `start_build` eine `revision`
-  übergibt.
+  Builder aus dem Community Hub ausgefüllt wird, mit `build start --recipe` oder wenn ein KI-Client dem MCP-Tool
+  `start_build` eine `revision` übergibt.
 - Für Deep Ingest (Dokumentationsseiten zur Wissensbasis hinzufügen) gibt es keinen CLI-Befehl; es läuft im
   Modul-Assistenten der GUI (**Tools > Create Hardware Module...**).

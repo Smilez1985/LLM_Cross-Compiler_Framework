@@ -262,6 +262,9 @@ class BuildConfiguration:
     # The person's decision on the module's CMake options outside the allowlist (Core/module_flags.FlagDecision
     # .as_dict): its variables go into the build container (_execute_build_modules)
     module_flags: Optional[Dict[str, Any]] = None
+    # A recipe build (BuildService.recipe_record): compared with the target the build uses (_record_target) and with
+    # the result (_recipe_outcome), written into build_info.json as "recipe"
+    recipe: Optional[Dict[str, Any]] = None
     # Who started it through a tool (BuildRequest.owner: "mcp#<session>", "ditto"; empty for the GUI and the CLI):
     # an AI-started build stops at the soft cap (_step_limits)
     owner: str = ""
@@ -1059,12 +1062,56 @@ class BuildEngine:
             config.target_pack_sha256 = installed_digest(target_path)
         except (PackError, OSError) as e:
             progress.add_warning(f"Target fingerprint not recorded, so this build cannot become a recipe: {e}")
+        if getattr(config, "recipe", None):
+            self._compare_recipe_target(config, progress, target_path)
         try:
             meta = yaml.safe_load((target_path / "target.yml").read_text(encoding="utf-8")) or {}
             version = (meta.get("metadata") or {}).get("version")
             config.target_version = str(version) if version else None
         except (OSError, yaml.YAMLError, AttributeError):
             config.target_version = None
+
+    @staticmethod
+    def _compare_recipe_target(config: BuildConfiguration, progress: BuildProgress, target_path: Path) -> None:
+        """A recipe build: whether the target folder holds the content the recipe names (community_manager.same_content,
+        the rule of every recipe check). A different target is a warning, never a refusal."""
+        from orchestrator.Core.community_manager import same_content
+        from orchestrator.Core.community_pack import PackError
+        try:
+            same = same_content(target_path, config.recipe.get("target_sha256"))
+        except (PackError, OSError):
+            same = False
+        config.recipe["target"] = "same" if same else "different"
+        if not same:
+            version = config.recipe.get("target_version")
+            progress.add_warning(f"The installed target's files differ from the ones the recipe "
+                                 f"{config.recipe.get('id')} was made with ({config.target_arch}"
+                                 f"{f' version {version}' if version else ''}); the result may differ from the "
+                                 "recipe's reference.")
+
+    @staticmethod
+    def _recipe_outcome(config: BuildConfiguration, primary: Optional[Dict[str, Any]],
+                        progress: Optional[BuildProgress]) -> Dict[str, Any]:
+        """build_info.json's "recipe" of a recipe build: id, digest, author, the changed variables, the target (same or
+        different) and `reproduced`: after a build that changed no variable on the recipe's target, whether the primary
+        artifact's sha256 is one of the recipe's reference results (a warning names both framework versions and
+        toolchain images when it is not); None when there is nothing to compare."""
+        recipe = config.recipe or {}
+        results = [r for r in recipe.get("results") or [] if isinstance(r, dict)]
+        reproduced: Optional[bool] = None
+        if not recipe.get("changed") and recipe.get("target") == "same" and results and primary is not None:
+            reproduced = any(digest_matches(primary["sha256"], r.get("sha256") or "") for r in results)
+            if not reproduced and progress is not None:
+                ref = results[0]
+                progress.add_warning(
+                    f"The build did not reproduce the recipe {recipe.get('id')}: {primary['file']} has sha256 "
+                    f"{primary['sha256'][:16]}..., the recipe's {ref.get('file')} {str(ref.get('sha256'))[:16]}... "
+                    f"(made with framework {ref.get('lcf_version')}, toolchain image "
+                    f"{ref.get('toolchain_image') or 'not recorded'}; this build: framework {__version__}, "
+                    f"toolchain image {config.toolchain_image or 'not recorded'}).")
+        return {"id": recipe.get("id"), "sha256": recipe.get("sha256"), "author": recipe.get("author"),
+                "changed": list(recipe.get("changed") or []), "target": recipe.get("target") or "unknown",
+                "reproduced": reproduced, "reference": [r.get("sha256") for r in results]}
 
     def _validate_build_config(self, config: BuildConfiguration):
         if not config.build_id or not config.model_source or not config.output_dir:
@@ -2764,6 +2811,9 @@ class BuildEngine:
             build_identity.MANIFEST_KEY: options,
             build_identity.DIGEST_KEY: build_identity.options_sha256(options),
         })
+        if getattr(config, "recipe", None):   # a recipe build: what was changed and whether the result reproduced the recipe's reference
+            info["recipe"] = self._recipe_outcome(config, next((a for a in artifacts if a["file"] == primary), None),
+                                                  progress)
         manifest_path.write_text(json.dumps(info, indent=2), encoding="utf-8")
         return info
 

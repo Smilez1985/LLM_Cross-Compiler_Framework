@@ -87,6 +87,25 @@ class RecipeResult(_Strict):
     reporter: Optional[str] = Field(default=None, max_length=64)
 
 
+# The variables of a recipe build (DESIGN "Community, recipes and packs"): what the person may pick in the build menu
+# instead of the recipe's value. The target is not one of them: it is the template itself, and neither is the context
+# length, which the recipe tuned to the board's memory like the target's build code.
+RECIPE_VARIABLES = ("model", "format", "board", "quantization", "use_imatrix", "dataset")
+
+
+class RecipeChoices(_Strict):
+    """The person's choices for a recipe build: every field left out (None) takes the recipe's value. `model` with
+    `revision` is another model (or another commit of the recipe's model); `own_dataset_path` is a calibration file of
+    the person's own instead of the recipe's ("" builds without one)."""
+    model: Optional[str] = Field(default=None, min_length=1, max_length=512)
+    revision: Optional[str] = Field(default=None, pattern=_COMMIT)
+    format: Optional[str] = Field(default=None, min_length=1, max_length=32)
+    board: Optional[str] = Field(default=None, max_length=64)
+    quantization: Optional[str] = Field(default=None, max_length=32)
+    use_imatrix: Optional[bool] = None
+    own_dataset_path: Optional[str] = Field(default=None, max_length=1024)
+
+
 class Recipe(_Strict):
     schema_version: Literal[1] = 1
     id: str = Field(pattern=_RECIPE_ID)

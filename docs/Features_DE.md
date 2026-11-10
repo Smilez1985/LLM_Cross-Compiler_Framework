@@ -1262,7 +1262,7 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `list_packs` | lesen | Community-Packs des signierten Index und die installierten mit Vertrauensstufe; Details, Prüfung installierter Packs ([Details](#packs-für-ki-clients)) |
 | `add_pack_from_index` | extern | Ein Wissens-, Target- oder Rezept-Pack aus dem signierten Index hinzufügen, als Job; immer gefragt mit der geprüften Zusammenfassung und jedem Basis-Image eines Target-Packs |
 | `export_pack` | lokal schreiben | Ein Target-, Rezept- oder Wissens-Pack in eine lokale Datei exportieren, mit deinem Schlüssel signiert; immer gefragt, nichts wird hochgeladen |
-| `start_recipe_build` | lokal schreiben | Ein installiertes Community-Rezept genau wie festgelegt bauen (Modell-Commit, Target, Format, Board, Quantisierung), mit der Frage und den Prüfungen von `start_build` |
+| `start_recipe_build` | lokal schreiben | Mit einem installierten Community-Rezept als Target-Vorlage bauen: sein Target und seine Werte (Modell-Commit, Format, Board, Quantisierung, Importance Matrix), wenn der Client sie nicht ändert, mit der Frage und den Prüfungen von `start_build` |
 | `crawl_docs_site` | lokal schreiben | Deep Ingest von 1 bis 5 öffentlichen Dokumentations-Websites in die Wissensbasis, als Job; immer gefragt mit jeder Startadresse, erst nachdem eine Person den Hinweis gelesen hat ([Details](#deep-ingest-durch-einen-ki-client)) |
 | `index_framework_docs` | lokal schreiben | Die eigene Dokumentation des Frameworks (mit `include_code` auch Code und Konfiguration) in die Wissensbasis aufnehmen, als Job; immer gefragt, vorher wird ein Snapshot angelegt; danach mit `search_knowledge`, Art `docs`, durchsuchen |
 | `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen); die Frage zeigt Commit, Größe, Speicherplatz und Hardware-Schätzung |
@@ -3632,8 +3632,17 @@ Es enthält keine Gewichte: Ein Rezept wird nachgebaut, nie als Modell herunterg
 - Bei der Installation wird ein Rezept gegen die Capabilities seines Targets geprüft, falls dieses Target installiert
   ist. Ein Hinweis sagt, wenn das Target fehlt oder deine Kopie von der abweicht, mit der das Rezept gebaut wurde.
 - **Build** bei einem installierten Rezept im Hub füllt den Builder aus (Modell in seinem gepinnten Commit, Target,
-  Format, Board, Quantisierung, Importance Matrix). Du prüfst die Einstellungen und startest den Build; ein Rezept
-  wird zu einer normalen Build-Anfrage.
+  Format, Board, Quantisierung, Importance Matrix). Ein Rezept ist eine Target-Vorlage: Sein Target enthält den
+  Build-Code, und jeden Wert kannst du vor dem Start ändern (Modell, Format, Board, Quantisierung, Importance Matrix,
+  Kalibrierdatei; die Kontextlänge bleibt die des Rezepts). Der Builder behält das Rezept, solange sein Target gewählt
+  ist, schreibt ins Log, was du geändert hast, und baut über denselben Weg wie `llm-cli build start --recipe ID` und das
+  Werkzeug `start_recipe_build`.
+- Der Builder nutzt alles, was ein Rezept enthält: Seine Werte bauen; seine Kalibrierdatei wird per sha256 geprüft,
+  wenn du die Datei des Rezepts nimmst (eine andere Datei ist deine eigene Wahl); der Digest seines Targets wird mit
+  deinem installierten Target verglichen (ein anderes Target ist eine Warnung, nie eine Ablehnung); seine
+  Referenzergebnisse werden gezeigt, und ein Build, der auf dem eigenen Target des Rezepts nichts ändert, wird an
+  seinem Ende mit ihnen verglichen (`build_info.json`: `recipe` mit den geänderten Variablen und `reproduced`; ein
+  abweichendes Ergebnis ist eine Warnung, die beide Framework-Versionen und Toolchain-Images nennt).
 
 ### Der signierte Index
 
@@ -3863,16 +3872,19 @@ signierten Index und verlassen diesen Rechner nur als lokale Datei, die du selbs
   höchstens 30 Tage angeboten. Eine Installation darunter muss die größere Speicherreserve einer dauerhaften Freigabe
   frei lassen (20 GiB oder 10 %), sonst wird gefragt. Jeder Import nimmt eine Reservierung (die doppelte Pack-Größe)
   im gemeinsamen Reservierungsbuch, die beim Start des Imports unter dessen Sperre erneut geprüft wird.
-- **`start_recipe_build`** (lokal schreiben): baut ein installiertes Rezept genau so, wie es festgelegt ist: sein
-  Hugging-Face-Modell beim Commit des Rezepts, Target, Format, Board, Quantisierung, Importance-Matrix und
-  Kontextlänge. Es geht denselben zweistufigen Weg wie `start_build` (die Frage zeigt das Rezept, ob das
+- **`start_recipe_build`** (lokal schreiben): baut mit einem installierten Rezept als Target-Vorlage: sein Target und
+  für jeden Wert, den der Client weglässt, den des Rezepts (sein Hugging-Face-Modell beim Commit des Rezepts, Format,
+  Board, Quantisierung, Importance-Matrix; die Kontextlänge ist immer die des Rezepts). `model`, `revision`,
+  `format`, `board`, `quantization`, `use_imatrix` und `own_dataset_path` ändern einen Wert; die Frage listet, was
+  geändert ist („nichts“ für das Rezept wie festgelegt, dessen Ergebnis mit seiner Referenz verglichen wird), und die
+  Referenzergebnisse des Rezepts. Es geht denselben zweistufigen Weg wie `start_build` (die Frage zeigt das Rezept, ob das
   installierte Target das ist, mit dem das Rezept entstand, seine Importance-Matrix und Kontextlänge, den Commit,
   die Downloadgröße, das Laufwerk, die
   Hardware-Schätzung, Lizenz, Zugangsbeschränkung und Image-Build; dieselbe Speicherreservierung und dieselben
   Kontingente). `probe` nennt die Hardware-Probe des Boards wie bei `start_build` (vor der Frage geprüft; ohne sie
-  die neueste gespeicherte Probe eines Boards des SoC des Rezepts). `dataset_path` nur, wenn das Rezept einen
-  Kalibrierungsdatensatz nennt, und dann muss es genau diese
-  Datei sein (sha256): Der Build kopiert die Datei in seinen eigenen Ordner, während er sie hasht, und benutzt nur
+  die neueste gespeicherte Probe eines Boards des SoC des Rezepts). `dataset_path` nur für die eigene
+  Kalibrierdatei des Rezepts, und dann muss es genau diese
+  Datei sein (sha256; eine eigene Datei des Clients ist `own_dataset_path`): Der Build kopiert die Datei in seinen eigenen Ordner, während er sie hasht, und benutzt nur
   diese Kopie, sodass eine nach der Frage ausgetauschte Datei nie benutzt wird. Ein nach der Frage in irgendeinem
   Feld geändertes Rezept wird nicht gebaut. „Ja, und nicht mehr fragen“ hat den
   Umfang von `start_build`; ein unter einem Dauerauftrag installiertes Rezept ist erst abgedeckt, nachdem du einen

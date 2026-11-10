@@ -32,8 +32,8 @@ decisions it comes from.
 3.3.0 is released (see the changelog); what it left open is carried on here, with LoRA and large models after it.
 This version comes in this order: Ditto's context first, the board bundle next to it, then the gateway, voice and MCP
 on the board. The first hardware sets the priorities for the device runtime: RK3566 boards, NVIDIA RTX GPUs and the
-AMD Ryzen Z1 Extreme, on Windows and Linux. The recipes come first there; the rotation stage and the generic ARM64
-target follow right after them.
+AMD Ryzen Z1 Extreme, on Windows and Linux. The recipes as target templates are built; the rotation stage and the
+generic ARM64 target come next.
 
 ### Carried over from 3.1.0
 
@@ -147,7 +147,6 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 
 | Item | Status |
 |---|---|
-| **Recipes as target templates.** A target template holds the build code; model, quantization, format and deployment are variables you pick in the build menu, and the builder uses everything a recipe holds. Why: you are never bound to the choices of the person who made the template. | planned |
 | **Rotation stage before quantization** (SpinQuant, QuaRot), right after the recipes: rotations are baked into the weights before conversion and quantization, only where the target format supports them (a capability of the format, not a fixed step). Why: 4-bit models of the Llama family keep their quality on small boards. The slot is there: the stage runner runs a target's `modules/rotate_module.sh` between the convert and target stages; the algorithm is still to come. | planned |
 | **Generic ARM64 CPU target (GGUF)** with board defaults for the Raspberry Pi 4 and 5, right after the recipes. Why: Rockchip was only the start, and these boards need no vendor SDK. | planned |
 | **The Raspberry Pi AI Camera (IMX500)**: on Raspberry Pi targets, with the Raspberry Pi target modules, through Raspberry Pi's own stack (the kernel driver over I2C, the sensor's network firmware downloaded at every start, package `imx500-all`, and the RP2040 on the module through Raspberry Pi's SPI driver); on Rockchip boards a port of the imx500 driver, the firmware download and the RP2040 SPI driver to the Rockchip vendor kernel, whose feasibility is checked first; until then it is not usable there ([design](DESIGN.md#on-the-board-gateway-voice-and-mcp-planned)). | planned |

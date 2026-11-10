@@ -33,8 +33,8 @@ der Entscheidungen des Maintainers, aus der sie stammt.
 3.3.0 ist veröffentlicht (siehe Changelog); was es offen ließ, geht hier weiter, LoRA und große Modelle danach.
 Diese Version kommt in dieser Reihenfolge: zuerst Dittos Kontext, daneben das Board-Bündel, dann das Gateway,
 Sprache und MCP auf dem Board. Die erste Hardware setzt die Prioritäten für die Laufzeit auf dem Gerät:
-RK3566-Boards, NVIDIA-RTX-GPUs und der AMD Ryzen Z1 Extreme, unter Windows und Linux. Die Rezepte kommen dort
-zuerst; die Rotationsstufe und das allgemeine ARM64-Target folgen direkt danach.
+RK3566-Boards, NVIDIA-RTX-GPUs und der AMD Ryzen Z1 Extreme, unter Windows und Linux. Die Rezepte als
+Target-Vorlagen sind gebaut; die Rotationsstufe und das allgemeine ARM64-Target kommen als Nächstes.
 
 ### Aus 3.1.0 übernommen
 
@@ -149,7 +149,6 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
 
 | Punkt | Status |
 |---|---|
-| **Rezepte als Target-Vorlagen.** Eine Target-Vorlage enthält den Build-Code; Modell, Quantisierung, Format und Deployment sind Variablen, die du im Build-Menü wählst, und der Builder nutzt alles, was ein Rezept enthält. Warum: Du bist nie an die Wahl der Person gebunden, die die Vorlage gemacht hat. | geplant |
 | **Rotationsstufe vor der Quantisierung** (SpinQuant, QuaRot), direkt nach den Rezepten: Rotationen werden vor Konvertierung und Quantisierung in die Gewichte eingerechnet, nur wo das Zielformat sie unterstützt (eine Fähigkeit des Formats, kein fester Schritt). Warum: 4-Bit-Modelle der Llama-Familie behalten auf kleinen Boards ihre Qualität. Der Platz ist da: Der Stage-Runner führt das `modules/rotate_module.sh` eines Targets zwischen den Stufen convert und target aus; der Algorithmus kommt noch. | geplant |
 | **Allgemeines ARM64-CPU-Target (GGUF)** mit Board-Vorgaben für den Raspberry Pi 4 und 5, direkt nach den Rezepten. Warum: Rockchip war nur der Anfang, und diese Boards brauchen kein Hersteller-SDK. | geplant |
 | **Die Raspberry Pi AI Camera (IMX500)**: auf Raspberry-Pi-Targets, mit den Target-Modulen für Raspberry Pi, über den eigenen Stack von Raspberry Pi (der Kernel-Treiber über I2C, die Netzwerk-Firmware des Sensors bei jedem Start heruntergeladen, Paket `imx500-all`, und der RP2040 auf dem Modul über den SPI-Treiber von Raspberry Pi); auf Rockchip-Boards eine Portierung des imx500-Treibers, des Firmware-Downloads und des RP2040-SPI-Treibers auf den Rockchip-Herstellerkernel, deren Machbarkeit zuerst geprüft wird; bis dahin ist sie dort nicht nutzbar ([Design](DESIGN_DE.md#auf-dem-board-gateway-sprache-und-mcp-geplant)). | geplant |
