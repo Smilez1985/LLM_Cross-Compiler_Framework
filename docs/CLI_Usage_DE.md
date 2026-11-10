@@ -2328,34 +2328,49 @@ Neue Hardware-Targets. Die vollständige Anleitung: [Module_Developer_Guide_DE.m
 
 ```
 llm-cli module create [--name TEXT] [--arch aarch64|x86_64|armv7l|riscv64] [--sdk TEXT] [--probe DATEI]
+                      [--description TEXT] [--base-image IMAGE] [--packages TEXT] [--cpu-flags TEXT]
+                      [--cmake-flags TEXT] [--setup-commands DATEI] [--quantization-logic DATEI]
+                      [--knowledge-root URL]...
 ```
 
-Legt ein neues Target per Fragen an: Name, Architektur und SDK (wenn nicht als Option angegeben), dann
-Docker-Basis-Image (Standard `debian:bookworm-slim`), Beschreibung, Systempakete (Standard
-`build-essential, cmake, git`) und CPU-Flags, die das Modul nur als Hinweis vermerkt und nie anwendet. Jeder Wert wird geprüft, bevor Dateien geschrieben werden, der
-fertige Ordner muss die Target-Prüfungen bestehen
+Legt ein neues Target mit den Werten des Modul-Assistenten an, als Optionen; was fehlt, wird gefragt: Name,
+Architektur und SDK, dann Docker-Basis-Image (Standard `debian:bookworm-slim`), Beschreibung, Systempakete (Standard
+`build-essential, cmake, git`) und CPU-Flags. Mit `--probe` werden Name, Architektur und SDK wie im Assistenten aus
+der Probe vorgeschlagen und nicht gefragt. Jeder Wert wird geprüft, bevor Dateien geschrieben werden, der fertige
+Ordner muss die Target-Prüfungen bestehen
 ([Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md#91-was-die-prüfungen-verlangen)), und ein vorhandenes
-Target wird nie überschrieben.
+Target wird nie überschrieben. Das Target ist als ungetestet markiert, bis ein Lauf auf seinem Board es belegt.
 
 | Option | Bedeutung |
 |---|---|
-| `--name TEXT` | Name des neuen Targets. |
-| `--arch [aarch64\|x86_64\|armv7l\|riscv64]` | CPU-Architektur. |
-| `--sdk TEXT` | Besonderes SDK, z. B. `CUDA`, `RKNN` (Standard `None`). |
-| `--probe DATEI` | Hardware-Probe des Targets (das Profil, das [`scan --device`](#scan) schreibt). Der Block `runtime:` der neuen `target.yml` ist dann der Plan des Build-Rezepts für die llama.cpp-Laufzeit des Boards daraus; eine Datei, die kein Probe-Profil ist, wird abgelehnt, bevor etwas geschrieben wird. |
+| `--name TEXT` | Name des neuen Targets. Mit `--probe`: Standard ist der Board-Name der Probe, sonst ihr SoC oder ihre CPU, eindeutig unter den Targets. |
+| `--arch [aarch64\|x86_64\|armv7l\|riscv64]` | CPU-Architektur. Mit `--probe`: Standard ist die der Probe. |
+| `--sdk TEXT` | Besonderes SDK, z. B. `CUDA`, `RKNN` (Standard `None`; mit `--probe`: aus den Beschleunigern der Probe). |
+| `--probe DATEI` | Hardware-Probe des Targets (das Profil, das [`scan --device`](#scan) schreibt). Sie wird im Probe-Speicher abgelegt wie mit [`scan --import`](#scan) und im Assistenten (der Befehl nennt ihre Probe-ID), ihr SoC wird das Board des Targets (so findet die Probe das Target), und der Block `runtime:` der neuen `target.yml` ist der Plan des Build-Rezepts für die llama.cpp-Laufzeit des Boards daraus; eine Datei, die kein Probe-Profil ist, wird abgelehnt, bevor etwas geschrieben wird. |
+| `--description TEXT` | Beschreibung des Targets. |
+| `--base-image IMAGE` | Basis-Image des Build-Images. |
+| `--packages TEXT` | Systempakete, durch Kommas oder Leerzeichen getrennt. |
+| `--cpu-flags TEXT` | GCC-Flags für den Cross-Build des Board-Pakets (die Config-Stufe); der Plan aus der Probe des Boards kommt nach ihnen und gewinnt, wo er entscheidet. |
+| `--cmake-flags TEXT` | CMake-Optionen von llama.cpp für denselben Cross-Build, nach derselben Regel. |
+| `--setup-commands DATEI` | Befehle, die die Source-Stufe einmal vor dem Konvertieren ausführt (als Build-Benutzer ohne Rechte, ohne Netz). |
+| `--quantization-logic DATEI` | Die bash-`case`-Zweige der Convert-Stufe (`modules/convert_module.sh`). |
+| `--knowledge-root URL` | Die Seiten der Wissensbasis anhängen, die von dieser Adresse gecrawlt wurden (Datenschutz-Bereinigung angewendet); wiederholbar. Nur diese Seiten werden angehängt. |
 
 Das Target wird in den eingestellten Targets-Ordner geschrieben (Einstellung `targets_dir`; ein relativer Pfad
-gilt relativ zur Installation, nicht zum aktuellen Ordner). Seine `target.yml` hat einen Block `capabilities:` (Unterstützungsstufe `community`) mit dem Modulnamen als einzigem
-Board und GGUF als einzigem Format; trag dort deine echten Boards und Formate ein. Der Build sind die vier
-Stufenmodule (`source_module.sh`, `config_module.sh`, `convert_module.sh`, `target_module.sh`), die
-`modules/build.sh`, der Stage-Runner, den die Build-Engine startet, der Reihe nach ausführt; die nächsten Schritte des
-Befehls nennen die Stufen convert und target, in denen ein neues Target seine Umwandlung und Quantisierung ergänzt
-([Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md#6-die-stufen-des-builds)).
+gilt relativ zur Installation, nicht zum aktuellen Ordner). Seine `target.yml` hat einen Block `capabilities:`
+(Unterstützungsstufe `community`) mit dem Board der Probe (ohne Probe dem Modulnamen) als einzigem Board und GGUF als
+einzigem Format; trag dort deine echten Boards und Formate ein. Der Build sind die vier Stufenmodule
+(`source_module.sh`, `config_module.sh`, `convert_module.sh`, `target_module.sh`), die der Stage-Runner des Frameworks
+(`orchestrator/runtime_layer/runner.sh`) der Reihe nach ausführt; ein `modules/build.sh` eines Targets wird nicht
+genutzt. Die nächsten Schritte des Befehls nennen die Stufen convert und target, in denen ein neues Target seine
+Umwandlung und Quantisierung ergänzt ([Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md#6-die-stufen-des-builds)),
+und wie man es teilt ([`zoo export`](#zoo-export)).
 
 In der GUI: **Tools > Create Hardware Module...**: Name, Architektur, SDK und **Beschreibung** auf der Hardware-Seite,
-Basis-Image und Pakete auf der Docker-Seite, CPU- und CMake-Flags auf der Flags-Seite; der Standard-Import auf der
-ersten Seite liest eine Probe-Datei (`--probe`). Nach **Finish** wird das neue Target wie mit `targets
-validate` geprüft.
+Basis-Image und Pakete auf der Docker-Seite, CPU- und CMake-Flags, Quantisierungslogik und Einrichtungsbefehle auf der
+Flags-Seite, das Anhängen des Wissens und der Community-Export auf der letzten Seite; der Standard-Import auf der
+ersten Seite liest eine Probe-Datei (`--probe`). Nach **Finish** wird das neue Target wie mit `targets validate`
+geprüft.
 
 ### module generate-ai
 
@@ -2368,9 +2383,10 @@ Ditto schlägt ein Target-Modul aus einer Hardware-Probe-Datei vor (`target_hard
 `\u`-Escapes; erst nach deiner Bestätigung wird das Modul im
 eingestellten Targets-Ordner angelegt (und vom Modulgenerator erneut geprüft). Ditto nutzt die gespeicherte
 Anmeldung des Anbieters ([`llm-cli ditto login`](#ditto-login)); der Befehl fragt selbst nie nach einem Schlüssel.
-Weder `module create` noch `module generate-ai` hängt Seiten aus der Wissensbasis an; das ist eine Option auf der
-letzten Seite des GUI-Assistenten. Ist die Probe-Datei ein Probe-Profil, wird der Block `runtime:` des Moduls daraus
-geplant; die CPU- und CMake-Flags des Vorschlags stehen dort als Hinweistext und werden nie angewendet. Ditto ist
+`module generate-ai` hängt keine Seiten aus der Wissensbasis an; `module create --knowledge-root` und die letzte
+Seite des GUI-Assistenten tun es. Ist die Probe-Datei ein Probe-Profil, wird der Block `runtime:` des Moduls daraus
+geplant; die CPU- und CMake-Flags des Vorschlags gehen in die Config-Stufe für den Cross-Build des Board-Pakets, wo der
+Plan aus der Probe des Boards gewinnt. Ditto ist
 experimentell: Vor dem ersten Lauf an einem Terminal geht der Hinweis zu Ditto einmal auf stderr ([ditto](#ditto)).
 
 | Option | Bedeutung |

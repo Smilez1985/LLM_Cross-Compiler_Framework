@@ -31,6 +31,14 @@ CLI_PATHS: Dict[str, str] = {
     "module create --arch": "act_tools_module_wizard",
     "module create --sdk": "act_tools_module_wizard",
     "module create --probe": "act_tools_module_wizard",       # its intro page: import a probe file
+    "module create --description": "act_tools_module_wizard",   # the hardware page
+    "module create --base-image": "act_tools_module_wizard",    # the Docker page
+    "module create --packages": "act_tools_module_wizard",      # the Docker page
+    "module create --cpu-flags": "act_tools_module_wizard",     # the flags page
+    "module create --cmake-flags": "act_tools_module_wizard",   # the flags page
+    "module create --setup-commands": "act_tools_module_wizard",       # the flags page: build-time setup
+    "module create --quantization-logic": "act_tools_module_wizard",   # the flags page: quantization logic
+    "module create --knowledge-root": "act_tools_module_wizard",       # the last page: attach the crawled knowledge
     "module generate-ai": "act_tools_module_wizard",          # its intro page: the AI import (Ditto)
     "module generate-ai --provider": "act_tools_module_wizard",   # "for this analysis only" provider
     "module generate-ai --model": "act_tools_module_wizard",      # "for this analysis only" model

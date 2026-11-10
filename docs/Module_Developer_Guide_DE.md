@@ -121,16 +121,22 @@ Es gibt drei Wege; alle enden im selben Modulgenerator (`orchestrator/Core/modul
 - **GUI-Assistent:** **Tools > Create Hardware Module...** Lies die Probe-Datei mit dem Standard-Import (feste
   Auswertung) ein oder lass Ditto sie analysieren, füge auf Wunsch mit „Deep Ingest“ Dokumentationsseiten zur
   Wissensbasis hinzu, prüfe dann die Seiten für Hardware, Docker und Flags und bestätige die Zusammenfassung. Für
-  `aarch64`, `armv7l` und `riscv64` ergänzt der Assistent die passenden Cross-Compiler-Pakete. Die letzte Seite
+  Der Import schlägt den Modulnamen aus der Probe vor (ihr Board, sonst ihr SoC oder ihre CPU, eindeutig unter deinen
+  Targets) und das SDK aus ihren Beschleunigern; Flags schlägt er keine vor, denn das Build-Rezept plant sie aus der
+  Probe des Boards. Die Compiler des Cross-Builds des Board-Pakets kommen aus dem Dockerfile der Vorlage (GCC für die
+  Architektur des Moduls), nicht aus Paketen, die der Assistent ergänzt. Die letzte Seite
   („Zusammenfassung“) hat zwei Kästchen, beide standardmäßig aus: den Wissens-Schnappschuss
   ([Abschnitt 3.4](#34-was-der-generator-schreibt-und-was-du-ergänzt)) und „Export for community after creating“
   ([Abschnitt 9.2](#92-ein-target-für-die-community-exportieren)).
-- **CLI, interaktiv:** `llm-cli module create` fragt nach Name, Architektur (`aarch64`, `x86_64`, `armv7l`,
-  `riscv64`), SDK, Basis-Image, Beschreibung, Paketen und CPU-Flags (nur als Hinweis, siehe
-  [Abschnitt 3.4](#34-was-der-generator-schreibt-und-was-du-ergänzt)). Mit `--probe <Probe-Datei>` (dem Profil, das
-  `llm-cli scan --device` schreibt) wird der `runtime:`-Block des Moduls aus der Probe des Boards geplant; eine Datei,
-  die kein Probe-Profil ist, wird abgelehnt. Führe den Befehl im Installationsordner aus: Anders als die übrigen
-  Befehle löst er ein relatives `targets_dir` gegen den aktuellen Ordner auf.
+- **CLI:** `llm-cli module create` nimmt jeden Wert des Assistenten als Option (`--name`, `--arch`, `--sdk`,
+  `--description`, `--base-image`, `--packages`, `--cpu-flags`, `--cmake-flags`, `--setup-commands DATEI`,
+  `--quantization-logic DATEI`, `--knowledge-root URL`) und fragt nach Name, Architektur, SDK, Basis-Image,
+  Beschreibung, Paketen und CPU-Flags, wenn sie fehlen. Mit `--probe <Probe-Datei>` (dem Profil, das
+  `llm-cli scan --device` schreibt) wird die Probe im Probe-Speicher abgelegt, wie der Assistent sie ablegt (der Befehl
+  nennt ihre Probe-ID), Name, Architektur und SDK werden wie im Assistenten aus ihr vorgeschlagen, und der `runtime:`-Block des
+  Moduls wird aus ihr geplant; eine Datei, die kein Probe-Profil ist, wird abgelehnt. Die Flags gehen in die
+  Config-Stufe ([Abschnitt 3.4](#34-was-der-generator-schreibt-und-was-du-ergänzt)). Ein relatives `targets_dir`
+  gilt relativ zur Installation, wie bei den übrigen Befehlen.
 - **CLI mit Ditto:** `llm-cli module generate-ai target_hardware_config.txt` (auf Wunsch mit `--provider` und
   `--model` für diesen Lauf). Ditto liefert einen strukturierten Vorschlag (Architektur, SDK, Basis-Image, Pakete,
   CPU- und CMake-Flags, Einrichtungsbefehle, Quantisierungsblock). Ist die Wissensbasis eingeschaltet, zieht es
@@ -152,8 +158,9 @@ Vorlage ausgefüllt wird:
   der ausdrückliche Opt-in aus [Abschnitt 5.2](#52-cuda-in-der-gpu-vorlage); jedes andere `nvidia/cuda`-Image wird
   abgelehnt. Ein vorgebautes llama.cpp-Image wird ebenfalls abgelehnt.
 - **Pakete:** gültige Debian-Paketnamen. **Flags:** einfache Compiler- oder CMake-Optionen wie `-mcpu=cortex-a76`
-  oder `-DGGML_CUDA=ON`. Sie sind nur Hinweise: Das Modul vermerkt sie in seinem `runtime:`-Block, und kein Build
-  wendet sie je an. Die CMake-Flags dürfen keine Option von llama.cpp einschalten, die beim Bauen etwas herunterlädt
+  oder `-DGGML_CUDA=ON`. Die Config-Stufe nutzt sie für den Cross-Build des Board-Pakets, und der Plan aus der Probe
+  des Boards gewinnt, wo er entscheidet (siehe „Wo die Flags genutzt werden“ unten); der `runtime:`-Block hält sie
+  als Aufzeichnung fest. Die CMake-Flags dürfen keine Option von llama.cpp einschalten, die beim Bauen etwas herunterlädt
   (`-DLLAMA_USE_PREBUILT_UI=ON`, `-DLLAMA_CURL=ON`, `-DGGML_CUDA_CCCL_VERSION=...`,
   `-DFETCHCONTENT_FULLY_DISCONNECTED=OFF`) oder `llama-server` Unterprozesse gibt (`-DLLAMA_SUBPROCESS=ON`): Builds
   haben kein Netzwerk, und das Board-Paket eines von Hand übergebenen Hardware-Profils nimmt diese Flags. Sie werden
@@ -238,7 +245,7 @@ runtime:
   advisory:
     cpu_flags: -mcpu=cortex-a55
     cmake_flags: -DGGML_NEON=ON
-    note: "proposed in the module wizard or by an AI; never applied: ..."
+    note: "from the module wizard or an AI; a record here, not used by the device runtime ..."
 ```
 
 - **Woher die Probe kommt:** die im Assistenten eingelesene Probe-Datei, die Probe-Datei von `module generate-ai`
@@ -253,9 +260,12 @@ runtime:
 - **Eine Aufzeichnung, keine Eingabe:** Die Geräte-Laufzeit wird beim Bauen immer neu aus der eigenen Probe des
   Geräts geplant; ein geänderter Block, auch einer in einem Community-Paket, ändert also keinen Build. Der Block eines
   Pakets muss trotzdem zum Schema passen (`TargetRuntime` in `orchestrator/schemas/targets.py`).
-- **Flags sind nur Hinweise:** CPU- und CMake-Flags aus dem Assistenten oder aus Dittos Vorschlag bleiben unter
-  `advisory` lesbar und werden von keinem Build angewendet; `config_module.sh` nutzt sie nur für ein von Hand
-  angegebenes Hardware-Profil (Abschnitt [10](#10-was-die-stufenmodule-aus-version-1x-behalten-haben)).
+- **Wo die Flags genutzt werden:** CPU- und CMake-Flags aus dem Assistenten, aus `module create` oder aus Dittos
+  Vorschlag gehen in `config_module.sh`, das sie für den Cross-Build des Board-Pakets nutzt (die llama.cpp-Programme,
+  die die Target-Stufe für das Board baut): die CPU-Flags in den Compiler-Flags der Toolchain, die CMake-Flags in der
+  cmake-Zeile von llama.cpp. Der Plan aus der Probe des Boards kommt nach ihnen und gewinnt, wo er entscheidet
+  (`-march`, `GGML_CPU_ARM_ARCH`, die x86-Optionen, `GGML_NATIVE=OFF`). Im `runtime:`-Block sind sie nur eine
+  Aufzeichnung unter `advisory`: Die Geräte-Laufzeit wird aus der Probe des Geräts geplant und nutzt sie nicht.
 
 **Wissens-Schnappschuss (nur auf Wunsch).** Auf der letzten Seite des Assistenten ist das Kästchen „Attach the
 knowledge crawled for this target (Deep Ingest, privacy scrub applied)“ standardmäßig aus und lässt sich erst

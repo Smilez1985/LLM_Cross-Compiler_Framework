@@ -2228,32 +2228,47 @@ New hardware targets. The full guide: [Module_Developer_Guide.md](Module_Develop
 
 ```
 llm-cli module create [--name TEXT] [--arch aarch64|x86_64|armv7l|riscv64] [--sdk TEXT] [--probe FILE]
+                      [--description TEXT] [--base-image IMAGE] [--packages TEXT] [--cpu-flags TEXT]
+                      [--cmake-flags TEXT] [--setup-commands FILE] [--quantization-logic FILE]
+                      [--knowledge-root URL]...
 ```
 
-Creates a new target by asking questions: name, architecture and SDK (if not given as options), then base Docker
-image (default `debian:bookworm-slim`), description, system packages (default `build-essential, cmake, git`) and
-CPU flags, which the module keeps as advisory text and never applies. Every value is checked before files are written, the finished folder must pass the target
-validators ([Module Developer Guide](Module_Developer_Guide.md#91-what-the-validators-check)), and an existing
-target is never overwritten.
+Creates a new target with the values of the module wizard, as options; what is not given is asked: name,
+architecture and SDK, then base Docker image (default `debian:bookworm-slim`), description, system packages (default
+`build-essential, cmake, git`) and CPU flags. With `--probe`, name, architecture and SDK are proposed from the probe
+as in the wizard and not asked. Every value is checked before files are written, the finished folder must pass the
+target validators ([Module Developer Guide](Module_Developer_Guide.md#91-what-the-validators-check)), and an existing
+target is never overwritten. The target is marked untested until a run on its board proves it.
 
 | Option | Meaning |
 |---|---|
-| `--name TEXT` | Name of the new target. |
-| `--arch [aarch64\|x86_64\|armv7l\|riscv64]` | CPU architecture. |
-| `--sdk TEXT` | Special SDK, e.g. `CUDA`, `RKNN` (default `None`). |
-| `--probe FILE` | Hardware probe of the target (the profile [`scan --device`](#scan) writes). The `runtime:` block of the new `target.yml` is then the build recipe's plan for the board's llama.cpp runtime from it; a file that is not a probe profile is refused before anything is written. |
+| `--name TEXT` | Name of the new target. With `--probe`: default the probe's board name, else its SoC or CPU, made unique among the targets. |
+| `--arch [aarch64\|x86_64\|armv7l\|riscv64]` | CPU architecture. With `--probe`: default the probe's. |
+| `--sdk TEXT` | Special SDK, e.g. `CUDA`, `RKNN` (default `None`; with `--probe`: from the probe's accelerators). |
+| `--probe FILE` | Hardware probe of the target (the profile [`scan --device`](#scan) writes). It is stored in the probe store as with [`scan --import`](#scan) and the wizard (the command prints its probe id), its SoC becomes the target's board (so the probe finds the target), and the `runtime:` block of the new `target.yml` is the build recipe's plan for the board's llama.cpp runtime from it; a file that is not a probe profile is refused before anything is written. |
+| `--description TEXT` | Description of the target. |
+| `--base-image IMAGE` | Base image of the build image. |
+| `--packages TEXT` | System packages, separated by commas or spaces. |
+| `--cpu-flags TEXT` | GCC flags for the board package's cross build (the config stage); the plan from the board's probe comes after them and wins where it decides. |
+| `--cmake-flags TEXT` | CMake options of llama.cpp for the same cross build, under the same rule. |
+| `--setup-commands FILE` | Commands the source stage runs once before converting (as the unprivileged build user, without network). |
+| `--quantization-logic FILE` | The bash `case` branches of the convert stage (`modules/convert_module.sh`). |
+| `--knowledge-root URL` | Attach the knowledge base's pages crawled from this address (privacy scrub applied); repeatable. Only these pages are attached. |
 
 The target is written to the configured targets folder (setting `targets_dir`; a relative path is relative to the
-installation, not the current folder). Its `target.yml` has a `capabilities:` block (support level `community`) with the module name as the only board and
-GGUF as the only format; add your real boards and formats there. The build is the four stage modules
-(`source_module.sh`, `config_module.sh`, `convert_module.sh`, `target_module.sh`), which `modules/build.sh`, the
-stage runner the build engine starts, runs in order; the command's next steps name the convert and target stages,
-where a new target fills in its conversion and quantization
-([Module Developer Guide](Module_Developer_Guide.md#6-the-build-stages)).
+installation, not the current folder). Its `target.yml` has a `capabilities:` block (support level `community`) with
+the probe's board (or, without a probe, the module name) as the only board and GGUF as the only format; add your real
+boards and formats there. The build is the four stage modules (`source_module.sh`, `config_module.sh`,
+`convert_module.sh`, `target_module.sh`), which the framework's stage runner (`orchestrator/runtime_layer/runner.sh`)
+runs in order; a `modules/build.sh` of a target is not used. The command's next steps name the convert and target
+stages, where a new target fills in its conversion and quantization
+([Module Developer Guide](Module_Developer_Guide.md#6-the-build-stages)), and how to share it
+([`zoo export`](#zoo-export)).
 
 In the GUI: **Tools > Create Hardware Module...**: name, architecture, SDK and **Description** on the hardware page,
-base image and packages on the Docker page, CPU and CMake flags on the flags page; the standard import on the first
-page reads a probe file (`--probe`). After **Finish** the new target is checked as with `targets validate`.
+base image and packages on the Docker page, CPU and CMake flags, quantization logic and setup commands on the flags
+page, the knowledge attachment and the community export on the last page; the standard import on the first page reads
+a probe file (`--probe`). After **Finish** the new target is checked as with `targets validate`.
 
 ### module generate-ai
 
@@ -2264,10 +2279,10 @@ llm-cli module generate-ai PROBE_FILE [--provider TEXT] [--model TEXT]
 Ditto proposes a target module from a hardware probe file (`target_hardware_config.txt`, see [scan](#scan)). The
 whole proposal is printed as JSON, hidden and control characters shown as `\u` escapes; only after you confirm is the
 module created (checked again by the module generator) in the configured targets folder. Ditto uses the provider's stored sign-in
-([`llm-cli ditto login`](#ditto-login)); the command never asks for a key itself. Neither `module create` nor
-`module generate-ai` attaches pages from the knowledge base; that is an option on the last page of the GUI wizard.
-When the probe file is a probe profile, the module's `runtime:` block is planned from it; the proposal's CPU and
-CMake flags are kept there as advisory text and never applied. Ditto is experimental: before the first run at a
+([`llm-cli ditto login`](#ditto-login)); the command never asks for a key itself. `module generate-ai` attaches no pages
+from the knowledge base; `module create --knowledge-root` and the last page of the GUI wizard do. When the probe file
+is a probe profile, the module's `runtime:` block is planned from it; the proposal's CPU and CMake flags go into the
+config stage for the board package's cross build, where the plan from the board's probe wins. Ditto is experimental: before the first run at a
 terminal the notice on Ditto goes to stderr once ([ditto](#ditto)).
 
 | Option | Meaning |

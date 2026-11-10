@@ -118,17 +118,23 @@ There are three ways; all of them end in the same module generator (`orchestrato
 
 - **GUI wizard:** **Tools > Create Hardware Module...** Import the probe file with the standard import (fixed
   parsing) or let Ditto analyse it, optionally add documentation pages to the knowledge base with "Deep Ingest",
-  then check the pages for hardware, Docker and flags and confirm the summary. For `aarch64`, `armv7l` and
-  `riscv64`, the wizard adds the matching cross-compiler packages. The last page ("Summary & Generation") has two
+  then check the pages for hardware, Docker and flags and confirm the summary. The import proposes the module name
+  from the probe (its board, else its SoC or CPU, unique among your targets) and the SDK from its accelerators; it
+  proposes no flags, since the build recipe plans them from the board's probe. The compilers of the board package's
+  cross build come from the template's Dockerfile (GCC for the module's architecture), not from packages the wizard
+  adds. The last page ("Summary & Generation") has two
   check boxes, both off by default: the knowledge snapshot
   ([section 3.4](#34-what-the-generator-writes-and-what-you-add)) and "Export for community after creating"
   ([section 9.2](#92-exporting-a-target-for-the-community)).
-- **CLI, interactive:** `llm-cli module create` asks for name, architecture (`aarch64`, `x86_64`, `armv7l`,
-  `riscv64`), SDK, base image, description, packages and CPU flags (advisory, see
-  [section 3.4](#34-what-the-generator-writes-and-what-you-add)). With `--probe <probe file>` (the profile
-  `llm-cli scan --device` writes) the module's `runtime:` block is planned from the board's probe; a file that is not
-  a probe profile is refused. Run it from the installation folder: unlike the other commands, it resolves a relative
-  `targets_dir` against the current folder.
+- **CLI:** `llm-cli module create` takes every value of the wizard as an option (`--name`, `--arch`, `--sdk`,
+  `--description`, `--base-image`, `--packages`, `--cpu-flags`, `--cmake-flags`, `--setup-commands FILE`,
+  `--quantization-logic FILE`, `--knowledge-root URL`) and asks for name, architecture, SDK, base image, description,
+  packages and CPU flags when they are not given. With `--probe <probe file>` (the profile `llm-cli scan --device`
+  writes) the probe is stored in the probe store as the wizard stores it (the command prints its probe id), name, architecture and
+  SDK are proposed from it as in the wizard, and the module's `runtime:` block is planned from it; a file that is not
+  a probe profile is refused. The flags go into the config stage
+  ([section 3.4](#34-what-the-generator-writes-and-what-you-add)). A relative `targets_dir` is relative to the
+  installation, as for the other commands.
 - **CLI with Ditto:** `llm-cli module generate-ai target_hardware_config.txt` (optionally `--provider` and
   `--model` for this run). Ditto returns a structured proposal (architecture, SDK, base image, packages, CPU and
   CMake flags, setup commands, quantization block). If the knowledge base is enabled, it adds matching
@@ -149,8 +155,9 @@ Every value ends up in a Dockerfile, YAML or a shell script, so it is checked be
   [section 5.2](#52-cuda-in-the-gpu-template); any other `nvidia/cuda` image is refused. A prebuilt llama.cpp image
   is refused as well.
 - **Packages:** valid Debian package names. **Flags:** plain compiler or CMake options such as
-  `-mcpu=cortex-a76` or `-DGGML_CUDA=ON`. They are advisory: the module keeps them in its `runtime:` block and no
-  build ever applies them. The CMake flags may not switch on a llama.cpp option that downloads while it is built
+  `-mcpu=cortex-a76` or `-DGGML_CUDA=ON`. The config stage uses them for the board package's cross build, and the
+  plan from the board's probe wins where it decides (see "Where the flags are used" below); the `runtime:` block
+  keeps them as a record. The CMake flags may not switch on a llama.cpp option that downloads while it is built
   (`-DLLAMA_USE_PREBUILT_UI=ON`, `-DLLAMA_CURL=ON`, `-DGGML_CUDA_CCCL_VERSION=...`,
   `-DFETCHCONTENT_FULLY_DISCONNECTED=OFF`) or gives `llama-server` subprocesses (`-DLLAMA_SUBPROCESS=ON`): builds
   have no network, and the board package of a hardware profile given by hand takes these flags. They are refused
@@ -233,7 +240,7 @@ runtime:
   advisory:
     cpu_flags: -mcpu=cortex-a55
     cmake_flags: -DGGML_NEON=ON
-    note: "proposed in the module wizard or by an AI; never applied: ..."
+    note: "from the module wizard or an AI; a record here, not used by the device runtime ..."
 ```
 
 - **Where the probe comes from:** the probe file imported in the wizard, the probe file of `module generate-ai`, or
@@ -248,9 +255,12 @@ runtime:
 - **A record, not an input:** the device runtime is always planned again from the device's own probe when it is
   built, so editing the block, or a block in a community pack, changes no build. A pack's block must still match
   the schema (`TargetRuntime` in `orchestrator/schemas/targets.py`).
-- **Flags are advisory:** CPU and CMake flags from the wizard or Ditto's proposal stay readable under `advisory` and
-  are never applied by a build; `config_module.sh` uses them only for a hardware profile given by hand (section
-  [10](#10-what-the-stage-modules-kept-from-version-1x)).
+- **Where the flags are used:** CPU and CMake flags from the wizard, `module create` or Ditto's proposal go into
+  `config_module.sh`, which uses them for the board package's cross build (the llama.cpp programs the target stage
+  builds for the board): the CPU flags in the toolchain's compiler flags, the CMake flags on llama.cpp's cmake line.
+  The plan from the board's probe comes after them and wins where it decides (`-march`, `GGML_CPU_ARM_ARCH`, the x86
+  options, `GGML_NATIVE=OFF`). In the `runtime:` block they are only a record under `advisory`: the device runtime
+  is planned from the device's probe and does not use them.
 
 **Knowledge snapshot (opt-in).** On the wizard's last page, the check box "Attach the knowledge crawled for this
 target (Deep Ingest, privacy scrub applied)" is off by default and can only be switched on after Deep Ingest ran in

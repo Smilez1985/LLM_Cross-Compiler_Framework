@@ -265,10 +265,12 @@ class ModuleDefinition(BaseModel):
                                      "Image is preferred; CUDA targets get CUDA from the framework's pinned redist "
                                      "archives, so no nvidia/cuda image); never an invented digest")
     packages: List[str] = Field(description="Debian/Ubuntu package names for the build image")
-    cpu_flags: str = Field(description="GCC flags for the target CPU, e.g. -mcpu=cortex-a76 (advisory: shown in the "
-                                       "module, never applied)")
-    cmake_flags: str = Field(description="CMake flags for llama.cpp, e.g. -DGGML_NATIVE=OFF (advisory: the framework "
-                                         "builds llama.cpp with its own recipe from the device's probe)")
+    cpu_flags: str = Field(description="GCC flags for the target CPU, e.g. -mcpu=cortex-a76: the config stage uses "
+                                       "them for the board package's cross build, and the plan from the board's "
+                                       "probe comes after them and wins where it decides; may be empty")
+    cmake_flags: str = Field(description="CMake options of llama.cpp, e.g. -DGGML_NATIVE=OFF: the config stage uses "
+                                         "them for the board package's cross build, and the plan from the board's "
+                                         "probe comes after them and wins where it decides; may be empty")
     setup_commands: str = Field(description="Bash the source stage runs once before converting, as the unprivileged "
                                             "build user and without network (e.g. exporting SDK variables; what it "
                                             "exports reaches the later stages); may be empty")
@@ -948,8 +950,9 @@ class DittoCoder:
                     generator: Any = None, description: str = "") -> Path:
         """Creates the module through the module generator (which validates every value again). `profile` is the
         parsed hardware probe of the target, when the probe file was one: the runtime: block of the module is the
-        build recipe's plan from it. The proposal's cpu_flags and cmake_flags are kept there as advisory text and
-        never applied (decision D20). A proposal never opts in to a prebuilt nvidia/cuda image (decision D6). The one
+        build recipe's plan from it. The proposal's cpu_flags and cmake_flags go into the config stage, which uses them
+        for the board package's cross build (the plan from the board's probe wins where it decides); in the runtime:
+        block they are only a record (decision D20). A proposal never opts in to a prebuilt nvidia/cuda image (decision D6). The one
         save of an AI-made module (`llm-cli module generate-ai` and the module wizard); knowledge_roots: the pages
         crawled for this target that the person chose to attach (the wizard's opt-in); generator: the module
         generator class the caller uses (default ModuleGenerator); description: the person's own words for the

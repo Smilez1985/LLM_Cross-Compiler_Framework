@@ -732,6 +732,46 @@ def probe_board(profile: Any) -> Optional[Dict[str, Any]]:
     return {"board": soc, "info": info}
 
 
+def probe_module_name(profile: Any, targets_dir: Optional[Path] = None) -> str:
+    """The module name proposed for a probe (the module wizard's import and `llm-cli module create --probe`): the
+    probe's board name, else its SoC, else its CPU model (current probe schema: BOARD_MODEL, SOC_MODEL, CPU_MODEL),
+    made a name the generator accepts and unique among the targets in targets_dir (a "_2", "_3"... when one reads the
+    same, target_name_collision). "Custom_Target" when the probe names none of them."""
+    get = getattr(profile, "get", None)
+    raw = ""
+    if callable(get):
+        raw = next((str(get(k) or "").strip() for k in ("BOARD_MODEL", "SOC_MODEL", "CPU_MODEL")
+                    if str(get(k) or "").strip()), "")
+    base = re.sub(r"_+", "_", re.sub(r"[^A-Za-z0-9_.-]+", "_", raw)).strip("_.- ")[:58] or "Custom_Target"
+    if not base[0].isalnum():
+        base = "Target_" + base
+    if targets_dir is None:
+        return base
+    name, n = base, 1
+    while target_name_collision(Path(targets_dir), module_slug(name), name):
+        n += 1
+        name = f"{base}_{n}"
+    return name
+
+
+def probe_sdk(profile: Any) -> str:
+    """The SDK proposed for a probe from the accelerator keys of the current probe schema (SUPPORTS_CUDA,
+    SUPPORTS_RKNN with RKLLM_RUNTIME_VERSION, SUPPORTS_HAILO, SUPPORTS_INTEL_NPU); "None" for a CPU-only board."""
+    get = getattr(profile, "get", None)
+    if not callable(get):
+        return "None"
+    on = lambda key: str(get(key) or "").upper() == "ON"  # noqa: E731
+    if on("SUPPORTS_CUDA"):
+        return "CUDA"
+    if on("SUPPORTS_RKNN"):
+        return "RKLLM / RKNN" if str(get("RKLLM_RUNTIME_VERSION") or "").strip() else "RKNN"
+    if on("SUPPORTS_HAILO"):
+        return "Hailo"
+    if on("SUPPORTS_INTEL_NPU"):
+        return "OpenVINO"
+    return "None"
+
+
 class ModuleGenerator:
     """
     Generates file structure and content for new hardware targets.
@@ -772,8 +812,10 @@ class ModuleGenerator:
             knowledge_roots: Opt-in knowledge snapshot: the root URLs crawled for this target. Only their
                 pages are attached (scrubbed); without roots nothing from the knowledge base is attached.
             profile: The hardware probe of the TARGET (a HardwareProfile), if one was given. The runtime: block of
-                target.yml is the build recipe's plan for the device runtime from it; cpu_flags and cmake_flags
-                are kept there as advisory text and never applied (decision D20).
+                target.yml is the build recipe's plan for the device runtime from it. cpu_flags and cmake_flags
+                go into the config stage, which uses them for the board package's cross build (the plan from
+                the board's probe comes after them and wins where it decides); in the runtime: block they are
+                only a record under `advisory` (decision D20).
         
         Returns:
             Path: Path to the created module directory

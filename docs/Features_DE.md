@@ -3433,7 +3433,8 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   C-Bibliothek, die der Cross-Build nicht überschreiten darf, die Builder-Basis, die CPU-Optionen (für den RK3566
   `armv8.2-a+dotprod+fp16`), die Backends und die Programme. Er sagt, dass llama.cpp aus dem Quelltext gebaut wird;
   er ist eine Aufzeichnung, und die Laufzeit wird immer neu aus der eigenen Probe des Geräts geplant. CPU- und
-  CMake-Flags aus dem Assistenten oder von Ditto stehen dort unter `advisory` und werden nie angewendet.
+  CMake-Flags aus dem Assistenten oder von Ditto stehen dort als Aufzeichnung unter `advisory`; die Config-Stufe nutzt
+  sie für den Cross-Build des Board-Pakets, wo der Plan aus der Probe des Boards gewinnt.
 - **Die CMake-Flags des Moduls im Board-Paket:** Eine Allowlist entscheidet sie überall (Generator, Ordnerprüfung,
   Build-Plan, die letzte Prüfung des Pakets im Build-Container): `-DNAME=WERT` und CMakes `-W`-Wörter; was Code oder
   eine andere Toolchain lädt, `-S`/`-B`, `-C`/`-P` und Downloads werden abgelehnt. Eine gültige CMake-Option außerhalb

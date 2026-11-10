@@ -297,9 +297,12 @@ def test_the_runtime_block_is_the_recipe_plan_from_the_target_probe(tmp_path):
     assert block["cpu"] == "explicit" and block["cpu_arm_arch"] == "armv8.2-a+dotprod+fp16"
     assert block["backends"] == ["cpu"] and "llama-bench" in block["targets"]
     assert block["profile_perf_key"] == profile.perf_key()
-    # The wizard's or AI's flags are advisory: kept for the reader, in no build input (decision D20).
+    # In the runtime: block the wizard's or AI's flags are only a record (decision D20); the device runtime is planned
+    # from the probe. The old note said "never applied", which was wrong: the config stage uses them for the board
+    # package's cross build, and the note now says so.
     assert block["advisory"]["cmake_flags"] == "-DGGML_NEON=ON -DGGML_NATIVE=ON"
-    assert "never applied" in block["advisory"]["note"]
+    assert "not used by the device runtime" in block["advisory"]["note"]
+    assert "config stage uses them" in block["advisory"]["note"]
     dockerfile = (target / "Dockerfile").read_text()
     assert "GGML_NEON" not in dockerfile and "cortex-a55" not in dockerfile
     assert validate_target_folder(target) == []

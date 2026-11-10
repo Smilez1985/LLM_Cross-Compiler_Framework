@@ -279,7 +279,8 @@ _NoteText = Annotated[str, Field(max_length=300)]
 
 
 class RuntimeAdvisory(BaseModel):
-    """Compiler and CMake flags from the module wizard or an AI: shown to the reader, never applied (decision D20)."""
+    """Compiler and CMake flags from the module wizard or an AI, as a record: the device runtime does not use them; the
+    board package's cross build (the config stage) does, after which the plan from the board's probe wins (D20)."""
     model_config = ConfigDict(extra="forbid")
 
     cpu_flags: str = Field(default="", max_length=500)

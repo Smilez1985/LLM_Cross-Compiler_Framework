@@ -3089,8 +3089,8 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   `module generate-ai`, or `llm-cli module create --probe <file>`): architecture, OS, the C library the cross build
   must not exceed, the builder base, the CPU options (for the RK3566 `armv8.2-a+dotprod+fp16`), the backends and the
   programs. It says that llama.cpp is built from source; it is a record, and the runtime is always planned again from
-  the device's own probe. CPU and CMake flags from the wizard or Ditto are kept there under `advisory` and never
-  applied.
+  the device's own probe. CPU and CMake flags from the wizard or Ditto are a record there under `advisory`; the config
+  stage uses them for the board package's cross build, where the plan from the board's probe wins.
 - **The module's CMake flags in the board package:** one allowlist decides them everywhere (generator, folder check,
   build plan, the package's last check in the build container): `-DNAME=VALUE` and CMake's `-W` words; what loads
   code or another toolchain, `-S`/`-B`, `-C`/`-P` and downloads are refused. A valid CMake option outside the list

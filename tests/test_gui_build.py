@@ -577,17 +577,18 @@ def wizard(qapp, tmp_path, monkeypatch):
     ("avx2,fma,avx512f,avx512cd,avx512er,avx512pf", False),      # a Xeon Phi (Knights Landing)
     ("", False),                                                  # no CPU flags: AVX-512 BW, VL, DQ not confirmed
 ], ids=["full-avx512", "avx512f-only", "no-flags"])
-def test_the_wizard_proposes_avx512_only_with_every_part_ggml_avx512_compiles_for(wizard, tmp_path, monkeypatch,
-                                                                                    flags, avx512):
-    """The module wizard's flags from a probe follow the build recipe's rule (recipe.avx512_missing): GGML_AVX512 adds
-    -mavx512cd/vl/dq/bw too, which a CPU with AVX-512 F alone cannot run."""
+def test_the_wizard_proposes_no_avx512_or_other_flags_from_a_probe(wizard, tmp_path, monkeypatch, flags, avx512):
+    """The wizard proposed GGML_AVX512 and other flags from a probe by a copy of the build recipe's rule; it now
+    proposes none, since the config stage plans them from the board's probe by the recipe itself (recipe.avx512_missing:
+    GGML_AVX512 adds -mavx512cd/vl/dq/bw too, which a CPU with AVX-512 F alone cannot run). `avx512` is what that
+    plan decides; the wizard leaves it to the plan in every case."""
+    from orchestrator.runtime.build.recipe import avx512_missing
     monkeypatch.setattr(wizard, "_store_probe", lambda path: None)
     probe = tmp_path / "probe.txt"
     probe.write_text(f"ARCH=x86_64\nSUPPORTS_AVX=ON\nSUPPORTS_AVX2=ON\nSUPPORTS_AVX512=ON\nCPU_FLAGS_ALL={flags}\n")
     wizard.import_probe_file(str(probe))
-    assert ("-DGGML_AVX512=ON" in wizard.cmake_flags.text()) is avx512
-    assert ("-mavx512f" in wizard.cpu_flags.text()) is avx512
-    assert "-DGGML_AVX2=ON" in wizard.cmake_flags.text()
+    assert wizard.cmake_flags.text() == "" and wizard.cpu_flags.text() == ""
+    assert (not avx512_missing([f for f in flags.split(",") if f])) is avx512
 
 
 def test_the_description_field_is_written_and_defaults_like_the_cli(wizard):

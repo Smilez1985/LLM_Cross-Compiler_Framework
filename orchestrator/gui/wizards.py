@@ -601,8 +601,9 @@ class ModuleCreationWizard(QWizard):
                             data[k.strip()] = v.strip()
                 
                 # Auto-fill
-                if "CPU_MODEL" in data:
-                    self.name_edit.setText(module_name_hint(data["CPU_MODEL"]))
+                from orchestrator.Core.module_generator import probe_module_name
+                if any(data.get(k) for k in ("BOARD_MODEL", "SOC_MODEL", "CPU_MODEL")):
+                    self.name_edit.setText(probe_module_name(data, self.targets_dir))
                 if "ARCH" in data:
                     # Probe files of schema 2 write arm64/armv7 (schema 1 wrote uname -m: aarch64/armv7l).
                     arch = {"arm64": "aarch64", "armv7": "armv7l"}.get(data["ARCH"], data["ARCH"])
@@ -911,7 +912,7 @@ class ModuleCreationWizard(QWizard):
             arch_map = {
                 "aarch64": "aarch64", "arm64": "aarch64", 
                 "x86_64": "x86_64", "amd64": "x86_64",
-                "armv7l": "armv7l"
+                "armv7l": "armv7l", "armv7": "armv7l", "riscv64": "riscv64"
             }
             detected_arch = config.get("Architecture", "").lower()
             if not detected_arch:
@@ -920,27 +921,12 @@ class ModuleCreationWizard(QWizard):
             if detected_arch in arch_map:
                 self.arch_combo.setCurrentText(arch_map[detected_arch])
             
-            # 2. Name & SDK Recommendation
-            sdk = "None"
-            name_hint = "Generic_Target"
-            
-            if config.get("SUPPORTS_CUDA") == "ON": 
-                sdk = "CUDA"
-                name_hint = f"NVIDIA_{config.get('GPU_MODEL', 'GPU').replace(' ', '_')}"
-            elif config.get("SUPPORTS_RKNN") == "ON": 
-                sdk = "RKNN"
-                name_hint = f"Rockchip_{config.get('NPU_MODEL', 'NPU')}"
-                if config.get("SUPPORTS_RKLLM") == "ON":
-                    sdk = "RKLLM / RKNN"
-            elif config.get("SUPPORTS_HAILO") == "ON": 
-                sdk = "Hailo"
-                name_hint = "Hailo_AI_Kit"
-            elif config.get("SUPPORTS_INTEL_NPU") == "ON": 
-                sdk = "OpenVINO"
-                name_hint = "Intel_NPU"
-
+            # 2. Name and SDK from the probe (the same rules as `llm-cli module create --probe`): the board's name,
+            # else its SoC or CPU, unique among the targets; the SDK from the accelerator keys of the current schema
+            from orchestrator.Core.module_generator import probe_module_name, probe_sdk
+            sdk = probe_sdk(config)
             self.sdk_edit.setText(sdk)
-            self.name_edit.setText(module_name_hint(name_hint))
+            self.name_edit.setText(probe_module_name(config, self.targets_dir))
             
             # 3. Docker Base Image Logic. CUDA targets get the GPU template, which provisions CUDA from NVIDIA's
             # pinned redist archives; a prebuilt nvidia/cuda image is only an explicit opt-in pinned by digest.
@@ -951,33 +937,11 @@ class ModuleCreationWizard(QWizard):
             else:
                 self.rad_debian.setChecked(True) 
 
-            # 4. Flags (CPU & CMake)
-            cpu_flags = []
-            cmake_flags = []
-            
-            if config.get("SUPPORTS_NEON") == "ON": cmake_flags.append("-DGGML_NEON=ON")
-            if config.get("SUPPORTS_FP16") == "ON":
-                cmake_flags.append("-DGGML_FP16=ON")
-                if detected_arch in ["aarch64", "arm64"]:
-                    cpu_flags.append("-march=armv8.2-a+fp16")
-                
-            if config.get("SUPPORTS_AVX") == "ON": cmake_flags.append("-DGGML_AVX=ON")
-            if config.get("SUPPORTS_AVX2") == "ON": 
-                cmake_flags.append("-DGGML_AVX2=ON")
-                cpu_flags.append("-mavx2")
-            # GGML_AVX512 only with every part of AVX-512 it compiles for (the build recipe's rule: a Xeon Phi has
-            # AVX-512 F without BW, VL and DQ, and a probe without CPU flags cannot tell)
-            from orchestrator.runtime.build.recipe import avx512_missing
-            if config.get("SUPPORTS_AVX512") == "ON" and not avx512_missing(
-                    re.split(r"[\s,]+", str(config.get("CPU_FLAGS_ALL") or ""))):
-                cmake_flags.append("-DGGML_AVX512=ON")
-                cpu_flags.append("-mavx512f")
-            if config.get("SUPPORTS_F16C") == "ON":
-                cmake_flags.append("-DGGML_F16C=ON")
-                cpu_flags.append("-mf16c")
-
-            self.cpu_flags.setText(" ".join(cpu_flags))
-            self.cmake_flags.setText(" ".join(cmake_flags))
+            # 4. No flags are proposed: the build recipe plans the CPU's flags and llama.cpp's options from the
+            # board's probe in the config stage, after the module's own, so a proposal here would only repeat or
+            # contradict it. The fields stay for flags the person adds.
+            self.cpu_flags.clear()
+            self.cmake_flags.clear()
             if self.ai_proposal:
                 # Ditto's values the probe does not set go too: none of them may end up in a module saved as the
                 # person's (unmarked, not audited)
@@ -1325,27 +1289,10 @@ class ModuleCreationWizard(QWizard):
         if unpinned:   # an AI's base image is written with its digest, as `module generate-ai` writes it
             self._start_pin(unpinned)
             return
-        # --- CROSS-COMPILER AUTO-INJECTION ---
+        # The board package's compilers come from the template's runtime stage (GCC for the module's system), not
+        # from packages added here.
         packages_list = self.packages_edit.text().split()
         arch = self.arch_combo.currentText()
-        
-        if arch == "aarch64":
-            if "gcc-aarch64-linux-gnu" not in packages_list:
-                packages_list.append("gcc-aarch64-linux-gnu")
-            if "g++-aarch64-linux-gnu" not in packages_list:
-                packages_list.append("g++-aarch64-linux-gnu")
-                
-        elif arch == "armv7l":
-             if "gcc-arm-linux-gnueabihf" not in packages_list:
-                 packages_list.append("gcc-arm-linux-gnueabihf")
-             if "g++-arm-linux-gnueabihf" not in packages_list:
-                 packages_list.append("g++-arm-linux-gnueabihf")
-
-        elif arch == "riscv64":
-             if "gcc-riscv64-linux-gnu" not in packages_list:
-                 packages_list.append("gcc-riscv64-linux-gnu")
-             if "g++-riscv64-linux-gnu" not in packages_list:
-                 packages_list.append("g++-riscv64-linux-gnu")
 
         from orchestrator.Core.ditto_manager import ai_module_description
         # A module Ditto helped with (its proposal, or fields it filled through the GUI tools) is AI-made: marked

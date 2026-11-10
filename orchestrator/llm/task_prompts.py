@@ -59,8 +59,9 @@ HEALING_TASK = (
 MODULE_TASK = (
     "From a "
     "hardware probe, or from the board and its SoC when there is no probe, propose the definition of a new target "
-    "module: architecture, SDK, a Docker base image, Debian package names, CPU and CMake flags for llama.cpp (kept "
-    "as advisory notes: the framework builds llama.cpp with its own recipe from the device probe), "
+    "module: architecture, SDK, a Docker base image, Debian package names, CPU and CMake flags for llama.cpp (the "
+    "config stage uses them for the board package's cross build; the framework's plan from the board's probe comes "
+    "after them and wins where it decides, so leave them empty unless the hardware needs more), "
     "optional setup commands (the source stage runs them once; what they export reaches the later stages) and the "
     "quantization case block of the convert stage. Base image: prefer a Docker Official "
     "Image (for example debian:bookworm-slim or ubuntu:24.04) with the vendor's packages. Any other image is "

@@ -8,6 +8,7 @@ AI Assistance, Deployment, Self-Healing, and Smart Calibration (IMatrix).
 The version shown by --help, --version and the banner is orchestrator.__version__.
 """
 
+import re
 import sys
 import json
 import asyncio
@@ -428,30 +429,69 @@ def _target_profile(probe_file, strict: bool):
 
 
 @module.command('create')
-@click.option('--name', prompt='Module Name', help='Name of the new target')
-@click.option('--arch', prompt='Architecture', type=click.Choice(['aarch64', 'x86_64', 'armv7l', 'riscv64']), help='CPU Architecture')
-@click.option('--sdk', prompt='SDK/Backend', default='None', help='Special SDK (e.g. CUDA, RKNN)')
+@click.option('--name', default=None, help='Name of the new target (default with --probe: the board named by the probe, '
+                                           'unique among the targets; otherwise asked)')
+@click.option('--arch', default=None, type=click.Choice(['aarch64', 'x86_64', 'armv7l', 'riscv64']),
+              help='CPU architecture (default with --probe: the probe\'s; otherwise asked)')
+@click.option('--sdk', default=None, help='Special SDK, e.g. CUDA, RKNN (default with --probe: from the probe\'s '
+                                          'accelerators; otherwise asked, None)')
 @click.option('--probe', 'probe_file', type=click.Path(exists=True, dir_okay=False), default=None,
-              help="Hardware probe of the target (llm-cli scan --device writes one): the module's runtime: block is "
-                   "the build recipe's plan for its device runtime")
+              help="Hardware probe of the target (llm-cli scan --device writes one): stored in the probe store as the "
+                   "module wizard stores it, and the module's runtime: block is the build recipe's plan from it")
+@click.option('--description', default=None, help='Description of the target (asked when not given)')
+@click.option('--base-image', 'base_image', default=None, help='Base Docker image (asked when not given; default '
+                                                               'debian:bookworm-slim)')
+@click.option('--packages', default=None, help='System packages, separated by commas or spaces (asked when not given)')
+@click.option('--cpu-flags', 'cpu_flags', default=None,
+              help="GCC flags for the board package's cross build (the config stage; the plan from the board's probe "
+                   "comes after them and wins where it decides); asked when not given")
+@click.option('--cmake-flags', 'cmake_flags', default="",
+              help="CMake options for llama.cpp in the board package's cross build (the config stage; the plan from "
+                   "the board's probe wins where it decides)")
+@click.option('--setup-commands', 'setup_file', type=click.Path(exists=True, dir_okay=False), default=None,
+              help="File with the commands the source stage runs once before converting (as the unprivileged build "
+                   "user, without network)")
+@click.option('--quantization-logic', 'quant_file', type=click.Path(exists=True, dir_okay=False), default=None,
+              help="File with the bash 'case' branches of the convert stage (modules/convert_module.sh)")
+@click.option('--knowledge-root', 'knowledge_roots', multiple=True, metavar='URL',
+              help="Attach the knowledge base's pages crawled from this address (Deep Ingest, privacy scrub applied); "
+                   "repeatable. Only these pages are attached, never the rest of the knowledge base")
 @pass_context
-def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str, probe_file: Optional[str]):
-    """Create a new hardware target module interactively"""
-
-    console.print(f"\n[bold cyan]Creating new target module: {name}[/bold cyan]")
+def module_create(ctx: FrameworkContext, name: Optional[str], arch: Optional[str], sdk: Optional[str],
+                  probe_file: Optional[str], description: Optional[str], base_image: Optional[str],
+                  packages: Optional[str], cpu_flags: Optional[str], cmake_flags: str, setup_file: Optional[str],
+                  quant_file: Optional[str], knowledge_roots: tuple):
+    """Create a new hardware target module (the module wizard's values as options; what is not given is asked)"""
+    from orchestrator.Core.module_generator import probe_module_name, probe_sdk
+    config, resolve = _settings(ctx)
+    # The configured targets folder (relative paths: the installation), as builds and the GUI use it.
+    targets_dir = resolve(config.get("targets_dir", "targets"))
     profile = _target_profile(probe_file, strict=True) if probe_file else None
+    if probe_file:   # into the probe store as the module wizard's import does (scan_steps.import_probe; prints its id)
+        _scan_import(ctx, _probe_store(ctx), Path(probe_file), None)
+    if profile is not None:
+        arch = arch or {"arm64": "aarch64", "armv7": "armv7l"}.get(str(profile.get("ARCH") or ""),
+                                                                   str(profile.get("ARCH") or "")) or None
+        if arch not in ('aarch64', 'x86_64', 'armv7l', 'riscv64'):
+            arch = None
+        name = name or probe_module_name(profile, targets_dir)
+        sdk = sdk or probe_sdk(profile)
+    name = name or click.prompt("Module Name")
+    arch = arch or click.prompt("Architecture", type=click.Choice(['aarch64', 'x86_64', 'armv7l', 'riscv64']))
+    sdk = sdk or click.prompt("SDK/Backend", default="None")
 
-    # Interaktive Abfrage weiterer Details (CLI Wizard Style)
-    base_os = click.prompt("Base Docker Image", default="debian:bookworm-slim")
-    description = click.prompt("Description", default=f"Target for {name}")
-    
-    console.print("Enter required system packages (comma separated):")
-    packages_input = click.prompt("Packages", default="build-essential, cmake, git")
-    packages = [p.strip() for p in packages_input.split(',')]
-    
-    # Advisory only: kept in the runtime: block of target.yml, never applied (llama.cpp's options come from the
-    # build recipe and the device's probe).
-    cpu_flags = click.prompt("CPU flags to note in the module (advisory, not applied)", default="")
+    console.print(f"\n[bold cyan]Creating new target module: {escape(name)}[/bold cyan]")
+    base_os = base_image or click.prompt("Base Docker Image", default="debian:bookworm-slim")
+    description = description or click.prompt("Description", default=f"Target for {name}")
+    if packages is None:
+        console.print("Enter required system packages (comma separated):")
+        packages = click.prompt("Packages", default="build-essential, cmake, git")
+    package_list = [p for p in re.split(r"[\s,]+", packages) if p]
+    if cpu_flags is None:
+        cpu_flags = click.prompt("CPU flags for the board package's cross build (the probe's plan wins)", default="")
+
+    def read(path: Optional[str]) -> str:
+        return Path(path).read_text(encoding="utf-8") if path else ""
 
     module_data = {
         "module_name": name,
@@ -459,34 +499,51 @@ def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str, probe_f
         "sdk": sdk,
         "description": description,
         "base_os": base_os,
-        "packages": packages,
+        "packages": package_list,
         "cpu_flags": cpu_flags,
-        "supported_boards": [], 
-        "setup_commands": "",
-        "cmake_flags": "",
+        "supported_boards": [],
+        "setup_commands": read(setup_file),
+        "cmake_flags": cmake_flags,
+        "quantization_logic": read(quant_file),
         "detection_commands": "lscpu"
     }
-    
-    try:
-        # The configured targets folder (relative paths: the installation), as builds and the GUI use it.
-        config, resolve = _settings(ctx)
-        targets_dir = resolve(config.get("targets_dir", "targets"))
-        generator = _lazy("ModuleGenerator")(targets_dir)
 
-        output_path = generator.generate_module(module_data, profile=profile)
-        
+    try:
+        generator = _lazy("ModuleGenerator")(targets_dir)
+        roots = sorted(set(knowledge_roots))
+        if roots:   # the knowledge base is the framework's: booted only for the attachment
+            ctx.require_framework()
+            output_path = generator.generate_module(module_data, ctx.framework_manager, knowledge_roots=roots,
+                                                    profile=profile)
+            from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT
+            if not (Path(output_path) / KNOWLEDGE_SNAPSHOT).is_file():
+                console.print("[yellow]The knowledge snapshot was not attached: no stored page comes from these "
+                              "addresses, or the knowledge base could not be read.[/yellow]")
+        else:
+            output_path = generator.generate_module(module_data, profile=profile)
+
         console.print(f"\n[bold green]✅ Module successfully created![/bold green]")
         console.print(f"Location: {output_path}")
         console.print("\nNext steps:")
-        console.print(f"1. Edit {output_path}/target.yml to add supported boards")
-        # The build is the four stage modules, which modules/build.sh (the stage runner) runs in order (DESIGN U9).
+        console.print(f"1. Check {output_path}/target.yml: its boards (with --probe, the probe's board) and formats")
+        # The build is the four stage modules, which the framework's stage runner (orchestrator/runtime_layer/runner.sh)
+        # runs in order; a modules/build.sh of a target is not used.
         console.print(f"2. Customize {output_path}/modules/convert_module.sh and target_module.sh (the convert and "
-                      f"target stages of the build, which build.sh runs after source and config; the Dockerfile "
-                      f"installs the tools they use)")
-        
+                      f"target stages of the build, which the framework's stage runner runs after source and config; "
+                      f"the Dockerfile installs the tools they use)")
+        console.print(f"3. To share it: llm-cli zoo export target {Path(output_path).name} --author NAME")
+
     except Exception as e:
-        console.print(f"[bold red]Error creating module: {e}[/bold red]")
+        console.print(f"[bold red]Error creating module: {escape(str(e))}[/bold red]")
         sys.exit(1)
+
+
+def _probe_store(ctx: FrameworkContext):
+    """The probe store of the settings (the one `llm-cli scan --import` and the module wizard write)."""
+    from orchestrator.runtime.probe_service import HardwareProbes
+    from orchestrator.runtime.profile import ProfileStore, default_state_dir
+    config, _ = _settings(ctx)
+    return HardwareProbes(store=ProfileStore(Path(getattr(config, "user_state_dir", None) or default_state_dir())))
 
 
 def _ai_override(ctx: FrameworkContext, provider: Optional[str], model: Optional[str]):
@@ -664,8 +721,8 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
     from rich.prompt import Confirm
     if not Confirm.ask("Generate module with these settings?"):
         return
-    console.print("[dim]cpu_flags and cmake_flags are kept in the module as advisory text; llama.cpp is built by the "
-                  "framework's recipe from the device's probe.[/dim]")
+    console.print("[dim]cpu_flags and cmake_flags go into the config stage, which uses them for the board package's "
+                  "cross build; the plan from the board's probe comes after them and wins where it decides.[/dim]")
     fm = ctx.framework_manager
     targets_dir = fm.resolve_path(fm.config.get("targets_dir", "targets"))
     module_name = definition.module_name.replace(" ", "_")

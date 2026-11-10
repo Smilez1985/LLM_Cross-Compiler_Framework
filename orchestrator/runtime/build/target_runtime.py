@@ -11,7 +11,9 @@ runtime is and that it is built from source (decision D21: the framework shares 
 
 The block is a record, never an input: a device runtime is planned again from the device's own probe when it is
 built, so a block in a community pack cannot change any build. Compiler and CMake flags typed into the module wizard
-or proposed by an AI are kept under `advisory` for the reader and never applied (decision D20).
+or proposed by an AI are kept under `advisory` as a record: the device runtime does not use them; the board package's
+cross build (the config stage of the target) does, with the plan from the board's probe winning where it decides
+(decision D20).
 """
 
 from typing import Any, Dict, List, Mapping, Optional
@@ -24,8 +26,9 @@ RUNTIME_SCHEMA_VERSION = 1
 RECIPE_PATH = "orchestrator/runtime/build/recipe.py"
 # The module generator's architecture names as the probe writes them (ARCH in configs/hardware_probe_schema.yml).
 ARCH_OF_MODULE = {"aarch64": "arm64", "x86_64": "x86_64", "armv7l": "armv7", "riscv64": "riscv64"}
-ADVISORY_NOTE = ("proposed in the module wizard or by an AI; never applied: llama.cpp's options come from the build "
-                 "recipe and the device's probe")
+ADVISORY_NOTE = ("from the module wizard or an AI; a record here, not used by the device runtime (planned from the "
+                 "device's probe); the config stage uses them for the board package's cross build, where the plan "
+                 "from the board's probe wins")
 NO_PROBE_NOTE = ("no hardware probe of the device was given: its runtime is planned from its probe when it is built "
                  "(llm-cli scan --device <address> stores one)")
 _MAX_NOTES = 12

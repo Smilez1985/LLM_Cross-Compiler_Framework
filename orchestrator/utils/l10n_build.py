@@ -334,8 +334,7 @@ TEXTS = {
                                  "base.",
         "bld.wizard.export": "Export for the community after creating (a scrubbed, signed pack for a pull request)",
         "bld.wizard.summary": "[SUMMARY]\nModule name:  {name}\nArchitecture: {arch}\nSDK:          {sdk}\n\n"
-                              "[DOCKER]\nBase image:   {base}\nPackages:     {packages}\nCompilers:    GCC for "
-                              "{arch}, added by the template (the board package's cross build)\n\n[COMPILER]\n"
+                              "[DOCKER]\nBase image:   {base}\nPackages:     {packages}\n\n[COMPILER]\n"
                               "CPU flags:    {cpu}\nCMake flags:  {cmake}\n\n[LOGIC] (becomes part of the generated "
                               "scripts: review it)\nQuantization logic:\n{quant}\n\nSetup commands:\n{setup}\n",
         "bld.wizard.default": "(default)",
@@ -688,8 +687,7 @@ TEXTS = {
         "bld.wizard.export": "Nach dem Erstellen für die Community exportieren (ein bereinigtes, signiertes Paket für "
                              "einen Pull Request)",
         "bld.wizard.summary": "[ÜBERSICHT]\nModulname:    {name}\nArchitektur:  {arch}\nSDK:          {sdk}\n\n"
-                              "[DOCKER]\nBasis-Image:  {base}\nPakete:       {packages}\nCompiler:     GCC für "
-                              "{arch}, von der Vorlage ergänzt (der Cross-Build des Board-Pakets)\n\n[COMPILER]\n"
+                              "[DOCKER]\nBasis-Image:  {base}\nPakete:       {packages}\n\n[COMPILER]\n"
                               "CPU-Flags:    {cpu}\nCMake-Flags:  {cmake}\n\n[LOGIK] (wird Teil der erzeugten "
                               "Skripte: prüfe sie)\nQuantisierungslogik:\n{quant}\n\nEinrichtungsbefehle:\n{setup}\n",
         "bld.wizard.default": "(Standard)",

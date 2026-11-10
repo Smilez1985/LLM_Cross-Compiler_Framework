@@ -165,3 +165,165 @@ def test_a_folder_without_a_pack_is_shipped_only_in_the_frameworks_own_targets(t
     assert own_target_trust(copy) == "own"
     (copy / "target.yml").write_text("metadata:\n  provenance: ai-generated\n")
     assert own_target_trust(copy) == "ai-generated"
+
+
+# --- the probe proposes the name and the SDK, never flags; the CLI matches the wizard --------------------------------
+
+def test_the_wizard_names_the_module_after_the_probes_board_and_keeps_it_unique(fw, qapp, monkeypatch):
+    """Before: every probe without an accelerator gave "Generic_Target". Now the probe's board name, made unique."""
+    from orchestrator.gui import wizards
+    message_boxes(monkeypatch, wizards)
+    taken = Path(fw.target_manager.targets_dir) / "raspberry_pi_5_model_b_rev_1_0"
+    taken.mkdir()
+    wizard = wizards.ModuleCreationWizard(Path(fw.target_manager.targets_dir))
+    try:
+        wizard.framework_manager = fw
+        wizard.import_probe_file(str(PROBE))
+        assert wizard.name_edit.text() == "Raspberry_Pi_5_Model_B_Rev_1.0_2"
+        assert wizard.sdk_edit.text() == "None"
+    finally:
+        wizard.deleteLater()
+
+
+def test_the_wizard_proposes_no_flags_from_the_probe(fw, qapp, monkeypatch):
+    """Before: -DGGML_NEON=ON (no llama.cpp option) from SUPPORTS_NEON and flags from the schema-1 key SUPPORTS_FP16.
+    Now none: the build recipe plans the flags from the board's probe in the config stage."""
+    from orchestrator.gui import wizards
+    message_boxes(monkeypatch, wizards)
+    wizard = wizards.ModuleCreationWizard(Path(fw.target_manager.targets_dir))
+    try:
+        wizard.framework_manager = fw
+        wizard.cpu_flags.setText("-mcpu=old")
+        wizard.import_probe_file(str(PROBE))
+        assert wizard.cpu_flags.text() == "" and wizard.cmake_flags.text() == ""
+    finally:
+        wizard.deleteLater()
+
+
+def test_the_sdk_comes_from_the_accelerator_keys_of_the_current_probe_schema():
+    from orchestrator.Core.module_generator import probe_module_name, probe_sdk
+    assert probe_sdk({"SUPPORTS_CUDA": "ON"}) == "CUDA"
+    assert probe_sdk({"SUPPORTS_RKNN": "ON"}) == "RKNN"
+    assert probe_sdk({"SUPPORTS_RKNN": "ON", "RKLLM_RUNTIME_VERSION": "1.2.1"}) == "RKLLM / RKNN"
+    assert probe_sdk({"SUPPORTS_HAILO": "ON"}) == "Hailo"
+    assert probe_sdk({"SUPPORTS_INTEL_NPU": "ON"}) == "OpenVINO"
+    assert probe_sdk({"SUPPORTS_NEON": "ON"}) == "None" and probe_sdk(None) == "None"
+    assert probe_module_name({"SOC_MODEL": "rk3588"}) == "rk3588"
+    assert probe_module_name({"CPU_MODEL": "Cortex-A76"}) == "Cortex-A76"
+    assert probe_module_name({}) == "Custom_Target"
+
+
+def test_the_wizard_adds_no_cross_compiler_packages(fw, qapp, monkeypatch):
+    """The board package's compilers come from the template's runtime stage, not from packages the wizard adds."""
+    from orchestrator.gui import wizards
+    boxes = message_boxes(monkeypatch, wizards)
+    wizard = wizards.ModuleCreationWizard(Path(fw.target_manager.targets_dir))
+    try:
+        wizard.framework_manager = fw
+        wizard.import_probe_file(str(PROBE))
+        while wizard.nextId() != -1:
+            wizard.next()
+        assert "Auto-Added" not in wizard.summary_text.toPlainText()
+        wizard.accept()
+    finally:
+        wizard.deleteLater()
+    assert not any("gcc-aarch64-linux-gnu" in p for p in wizard.module_data["packages"])
+    check_made(fw, created_target(boxes), trust="own", provenance=None)
+
+
+def test_module_create_stores_the_probe_as_the_wizard_does(fw, qapp, monkeypatch):
+    """Before: `module create --probe` read the probe but never stored it; the wizard stored it. Now both store it
+    through the same import (runtime/scan_steps.import_probe), the CLI prints its probe id, and it proposes the same
+    name and SDK as the wizard."""
+    from click.testing import CliRunner
+    from orchestrator import cli as cli_module
+    from orchestrator.runtime.probe_service import HardwareProbes
+    from test_cli_builds import write_user_config
+    write_user_config(Path(fw.config.config_dir).parent, targets_dir=str(fw.target_manager.targets_dir))
+    probes = HardwareProbes(state(fw))
+    before = {p.probe_id for p in probes.list()}
+    result = CliRunner().invoke(cli_module.cli, ["-q", "module", "create", "--probe", str(PROBE)],
+                                input="\n\n\n\n")
+    assert result.exit_code == 0, result.output
+    stored = {p.probe_id for p in probes.list()} - before
+    assert len(stored) == 1
+    (cli_id,) = stored
+    assert f"Imported as probe {cli_id}" in " ".join(result.output.split())
+    from orchestrator.gui import wizards
+    message_boxes(monkeypatch, wizards)
+    wizard = wizards.ModuleCreationWizard(Path(fw.target_manager.targets_dir))
+    try:
+        wizard.framework_manager = fw
+        gui_id = wizard._store_probe(str(PROBE))
+    finally:
+        wizard.deleteLater()
+    # an import gets a new id each time; the two imports store the same profile through the same import path
+    assert gui_id and gui_id != cli_id
+    assert probes.get(gui_id).values == probes.get(cli_id).values
+    tid = "raspberry_pi_5_model_b_rev_1_0"
+    assert (Path(fw.target_manager.targets_dir) / tid).is_dir()
+    check_made(fw, tid, trust="own", provenance=None)
+
+
+def test_module_create_has_an_option_for_every_value_of_the_wizard(fw, qapp, monkeypatch, tmp_path):
+    """Parity: the same values typed into the wizard and given as options of `llm-cli module create` reach the module
+    generator as the same module definition."""
+    from click.testing import CliRunner
+    from orchestrator import cli as cli_module
+    from orchestrator.gui import wizards
+    seen = []
+
+    class Recorder:
+        def __init__(self, targets_dir, *a, **k):
+            self.targets_dir = Path(targets_dir)
+
+        def generate_module(self, data, framework_manager=None, knowledge_roots=None, profile=None):
+            seen.append((dict(data), sorted(knowledge_roots or [])))
+            folder = self.targets_dir / "recorded"
+            folder.mkdir(exist_ok=True)
+            return folder
+
+    values = dict(name="Parity Board", arch="aarch64", sdk="RKNN", description="My board",
+                  base="debian:bookworm-slim", packages="cmake git", cpu="-mcpu=cortex-a55",
+                  cmake="-DGGML_CUDA=OFF", setup="export A=1\n", quant="    Q4_0) echo q ;;\n",
+                  root="https://docs.example.org/board")
+    setup, quant = tmp_path / "setup.sh", tmp_path / "quant.sh"
+    setup.write_text(values["setup"])
+    quant.write_text(values["quant"])
+
+    monkeypatch.setattr(wizards, "ModuleGenerator", Recorder)
+    message_boxes(monkeypatch, wizards)
+    wizard = wizards.ModuleCreationWizard(Path(fw.target_manager.targets_dir))
+    try:
+        wizard.framework_manager = fw
+        monkeypatch.setattr(wizard, "_check_created", lambda folder: "")
+        wizard.name_edit.setText(values["name"])
+        wizard.arch_combo.setCurrentText(values["arch"])
+        wizard.sdk_edit.setText(values["sdk"])
+        wizard.desc_edit.setText(values["description"])
+        wizard.rad_debian.setChecked(True)
+        wizard.packages_edit.setText(values["packages"])
+        wizard.cpu_flags.setText(values["cpu"])
+        wizard.cmake_flags.setText(values["cmake"])
+        wizard.setup_commands.setPlainText(values["setup"])
+        wizard.quant_logic.setPlainText(values["quant"])
+        wizard.crawled_roots.add(values["root"])
+        wizard.chk_knowledge.setEnabled(True)
+        wizard.chk_knowledge.setChecked(True)
+        wizard.accept()
+    finally:
+        wizard.deleteLater()
+
+    monkeypatch.setattr(cli_module, "ModuleGenerator", Recorder)
+    from test_cli_builds import write_user_config
+    write_user_config(Path(fw.config.config_dir).parent, targets_dir=str(fw.target_manager.targets_dir))
+    result = CliRunner().invoke(cli_module.cli, [
+        "-q", "module", "create", "--name", values["name"], "--arch", values["arch"], "--sdk", values["sdk"],
+        "--description", values["description"], "--base-image", values["base"], "--packages", values["packages"],
+        "--cpu-flags", values["cpu"], "--cmake-flags", values["cmake"], "--setup-commands", str(setup),
+        "--quantization-logic", str(quant), "--knowledge-root", values["root"]], input="")
+    assert result.exit_code == 0, result.output
+    assert len(seen) == 2
+    (gui, gui_roots), (cli, cli_roots) = seen
+    assert gui_roots == cli_roots == [values["root"]]
+    assert gui == cli
