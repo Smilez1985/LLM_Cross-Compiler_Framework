@@ -300,7 +300,7 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         except Exception:  # noqa: BLE001 - a target that is gone
             return "unknown (the target is not installed)"
         marks = target_marks(framework, tid)
-        return marks["trust"] + (", untested (AI-generated)" if marks.get("untested") else "")
+        return marks["trust"] + (", untested on the board" if marks.get("untested") else "")
 
     # --- list_devices ---
 

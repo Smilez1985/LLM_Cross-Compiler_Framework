@@ -690,6 +690,9 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
             state = state_dir(framework)
             index = CommunityManager.read_cached_index(Path(state) / "community", revocations=True) if state else None
             trust, reason = trust_of_folder(target_folder, index)
+            if trust is None:   # no installed pack: shipped, the person's own or made by an AI, as list_targets says
+                from orchestrator.Core.community_manager import own_target_trust
+                plan.target_trust = own_target_trust(target_folder)
             if trust is not None:
                 plan.target_trust = trust.value
                 if trust.value == "revoked":

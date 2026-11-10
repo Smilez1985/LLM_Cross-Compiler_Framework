@@ -85,7 +85,11 @@ SHIPPED_TEMPLATE = Path(__file__).resolve().parents[2] / "targets" / "_template"
 TEMPLATE_PLACEHOLDERS = re.compile(  # not after a name: COMPILER_CONFIG[CMAKE_FLAGS] is a bash array entry
     r"(?<![\w$])\[(?:MODULE_NAME|Hardware-Familie|IHRE_ARCHITEKTUR|Hersteller|QUANTIZATION_LOGIC|CPU_FLAGS|CMAKE_FLAGS"
     r"|SDK_SETUP_COMMANDS|PACKAGING_COMMANDS|ihr-target-name|VENDOR_SOURCES|PIP_PACKAGES|PINNED_DOWNLOADS"
-    r"|PINNED_DOWNLOADS_COPY)\]|\{packages_str\}|YYYY-MM-DD")
+    r"|PINNED_DOWNLOADS_COPY|GNU_TRIPLET)\]|\{packages_str\}|YYYY-MM-DD")
+# The GNU system name of each module architecture: the board package's compilers in the image are <triplet>-gcc and
+# -g++ (the image's own on a build computer of that system, else the distribution's cross compilers).
+GNU_TRIPLETS = {"aarch64": "aarch64-linux-gnu", "x86_64": "x86_64-linux-gnu", "armv7l": "arm-linux-gnueabihf",
+                "riscv64": "riscv64-linux-gnu"}
 GGUF_DEFAULT_QUANTS = ["Q4_K_M", "Q4_0", "Q5_K_M", "Q6_K", "Q8_0", "F16"]
 # The four stages of a target's build, in the order the runtime layer's stage runner runs them (DESIGN U9).
 STAGE_MODULES = ("source", "config", "convert", "target")
@@ -426,7 +430,7 @@ def generator_input(definition: Dict[str, Any], module_name: Optional[str] = Non
     packages = data.get("packages", [])
     data.update({"module_name": name, "packages": packages.split() if isinstance(packages, str) else packages,
                  "description": ai_module_description(name, definition.get("assumptions") or [], lead=description),
-                 "detection_commands": "lscpu", "supported_boards": list(boards or [name]),
+                 "detection_commands": "lscpu", "supported_boards": list(boards or []),
                  "provenance": "ai-generated"})
     return data
 
@@ -556,14 +560,16 @@ def _yaml_text(text: str) -> str:
     return " ".join(re.sub(r"[\[\]{}]", "", str(text)).split())
 
 
-def capabilities_block(board_names: List[str], quantization_logic: str = "") -> Dict[str, Any]:
+def capabilities_block(board_names: List[str], quantization_logic: str = "",
+                       board_info: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
     """The capabilities of a generated target: its boards and GGUF with the types its convert stage handles (the
-    labels of the case branches of the quantization logic in modules/convert_module.sh) or common defaults. Support level community: works for its makers."""
+    labels of the case branches of the quantization logic in modules/convert_module.sh) or common defaults. Support level community: works for its makers.
+    board_info: a board's label and known board names by its name (probe_board), in place of the name as its label."""
     from orchestrator.schemas.targets import TargetCapabilities
     labels = re.findall(r"^\s*([A-Za-z0-9_|\"' ]+)\)", quantization_logic or "", re.MULTILINE)
     quants = [q.strip(" \"'") for label in labels for q in label.split("|")]
     quants = list(dict.fromkeys(q for q in quants if re.fullmatch(r"[A-Za-z0-9_]{1,32}", q))) or list(GGUF_DEFAULT_QUANTS)
-    boards = {module_slug(b): {"label": b} for b in board_names}
+    boards = {module_slug(b): dict((board_info or {}).get(b) or {"label": b}) for b in board_names}
     block = {"schema_version": 1, "support_level": "community", "default_board": next(iter(boards)),
              "boards": boards,
              "formats": {"gguf": {"label": "GGUF (llama.cpp)", "input": ["hf"], "quantizations": quants,
@@ -703,6 +709,29 @@ def validate_target_folder(root: Path, template_dir: Path = SHIPPED_TEMPLATE) ->
     return problems + check_shell_syntax(root)
 
 
+PROBE_BOARD_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+
+
+def probe_board(profile: Any) -> Optional[Dict[str, Any]]:
+    """The board a target made from a hardware probe gets when nobody named its boards: the probe's SoC as the board
+    id, the rule of the shipped targets (a board id is the SoC as the board's device tree names it), so the probe
+    the target was made from, and every later probe of that board, find it (probe_service.match_target, a build's
+    board probe and its pre-flight check); the probe's board name is its label and a known board name. None without
+    a probe, or when the SoC is not a usable board id (the module name stays the board then)."""
+    get = getattr(profile, "get", None)
+    if not callable(get):
+        return None
+    soc = str(get("SOC_MODEL") or "").strip().lower()
+    if not PROBE_BOARD_RE.fullmatch(soc) or not MODULE_NAME_RE.fullmatch(soc) or module_slug(soc) != soc:
+        return None
+    model = " ".join(str(get("BOARD_MODEL") or "").split())[:120]
+    model = re.sub(r"[\[\]{}]", "", model)   # a bracketed value reads as a template placeholder
+    info: Dict[str, Any] = {"label": f"{model} ({soc})" if model else soc}
+    if model:
+        info["examples"] = [model]
+    return {"board": soc, "info": info}
+
+
 class ModuleGenerator:
     """
     Generates file structure and content for new hardware targets.
@@ -750,6 +779,10 @@ class ModuleGenerator:
             Path: Path to the created module directory
         """
         data = validate_module_data(data)
+        found = None if data.get("supported_boards") else probe_board(profile)
+        if found:   # no boards named: the probe's SoC is the board, so the probe finds the target it made
+            data["supported_boards"] = [found["board"]]
+            data["board_info"] = {found["board"]: found["info"]}
         data["runtime_block"] = self._runtime_block(data, profile)
         data["optimization_probe"] = profile   # for the boards' optimization profiles (_update_yaml_config)
         module_name = data["module_name"]
@@ -932,6 +965,7 @@ class ModuleGenerator:
                 "[MODULE_NAME]": data.get("module_name", "Unknown"),
                 "[Hardware-Familie]": data.get("module_name", "Unknown"),
                 "[IHRE_ARCHITEKTUR]": data.get("architecture", "aarch64"),
+                "[GNU_TRIPLET]": GNU_TRIPLETS.get(str(data.get("architecture", "aarch64")), "aarch64-linux-gnu"),
                 "[Hersteller]": "Community",
                 "debian:bookworm-slim": data.get("base_os", "debian:bookworm-slim"),
                 "{packages_str}": packages_str,
@@ -1011,16 +1045,18 @@ class ModuleGenerator:
             "maintainer": data.get("maintainer") or "community", "created": date.today().isoformat(),
             "architecture_family": data["architecture"], "vendor": data.get("vendor") or "community",
             "sdk": data.get("sdk", "none"), "base_image": effective_base(data, self.template_dir)})
-        if data.get("provenance") == "ai-generated":
-            # Untested is a fact to state, not a reason to refuse (design 1.3); builds of this target warn.
-            config["metadata"].update({"provenance": "ai-generated", "untested": True})
+        # Every generated module is untested until a run on its board proves it, made by a person or an AI: a fact to
+        # state, not a reason to refuse (design 1.3)
+        config["metadata"]["untested"] = True
+        if data.get("provenance") == "ai-generated":   # builds of an AI-made target warn
+            config["metadata"]["provenance"] = "ai-generated"
             if data.get("assumptions"):
                 config["metadata"]["assumptions"] = [_yaml_text(a) for a in data["assumptions"]]
             if data.get("base_image_reason"):
                 config["metadata"]["base_image_reason"] = _yaml_text(data["base_image_reason"])
         config["supported_boards"] = [{"name": b} for b in boards]
         config.setdefault("docker", {})["image_name"] = f"llm-framework/{module_slug(name).replace('_', '-')}"
-        config["capabilities"] = capabilities_block(boards, data.get("quantization_logic", ""))
+        config["capabilities"] = capabilities_block(boards, data.get("quantization_logic", ""), data.get("board_info"))
         # One optimization profile per board: the build recipe's plan for the board's probe (or the plain defaults of
         # the architecture), so `llm-cli targets validate` finds it in agreement.
         from orchestrator.Core.board_profiles import generated_profile

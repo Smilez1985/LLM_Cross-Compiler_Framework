@@ -83,9 +83,9 @@ class TextTable:
             "wiz.lbl.packages": "System Packages (space separated):",
             
             "wiz.page.flags": "Compiler Flags",
-            "wiz.page.flags.sub": "Advisory: kept in the module, never applied (llama.cpp is built by the recipe)",
-            "wiz.lbl.cpu_flags": "CPU Flags (GCC, advisory):",
-            "wiz.lbl.cmake_flags": "CMake Flags (advisory):",
+            "wiz.page.flags.sub": "Used by the board package's cross build, before the plan from the board's probe (which wins)",
+            "wiz.lbl.cpu_flags": "CPU Flags (GCC):",
+            "wiz.lbl.cmake_flags": "CMake Flags:",
             
             "wiz.page.summary": "Summary & Generation",
             "wiz.page.summary.sub": "Review settings before generation",
@@ -297,9 +297,9 @@ class TextTable:
             "wiz.lbl.packages": "System Pakete (leerzeichengetrennt):",
             
             "wiz.page.flags": "Compiler Flags",
-            "wiz.page.flags.sub": "Nur Hinweis: im Modul vermerkt, nie angewendet (llama.cpp wird nach dem Rezept gebaut)",
-            "wiz.lbl.cpu_flags": "CPU-Flags (GCC, nur Hinweis):",
-            "wiz.lbl.cmake_flags": "CMake-Flags (nur Hinweis):",
+            "wiz.page.flags.sub": "Vom Cross-Build des Board-Pakets genutzt, vor dem Plan aus der Probe des Boards (der gewinnt)",
+            "wiz.lbl.cpu_flags": "CPU-Flags (GCC):",
+            "wiz.lbl.cmake_flags": "CMake-Flags:",
             
             "wiz.page.summary": "Zusammenfassung",
             "wiz.page.summary.sub": "Einstellungen vor Generierung prüfen",

@@ -304,6 +304,60 @@ TEXTS = {
                                    "build uses exactly this image:\n\n{pinned}\n\nSave the module with this image?",
         "bld.wizard.pin_not_saved": "The module was not saved: the base image {image}, which an AI chose, cannot be "
                                     "pinned to its digest ({reason}). {next}",
+
+        # the module wizard's own texts (orchestrator/gui/wizards.py)
+        "bld.wizard.ai_info": "Let Ditto analyze your hardware probe.",
+        "bld.wizard.ingest_button": "🧠 Deep Ingest (add documentation)",
+        "bld.wizard.ingest_tip": "Crawl documentation addresses so Ditto learns about new hardware.",
+        "bld.wizard.stop_tip": "End Deep Ingest now: a page that is still arriving is abandoned; pages already stored "
+                               "stay.",
+        "bld.wizard.stop_name": "Stop Deep Ingest",
+        "bld.wizard.name_hint": "e.g. NVIDIA Jetson Orin / Rockchip RK3588",
+        "bld.wizard.sdk_hint": "e.g. CUDA, RKNN, OpenVINO",
+        "bld.wizard.custom_image_hint": "e.g. ubuntu:24.04, or an image pinned by digest (name@sha256:...)",
+        "bld.wizard.autofill": "Fill in from the probe result",
+        "bld.wizard.autofill_done": "✅ Values filled in from the probe.",
+        "bld.wizard.autofill_failed": "❌ The probe file cannot be read: {reason}",
+        "bld.wizard.autofill_missing": "⚠️ No probe file found. Run the hardware probe first.",
+        "bld.wizard.flags_note": "Used by the cross build of the board package (the config stage), before the plan "
+                                 "from the board's probe, which wins where both set something; the device runtime "
+                                 "only notes them.",
+        "bld.wizard.quant_label": "Quantization logic (convert stage):",
+        "bld.wizard.quant_hint": "Optional: bash 'case' branches for the convert stage (modules/convert_module.sh; "
+                                 "review AI output carefully)",
+        "bld.wizard.setup_label": "Build-time setup:",
+        "bld.wizard.setup_hint": "Optional: commands the source stage runs once before converting (as the "
+                                 "unprivileged build user, without network), e.g. exporting SDK variables; what they "
+                                 "export reaches the later stages",
+        "bld.wizard.attach": "Attach the knowledge crawled for this target (Deep Ingest, privacy scrub applied)",
+        "bld.wizard.attach_tip": "Only pages crawled in this wizard are attached, never the rest of your knowledge "
+                                 "base.",
+        "bld.wizard.export": "Export for the community after creating (a scrubbed, signed pack for a pull request)",
+        "bld.wizard.summary": "[SUMMARY]\nModule name:  {name}\nArchitecture: {arch}\nSDK:          {sdk}\n\n"
+                              "[DOCKER]\nBase image:   {base}\nPackages:     {packages}\nCompilers:    GCC for "
+                              "{arch}, added by the template (the board package's cross build)\n\n[COMPILER]\n"
+                              "CPU flags:    {cpu}\nCMake flags:  {cmake}\n\n[LOGIC] (becomes part of the generated "
+                              "scripts: review it)\nQuantization logic:\n{quant}\n\nSetup commands:\n{setup}\n",
+        "bld.wizard.default": "(default)",
+        "bld.wizard.none": "(none)",
+        "bld.wizard.no_framework": "The framework is not linked to this window.",
+        "bld.wizard.no_rag": "The local knowledge base is not active. Turn it on in the AI settings first.",
+        "bld.wizard.no_dialog": "This window is not available.",
+        "bld.wizard.crawl_start": "Starting the crawl of {n} addresses...",
+        "bld.wizard.crawl_error_title": "Deep Ingest error",
+        "bld.wizard.crawl_error": "❌ Error: {reason}",
+        "bld.wizard.parsing": "Reading the probe...",
+        "bld.wizard.probe_empty": "The file holds no probe values.",
+        "bld.wizard.probe_loaded": "Hardware profile loaded.\nArchitecture: {arch}\nSuggested SDK: {sdk}",
+        "bld.wizard.probe_failed": "The probe file cannot be read:\n{reason}",
+        "bld.wizard.ai_error_title": "AI error",
+        "bld.wizard.no_ditto": "The AI assistant (Ditto) is not available.",
+        "bld.wizard.ai_unexpected": "Unexpected error: {reason}",
+        "bld.wizard.ai_not_json": "The AI answer is not a JSON object.",
+        "bld.wizard.ai_unknown_arch": "Unknown architecture '{arch}': please choose one.",
+        "bld.wizard.ai_filled": "Values filled in from the AI analysis.\nReview them on the next pages, especially "
+                                "the shell code.",
+        "bld.wizard.create_failed": "The module was not created:\n{reason}",
     },
     "de": {
         "bld.builder.start": "🚀 Build-Pipeline starten",
@@ -603,5 +657,61 @@ TEXTS = {
                                    "Das Modul mit diesem Image speichern?",
         "bld.wizard.pin_not_saved": "Das Modul wurde nicht gespeichert: Das Basis-Image {image}, das eine KI gewählt "
                                     "hat, lässt sich nicht auf seinen Digest festlegen ({reason}). {next}",
+
+        "bld.wizard.ai_info": "Lass Ditto deine Hardware-Probe auswerten.",
+        "bld.wizard.ingest_button": "🧠 Deep Ingest (Doku hinzufügen)",
+        "bld.wizard.ingest_tip": "Doku-Adressen crawlen, damit Ditto neue Hardware kennenlernt.",
+        "bld.wizard.stop_tip": "Deep Ingest jetzt beenden: Eine Seite, die noch ankommt, wird verworfen; schon "
+                               "gespeicherte Seiten bleiben.",
+        "bld.wizard.stop_name": "Deep Ingest beenden",
+        "bld.wizard.name_hint": "z. B. NVIDIA Jetson Orin / Rockchip RK3588",
+        "bld.wizard.sdk_hint": "z. B. CUDA, RKNN, OpenVINO",
+        "bld.wizard.custom_image_hint": "z. B. ubuntu:24.04, oder ein per Digest festgelegtes Image (name@sha256:...)",
+        "bld.wizard.autofill": "Aus dem Probe-Ergebnis ausfüllen",
+        "bld.wizard.autofill_done": "✅ Werte aus der Probe übernommen.",
+        "bld.wizard.autofill_failed": "❌ Die Probe-Datei lässt sich nicht lesen: {reason}",
+        "bld.wizard.autofill_missing": "⚠️ Keine Probe-Datei gefunden. Lass zuerst die Hardware-Probe laufen.",
+        "bld.wizard.flags_note": "Vom Cross-Build des Board-Pakets genutzt (die Config-Stufe), vor dem Plan aus der "
+                                 "Probe des Boards, der gewinnt, wo beide etwas setzen; die Geräte-Runtime vermerkt "
+                                 "sie nur.",
+        "bld.wizard.quant_label": "Quantisierungslogik (Convert-Stufe):",
+        "bld.wizard.quant_hint": "Optional: bash-'case'-Zweige für die Convert-Stufe (modules/convert_module.sh; "
+                                 "KI-Ausgaben sorgfältig prüfen)",
+        "bld.wizard.setup_label": "Einrichtung beim Build:",
+        "bld.wizard.setup_hint": "Optional: Befehle, die die Source-Stufe einmal vor dem Konvertieren ausführt (als "
+                                 "Build-Benutzer ohne Rechte, ohne Netz), z. B. SDK-Variablen exportieren; was sie "
+                                 "exportieren, erreicht die späteren Stufen",
+        "bld.wizard.attach": "Das für dieses Target gecrawlte Wissen anhängen (Deep Ingest, Datenschutz-Bereinigung "
+                             "angewendet)",
+        "bld.wizard.attach_tip": "Nur die in diesem Assistenten gecrawlten Seiten werden angehängt, nie der Rest "
+                                 "deiner Wissensbasis.",
+        "bld.wizard.export": "Nach dem Erstellen für die Community exportieren (ein bereinigtes, signiertes Paket für "
+                             "einen Pull Request)",
+        "bld.wizard.summary": "[ÜBERSICHT]\nModulname:    {name}\nArchitektur:  {arch}\nSDK:          {sdk}\n\n"
+                              "[DOCKER]\nBasis-Image:  {base}\nPakete:       {packages}\nCompiler:     GCC für "
+                              "{arch}, von der Vorlage ergänzt (der Cross-Build des Board-Pakets)\n\n[COMPILER]\n"
+                              "CPU-Flags:    {cpu}\nCMake-Flags:  {cmake}\n\n[LOGIK] (wird Teil der erzeugten "
+                              "Skripte: prüfe sie)\nQuantisierungslogik:\n{quant}\n\nEinrichtungsbefehle:\n{setup}\n",
+        "bld.wizard.default": "(Standard)",
+        "bld.wizard.none": "(keine)",
+        "bld.wizard.no_framework": "Das Framework ist mit diesem Fenster nicht verbunden.",
+        "bld.wizard.no_rag": "Die lokale Wissensbasis ist nicht aktiv. Schalte sie zuerst in den KI-Einstellungen "
+                             "ein.",
+        "bld.wizard.no_dialog": "Dieses Fenster ist nicht verfügbar.",
+        "bld.wizard.crawl_start": "Der Crawl von {n} Adressen startet...",
+        "bld.wizard.crawl_error_title": "Fehler bei Deep Ingest",
+        "bld.wizard.crawl_error": "❌ Fehler: {reason}",
+        "bld.wizard.parsing": "Die Probe wird gelesen...",
+        "bld.wizard.probe_empty": "Die Datei enthält keine Probe-Werte.",
+        "bld.wizard.probe_loaded": "Hardware-Profil geladen.\nArchitektur: {arch}\nVorgeschlagenes SDK: {sdk}",
+        "bld.wizard.probe_failed": "Die Probe-Datei lässt sich nicht lesen:\n{reason}",
+        "bld.wizard.ai_error_title": "KI-Fehler",
+        "bld.wizard.no_ditto": "Der KI-Assistent (Ditto) ist nicht verfügbar.",
+        "bld.wizard.ai_unexpected": "Unerwarteter Fehler: {reason}",
+        "bld.wizard.ai_not_json": "Die Antwort der KI ist kein JSON-Objekt.",
+        "bld.wizard.ai_unknown_arch": "Unbekannte Architektur '{arch}': bitte wähle eine.",
+        "bld.wizard.ai_filled": "Werte aus der KI-Analyse übernommen.\nPrüfe sie auf den nächsten Seiten, vor allem "
+                                "den Shell-Code.",
+        "bld.wizard.create_failed": "Das Modul wurde nicht erstellt:\n{reason}",
     },
 }

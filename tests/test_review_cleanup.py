@@ -169,7 +169,8 @@ class TestLocalProbe:
         try:
             wizard.framework_manager = framework
             wizard.detect_cb.setChecked(True)
-            assert "loaded" in wizard.status_lbl.text()
+            from orchestrator.utils.localization import ui_text
+            assert wizard.status_lbl.text() == ui_text("bld.wizard.autofill_done")
             assert wizard.name_edit.text()
         finally:
             wizard.deleteLater()

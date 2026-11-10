@@ -624,6 +624,25 @@ def ai_generated_target(target_path: Path) -> bool:
         meta["metadata"].get("provenance") == "ai-generated"
 
 
+# Target folders the framework ships, in its own targets folder: trust "shipped".
+SHIPPED_TARGET_FOLDERS = frozenset({"Rockchip", "ARM64"})
+SHIPPED_TARGETS_DIR = Path(__file__).resolve().parents[2] / "targets"
+
+
+def own_target_trust(target_path: Path) -> str:
+    """The trust of a target folder without provenance (no installed pack): "ai-generated" when its target.yml marks it
+    so, "shipped" for a folder the framework ships in its own targets folder, else "own" (made on this computer by the
+    module wizard or `llm-cli module create`, or copied by hand). The one rule of list_targets and the build plan."""
+    folder = Path(target_path)
+    if ai_generated_target(folder):
+        return "ai-generated"
+    try:
+        shipped = folder.name in SHIPPED_TARGET_FOLDERS and folder.resolve().parent == SHIPPED_TARGETS_DIR
+    except OSError:
+        shipped = False
+    return "shipped" if shipped else "own"
+
+
 CHANGED = "changed since it was installed"
 
 

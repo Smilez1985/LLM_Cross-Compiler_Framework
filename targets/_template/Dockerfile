@@ -210,6 +210,23 @@ RUN apt-get update && \
         python3 cmake make git bc jq file curl gosu libgomp1 \
     && rm -rf /var/lib/apt/lists/* && apt-get clean
 
+# The compilers of the board package's cross build (the config stage plans with CC and CXX and tests them, the target
+# stage builds llama-cli and llama-server for the board with them): GCC for the module's system [GNU_TRIPLET], the
+# image's own on a build computer of that system, else the distribution's cross compilers; libc6-dev for the test.
+ARG GNU_TRIPLET=[GNU_TRIPLET]
+# hadolint ignore=DL3008,SC2086
+RUN set -eu; \
+    case "$(dpkg --print-architecture):${GNU_TRIPLET}" in \
+        amd64:x86_64-linux-gnu|arm64:aarch64-linux-gnu|riscv64:riscv64-linux-gnu|armhf:arm-linux-gnueabihf) cross="" ;; \
+        *) package="$(printf '%s' "${GNU_TRIPLET}" | tr _ -)"; cross="gcc-${package} g++-${package}" ;; \
+    esac; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends gcc g++ libc6-dev ${cross}; \
+    rm -rf /var/lib/apt/lists/*; \
+    command -v "${GNU_TRIPLET}-gcc"; \
+    command -v "${GNU_TRIPLET}-g++"
+ENV CC=${GNU_TRIPLET}-gcc CXX=${GNU_TRIPLET}-g++
+
 # Copy Python Environment and the llama.cpp tools (source tree with build/bin) from Builder
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /usr/src/llama.cpp /usr/src/llama.cpp

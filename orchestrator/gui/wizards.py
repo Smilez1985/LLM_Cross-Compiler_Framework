@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Wizards (v2.3.0 Enterprise)
-DIREKTIVE: Goldstandard, vollständige Implementierung.
+The module wizard (Tools > Create Hardware Module...): a new hardware target from a hardware probe, in five pages.
 
-Dieser Wizard führt den Benutzer durch die Erstellung eines neuen Hardware-Targets.
-Er unterstützt zwei Modi:
-1. Standard Import: Deterministisches Parsen von hardware_probe.sh/.ps1 Ausgaben.
-2. AI Auto-Discovery: Intelligente Analyse und Optimierungsvorschläge durch Ditto (LLM).
-
-Updates v2.3.0:
-- Updated probe result filename to `target_hardware_config.txt`.
-- Robust Framework/Config access.
-- Improved asset handling for Avatar.
+Two ways to fill the pages: the standard import reads a probe file by rules (hardware_probe.sh/.py/.ps1 output, stored
+in the probe store through runtime/scan_steps.import_probe), and Ditto's AI analysis proposes a module definition from
+it (marked AI-generated). Deep Ingest crawls the vendor's documentation into the knowledge base (CrawlWorker), and the
+pages crawled here can be attached to the module. The module is written by Core/module_generator.py, the same
+generator as `llm-cli module create`, `llm-cli module generate-ai` and the tool create_target_module; every text is
+English and German (utils/l10n_build.py, "bld.wizard.*").
 """
 
 import threading
@@ -35,7 +31,7 @@ from orchestrator.gui.worker_relay import worker_relay
 from orchestrator.tools.confirmation import visible
 from orchestrator.utils import input_history
 from orchestrator.utils.announce import announce
-from orchestrator.utils.localization import current_language, tr, ui_text
+from orchestrator.utils.localization import current_language, ui_text
 
 # The Docker page's packages before anything is imported (a probe import puts them back after Ditto's proposal).
 DEFAULT_PACKAGES = "build-essential cmake git python3-pip"
@@ -61,7 +57,7 @@ class SummaryPage(QWizardPage):
 # --- CUSTOM WIDGET: SPRITE ANIMATOR ---
 class SpriteAnimationWidget(QLabel):
     """
-    Spielt eine Animation basierend auf einem Sprite-Sheet (Horizontal Strip) ab.
+    Plays an animation from a sprite sheet (a horizontal strip of frames).
     """
     def __init__(self, image_path: str, frame_count: int, interval: int = 150, parent=None):
         super().__init__(parent)
@@ -142,7 +138,7 @@ class CrawlWorker(QThread):
                 if self._stop.is_set():
                     stopped = True
                     break
-                self.progress.emit(f"Crawling root: {url}...")
+                self.progress.emit(ui_text("crawl.progress.start", self.lang) + f" {visible(url)}")
                 # the person's crawl (actor "gui"): in offline mode it may read the own network (round 26 Q5)
                 result = self.rag_manager.ingest_url(url, self.options, stop=self._stop, progress=self.page.emit,
                                                      actor="gui", **({"topic": self.topic} if self.topic else {}))
@@ -200,7 +196,7 @@ class CrawlWorker(QThread):
 
 class ModuleCreationWizard(QWizard):
     """
-    5-Step Module Creation Wizard mit Dual-Mode (Standard & AI).
+    The five pages of a new target module: import, hardware, Docker, flags, summary.
     """
     
     def __init__(self, targets_dir: Path, parent=None):
@@ -215,7 +211,7 @@ class ModuleCreationWizard(QWizard):
                 self.assets_dir = parent.app_root / "assets"
             self.framework_manager = getattr(parent, 'framework_manager', None) or getattr(parent, 'framework', None)
             
-        self.setWindowTitle(tr("wiz.title"))
+        self.setWindowTitle(ui_text("wiz.title"))
         self.setWizardStyle(QWizard.ModernStyle)
         self.setMinimumSize(900, 700)
         
@@ -322,13 +318,13 @@ class ModuleCreationWizard(QWizard):
 
     def create_intro_page(self):
         page = QWizardPage()
-        page.setTitle(tr("wiz.intro.title"))
-        page.setSubTitle(tr("wiz.intro.text"))
+        page.setTitle(ui_text("wiz.intro.title"))
+        page.setSubTitle(ui_text("wiz.intro.text"))
         
         layout = QVBoxLayout()
         
         # --- Import Section ---
-        import_group = QGroupBox(tr("wiz.grp.import"))
+        import_group = QGroupBox(ui_text("wiz.grp.import"))
         import_layout = QVBoxLayout()
         
         # Ditto Avatar & Info
@@ -339,7 +335,7 @@ class ModuleCreationWizard(QWizard):
         header_layout.addWidget(self.avatar_container)
         
         # Info Text
-        info_lbl = QLabel(tr("wiz.lbl.ai_info") if tr("wiz.lbl.ai_info") != "wiz.lbl.ai_info" else "Let Ditto analyze your hardware probe.")
+        info_lbl = QLabel(ui_text("bld.wizard.ai_info"))
         info_lbl.setWordWrap(True)
         header_layout.addWidget(info_lbl)
         header_layout.addStretch()
@@ -350,13 +346,13 @@ class ModuleCreationWizard(QWizard):
         hbox_btns = QHBoxLayout()
         
         # Button 1: Standard Import (Hardcoded Logic)
-        self.btn_import_std = QPushButton(tr("wiz.btn.import_std"))
+        self.btn_import_std = QPushButton(ui_text("wiz.btn.import_std"))
         self.btn_import_std.clicked.connect(self.run_standard_import)
         self.btn_import_std.setMinimumHeight(40)
         hbox_btns.addWidget(self.btn_import_std)
         
         # Button 2: AI Import (Ditto)
-        self.btn_import_ai = QPushButton(tr("wiz.btn.import_ai"))
+        self.btn_import_ai = QPushButton(ui_text("wiz.btn.import_ai"))
         self.btn_import_ai.clicked.connect(self.run_ai_analysis)
         self.btn_import_ai.setStyleSheet("background-color: #6a0dad; color: white; font-weight: bold;")
         self.btn_import_ai.setMinimumHeight(40)
@@ -366,14 +362,13 @@ class ModuleCreationWizard(QWizard):
         
         # Buttons Row 2: Knowledge Ingest (v1.6.0)
         hbox_know = QHBoxLayout()
-        self.btn_deep_ingest = QPushButton("🧠 Deep Ingest (Add Docs)")
-        self.btn_deep_ingest.setToolTip("Crawl external documentation URLs to teach Ditto about new hardware.")
+        self.btn_deep_ingest = QPushButton(ui_text("bld.wizard.ingest_button"))
+        self.btn_deep_ingest.setToolTip(ui_text("bld.wizard.ingest_tip"))
         self.btn_deep_ingest.clicked.connect(self.run_deep_ingest)
         hbox_know.addWidget(self.btn_deep_ingest)
         self.btn_stop_crawl = QPushButton(ui_text("crawl.btn.stop"))
-        self.btn_stop_crawl.setToolTip("End Deep Ingest now: a page that is still arriving is abandoned; pages "
-                                       "already stored stay.")
-        self.btn_stop_crawl.setAccessibleName("Stop Deep Ingest")
+        self.btn_stop_crawl.setToolTip(ui_text("bld.wizard.stop_tip"))
+        self.btn_stop_crawl.setAccessibleName(ui_text("bld.wizard.stop_name"))
         self.btn_stop_crawl.clicked.connect(self.stop_deep_ingest)
         self.btn_stop_crawl.setVisible(False)
         hbox_know.addWidget(self.btn_stop_crawl)
@@ -381,7 +376,7 @@ class ModuleCreationWizard(QWizard):
         hbox_know.addStretch()
         
         # AI Config Button
-        self.btn_configure_ai = QPushButton(tr("wiz.btn.config_ai"))
+        self.btn_configure_ai = QPushButton(ui_text("wiz.btn.config_ai"))
         self.btn_configure_ai.clicked.connect(self.configure_ai)
         hbox_know.addWidget(self.btn_configure_ai)
         
@@ -407,7 +402,7 @@ class ModuleCreationWizard(QWizard):
         self._fill_run_providers()
 
         # Progress & Status Area
-        self.status_label = QLabel(tr("wiz.status.waiting"))
+        self.status_label = QLabel(ui_text("wiz.status.waiting"))
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setTextFormat(Qt.PlainText)  # shows crawled URLs
         self.status_label.setWordWrap(True)
@@ -431,7 +426,7 @@ class ModuleCreationWizard(QWizard):
         
         # --- Manual Section ---
         layout.addSpacing(20)
-        layout.addWidget(QLabel(tr("wiz.lbl.manual")))
+        layout.addWidget(QLabel(ui_text("wiz.lbl.manual")))
         
         page.setLayout(layout)
         return page
@@ -485,21 +480,21 @@ class ModuleCreationWizard(QWizard):
 
     def create_hardware_page(self):
         page = QWizardPage()
-        page.setTitle(tr("wiz.page.hardware"))
-        page.setSubTitle(tr("wiz.page.hardware.sub"))
+        page.setTitle(ui_text("wiz.page.hardware"))
+        page.setSubTitle(ui_text("wiz.page.hardware.sub"))
         layout = QFormLayout()
         
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("e.g. NVIDIA Jetson Orin / Rockchip RK3588")
-        layout.addRow(tr("wiz.lbl.name"), self.name_edit)
+        self.name_edit.setPlaceholderText(ui_text("bld.wizard.name_hint"))
+        layout.addRow(ui_text("wiz.lbl.name"), self.name_edit)
         
         self.arch_combo = QComboBox()
         self.arch_combo.addItems(["aarch64", "x86_64", "armv7l", "riscv64"])
-        layout.addRow(tr("wiz.lbl.arch"), self.arch_combo)
+        layout.addRow(ui_text("wiz.lbl.arch"), self.arch_combo)
         
         self.sdk_edit = QLineEdit()
-        self.sdk_edit.setPlaceholderText("e.g. CUDA, RKNN, OpenVINO")
-        layout.addRow(tr("wiz.lbl.sdk"), self.sdk_edit)
+        self.sdk_edit.setPlaceholderText(ui_text("bld.wizard.sdk_hint"))
+        layout.addRow(ui_text("wiz.lbl.sdk"), self.sdk_edit)
 
         # The module's description (`llm-cli module create` asks for it); empty: "Target for <name>"
         self.desc_edit = QLineEdit()
@@ -509,7 +504,7 @@ class ModuleCreationWizard(QWizard):
         self._update_description_hint()
         
         # Auto-Detect Button
-        self.detect_cb = QCheckBox("Auto-fill from Probe Result")
+        self.detect_cb = QCheckBox(ui_text("bld.wizard.autofill"))
         self.detect_cb.stateChanged.connect(self.load_probe_data)
         layout.addRow("", self.detect_cb)
         self.status_lbl = QLabel("")
@@ -614,40 +609,40 @@ class ModuleCreationWizard(QWizard):
                     idx = self.arch_combo.findText(arch)
                     if idx >= 0: self.arch_combo.setCurrentIndex(idx)
                     
-                self.status_lbl.setText("✅ Data loaded from probe.")
+                self.status_lbl.setText(ui_text("bld.wizard.autofill_done"))
             except Exception as e:
-                self.status_lbl.setText(f"❌ Error parsing probe: {e}")
+                self.status_lbl.setText(ui_text("bld.wizard.autofill_failed", reason=e))
         else:
-            self.status_lbl.setText("⚠️ No probe file found. Run 'Hardware Probe' script first.")
+            self.status_lbl.setText(ui_text("bld.wizard.autofill_missing"))
 
     def create_docker_page(self):
         page = QWizardPage()
-        page.setTitle(tr("wiz.page.docker"))
-        page.setSubTitle(tr("wiz.page.docker.sub"))
+        page.setTitle(ui_text("wiz.page.docker"))
+        page.setSubTitle(ui_text("wiz.page.docker.sub"))
         layout = QVBoxLayout()
         
         self.os_group = QButtonGroup(page)
-        self.rad_debian = QRadioButton(tr("wiz.rad.debian"))
-        self.rad_ubuntu = QRadioButton(tr("wiz.rad.ubuntu"))
-        self.rad_custom = QRadioButton(tr("wiz.rad.custom"))
+        self.rad_debian = QRadioButton(ui_text("wiz.rad.debian"))
+        self.rad_ubuntu = QRadioButton(ui_text("wiz.rad.ubuntu"))
+        self.rad_custom = QRadioButton(ui_text("wiz.rad.custom"))
         self.rad_debian.setChecked(True)
         
         self.os_group.addButton(self.rad_debian)
         self.os_group.addButton(self.rad_ubuntu)
         self.os_group.addButton(self.rad_custom)
         
-        layout.addWidget(QLabel(tr("wiz.lbl.base_os")))
+        layout.addWidget(QLabel(ui_text("wiz.lbl.base_os")))
         layout.addWidget(self.rad_debian)
         layout.addWidget(self.rad_ubuntu)
         layout.addWidget(self.rad_custom)
         
         self.custom_os_edit = QLineEdit()
-        self.custom_os_edit.setPlaceholderText("e.g. ubuntu:24.04, or an image pinned by digest (name@sha256:...)")
+        self.custom_os_edit.setPlaceholderText(ui_text("bld.wizard.custom_image_hint"))
         self.custom_os_edit.setEnabled(False)
         self.rad_custom.toggled.connect(lambda: self.custom_os_edit.setEnabled(self.rad_custom.isChecked()))
         layout.addWidget(self.custom_os_edit)
         
-        layout.addWidget(QLabel(tr("wiz.lbl.packages")))
+        layout.addWidget(QLabel(ui_text("wiz.lbl.packages")))
         self.packages_edit = QLineEdit()
         self.packages_edit.setText(DEFAULT_PACKAGES)
         layout.addWidget(self.packages_edit)
@@ -657,40 +652,40 @@ class ModuleCreationWizard(QWizard):
 
     def create_flags_page(self):
         page = QWizardPage()
-        page.setTitle(tr("wiz.page.flags"))
-        page.setSubTitle(tr("wiz.page.flags.sub"))
+        page.setTitle(ui_text("wiz.page.flags"))
+        page.setSubTitle(ui_text("wiz.page.flags.sub"))
         layout = QFormLayout()
         
         self.cpu_flags = QLineEdit()
         self.cpu_flags.setPlaceholderText("-mcpu=cortex-a76 -mtune=cortex-a76")
-        layout.addRow(tr("wiz.lbl.cpu_flags"), self.cpu_flags)
+        layout.addRow(ui_text("wiz.lbl.cpu_flags"), self.cpu_flags)
         
         self.cmake_flags = QLineEdit()
         self.cmake_flags.setPlaceholderText("-DGGML_CUDA=ON")
-        layout.addRow(tr("wiz.lbl.cmake_flags"), self.cmake_flags)
+        layout.addRow(ui_text("wiz.lbl.cmake_flags"), self.cmake_flags)
+        flags_note = QLabel(ui_text("bld.wizard.flags_note"))
+        flags_note.setWordWrap(True)
+        layout.addRow(flags_note)
         
         # Shell code that ends up in the generated build scripts: always visible and editable for review.
         mono = "font-family: Consolas, Monospace;"
         self.quant_logic = QTextEdit()
         self.quant_logic.setStyleSheet(mono)
-        self.quant_logic.setPlaceholderText("Optional: bash 'case' branches for the convert stage "
-                                            "(modules/convert_module.sh; review AI output carefully)")
-        layout.addRow("Quantization logic (convert stage):", self.quant_logic)
+        self.quant_logic.setPlaceholderText(ui_text("bld.wizard.quant_hint"))
+        layout.addRow(ui_text("bld.wizard.quant_label"), self.quant_logic)
 
         self.setup_commands = QTextEdit()
         self.setup_commands.setStyleSheet(mono)
-        self.setup_commands.setPlaceholderText("Optional: commands the source stage runs once before converting "
-                                               "(as the unprivileged build user, without network), e.g. exporting SDK "
-                                               "variables; what they export reaches the later stages")
-        layout.addRow("Build-time setup:", self.setup_commands)
+        self.setup_commands.setPlaceholderText(ui_text("bld.wizard.setup_hint"))
+        layout.addRow(ui_text("bld.wizard.setup_label"), self.setup_commands)
         
         page.setLayout(layout)
         return page
 
     def create_summary_page(self):
         page = self.summary_page = SummaryPage(self._crawl_running)
-        page.setTitle(tr("wiz.page.summary"))
-        page.setSubTitle(tr("wiz.page.summary.sub"))
+        page.setTitle(ui_text("wiz.page.summary"))
+        page.setSubTitle(ui_text("wiz.page.summary.sub"))
         layout = QVBoxLayout()
         
         self.summary_text = QTextEdit()
@@ -698,11 +693,10 @@ class ModuleCreationWizard(QWizard):
         self.summary_text.setStyleSheet("font-family: Consolas, Monospace;")
         layout.addWidget(self.summary_text)
         # Both off by default: nothing of the knowledge base goes into the module, nothing is shared.
-        self.chk_knowledge = QCheckBox("Attach the knowledge crawled for this target (Deep Ingest, privacy scrub applied)")
-        self.chk_knowledge.setToolTip("Only pages crawled in this wizard are attached, never the rest of your "
-                                      "knowledge base.")
+        self.chk_knowledge = QCheckBox(ui_text("bld.wizard.attach"))
+        self.chk_knowledge.setToolTip(ui_text("bld.wizard.attach_tip"))
         layout.addWidget(self.chk_knowledge)
-        self.chk_export = QCheckBox("Export for community after creating (a scrubbed, signed pack for a pull request)")
+        self.chk_export = QCheckBox(ui_text("bld.wizard.export"))
         layout.addWidget(self.chk_export)
         self.lbl_crawl_running = QLabel(ui_text("crawl.finish_waits"))
         self.lbl_crawl_running.setWordWrap(True)
@@ -721,30 +715,12 @@ class ModuleCreationWizard(QWizard):
         elif self.rad_ubuntu.isChecked(): base_os = "ubuntu:22.04"
         else: base_os = self.custom_os_edit.text()
         
-        summary = f"""
-[CONFIGURATION SUMMARY]
-=======================
-Module Name:  {self.name_edit.text()}
-Architecture: {self.arch_combo.currentText()}
-SDK Backend:  {self.sdk_edit.text()}
-
-[DOCKER]
-Base Image:   {base_os}
-Packages:     {self.packages_edit.text()}
-+ Auto-Added: Cross-Compiler for {self.arch_combo.currentText()}
-
-[COMPILER]
-CPU Flags:    {self.cpu_flags.text()}
-CMake Flags:  {self.cmake_flags.text()}
-
-[LOGIC] (becomes part of the generated scripts - review it)
-Quantization logic:
-{self.quant_logic.toPlainText() or '(default)'}
-
-Setup commands:
-{self.setup_commands.toPlainText() or '(none)'}
-"""
-        self.summary_text.setText(summary)
+        summary = ui_text("bld.wizard.summary", name=self.name_edit.text(), arch=self.arch_combo.currentText(),
+                          sdk=self.sdk_edit.text(), base=base_os, packages=self.packages_edit.text(),
+                          cpu=self.cpu_flags.text(), cmake=self.cmake_flags.text(),
+                          quant=self.quant_logic.toPlainText() or ui_text("bld.wizard.default"),
+                          setup=self.setup_commands.toPlainText() or ui_text("bld.wizard.none"))
+        self.summary_text.setPlainText(summary)   # shell code and AI text: never rich text
         self.chk_knowledge.setEnabled(bool(self.crawled_roots))
         if not self.crawled_roots:
             self.chk_knowledge.setChecked(False)
@@ -753,7 +729,7 @@ Setup commands:
     def run_deep_ingest(self):
         """Starts the Deep Ingest Process."""
         if not self.framework_manager:
-            QMessageBox.critical(self, "Error", "Framework Manager not linked.")
+            QMessageBox.critical(self, ui_text("status.error"), ui_text("bld.wizard.no_framework"))
             return
 
         cfg = self.framework_manager.config
@@ -777,12 +753,12 @@ Setup commands:
 
         rag = self.framework_manager.get_component("rag_manager")
         if not rag:
-            QMessageBox.critical(self, "Error", "Local Knowledge Base (RAG) is not active.\nPlease enable it in 'Configure AI Agent' first.")
+            QMessageBox.critical(self, ui_text("status.error"), ui_text("bld.wizard.no_rag"))
             return
 
         # Show Input Dialog
         if not URLInputDialog:
-             QMessageBox.critical(self, "Error", "URLInputDialog not available.")
+             QMessageBox.critical(self, ui_text("status.error"), ui_text("bld.wizard.no_dialog"))
              return
 
         history = input_history.for_config(cfg)
@@ -802,7 +778,7 @@ Setup commands:
             self.crawl_log.setVisible(True)
             self.crawl_log.clear()
             self.crawled_roots.update(urls)
-            self.crawl_log.appendPlainText(f"Initializing Crawler for {len(urls)} URLs...")
+            self.crawl_log.appendPlainText(ui_text("bld.wizard.crawl_start", n=len(urls)))
             self.btn_deep_ingest.setEnabled(False)
             self.btn_stop_crawl.setEnabled(True)
             self.btn_stop_crawl.setVisible(True)
@@ -881,8 +857,8 @@ Setup commands:
     def on_crawl_error(self, err):
         self._set_avatar_state("fail")
         self._crawl_controls_idle()
-        self.crawl_log.appendPlainText(f"\n❌ Error: {err}")
-        QMessageBox.critical(self, "Crawl Error", str(err))
+        self.crawl_log.appendPlainText("\n" + ui_text("bld.wizard.crawl_error", reason=err))
+        QMessageBox.critical(self, ui_text("bld.wizard.crawl_error_title"), str(err))
 
     def done(self, result):
         """Closing the wizard stops a running crawl (a page still arriving is abandoned). It closes once a page
@@ -907,7 +883,7 @@ Setup commands:
     # --- STANDARD IMPORT LOGIC (Rule Based) ---
 
     def run_standard_import(self):
-        path, _ = QFileDialog.getOpenFileName(self, tr("menu.import_profile"), "", "Config (*.txt);;All Files (*)")
+        path, _ = QFileDialog.getOpenFileName(self, ui_text("menu.import_profile"), "", "Config (*.txt);;All Files (*)")
         if not path: return
         self.import_probe_file(path)
 
@@ -916,7 +892,7 @@ Setup commands:
         self.probe_path = path
         self._store_probe(path)
 
-        self.status_label.setText("Parsing probe data...")
+        self.status_label.setText(ui_text("bld.wizard.parsing"))
         
         try:
             config = {}
@@ -929,7 +905,7 @@ Setup commands:
                         config[key.strip()] = val.strip()
             
             if not config:
-                raise ValueError("File format invalid or empty.")
+                raise ValueError(ui_text("bld.wizard.probe_empty"))
 
             # 1. Architecture Detection
             arch_map = {
@@ -1013,30 +989,30 @@ Setup commands:
             self.ai_proposal = None  # the fields now come from the probe, not from Ditto
             self._update_description_hint()
             self._set_avatar_state("success")
-            self.status_label.setText(tr("msg.import_success"))
+            self.status_label.setText(ui_text("msg.import_success"))
             note = getattr(self, "pairing_note", "")   # what became of a probe kit's pairing block
-            QMessageBox.information(self, tr("msg.import_success"),
-                                    f"Hardware profile loaded.\nDetected Arch: {detected_arch}\nSuggested SDK: {sdk}"
+            QMessageBox.information(self, ui_text("msg.import_success"),
+                                    ui_text("bld.wizard.probe_loaded", arch=detected_arch, sdk=sdk)
                                     + (f"\n\n{note}" if note else ""))
             self.next()
             
         except Exception as e:
             self._set_avatar_state("fail")
-            self.status_label.setText(tr("status.error"))
-            QMessageBox.critical(self, tr("status.error"), f"Failed to parse probe file:\n{str(e)}")
+            self.status_label.setText(ui_text("status.error"))
+            QMessageBox.critical(self, ui_text("status.error"), ui_text("bld.wizard.probe_failed", reason=e))
 
     # --- AI LOGIC (Ditto) ---
 
     def configure_ai(self):
         if not AIConfigurationDialog:
-             QMessageBox.critical(self, "Error", "AIConfigurationDialog not available.")
+             QMessageBox.critical(self, ui_text("status.error"), ui_text("bld.wizard.no_dialog"))
              return
              
         dialog = AIConfigurationDialog(self.framework_manager, self)
         if dialog.exec() == QDialog.Accepted:
             self.ai_config = dialog.get_config()
             self.btn_import_ai.setEnabled(True)
-            self.status_label.setText(f"{tr('msg.ai_ready')}: {self.ai_config.get('provider')}")
+            self.status_label.setText(f"{ui_text('msg.ai_ready')}: {self.ai_config.get('provider')}")
 
     def _store_probe(self, path):
         """Copies the chosen probe file, validated and without its host name, into the probe store, so AI clients and
@@ -1078,14 +1054,14 @@ Setup commands:
         return getattr(self.framework_manager, "ditto_manager", None) if self.framework_manager else None
 
     def _run_problem(self, text: str):
-        box = QMessageBox(QMessageBox.Critical, "AI Error", text, QMessageBox.Ok, self)
+        box = QMessageBox(QMessageBox.Critical, ui_text("bld.wizard.ai_error_title"), text, QMessageBox.Ok, self)
         box.setTextFormat(Qt.PlainText)
         box.exec()
 
     def run_ai_analysis(self):
         ditto = self._ditto()
         if ditto is None:
-            QMessageBox.critical(self, tr("status.error"), "The AI assistant (Ditto) is not available.")
+            QMessageBox.critical(self, ui_text("status.error"), ui_text("bld.wizard.no_ditto"))
             return
         provider, model = self.run_choice()
         if provider or model:
@@ -1106,7 +1082,7 @@ Setup commands:
             if not ditto.is_configured("json"):
                 return
 
-        path, _ = QFileDialog.getOpenFileName(self, tr("menu.import_profile"), "", "Config (*.txt);;All Files (*)")
+        path, _ = QFileDialog.getOpenFileName(self, ui_text("menu.import_profile"), "", "Config (*.txt);;All Files (*)")
         if not path: return
         self.probe_path = path
         self._store_probe(path)
@@ -1115,7 +1091,7 @@ Setup commands:
         self.btn_import_ai.setEnabled(False)
         self.btn_import_std.setEnabled(False)
         self.ai_progress.setVisible(True)
-        self.status_label.setText(tr("msg.ai_thinking"))
+        self.status_label.setText(ui_text("msg.ai_thinking"))
         
         token = self._ai_request = object()
         offline = bool(getattr(ditto, "offline_mode", False))
@@ -1145,7 +1121,7 @@ Setup commands:
         except (DittoError, OSError) as e:
             result = ("error", str(e))
         except Exception as e:
-            result = ("error", f"Unexpected error: {e}")
+            result = ("error", ui_text("bld.wizard.ai_unexpected", reason=e))
         relay.done.emit(token, result)
 
     def _on_ai_relay(self, token, result) -> None:
@@ -1166,9 +1142,9 @@ Setup commands:
         self.btn_import_ai.setEnabled(True)
         self.btn_import_std.setEnabled(True)
         self.ai_progress.setVisible(False)
-        self.status_label.setText(f"❌ {tr('status.error')}")
+        self.status_label.setText(f"❌ {ui_text('status.error')}")
         # The error can quote the model (Ditto's stated reason for "cannot"): AI text is never rendered as rich text.
-        box = QMessageBox(QMessageBox.Critical, "AI Error", str(err), QMessageBox.Ok, self)
+        box = QMessageBox(QMessageBox.Critical, ui_text("bld.wizard.ai_error_title"), str(err), QMessageBox.Ok, self)
         box.setTextFormat(Qt.PlainText)
         box.exec()
         if reason == "missing_information":
@@ -1190,10 +1166,10 @@ Setup commands:
         self.btn_import_ai.setEnabled(True)
         self.btn_import_std.setEnabled(True)
         self.ai_progress.setVisible(False)
-        self.status_label.setText(tr("msg.ai_complete"))
+        self.status_label.setText(ui_text("msg.ai_complete"))
         
         if not isinstance(config, dict):
-            self.on_ai_error("The AI answer is not a JSON object.")
+            self.on_ai_error(ui_text("bld.wizard.ai_not_json"))
             return
         self.ai_proposal = dict(config)
         self._update_description_hint()
@@ -1211,7 +1187,7 @@ Setup commands:
             if self.arch_combo.findText(arch) >= 0:
                 self.arch_combo.setCurrentText(arch)
             else:
-                warnings.append(f"Unknown architecture '{arch}' - please choose one.")
+                warnings.append(ui_text("bld.wizard.ai_unknown_arch", arch=arch))
         if "sdk" in config: self.sdk_edit.setText(text("sdk"))
         if "base_os" in config:
             # Only the exact images of the two buttons select them; any other image (also one with "debian" in its
@@ -1230,8 +1206,7 @@ Setup commands:
         if "setup_commands" in config: self.setup_commands.setPlainText(text("setup_commands"))
         
         from orchestrator.Core.ditto_manager import proposal_facts
-        message = ("Values filled from AI analysis.\nReview them on the next pages, especially the shell code.\n\n"
-                   + proposal_facts(config))
+        message = ui_text("bld.wizard.ai_filled") + "\n\n" + proposal_facts(config)
         if warnings:
             message += "\n\n" + "\n".join(warnings)
         box = QMessageBox(QMessageBox.Information, "Ditto", message, QMessageBox.Ok, self)
@@ -1425,16 +1400,16 @@ Setup commands:
                 from orchestrator.Core.module_generator import record_module_saved
                 record_module_saved(self.framework_manager, "gui", self.module_data, Path(output_path),
                                     "framework-gui")
-            message = f"{tr('msg.module_created')}\n{output_path}"
+            message = f"{ui_text('msg.module_created')}\n{output_path}"
             if roots and not (Path(output_path) / KNOWLEDGE_SNAPSHOT).is_file():
                 message += "\n\n" + ui_text("crawl.snapshot_missing")
             checked = self._check_created(output_path)   # `llm-cli targets validate` on the new target
             if checked:
                 message += "\n\n" + ui_text("bld.check.after_create") + "\n" + checked
-            QMessageBox.information(self, tr("msg.success"), message)
+            QMessageBox.information(self, ui_text("msg.success"), message)
             if self.chk_export.isChecked():
                 from orchestrator.gui.community_hub import CommunityExportDialog
                 CommunityExportDialog(self.framework_manager, "target", output_path.name, self).exec()
             super().accept()
         except Exception as e:
-            QMessageBox.critical(self, tr("status.error"), f"Failed to generate module:\n{e}")
+            QMessageBox.critical(self, ui_text("status.error"), ui_text("bld.wizard.create_failed", reason=e))
