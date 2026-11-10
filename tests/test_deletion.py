@@ -212,6 +212,10 @@ DELETION_SITES = {
     ("orchestrator/Core/community_maintainer.py", "Review.discard"): STAGING,
     ("orchestrator/Core/community_pack.py", "read_pack"): STAGING,
     ("orchestrator/Core/module_generator.py", "ModuleGenerator.generate_module"): STAGING,
+    # the edit step: its own scratch folder of a module made before the save (a save moved it into the targets
+    # folder, a cancel leaves nothing), and the temporary file of a file it writes
+    ("orchestrator/Core/module_edit.py", "discard_staged"): STAGING,
+    ("orchestrator/Core/module_edit.py", "_write_lf"): TEMP,
     ("orchestrator/tools/tools_community.py", "Quarantine._discard"): STAGING,
     ("orchestrator/runtime/build/source.py", "remove_tree"): STAGING,   # the old name, delegates to the helper below
     # the one removal of the framework's own folders (chain win-hygiene); its callers are listed

@@ -158,7 +158,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `mcp serve` / `mcp config` | Run the MCP server / show how to connect AI clients |
 | `acp` / `acp config` / `acp servers` | Ditto as an agent of editors that speak ACP (the editor starts it) / show the editor entry / the MCP servers editors passed, with your consent per entry |
 | `secrets set` / `secrets list` | Store a token (Hugging Face, GitHub) / list the stored names |
-| `module create` / `module generate-ai` | Create a new hardware target, by questions or from a probe file with Ditto |
+| `module create` / `module generate-ai` / `module edit` | Create a new hardware target, by questions or from a probe file with Ditto / edit its files with a diff and the checks |
 | `scan` | Run the hardware probe on this computer or, with `--device`, on a board over SSH, or with `--import` store a board's probe file, and print its probe id |
 | `device list` / `device settings` | The probed boards / how the runtime is installed on a board (start script or systemd), decided before a deployment |
 | `device runtime plan/build/deploy/verify/status` | The self-built llama.cpp runtime of a board: plan it from the board's profile, cross-build it, install it over SSH and check it there |
@@ -2230,7 +2230,7 @@ New hardware targets. The full guide: [Module_Developer_Guide.md](Module_Develop
 llm-cli module create [--name TEXT] [--arch aarch64|x86_64|armv7l|riscv64] [--sdk TEXT] [--probe FILE]
                       [--description TEXT] [--base-image IMAGE] [--packages TEXT] [--cpu-flags TEXT]
                       [--cmake-flags TEXT] [--setup-commands FILE] [--quantization-logic FILE]
-                      [--knowledge-root URL]...
+                      [--knowledge-root URL]... [--edit]
 ```
 
 Creates a new target with the values of the module wizard, as options; what is not given is asked: name,
@@ -2254,6 +2254,7 @@ target is never overwritten. The target is marked untested until a run on its bo
 | `--setup-commands FILE` | Commands the source stage runs once before converting (as the unprivileged build user, without network). |
 | `--quantization-logic FILE` | The bash `case` branches of the convert stage (`modules/convert_module.sh`). |
 | `--knowledge-root URL` | Attach the knowledge base's pages crawled from this address (privacy scrub applied); repeatable. Only these pages are attached. |
+| `--edit` | The wizard's "edit all files" step: the module is made in a private scratch folder, its stage modules, `target.yml` and Dockerfile open in `$EDITOR` one after the other, the diff is shown and the checks run again ([`module edit`](#module-edit)); a failing check offers to open the files again, and the module goes into the targets folder only when every check passes and you say yes. Otherwise nothing is written. |
 
 The target is written to the configured targets folder (setting `targets_dir`; a relative path is relative to the
 installation, not the current folder). Its `target.yml` has a `capabilities:` block (support level `community`) with
@@ -2268,7 +2269,9 @@ stages, where a new target fills in its conversion and quantization
 In the GUI: **Tools > Create Hardware Module...**: name, architecture, SDK and **Description** on the hardware page,
 base image and packages on the Docker page, CPU and CMake flags, quantization logic and setup commands on the flags
 page, the knowledge attachment and the community export on the last page; the standard import on the first page reads
-a probe file (`--probe`). After **Finish** the new target is checked as with `targets validate`.
+a probe file (`--probe`). The last page is the "edit all files" step (`--edit`): the module is made there, not saved
+yet, its files listed with their diff; **Finish** runs the checks again, refuses with the reasons while one fails, and
+then saves the module. After **Finish** the new target is checked as with `targets validate`.
 
 ### module generate-ai
 
@@ -2299,6 +2302,37 @@ In the GUI: **Tools > Create Hardware Module...**, first page: **AI Auto-Discove
 **for this analysis only** (`--provider`, `--model`; the saved AI settings stay unchanged). The base image is pinned
 to its digest before you see the proposal, and the module is saved through the same function as this command, with the
 same refusals.
+
+### module edit
+
+```
+llm-cli module edit TARGET [--file FILE]... [--apply DIFF_FILE]
+```
+
+The "edit all files" step for a target of the targets folder (by id or folder name), the place where a module is
+repaired by hand. It lists the four stage modules, the slot modules that `target.yml` names in its `stages:` block,
+`target.yml` and every Dockerfile; never the framework's stage runner, nor a runner file a target ships
+(`modules/build.sh`, `stage_user.sh`), the helper scripts or the crawled knowledge. Each file opens in `$EDITOR`; then
+the diff against the saved files is shown, and the checks of a target folder run again on a copy with your changes
+([`validate_target_folder`](Module_Developer_Guide.md#91-what-the-validators-check): the shell deny patterns, the
+template placeholders, the pinned images, the slots, `bash -n`). While a check fails nothing is saved, with the
+reasons; an edit may not drop the marks `untested` and `provenance` of `target.yml`. Only your yes writes the files
+(no answer, no terminal: nothing is written).
+
+| Option | Meaning |
+|---|---|
+| `--file FILE` | Open only this file of the step (e.g. `modules/config_module.sh`, `target.yml`, `Dockerfile`); repeatable. Default: every file, unless `--apply` is given. |
+| `--apply DIFF_FILE` | Apply a unified diff first (an AI's proposal, or one written by hand), all or nothing; it is shown and checked like any edit and saved only on your yes. A diff that adds, deletes or renames a file, or touches the runner, is refused. |
+
+```bash
+llm-cli module edit my_board --file modules/config_module.sh
+llm-cli module edit my_board --apply proposal.diff
+```
+
+In the GUI: **Build > Targets...**, select the target, **Edit Files...**: the same files with their diff, **Run the
+Checks**, **Apply a Diff...** (`--apply`) and **Save**, which is refused with the reasons while a check fails. An AI
+app or Ditto may propose a change there through the GUI tools, as a diff in the field "proposal": it is applied in the
+window, marked and listed with an Undo, and only your **Save** writes it.
 
 ---
 

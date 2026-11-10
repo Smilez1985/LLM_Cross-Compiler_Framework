@@ -93,7 +93,13 @@ def test_the_wizard_makes_a_target_from_a_probe(fw, qapp, monkeypatch):
         assert summary.startswith(ui_text("bld.wizard.summary", name="", arch="", sdk="", base="", packages="",
                                           cpu="", cmake="", quant="", setup="").split("\n")[0])
         assert "<b>Q4_K_M</b>" in summary   # shell code shown as written, never as rich text
+        # the edit step could not make the files from that shell code: it says why, and nothing was saved
+        assert wizard.currentId() == wizard.edit_id and wizard.edit_panel.edit is None
+        assert "syntax error" in wizard.edit_panel.problems_view.toPlainText()
+        wizard.back()
         wizard.quant_logic.setPlainText("")
+        wizard.next()
+        assert wizard.edit_panel.edit is not None and not wizard.edit_panel.edit.changed()
         wizard.accept()
     finally:
         wizard.deleteLater()

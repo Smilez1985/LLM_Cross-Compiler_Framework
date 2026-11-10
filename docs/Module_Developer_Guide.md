@@ -122,10 +122,11 @@ There are three ways; all of them end in the same module generator (`orchestrato
   from the probe (its board, else its SoC or CPU, unique among your targets) and the SDK from its accelerators; it
   proposes no flags, since the build recipe plans them from the board's probe. The compilers of the board package's
   cross build come from the template's Dockerfile (GCC for the module's architecture), not from packages the wizard
-  adds. The last page ("Summary & Generation") has two
+  adds. The summary page ("Summary & Generation") has two
   check boxes, both off by default: the knowledge snapshot
   ([section 3.4](#34-what-the-generator-writes-and-what-you-add)) and "Export for community after creating"
-  ([section 9.2](#92-exporting-a-target-for-the-community)).
+  ([section 9.2](#92-exporting-a-target-for-the-community)). The last page is the "edit all files" step
+  ([section 3.6](#36-edit-all-files-before-the-module-is-saved)); **Finish** there saves the module.
 - **CLI:** `llm-cli module create` takes every value of the wizard as an option (`--name`, `--arch`, `--sdk`,
   `--description`, `--base-image`, `--packages`, `--cpu-flags`, `--cmake-flags`, `--setup-commands FILE`,
   `--quantization-logic FILE`, `--knowledge-root URL`) and asks for name, architecture, SDK, base image, description,
@@ -134,7 +135,8 @@ There are three ways; all of them end in the same module generator (`orchestrato
   SDK are proposed from it as in the wizard, and the module's `runtime:` block is planned from it; a file that is not
   a probe profile is refused. The flags go into the config stage
   ([section 3.4](#34-what-the-generator-writes-and-what-you-add)). A relative `targets_dir` is relative to the
-  installation, as for the other commands.
+  installation, as for the other commands. `--edit` adds the "edit all files" step
+  ([section 3.6](#36-edit-all-files-before-the-module-is-saved)).
 - **CLI with Ditto:** `llm-cli module generate-ai target_hardware_config.txt` (optionally `--provider` and
   `--model` for this run). Ditto returns a structured proposal (architecture, SDK, base image, packages, CPU and
   CMake flags, setup commands, quantization block). If the knowledge base is enabled, it adds matching
@@ -351,6 +353,40 @@ check in the build container (`module_flag_verdicts` of `target_module.sh`) give
   question the person answers. `llm-cli build deps list|fetch|delete` (Build > Build Dependencies... in the GUI)
   lists, fetches and deletes the cache's entries. Other download options (CUDA CCCL, ZenDNN, llguidance, the virtual
   GPU header, OpenMP on Windows) have no pinned source and stay refused.
+
+### 3.6 Edit all files before the module is saved
+
+Vendor paths and flags the template cannot know are finished by hand in the "edit all files" step: the wizard's last
+page, `llm-cli module create --edit` and, for a target that already exists (one you made earlier, or one from the
+community), `llm-cli module edit <target>` or **Build > Targets... > Edit Files...**. A module that failed its build is
+repaired by hand here too.
+
+- **The files.** The four stage modules, the slot modules that `target.yml` names in its `stages:` block
+  ([section 6](#6-the-build-stages)), `target.yml` and every Dockerfile. Never the framework's stage runner
+  (`orchestrator/runtime_layer/runner.sh`, the runner of every build), nor a runner file a target ships
+  (`modules/build.sh`, `stage_user.sh`, which builds ignore), the helper scripts or the crawled knowledge. The step
+  changes these files; it neither adds nor deletes one (a new slot module is a file you add to `modules/` yourself).
+- **Before it is saved.** The wizard and `module create --edit` make the module in a private scratch folder outside the
+  targets folder; it moves into the targets folder only when you save it, so a module being edited is never a target a
+  build could pick up. Going back in the wizard and changing a page makes the files again (the edits made so far are
+  then dropped; the page says so).
+- **The diff.** Every changed file is shown as a unified diff against the version the generator wrote (for an existing
+  module: against the files as they were last saved).
+- **The checks.** Finish, Save and the CLI's question come only after `validate_target_folder`
+  ([section 9.1](#91-what-the-validators-check)) passed on a copy with your changes: the shell deny patterns, the
+  template placeholders, the pinned images, the slots, `bash -n`. While a check fails nothing is saved, and the
+  reasons are shown. The marks `untested` and `provenance` of `target.yml` stay as they are: a passed build or a run on
+  the board changes them, never an edit.
+- **An AI's proposal.** Ditto or an AI app may propose a change as a unified diff: through the GUI tools into the
+  step's field "proposal" (applied in the window, marked, listed with an Undo, shown in the diff; a file you edited
+  yourself is never overwritten), or as a file you apply with `module edit --apply` or **Apply a Diff...**. A proposal
+  is only a change in the step: only your Finish, Save or yes writes it.
+
+```bash
+llm-cli module create --name my_board --arch aarch64 --sdk None --edit
+llm-cli module edit my_board --file modules/config_module.sh
+llm-cli module edit my_board --apply proposal.diff
+```
 
 ## 4. target.yml and the capabilities block
 

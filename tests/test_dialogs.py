@@ -1257,11 +1257,13 @@ class TestDeepIngestControls:
         finish = wizard.button(wizards.QWizard.FinishButton)
         assert finish.isEnabled() and wizard.lbl_crawl_running.isHidden()
 
+        # the edit step made the module's files in a scratch folder when it opened (no save): count from here
+        made = len(generated)
         wizard.run_deep_ingest()
         assert started.wait(5)
         assert not finish.isEnabled() and not wizard.lbl_crawl_running.isHidden()
         wizard.accept()
-        assert generated == [] and wizard.isVisible()
+        assert len(generated) == made and wizard.isVisible()
 
         release.set()
         assert wait_for(qapp, lambda: finish.isEnabled())
@@ -1494,7 +1496,7 @@ class TestMainWindowWiring:
 
             wizard = ModuleCreationWizard(tmp_path / "targets", win)
             assert wizard.framework_manager is win.framework
-            assert len(wizard.pageIds()) == 5
+            assert len(wizard.pageIds()) == 6   # the last one: the edit step
 
             # A module created by the wizard shows up without restarting the app.
             assert win.builder_tab.target_combo.count() == 0

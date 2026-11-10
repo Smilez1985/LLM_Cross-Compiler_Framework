@@ -7,6 +7,7 @@ or "no capabilities declared", from BuildService.list_targets, the same query as
 TargetManager.validate, the CLI's check, on the selected target (its target.yml read again, so an edited file is
 checked as it is now) and shows each schema error by field, or that the target declares no capabilities. The same
 check runs after the module wizard created a target and after a Community Hub target install (target_check_text).
+[Edit Files...] opens the "edit all files" step (gui/module_edit.py, `llm-cli module edit`) for the selected target.
 Every text is plain text.
 """
 
@@ -121,8 +122,11 @@ class TargetsDialog(QDialog):
         # the boards with their optimization profile and benchmark rows (`llm-cli targets boards`)
         self.btn_boards = QPushButton(button_text(self._t("bld.targets.boards")), self)
         self.btn_boards.setObjectName("btn_targets_boards")
+        # the "edit all files" step for the selected target (`llm-cli module edit`), the place of a repair by hand
+        self.btn_edit = QPushButton(button_text(self._t("bld.targets.edit")), self)
+        self.btn_edit.setObjectName("btn_targets_edit")
         for button, slot in ((self.btn_check, self._check), (self.btn_boards, self._boards),
-                             (self.btn_reload, self._reload)):
+                             (self.btn_edit, self._edit), (self.btn_reload, self._reload)):
             button.setAutoDefault(False)
             button.clicked.connect(slot)
             buttons.addButton(button, QDialogButtonBox.ActionRole)
@@ -166,6 +170,7 @@ class TargetsDialog(QDialog):
         has = bool(self.targets)
         self.btn_check.setEnabled(has)
         self.btn_boards.setEnabled(has)
+        self.btn_edit.setEnabled(has)
 
     def selected(self) -> Optional[str]:
         rows = self.table.selectionModel().selectedRows() if self.table.selectionModel() else []
@@ -212,6 +217,22 @@ class TargetsDialog(QDialog):
         plain_box(self, "information" if text is not None else "warning",
                   self._t("bld.targets.boards_title", id=one_line(name)),
                   text if text is not None else self._t("bld.targets.boards_invalid", id=one_line(name)))
+
+    def _edit(self):
+        """Edit Files...: the edit step for the selected target; saved edits are read again (the table refreshed)."""
+        name = self.selected()
+        if not name:
+            plain_box(self, "information", self._t("bld.targets.title"), self._t("bld.targets.pick"))
+            return None
+        tm = _target_manager(self.framework)
+        folder = tm.folder_of(name) if tm is not None and hasattr(tm, "folder_of") else None
+        if folder is None:
+            plain_box(self, "critical", self._t("bld.targets.title"),
+                      self._t("bld.edit.open_failed", target=one_line(name), reason="-"))
+            return None
+        from orchestrator.gui.module_edit import open_module_edit
+        return open_module_edit(self, folder, registry=getattr(self.framework, "tool_registry", None),
+                                on_saved=lambda _files: self._reload())
 
     def _reload(self) -> None:
         tm = _target_manager(self.framework)

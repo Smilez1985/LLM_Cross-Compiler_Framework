@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The module wizard (Tools > Create Hardware Module...): a new hardware target from a hardware probe, in five pages.
+The module wizard (Tools > Create Hardware Module...): a new hardware target from a hardware probe, in six pages.
 
 Two ways to fill the pages: the standard import reads a probe file by rules (hardware_probe.sh/.py/.ps1 output, stored
 in the probe store through runtime/scan_steps.import_probe), and Ditto's AI analysis proposes a module definition from
@@ -8,8 +8,14 @@ it (marked AI-generated). Deep Ingest crawls the vendor's documentation into the
 pages crawled here can be attached to the module. The module is written by Core/module_generator.py, the same
 generator as `llm-cli module create`, `llm-cli module generate-ai` and the tool create_target_module; every text is
 English and German (utils/l10n_build.py, "bld.wizard.*").
+
+The last page is the "edit all files" step (gui/module_edit.py over Core/module_edit.py): when it opens, the module is
+made in a private scratch folder outside the targets folder; the person finishes its stage modules, target.yml and
+Dockerfile there with a diff, and Finish runs the checks again and moves the module into the targets folder only when
+every check passes. Nothing is in the targets folder before Finish.
 """
 
+import json
 import threading
 import re
 from pathlib import Path
@@ -24,6 +30,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QThread, QTimer, QRect
 from PySide6.QtGui import QPixmap
 
+from orchestrator.Core.module_edit import (ModuleEdit, commit_staged, discard_staged, name_taken, stage_folder,
+                                           template_for)
 from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT, ModuleGenerator
 from orchestrator.gui.dialogs import AIConfigurationDialog, URLInputDialog, show_crawl_notice_once
 from orchestrator.gui.plain import plain_tooltip
@@ -44,11 +52,33 @@ def module_name_hint(raw: str) -> str:
     return name or "Custom_Target"
 
 class SummaryPage(QWizardPage):
-    """The last page. Finish stays disabled while a Deep Ingest runs: the knowledge snapshot would be partial."""
+    """The summary. Next (and Finish on the edit page) stays disabled while a Deep Ingest runs: the knowledge snapshot
+    would be partial. `leave()` decides whether Next may make the module's files (an AI's base image is pinned
+    first)."""
 
-    def __init__(self, crawl_running: Callable[[], bool]):
+    def __init__(self, crawl_running: Callable[[], bool], leave: Optional[Callable[[], bool]] = None):
         super().__init__()
         self._crawl_running = crawl_running
+        self._leave = leave
+
+    def isComplete(self) -> bool:
+        return super().isComplete() and not self._crawl_running()
+
+    def validatePage(self) -> bool:
+        return self._leave() if self._leave is not None else True
+
+
+class ModuleEditPage(QWizardPage):
+    """The "edit all files" step: the module made in a scratch folder when the page opens (see the module
+    docstring)."""
+
+    def __init__(self, crawl_running: Callable[[], bool], stage: Callable[[], None]):
+        super().__init__()
+        self._crawl_running = crawl_running
+        self._stage = stage
+
+    def initializePage(self) -> None:
+        self._stage()
 
     def isComplete(self) -> bool:
         return super().isComplete() and not self._crawl_running()
@@ -196,7 +226,7 @@ class CrawlWorker(QThread):
 
 class ModuleCreationWizard(QWizard):
     """
-    The five pages of a new target module: import, hardware, Docker, flags, summary.
+    The six pages of a new target module: import, hardware, Docker, flags, summary, edit all files.
     """
     
     def __init__(self, targets_dir: Path, parent=None):
@@ -232,6 +262,9 @@ class ModuleCreationWizard(QWizard):
         # clicks Finish; the pinned image the person accepted is what the module is written with.
         self._pin_request: Optional[object] = None
         self._pinned_image: Optional[tuple] = None   # (the AI's image, its pinned reference)
+        self._staged: Optional[Path] = None   # the module made for the edit step, in its scratch folder
+        self._staged_key: Optional[str] = None   # the pages' values it was made from
+        self._stage_error = ""
         worker_relay().done.connect(self._on_pin_relay, Qt.QueuedConnection)
         
         # Container for Avatar (Stacked to switch widgets)
@@ -243,7 +276,8 @@ class ModuleCreationWizard(QWizard):
         self.addPage(self.create_hardware_page())
         self.addPage(self.create_docker_page())
         self.addPage(self.create_flags_page())
-        self.addPage(self.create_summary_page())
+        self.summary_id = self.addPage(self.create_summary_page())
+        self.edit_id = self.addPage(self.create_edit_page())
         self.gui_form = self._bind_gui_form()
 
     def _bind_gui_form(self):
@@ -309,6 +343,8 @@ class ModuleCreationWizard(QWizard):
         b.close_with(self)
         registry = getattr(self.framework_manager, "tool_registry", None)
         for page_id in self.pageIds()[1:]:   # the banner of what Ditto filled, with its Undo, on every page
+            if page_id == self.edit_id:   # the edit step has the banner of its own form
+                continue
             layout = self.page(page_id).layout()
             if layout is not None:
                 layout.addWidget(b.banner(self.page(page_id), audit=person_audit(registry)))
@@ -684,7 +720,7 @@ class ModuleCreationWizard(QWizard):
         return page
 
     def create_summary_page(self):
-        page = self.summary_page = SummaryPage(self._crawl_running)
+        page = self.summary_page = SummaryPage(self._crawl_running, self._leave_summary)
         page.setTitle(ui_text("wiz.page.summary"))
         page.setSubTitle(ui_text("wiz.page.summary.sub"))
         layout = QVBoxLayout()
@@ -707,9 +743,21 @@ class ModuleCreationWizard(QWizard):
         page.setLayout(layout)
         return page
 
+    def create_edit_page(self):
+        from orchestrator.gui.module_edit import ModuleEditPanel
+        page = self.edit_page = ModuleEditPage(self._crawl_running, self._stage_module)
+        page.setTitle(ui_text("bld.edit.page"))
+        page.setSubTitle(ui_text("bld.edit.page.sub"))
+        layout = QVBoxLayout()
+        self.edit_panel = ModuleEditPanel(page, registry=getattr(self.framework_manager, "tool_registry", None))
+        layout.addWidget(self.edit_panel)
+        page.setLayout(layout)
+        return page
+
     def initializePage(self, page_id):
-        if self.nextId() == -1: # Last page
+        if page_id == getattr(self, "summary_id", None):
             self.update_summary()
+        super().initializePage(page_id)
 
     def update_summary(self):
         if self.rad_debian.isChecked(): base_os = "debian:bookworm-slim"
@@ -815,6 +863,7 @@ class ModuleCreationWizard(QWizard):
         """Finish waits for a running crawl (SummaryPage.isComplete); the summary page says why."""
         self.lbl_crawl_running.setVisible(self._crawl_running())
         self.summary_page.completeChanged.emit()
+        self.edit_page.completeChanged.emit()
 
     def stop_deep_ingest(self):
         """Stop button: the crawl ends, abandoning a page that is still arriving, and keeps what is stored."""
@@ -874,6 +923,7 @@ class ModuleCreationWizard(QWizard):
             self._close_result = result
             self.stop_deep_ingest()
             return
+        self._discard_staging()   # a module that was not saved leaves nothing behind
         super().done(result)
 
     def _close_after_crawl(self):
@@ -1211,9 +1261,10 @@ class ModuleCreationWizard(QWizard):
         token = self._pin_request = object()
         relay, offline = worker_relay(), self._offline()
         config = getattr(self.framework_manager, "config", None)
-        finish = self.button(QWizard.FinishButton)
-        if finish is not None:
-            finish.setEnabled(False)   # one lookup at a time; Finish comes back with the answer
+        for which in (QWizard.FinishButton, QWizard.NextButton):
+            button = self.button(which)
+            if button is not None:
+                button.setEnabled(False)   # one lookup at a time; Finish and Next come back with the answer
 
         def work() -> None:
             from orchestrator.Core.ditto_manager import pin_reference
@@ -1230,9 +1281,10 @@ class ModuleCreationWizard(QWizard):
             return
         from orchestrator.gui.plain import ask, plain_box
         self._pin_request = None
-        finish = self.button(QWizard.FinishButton)
-        if finish is not None:
-            finish.setEnabled(True)
+        for which in (QWizard.FinishButton, QWizard.NextButton):
+            button = self.button(which)
+            if button is not None:
+                button.setEnabled(True)
         kind, image, value, next_step = result
         title = ui_text("bld.wizard.pin_title")
         if kind != "pinned":   # as `module generate-ai` refuses a proposal whose image cannot be pinned
@@ -1244,27 +1296,49 @@ class ModuleCreationWizard(QWizard):
         if not ask(self, title, ui_text("bld.wizard.pin_question", image=image, pinned=value)):
             return
         self._pinned_image = (image, value)
-        self.accept()
+        if self.currentId() == self.summary_id:   # Next on the summary: the edit step makes the files with it
+            self.next()
+        else:
+            self.accept()
 
-    def _save_through_ditto(self, roots, profile) -> Path:
+    def _ditto_definition(self):
+        """The definition an AI-made module is saved with: the pages' values over the proposal's (see
+        _save_through_ditto), with the module name and the person's own description."""
+        from orchestrator.Core.module_generator import AI_DEFINITION_FIELDS
+        definition = {k: v for k, v in (self.ai_proposal or {}).items() if k in AI_DEFINITION_FIELDS}
+        definition.update({k: self.module_data[k] for k in ("architecture", "sdk", "base_os", "packages", "cpu_flags",
+                                                            "cmake_flags", "setup_commands", "quantization_logic")})
+        return definition, self.module_data["module_name"], self.person_description()
+
+    def _audit_ditto_save(self, path) -> None:
+        from orchestrator.Core.module_generator import generator_input, record_module_saved
+        definition, name, lead = self._ditto_definition()
+        record_module_saved(self.framework_manager, "gui", generator_input(definition, name, description=lead),
+                            Path(path), "framework-gui")
+
+    def _generator(self, targets_dir):
+        """The module generator for `targets_dir`; in a scratch folder it renders the targets folder's template."""
+        generator = ModuleGenerator(targets_dir)
+        if Path(targets_dir) != Path(self.targets_dir):
+            try:
+                generator.template_dir = template_for(self.targets_dir)
+            except AttributeError:   # a generator without one
+                pass
+        return generator
+
+    def _save_through_ditto(self, roots, profile, targets_dir=None, audit: bool = True) -> Path:
         """An AI-made module takes the path of `llm-cli module generate-ai`: DittoManager.save_module refuses a
         prebuilt nvidia/cuda image and an image that is not a Docker Official Image without the AI's reason, the
         module generator checks every value again, and the save is audited like the CLI's (record_module_saved). The
         values are the ones on the pages (the person may have changed Ditto's); the proposal's fields without a page
         of their own are passed on."""
         from orchestrator.Core.ditto_manager import DittoCoder
-        from orchestrator.Core.module_generator import AI_DEFINITION_FIELDS, generator_input
-        from orchestrator.Core.module_generator import record_module_saved
-        definition = {k: v for k, v in (self.ai_proposal or {}).items() if k in AI_DEFINITION_FIELDS}
-        definition.update({k: self.module_data[k] for k in ("architecture", "sdk", "base_os", "packages", "cpu_flags",
-                                                            "cmake_flags", "setup_commands", "quantization_logic")})
-        name = self.module_data["module_name"]
+        definition, name, lead = self._ditto_definition()
         ditto = self._ditto() or DittoCoder(self.framework_manager)
-        lead = self.person_description()
-        path = Path(ditto.save_module(definition, self.targets_dir, module_name=name, profile=profile,
-                                      knowledge_roots=roots, generator=ModuleGenerator, description=lead))
-        record_module_saved(self.framework_manager, "gui", generator_input(definition, name, description=lead), path,
-                            "framework-gui")
+        path = Path(ditto.save_module(definition, targets_dir or self.targets_dir, module_name=name, profile=profile,
+                                      knowledge_roots=roots, generator=self._generator, description=lead))
+        if audit:
+            self._audit_ditto_save(path)
         return path
 
     def _check_created(self, folder) -> str:
@@ -1280,15 +1354,9 @@ class ModuleCreationWizard(QWizard):
         except Exception:  # noqa: BLE001 - the module exists; the check is information
             return ""
 
-    def accept(self):
-        if self._crawl_running():  # Finish is disabled meanwhile; the snapshot must hold every crawled page
-            return
-        if self._pin_request is not None:   # the digest of the AI's base image is being looked up
-            return
-        unpinned = self._unpinned_ai_image()
-        if unpinned:   # an AI's base image is written with its digest, as `module generate-ai` writes it
-            self._start_pin(unpinned)
-            return
+    def _collect_module_data(self) -> bool:
+        """self.module_data from the pages (the pinned image the person accepted in place of an AI's tag); returns
+        whether an AI helped (Ditto's proposal, or fields an AI filled through the GUI tools)."""
         # The board package's compilers come from the template's runtime stage (GCC for the module's system), not
         # from packages added here.
         packages_list = self.packages_edit.text().split()
@@ -1328,35 +1396,150 @@ class ModuleCreationWizard(QWizard):
                 if key not in self.module_data and (self.ai_proposal or {}).get(key):
                     self.module_data[key] = self.ai_proposal[key]
             self.module_data["provenance"] = "ai-generated"
+        return ai_made
 
+    def _roots(self):
+        return sorted(self.crawled_roots) if self.chk_knowledge.isChecked() else None
+
+    def _via_ditto(self) -> bool:
+        """Ditto's proposal (or a base image an AI filled in) is saved as `llm-cli module generate-ai` saves it."""
+        return bool(self.ai_proposal or self._ai_chose_base_image())
+
+    def _generate_into(self, targets_dir, roots, profile) -> Path:
+        """Makes the module from self.module_data in `targets_dir` (the targets folder, or the edit step's scratch
+        folder: then nothing is audited, the save is)."""
+        if self._via_ditto():
+            return self._save_through_ditto(roots, profile, targets_dir=targets_dir,
+                                            audit=Path(targets_dir) == Path(self.targets_dir))
+        generator = self._generator(targets_dir)
+        if self.framework_manager:
+            return generator.generate_module(self.module_data, self.framework_manager, knowledge_roots=roots,
+                                             profile=profile)
+        return generator.generate_module(self.module_data, profile=profile)
+
+    def _stage_key(self) -> str:
+        """The values the edit step's files are made from: when they change, the files are made again."""
+        return json.dumps([self.module_data, self._roots(), self._via_ditto(), self.ai_proposal], sort_keys=True,
+                          default=str)
+
+    # --- the "edit all files" step -------------------------------------------------------------------------------
+
+    def _leave_summary(self) -> bool:
+        """Next on the summary: an AI's base image is pinned first (the answer comes back to _on_pin_relay)."""
+        if self._crawl_running() or self._pin_request is not None:
+            return False
+        unpinned = self._unpinned_ai_image()
+        if unpinned:
+            self._start_pin(unpinned)
+            return False
+        return True
+
+    def _discard_staging(self) -> None:
+        if self._staged is not None:
+            discard_staged(self._staged)
+        self._staged = self._staged_key = None
+
+    def _stage_module(self, note: str = "") -> None:
+        """Makes the module in a scratch folder for the edit step, unless it was made from the same values already
+        (then the edits made so far stay)."""
+        self._collect_module_data()
+        key = self._stage_key()
+        if self._staged is not None and key == self._staged_key and self.edit_panel.edit is not None:
+            return
+        edit = self.edit_panel.edit
+        had_edits = bool(edit is not None and edit.changed())
+        self._discard_staging()
+        self._stage_error = ""
+        taken = name_taken(self.targets_dir, str(self.module_data.get("module_name") or ""))
+        try:
+            if taken:
+                raise ValueError(f"A target named '{taken}' already exists, and "
+                                 f"'{self.module_data.get('module_name')}' would read the same (names are compared "
+                                 "ignoring case and separators); choose another module name.")
+            scratch = stage_folder()
+            try:
+                folder = Path(self._generate_into(scratch, self._roots(), self._target_profile()))
+                edit = ModuleEdit(folder, template_dir=template_for(self.targets_dir))
+            except Exception:
+                discard_staged(scratch)
+                raise
+        except Exception as e:  # noqa: BLE001 - the reason is shown on the page; Finish says it again
+            self._stage_error = str(e)
+            self.edit_panel.show_error(ui_text("bld.edit.make_failed", reason=e))
+            return
+        self._staged, self._staged_key = folder, key
+        self.edit_panel.load(edit, note=note or (ui_text("bld.edit.remade") if had_edits else ""))
+
+    def _finish_edited(self) -> None:
+        """Finish on the edit step: the checks again, then the module moves into the targets folder."""
+        ai_made = self._collect_module_data()
+        if self._staged is None or self.edit_panel.edit is None or self._stage_key() != self._staged_key:
+            # the files could not be made, or the values changed since (e.g. a crawl finished): made again, and the
+            # person sees them before the next Finish
+            self._stage_module(note=ui_text("bld.edit.remade_finish"))
+            if self._staged is None:
+                QMessageBox.critical(self, ui_text("status.error"),
+                                     ui_text("bld.wizard.create_failed", reason=self._stage_error))
+            else:
+                from orchestrator.gui.plain import plain_box
+                plain_box(self, "information", ui_text("bld.edit.page"), ui_text("bld.edit.remade_finish"))
+            return
+        if self.edit_panel.save() is None:   # a check failed: refused with the reasons, nothing saved
+            return
+        try:
+            output_path = commit_staged(self._staged, self.targets_dir)
+        except Exception as e:  # noqa: BLE001 - e.g. a target of the same name appeared meanwhile
+            QMessageBox.critical(self, ui_text("status.error"), ui_text("bld.wizard.create_failed", reason=e))
+            return
+        self._staged = self._staged_key = None
+        self.edit_panel.unload()
+        if self._via_ditto():
+            self._audit_ditto_save(output_path)
+        self._saved(output_path, ai_made)
+
+    def _saved(self, output_path, ai_made: bool) -> None:
+        """After the module is in the targets folder: the audit of fields an AI filled, the result, the check, the
+        export the person chose."""
+        roots = self._roots()
+        if ai_made and not self._via_ditto():
+            # fields an AI filled through the GUI tools, saved by the person: audited (design 6.7)
+            from orchestrator.Core.module_generator import record_module_saved
+            record_module_saved(self.framework_manager, "gui", self.module_data, Path(output_path),
+                                "framework-gui")
+        message = f"{ui_text('msg.module_created')}\n{output_path}"
+        if roots and not (Path(output_path) / KNOWLEDGE_SNAPSHOT).is_file():
+            message += "\n\n" + ui_text("crawl.snapshot_missing")
+        checked = self._check_created(output_path)   # `llm-cli targets validate` on the new target
+        if checked:
+            message += "\n\n" + ui_text("bld.check.after_create") + "\n" + checked
+        QMessageBox.information(self, ui_text("msg.success"), message)
+        if self.chk_export.isChecked():
+            from orchestrator.gui.community_hub import CommunityExportDialog
+            CommunityExportDialog(self.framework_manager, "target", Path(output_path).name, self).exec()
+        super().accept()
+
+    def accept(self):
+        if self._crawl_running():  # Finish is disabled meanwhile; the snapshot must hold every crawled page
+            return
+        if self._pin_request is not None:   # the digest of the AI's base image is being looked up
+            return
+        if self.currentId() == self.edit_id:   # Finish on the edit step: the edited module is saved
+            self._finish_edited()
+            return
+        unpinned = self._unpinned_ai_image()
+        if unpinned:   # an AI's base image is written with its digest, as `module generate-ai` writes it
+            self._start_pin(unpinned)
+            return
+        # Without the edit step (Finish is only on it; a caller that accepts on another page): the module is made
+        # straight in the targets folder, the generator's own checks deciding.
+        ai_made = self._collect_module_data()
         try:
             if not self.targets_dir.exists(): self.targets_dir.mkdir(parents=True, exist_ok=True)
-            generator = ModuleGenerator(self.targets_dir)
-            roots = sorted(self.crawled_roots) if self.chk_knowledge.isChecked() else None
-            profile = self._target_profile()
-            if self.ai_proposal or self._ai_chose_base_image():
-                # Ditto's proposal (or a base image an AI filled in) is saved as `llm-cli module generate-ai` saves it
-                output_path = self._save_through_ditto(roots, profile)
-            elif self.framework_manager:
-                output_path = generator.generate_module(self.module_data, self.framework_manager, knowledge_roots=roots,
-                                                        profile=profile)
-            else:
-                output_path = generator.generate_module(self.module_data, profile=profile)
-            if ai_made and not (self.ai_proposal or self._ai_chose_base_image()):
-                # fields an AI filled through the GUI tools, saved by the person: audited (design 6.7)
-                from orchestrator.Core.module_generator import record_module_saved
-                record_module_saved(self.framework_manager, "gui", self.module_data, Path(output_path),
-                                    "framework-gui")
-            message = f"{ui_text('msg.module_created')}\n{output_path}"
-            if roots and not (Path(output_path) / KNOWLEDGE_SNAPSHOT).is_file():
-                message += "\n\n" + ui_text("crawl.snapshot_missing")
-            checked = self._check_created(output_path)   # `llm-cli targets validate` on the new target
-            if checked:
-                message += "\n\n" + ui_text("bld.check.after_create") + "\n" + checked
-            QMessageBox.information(self, ui_text("msg.success"), message)
-            if self.chk_export.isChecked():
-                from orchestrator.gui.community_hub import CommunityExportDialog
-                CommunityExportDialog(self.framework_manager, "target", output_path.name, self).exec()
-            super().accept()
+            output_path = self._generate_into(self.targets_dir, self._roots(), self._target_profile())
+        except Exception as e:
+            QMessageBox.critical(self, ui_text("status.error"), ui_text("bld.wizard.create_failed", reason=e))
+            return
+        try:
+            self._saved(output_path, ai_made)
         except Exception as e:
             QMessageBox.critical(self, ui_text("status.error"), ui_text("bld.wizard.create_failed", reason=e))

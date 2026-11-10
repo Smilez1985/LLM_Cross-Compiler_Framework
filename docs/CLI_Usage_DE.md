@@ -159,7 +159,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `mcp serve` / `mcp config` | Den MCP-Server betreiben / zeigen, wie man KI-Clients verbindet |
 | `acp` / `acp config` / `acp servers` | Ditto als Agent von Editoren, die ACP sprechen (der Editor startet es) / den Eintrag für den Editor zeigen / die MCP-Server, die Editoren übergeben haben, mit deiner Zustimmung je Eintrag |
 | `secrets set` / `secrets list` | Ein Token speichern (Hugging Face, GitHub) / die gespeicherten Namen auflisten |
-| `module create` / `module generate-ai` | Ein neues Hardware-Target anlegen, per Fragen oder mit Ditto aus einer Probe-Datei |
+| `module create` / `module generate-ai` / `module edit` | Ein neues Hardware-Target anlegen, per Fragen oder mit Ditto aus einer Probe-Datei / seine Dateien mit Diff und Prüfungen bearbeiten |
 | `scan` | Die Hardware-Probe auf diesem Rechner oder mit `--device` auf einem Board per SSH ausführen, oder mit `--import` die Probe-Datei eines Boards ablegen, und ihre Probe-ID zeigen |
 | `device list` / `device settings` | Die untersuchten Boards / wie die Laufzeit auf einem Board installiert wird (Startskript oder systemd), vor einem Deployment entschieden |
 | `device runtime plan/build/deploy/verify/status` | Die selbst gebaute llama.cpp-Laufzeit eines Boards: aus seinem Profil planen, cross-kompilieren, per SSH installieren und dort prüfen |
@@ -2330,7 +2330,7 @@ Neue Hardware-Targets. Die vollständige Anleitung: [Module_Developer_Guide_DE.m
 llm-cli module create [--name TEXT] [--arch aarch64|x86_64|armv7l|riscv64] [--sdk TEXT] [--probe DATEI]
                       [--description TEXT] [--base-image IMAGE] [--packages TEXT] [--cpu-flags TEXT]
                       [--cmake-flags TEXT] [--setup-commands DATEI] [--quantization-logic DATEI]
-                      [--knowledge-root URL]...
+                      [--knowledge-root URL]... [--edit]
 ```
 
 Legt ein neues Target mit den Werten des Modul-Assistenten an, als Optionen; was fehlt, wird gefragt: Name,
@@ -2355,6 +2355,7 @@ Target wird nie überschrieben. Das Target ist als ungetestet markiert, bis ein 
 | `--setup-commands DATEI` | Befehle, die die Source-Stufe einmal vor dem Konvertieren ausführt (als Build-Benutzer ohne Rechte, ohne Netz). |
 | `--quantization-logic DATEI` | Die bash-`case`-Zweige der Convert-Stufe (`modules/convert_module.sh`). |
 | `--knowledge-root URL` | Die Seiten der Wissensbasis anhängen, die von dieser Adresse gecrawlt wurden (Datenschutz-Bereinigung angewendet); wiederholbar. Nur diese Seiten werden angehängt. |
+| `--edit` | Der Schritt „alle Dateien bearbeiten“ des Assistenten: Das Modul wird in einem privaten Arbeitsordner erzeugt, seine Stage-Module, die `target.yml` und das Dockerfile öffnen nacheinander in `$EDITOR`, der Diff wird gezeigt und die Prüfungen laufen erneut ([`module edit`](#module-edit)); bei einer gescheiterten Prüfung lassen sich die Dateien noch einmal öffnen, und das Modul kommt erst in den Targets-Ordner, wenn jede Prüfung besteht und du Ja sagst. Sonst wird nichts geschrieben. |
 
 Das Target wird in den eingestellten Targets-Ordner geschrieben (Einstellung `targets_dir`; ein relativer Pfad
 gilt relativ zur Installation, nicht zum aktuellen Ordner). Seine `target.yml` hat einen Block `capabilities:`
@@ -2369,8 +2370,10 @@ und wie man es teilt ([`zoo export`](#zoo-export)).
 In der GUI: **Tools > Create Hardware Module...**: Name, Architektur, SDK und **Beschreibung** auf der Hardware-Seite,
 Basis-Image und Pakete auf der Docker-Seite, CPU- und CMake-Flags, Quantisierungslogik und Einrichtungsbefehle auf der
 Flags-Seite, das Anhängen des Wissens und der Community-Export auf der letzten Seite; der Standard-Import auf der
-ersten Seite liest eine Probe-Datei (`--probe`). Nach **Finish** wird das neue Target wie mit `targets validate`
-geprüft.
+ersten Seite liest eine Probe-Datei (`--probe`). Die letzte Seite ist der Schritt „alle Dateien bearbeiten“
+(`--edit`): Dort wird das Modul erzeugt, noch nicht gespeichert, und seine Dateien mit ihrem Diff gelistet; **Finish**
+führt die Prüfungen erneut aus, lehnt mit den Gründen ab, solange eine scheitert, und speichert dann das Modul. Nach
+**Finish** wird das neue Target wie mit `targets validate` geprüft.
 
 ### module generate-ai
 
@@ -2403,6 +2406,39 @@ In der GUI: **Tools > Create Hardware Module...**, erste Seite: **AI Auto-Discov
 **nur für diese Analyse** (`--provider`, `--model`; die gespeicherten KI-Einstellungen bleiben unverändert). Das
 Basis-Image wird auf seinen Digest festgelegt, bevor du den Vorschlag siehst, und das Modul wird über dieselbe
 Funktion wie bei diesem Befehl gespeichert, mit denselben Ablehnungen.
+
+### module edit
+
+```
+llm-cli module edit TARGET [--file DATEI]... [--apply DIFF_DATEI]
+```
+
+Der Schritt „alle Dateien bearbeiten“ für ein Target des Targets-Ordners (nach ID oder Ordnername), der Ort, an dem
+ein Modul von Hand repariert wird. Er listet die vier Stage-Module, die Slot-Module, die die `target.yml` in ihrem
+Block `stages:` nennt, die `target.yml` und jedes Dockerfile; nie den Stage-Runner des Frameworks, keine Runner-Datei,
+die ein Target mitbringt (`modules/build.sh`, `stage_user.sh`), keine Hilfsskripte und nicht das gecrawlte Wissen.
+Jede Datei öffnet in `$EDITOR`; dann wird der Diff gegenüber den gespeicherten Dateien gezeigt, und die Prüfungen
+eines Target-Ordners laufen erneut auf einer Kopie mit deinen Änderungen
+([`validate_target_folder`](Module_Developer_Guide_DE.md#91-was-die-prüfungen-verlangen): die Sperrmuster für
+Shell-Code, die Platzhalter der Vorlage, die gepinnten Images, die Slots, `bash -n`). Solange eine Prüfung scheitert,
+wird nichts gespeichert, mit den Gründen; eine Änderung darf die Markierungen `untested` und `provenance` der
+`target.yml` nicht entfernen. Nur dein Ja schreibt die Dateien (keine Antwort, kein Terminal: nichts wird geschrieben).
+
+| Option | Bedeutung |
+|---|---|
+| `--file DATEI` | Nur diese Datei des Schritts öffnen (z. B. `modules/config_module.sh`, `target.yml`, `Dockerfile`); wiederholbar. Standard: jede Datei, außer mit `--apply`. |
+| `--apply DIFF_DATEI` | Zuerst einen Unified Diff anwenden (den Vorschlag einer KI oder einen von Hand geschriebenen), ganz oder gar nicht; er wird gezeigt und geprüft wie jede Änderung und nur auf dein Ja gespeichert. Ein Diff, der eine Datei anlegt, löscht oder umbenennt oder den Runner berührt, wird abgelehnt. |
+
+```bash
+llm-cli module edit my_board --file modules/config_module.sh
+llm-cli module edit my_board --apply proposal.diff
+```
+
+In der GUI: **Build > Targets...**, das Target wählen, **Dateien bearbeiten...**: dieselben Dateien mit ihrem Diff,
+**Prüfungen ausführen**, **Diff anwenden...** (`--apply`) und **Speichern**, das mit den Gründen abgelehnt wird,
+solange eine Prüfung scheitert. Eine KI-App oder Ditto kann dort über die GUI-Werkzeuge eine Änderung vorschlagen, als
+Diff im Feld „Vorschlag“: Er wird im Fenster angewendet, markiert und mit einem Rückgängig gelistet, und nur dein
+**Speichern** schreibt ihn.
 
 ---
 

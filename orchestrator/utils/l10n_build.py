@@ -357,6 +357,39 @@ TEXTS = {
         "bld.wizard.ai_filled": "Values filled in from the AI analysis.\nReview them on the next pages, especially "
                                 "the shell code.",
         "bld.wizard.create_failed": "The module was not created:\n{reason}",
+        # the "edit all files" step (orchestrator/gui/module_edit.py, Core/module_edit.py)
+        "bld.edit.form": "Edit all files",
+        "bld.edit.page": "Edit all files",
+        "bld.edit.page.sub": "The module is made but not saved yet. Finish its stage modules, target.yml and "
+                             "Dockerfile by hand: the diff shows every change, and Finish saves the module only when "
+                             "every check passes. The framework's stage runner is not among the files.",
+        "bld.edit.title": "Edit Files: {target}",
+        "bld.edit.intro": "The files of {target}: the stage modules, target.yml and the Dockerfile (never the stage "
+                          "runner). The diff shows every change against the saved files; Save writes them only when "
+                          "every check passes.",
+        "bld.edit.text": "Text",
+        "bld.edit.diff": "Diff",
+        "bld.edit.changed": "{name} (changed)",
+        "bld.edit.check": "Run the Checks",
+        "bld.edit.apply": "Apply a Diff...",
+        "bld.edit.reset": "Undo My Changes to This File",
+        "bld.edit.save": "Save",
+        "bld.edit.no_changes": "No file changed.",
+        "bld.edit.checks_ok": "Every check passed.",
+        "bld.edit.checks_failed": "A check failed, so the module cannot be saved like this:\n{problems}",
+        "bld.edit.refused_title": "Not saved",
+        "bld.edit.refused": "The module was not saved: a check failed.\n{problems}",
+        "bld.edit.make_failed": "The module's files could not be made:\n{reason}\nGo back and change the pages.",
+        "bld.edit.remade": "The pages changed, so the module's files were made again; the edits made before are "
+                           "gone.",
+        "bld.edit.remade_finish": "The pages changed since the files were made, so they were made again (the edits "
+                                  "made before are gone). Check them and click Finish again.",
+        "bld.edit.apply_title": "Apply a diff",
+        "bld.edit.apply_failed": "The diff was not applied:\n{reason}",
+        "bld.edit.saved": "Saved: {files}",
+        "bld.edit.open_failed": "The files of {target} cannot be opened:\n{reason}",
+        "bld.edit.field.proposal": "Proposal (a unified diff)",
+        "bld.targets.edit": "Edit Files...",
     },
     "de": {
         "bld.builder.start": "🚀 Build-Pipeline starten",
@@ -711,5 +744,41 @@ TEXTS = {
         "bld.wizard.ai_filled": "Werte aus der KI-Analyse übernommen.\nPrüfe sie auf den nächsten Seiten, vor allem "
                                 "den Shell-Code.",
         "bld.wizard.create_failed": "Das Modul wurde nicht erstellt:\n{reason}",
+        # the "edit all files" step (orchestrator/gui/module_edit.py, Core/module_edit.py)
+        "bld.edit.form": "Alle Dateien bearbeiten",
+        "bld.edit.page": "Alle Dateien bearbeiten",
+        "bld.edit.page.sub": "Das Modul ist erzeugt, aber noch nicht gespeichert. Stelle seine Stage-Module, die "
+                             "target.yml und das Dockerfile von Hand fertig: Der Diff zeigt jede Änderung, und Finish "
+                             "speichert das Modul erst, wenn jede Prüfung besteht. Der Stage-Runner des Frameworks ist "
+                             "nicht unter den Dateien.",
+        "bld.edit.title": "Dateien bearbeiten: {target}",
+        "bld.edit.intro": "Die Dateien von {target}: die Stage-Module, die target.yml und das Dockerfile (nie der "
+                          "Stage-Runner). Der Diff zeigt jede Änderung gegenüber den gespeicherten Dateien; Speichern "
+                          "schreibt sie erst, wenn jede Prüfung besteht.",
+        "bld.edit.text": "Text",
+        "bld.edit.diff": "Diff",
+        "bld.edit.changed": "{name} (geändert)",
+        "bld.edit.check": "Prüfungen ausführen",
+        "bld.edit.apply": "Diff anwenden...",
+        "bld.edit.reset": "Meine Änderungen an dieser Datei zurücknehmen",
+        "bld.edit.save": "Speichern",
+        "bld.edit.no_changes": "Keine Datei geändert.",
+        "bld.edit.checks_ok": "Jede Prüfung bestanden.",
+        "bld.edit.checks_failed": "Eine Prüfung ist gescheitert, so lässt sich das Modul nicht speichern:\n{problems}",
+        "bld.edit.refused_title": "Nicht gespeichert",
+        "bld.edit.refused": "Das Modul wurde nicht gespeichert: Eine Prüfung ist gescheitert.\n{problems}",
+        "bld.edit.make_failed": "Die Dateien des Moduls ließen sich nicht erzeugen:\n{reason}\nGeh zurück und ändere "
+                                "die Seiten.",
+        "bld.edit.remade": "Die Seiten haben sich geändert, also wurden die Dateien des Moduls neu erzeugt; die "
+                           "Änderungen von vorher sind weg.",
+        "bld.edit.remade_finish": "Die Seiten haben sich geändert, seit die Dateien erzeugt wurden, also wurden sie "
+                                  "neu erzeugt (die Änderungen von vorher sind weg). Prüfe sie und klicke noch einmal "
+                                  "auf Finish.",
+        "bld.edit.apply_title": "Diff anwenden",
+        "bld.edit.apply_failed": "Der Diff wurde nicht angewendet:\n{reason}",
+        "bld.edit.saved": "Gespeichert: {files}",
+        "bld.edit.open_failed": "Die Dateien von {target} lassen sich nicht öffnen:\n{reason}",
+        "bld.edit.field.proposal": "Vorschlag (ein Unified Diff)",
+        "bld.targets.edit": "Dateien bearbeiten...",
     },
 }

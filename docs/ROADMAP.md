@@ -288,10 +288,6 @@ parts move only when a measurement shows a gain (maintainer decision of 2026-10-
     containers, not OS images, so it is an addition to the image, not its way out.
   - **A QEMU smoke test of cross builds in CI**, never on your computer. Why: a broken cross build is found before it
     reaches a board.
-  - **An "edit all files" step in the module wizard**, with a diff and the checks run again: the stage modules,
-    `target.yml` (with its `stages:` slots) and the Dockerfile. The stage runner is never among them: it is the
-    framework's runtime layer, the same for every target. Why: vendor paths and flags can be finished before the
-    module is saved.
   - **The first release of llmcf-setpriv for the toolbox way `fetch`**: the maintainer pushes a tag `tools-v<version>`
     (the release workflow builds, checks, attests and uploads it), then its URL and sha256 go into
     `orchestrator/runtime_layer/toolbox/prebuilt.json`. Why: until then `fetch` refuses plainly ("no release yet")

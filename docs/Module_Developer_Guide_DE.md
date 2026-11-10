@@ -124,10 +124,12 @@ Es gibt drei Wege; alle enden im selben Modulgenerator (`orchestrator/Core/modul
   Der Import schlägt den Modulnamen aus der Probe vor (ihr Board, sonst ihr SoC oder ihre CPU, eindeutig unter deinen
   Targets) und das SDK aus ihren Beschleunigern; Flags schlägt er keine vor, denn das Build-Rezept plant sie aus der
   Probe des Boards. Die Compiler des Cross-Builds des Board-Pakets kommen aus dem Dockerfile der Vorlage (GCC für die
-  Architektur des Moduls), nicht aus Paketen, die der Assistent ergänzt. Die letzte Seite
+  Architektur des Moduls), nicht aus Paketen, die der Assistent ergänzt. Die Seite der Zusammenfassung
   („Zusammenfassung“) hat zwei Kästchen, beide standardmäßig aus: den Wissens-Schnappschuss
   ([Abschnitt 3.4](#34-was-der-generator-schreibt-und-was-du-ergänzt)) und „Export for community after creating“
-  ([Abschnitt 9.2](#92-ein-target-für-die-community-exportieren)).
+  ([Abschnitt 9.2](#92-ein-target-für-die-community-exportieren)). Die letzte Seite ist der Schritt „alle Dateien
+  bearbeiten“ ([Abschnitt 3.6](#36-alle-dateien-bearbeiten-bevor-das-modul-gespeichert-wird)); **Finish** dort
+  speichert das Modul.
 - **CLI:** `llm-cli module create` nimmt jeden Wert des Assistenten als Option (`--name`, `--arch`, `--sdk`,
   `--description`, `--base-image`, `--packages`, `--cpu-flags`, `--cmake-flags`, `--setup-commands DATEI`,
   `--quantization-logic DATEI`, `--knowledge-root URL`) und fragt nach Name, Architektur, SDK, Basis-Image,
@@ -136,7 +138,8 @@ Es gibt drei Wege; alle enden im selben Modulgenerator (`orchestrator/Core/modul
   nennt ihre Probe-ID), Name, Architektur und SDK werden wie im Assistenten aus ihr vorgeschlagen, und der `runtime:`-Block des
   Moduls wird aus ihr geplant; eine Datei, die kein Probe-Profil ist, wird abgelehnt. Die Flags gehen in die
   Config-Stufe ([Abschnitt 3.4](#34-was-der-generator-schreibt-und-was-du-ergänzt)). Ein relatives `targets_dir`
-  gilt relativ zur Installation, wie bei den übrigen Befehlen.
+  gilt relativ zur Installation, wie bei den übrigen Befehlen. `--edit` fügt den Schritt „alle Dateien bearbeiten“ hinzu
+  ([Abschnitt 3.6](#36-alle-dateien-bearbeiten-bevor-das-modul-gespeichert-wird)).
 - **CLI mit Ditto:** `llm-cli module generate-ai target_hardware_config.txt` (auf Wunsch mit `--provider` und
   `--model` für diesen Lauf). Ditto liefert einen strukturierten Vorschlag (Architektur, SDK, Basis-Image, Pakete,
   CPU- und CMake-Flags, Einrichtungsbefehle, Quantisierungsblock). Ist die Wissensbasis eingeschaltet, zieht es
@@ -363,6 +366,44 @@ gleich (`tests/test_module_flags.py` lässt beide über `tests/data/cmake_flag_v
   `llm-cli build deps list|fetch|delete` (in der GUI Build > Build-Abhängigkeiten…) listet, holt und löscht die
   Einträge des Caches. Andere Download-Optionen (CUDA CCCL, ZenDNN, llguidance, der Header der virtuellen GPU, OpenMP
   unter Windows) haben keine festgelegte Quelle und bleiben abgelehnt.
+
+### 3.6 Alle Dateien bearbeiten, bevor das Modul gespeichert wird
+
+Herstellerpfade und Flags, die die Vorlage nicht kennen kann, werden im Schritt „alle Dateien bearbeiten“ von Hand
+fertiggestellt: auf der letzten Seite des Assistenten, mit `llm-cli module create --edit` und, für ein Target, das es
+schon gibt (eines, das du früher erzeugt hast, oder eines aus der Community), mit `llm-cli module edit <target>` oder
+**Build > Targets... > Dateien bearbeiten...**. Auch ein Modul, dessen Build gescheitert ist, wird hier von Hand
+repariert.
+
+- **Die Dateien.** Die vier Stage-Module, die Slot-Module, die die `target.yml` in ihrem Block `stages:` nennt
+  ([Abschnitt 6](#6-die-stufen-des-builds)), die `target.yml` und jedes Dockerfile. Nie der Stage-Runner des
+  Frameworks (`orchestrator/runtime_layer/runner.sh`, der Runner jedes Builds), keine Runner-Datei, die ein Target
+  mitbringt (`modules/build.sh`, `stage_user.sh`, die Builds ignorieren), keine Hilfsskripte und nicht das gecrawlte
+  Wissen. Der Schritt ändert diese Dateien; er legt keine an und löscht keine (ein neues Slot-Modul ist eine Datei, die
+  du selbst in `modules/` anlegst).
+- **Bevor es gespeichert wird.** Der Assistent und `module create --edit` erzeugen das Modul in einem privaten
+  Arbeitsordner außerhalb des Targets-Ordners; es kommt erst beim Speichern in den Targets-Ordner, also ist ein Modul,
+  das gerade bearbeitet wird, nie ein Target, das ein Build nehmen könnte. Wer im Assistenten zurückgeht und eine Seite
+  ändert, erzeugt die Dateien neu (die bisherigen Änderungen fallen dann weg; die Seite sagt es).
+- **Der Diff.** Jede geänderte Datei wird als Unified Diff gegenüber der Fassung gezeigt, die der Generator schrieb
+  (bei einem bestehenden Modul: gegenüber den zuletzt gespeicherten Dateien).
+- **Die Prüfungen.** Finish, Speichern und die Frage der CLI kommen erst, wenn `validate_target_folder`
+  ([Abschnitt 9.1](#91-was-die-prüfungen-verlangen)) auf einer Kopie mit deinen Änderungen bestanden hat: die
+  Sperrmuster für Shell-Code, die Platzhalter der Vorlage, die gepinnten Images, die Slots, `bash -n`. Solange eine
+  Prüfung scheitert, wird nichts gespeichert, und die Gründe werden gezeigt. Die Markierungen `untested` und
+  `provenance` der `target.yml` bleiben, wie sie sind: Ein bestandener Build oder ein Lauf auf dem Board ändert sie,
+  nie eine Bearbeitung.
+- **Der Vorschlag einer KI.** Ditto oder eine KI-App kann eine Änderung als Unified Diff vorschlagen: über die
+  GUI-Werkzeuge ins Feld „Vorschlag“ des Schritts (im Fenster angewendet, markiert, mit einem Rückgängig gelistet, im
+  Diff gezeigt; eine Datei, die du selbst bearbeitet hast, wird nie überschrieben) oder als Datei, die du mit
+  `module edit --apply` oder **Diff anwenden...** anwendest. Ein Vorschlag ist nur eine Änderung im Schritt: Erst dein
+  Finish, Speichern oder Ja schreibt ihn.
+
+```bash
+llm-cli module create --name my_board --arch aarch64 --sdk None --edit
+llm-cli module edit my_board --file modules/config_module.sh
+llm-cli module edit my_board --apply proposal.diff
+```
 
 ## 4. target.yml und der Capabilities-Block
 

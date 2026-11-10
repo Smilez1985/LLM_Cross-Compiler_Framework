@@ -456,11 +456,15 @@ def _target_profile(probe_file, strict: bool):
 @click.option('--knowledge-root', 'knowledge_roots', multiple=True, metavar='URL',
               help="Attach the knowledge base's pages crawled from this address (Deep Ingest, privacy scrub applied); "
                    "repeatable. Only these pages are attached, never the rest of the knowledge base")
+@click.option('--edit', 'edit_files', is_flag=True,
+              help="The module wizard's \"edit all files\" step: the module is made in a scratch folder, each of its "
+                   "stage modules, target.yml and Dockerfile opens in $EDITOR, the diff is shown and the checks run "
+                   "again; it is saved into the targets folder only when every check passes and you say yes")
 @pass_context
 def module_create(ctx: FrameworkContext, name: Optional[str], arch: Optional[str], sdk: Optional[str],
                   probe_file: Optional[str], description: Optional[str], base_image: Optional[str],
                   packages: Optional[str], cpu_flags: Optional[str], cmake_flags: str, setup_file: Optional[str],
-                  quant_file: Optional[str], knowledge_roots: tuple):
+                  quant_file: Optional[str], knowledge_roots: tuple, edit_files: bool):
     """Create a new hardware target module (the module wizard's values as options; what is not given is asked)"""
     from orchestrator.Core.module_generator import probe_module_name, probe_sdk
     config, resolve = _settings(ctx)
@@ -508,19 +512,32 @@ def module_create(ctx: FrameworkContext, name: Optional[str], arch: Optional[str
         "detection_commands": "lscpu"
     }
 
-    try:
-        generator = _lazy("ModuleGenerator")(targets_dir)
-        roots = sorted(set(knowledge_roots))
+    roots = sorted(set(knowledge_roots))
+
+    def generate(folder: Path) -> Path:
+        from orchestrator.Core.module_edit import template_for
+        generator = _lazy("ModuleGenerator")(folder)
+        if Path(folder) != Path(targets_dir):   # the edit step's scratch folder renders the targets folder's template
+            generator.template_dir = template_for(targets_dir)
         if roots:   # the knowledge base is the framework's: booted only for the attachment
             ctx.require_framework()
-            output_path = generator.generate_module(module_data, ctx.framework_manager, knowledge_roots=roots,
-                                                    profile=profile)
+            made = generator.generate_module(module_data, ctx.framework_manager, knowledge_roots=roots,
+                                             profile=profile)
             from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT
-            if not (Path(output_path) / KNOWLEDGE_SNAPSHOT).is_file():
+            if not (Path(made) / KNOWLEDGE_SNAPSHOT).is_file():
                 console.print("[yellow]The knowledge snapshot was not attached: no stored page comes from these "
                               "addresses, or the knowledge base could not be read.[/yellow]")
+            return made
+        return generator.generate_module(module_data, profile=profile)
+
+    try:
+        if edit_files:
+            output_path = _create_with_edit_step(targets_dir, name, generate)
+            if output_path is None:
+                console.print("[yellow]The module was not saved; nothing was written to the targets folder.[/yellow]")
+                sys.exit(1)
         else:
-            output_path = generator.generate_module(module_data, profile=profile)
+            output_path = generate(targets_dir)
 
         console.print(f"\n[bold green]✅ Module successfully created![/bold green]")
         console.print(f"Location: {output_path}")
@@ -530,12 +547,87 @@ def module_create(ctx: FrameworkContext, name: Optional[str], arch: Optional[str
         # runs in order; a modules/build.sh of a target is not used.
         console.print(f"2. Customize {output_path}/modules/convert_module.sh and target_module.sh (the convert and "
                       f"target stages of the build, which the framework's stage runner runs after source and config; "
-                      f"the Dockerfile installs the tools they use)")
+                      f"the Dockerfile installs the tools they use): llm-cli module edit {Path(output_path).name} "
+                      f"opens them with a diff and the checks")
         console.print(f"3. To share it: llm-cli zoo export target {Path(output_path).name} --author NAME")
 
     except Exception as e:
         console.print(f"[bold red]Error creating module: {escape(str(e))}[/bold red]")
         sys.exit(1)
+
+
+def _show_module_diff(session) -> None:
+    """The diff of every changed file; hidden and control characters shown escaped (an AI may have written it)."""
+    from orchestrator.tools.confirmation import visible
+    diff = session.diff()
+    if not diff:
+        console.print("No file changed.")
+        return
+    click.echo("\n".join(visible(line) for line in diff.rstrip("\n").split("\n")))
+
+
+def _open_in_editor(session, files) -> None:
+    """Each file in $EDITOR (click.edit); a file closed without saving keeps its text."""
+    for rel in files:
+        text = click.edit(session.text(rel), extension="." + (Path(rel).name.rsplit(".", 1)[-1]
+                                                             if "." in Path(rel).name else "txt"),
+                          require_save=True)
+        if text is not None:
+            session.set_text(rel, text)
+
+
+def _review_module_edit(session, files, question: str) -> bool:
+    """The edit step's end in the terminal: the diff, the checks (refused with the reasons while one fails; with
+    files to edit, they open again on request), then the person's yes. True: the person said yes."""
+    while True:
+        _show_module_diff(session)
+        problems = session.problems()
+        if not problems:
+            console.print("[green]Every check passed.[/green]")
+            break
+        console.print("[red]A check failed, so the module cannot be saved like this:[/red]")
+        for problem in problems:
+            console.print(f"  - {escape(problem)}")
+        if not files or not click.confirm("Open the files again?", default=True):
+            return False
+        _open_in_editor(session, files)
+    return click.confirm(question, default=False)
+
+
+def _create_with_edit_step(targets_dir: Path, name: str, generate) -> Optional[Path]:
+    """`module create --edit`: the module made in a scratch folder, its files opened in $EDITOR, the diff and the
+    checks, then saved into the targets folder on the person's yes (None: not saved)."""
+    from orchestrator.Core.module_edit import ModuleEdit, commit_staged, discard_staged, name_taken, stage_folder
+    from orchestrator.Core.module_edit import template_for
+    taken = name_taken(targets_dir, name)
+    if taken:
+        raise ValueError(f"A target named '{taken}' already exists, and '{name}' would read the same (names are "
+                         "compared ignoring case and separators); choose another module name.")
+    scratch = stage_folder()
+    try:
+        session = ModuleEdit(Path(generate(scratch)), template_for(targets_dir))
+        console.print("The module is made, not saved yet. Its files open in your editor one after the other: "
+                      + ", ".join(session.files) + " (never the framework's stage runner).")
+        _open_in_editor(session, session.files)
+        if not _review_module_edit(session, session.files, "Save the module into the targets folder?"):
+            return None
+        session.save()   # the checks once more, then the edits are written
+        return commit_staged(session.folder, targets_dir)
+    finally:
+        discard_staged(scratch)
+
+
+def _module_folder(targets_dir: Path, target: str) -> Path:
+    """The folder of a target of the targets folder by its id or folder name (any case, as builds resolve it); exits
+    when there is none."""
+    from orchestrator.Core.target_manager import read_target_folders, resolve_target_name
+    folders = {tid: folder for tid, (folder, _data) in read_target_folders(Path(targets_dir)).items()}
+    tid = resolve_target_name(target, folders)
+    if tid is None:
+        console.print(f"[red]No target '{escape(str(target))}' in {escape(str(targets_dir))} (llm-cli targets list "
+                      "shows the targets).[/red]")
+        sys.exit(1)
+    return folders[tid]
 
 
 def _probe_store(ctx: FrameworkContext):
@@ -736,6 +828,57 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
     from orchestrator.Core.module_generator import record_module_saved
     record_module_saved(fm, "cli", generator_input(definition.model_dump(), module_name), path, "framework-cli")
     console.print(f"[bold green]✅ Module '{escape(module_name)}' created in {escape(str(path))}[/bold green]")
+
+
+@module.command('edit')
+@click.argument('target')
+@click.option('--file', 'files', multiple=True, metavar='FILE',
+              help="Open only this file of the step in $EDITOR (e.g. modules/config_module.sh, target.yml, "
+                   "Dockerfile); repeatable. Default: every file of the step, unless --apply is given")
+@click.option('--apply', 'patch_file', type=click.Path(exists=True, dir_okay=False), default=None,
+              help="Apply a unified diff (an AI's proposal, or one written by hand) to the files first; it is shown "
+                   "and checked like any edit, and saved only on your yes")
+@pass_context
+def module_edit(ctx: FrameworkContext, target: str, files: tuple, patch_file: Optional[str]):
+    """Edit the files of a target module: the "edit all files" step of the module wizard
+
+    The stage modules, the slot modules, target.yml and the Dockerfile (never the framework's stage runner) open in
+    $EDITOR; the diff against the saved files is shown, the checks run again (validate_target_folder), and the files
+    are written only when every check passes and you say yes.
+    """
+    from orchestrator.Core.module_edit import EditRefused, ModuleEdit
+    config, resolve = _settings(ctx)
+    targets_dir = Path(resolve(config.get("targets_dir", "targets")))
+    folder = _module_folder(targets_dir, target)
+    try:
+        session = ModuleEdit(folder)
+    except (OSError, ValueError) as e:
+        console.print(f"[red]The files of {escape(folder.name)} cannot be opened: {escape(str(e))}[/red]")
+        sys.exit(1)
+    try:
+        chosen = [session._known(f) for f in files]
+        if patch_file:
+            changed = session.apply_diff(Path(patch_file).read_text(encoding="utf-8"))
+            console.print("The diff changes: " + (", ".join(changed) or "nothing"))
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        console.print(f"[red]{escape(_printable(e))}[/red]")
+        sys.exit(1)
+    to_edit = chosen or ([] if patch_file else session.files)
+    console.print(f"The files of {escape(folder.name)}: {', '.join(session.files)} (never the framework's stage "
+                  "runner).")
+    _open_in_editor(session, to_edit)
+    if not session.changed():
+        console.print("No file changed; nothing was written.")
+        return
+    if not _review_module_edit(session, to_edit, f"Save these changes to {folder.name}?"):
+        console.print("[yellow]Not saved; the files are as they were.[/yellow]")
+        sys.exit(1)
+    try:
+        written = session.save()
+    except EditRefused as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]Saved: {escape(', '.join(written))}[/green]")
 
 
 # ============================================================================

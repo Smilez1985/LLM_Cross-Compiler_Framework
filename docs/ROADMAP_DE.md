@@ -294,10 +294,6 @@ Rust geschrieben; andere Teile wechseln nur, wenn eine Messung einen Gewinn zeig
     verteilt Container, keine OS-Images, also ist er eine Ergänzung des Images, nicht sein Weg nach draußen.
   - **Ein QEMU-Smoke-Test von Cross-Builds in der CI**, nie auf deinem Rechner. Warum: Ein kaputter Cross-Build fällt
     auf, bevor er ein Board erreicht.
-  - **Ein Schritt „alle Dateien bearbeiten“ im Modul-Assistenten**, mit Diff und erneuten Prüfungen: die
-    Stufen-Module, `target.yml` (mit ihren `stages:`-Plätzen) und das Dockerfile. Der Stufen-Runner ist nie dabei: Er
-    ist die Laufzeit-Schicht des Frameworks, für jedes Target dieselbe. Warum: Herstellerpfade und Flags lassen sich
-    fertigstellen, bevor das Modul gespeichert wird.
   - **Das erste Release von llmcf-setpriv für den Werkzeug-Weg `fetch`**: Der Maintainer pusht einen Tag
     `tools-v<Version>` (der Release-Workflow baut, prüft, bestätigt und lädt es hoch), dann kommen seine Adresse und
     sha256 in `orchestrator/runtime_layer/toolbox/prebuilt.json`. Warum: Bis dahin verweigert `fetch` klar („no

@@ -42,6 +42,11 @@ CLI_PATHS: Dict[str, str] = {
     "module generate-ai": "act_tools_module_wizard",          # its intro page: the AI import (Ditto)
     "module generate-ai --provider": "act_tools_module_wizard",   # "for this analysis only" provider
     "module generate-ai --model": "act_tools_module_wizard",      # "for this analysis only" model
+    "module create --edit": "act_tools_module_wizard",        # the last page: edit all files
+    # Build > Targets... > Edit Files...: the edit step for an existing target (its Apply a Diff... button)
+    "module edit": "btn_targets_edit",
+    "module edit --file": "btn_targets_edit",
+    "module edit --apply": "btn_targets_edit",
     "build start": "btn_builder_start",
     "build start --model": "combo_builder_model",
     "build start --target": "combo_builder_target",
@@ -110,7 +115,8 @@ CLI_PATHS: Dict[str, str] = {
 }
 # The objects of this area that live in a window, with the menu action that opens it (the parity test opens it).
 WINDOW_OBJECTS: Dict[str, str] = {"btn_build_deps_fetch": "act_build_deps", "btn_build_deps_delete": "act_build_deps",
-                                   "btn_history_interrupted": "act_build_history"}
+                                   "btn_history_interrupted": "act_build_history",
+                                   "btn_targets_edit": "act_build_targets"}
 # The switches of this area that are for scripts only, with the reason (as the other menu modules list theirs; the
 # hidden, deprecated build start --parallel is not offered at all).
 MACHINE_ONLY: Dict[str, str] = {
