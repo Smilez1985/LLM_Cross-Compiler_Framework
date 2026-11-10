@@ -104,7 +104,12 @@ Board-Bundle nimmt es nach deinem eigenen `--accept-memory-risk`. Radxas ROCK-5-
 RK3582 des ROCK 5C Lite, E52C und E54C) sind `rk3588`, der ROCK 4D ist `rk3576`. Jeder `ARM64`-Build
 macht auch das Board-Paket mit `llama-cli` und `llama-server`, aus der gespeicherten Probe des Boards oder, ohne
 eine, aus den CPU-Features, die jeder Chip des Boards hat. `llm-cli targets boards ARM64` und **Build > Targets... >
-Boards...** zeigen die Profile.
+Boards...** zeigen die Profile. Ein Profil kann sagen, welche Modellgrößen zu welchen Aufgaben passen (`model_sizes`;
+auf dem Zero 2 W Modelle von etwa 135M bis 360M für eng umrissene Aufgaben wie das Schalten über MQTT, nicht für Chat
+oder Code): der Tooltip des Boards im Builder, eine Zeile von `targets boards` und ein Fakt der Startfrage an die KI,
+nie eine Grenze. Ein Chip ohne eigenes Profil steht als Eintrag in der Liste, der mit dem Grund und seiner Quelle auf
+das Board verweist, das ihn bedient (`capabilities.variants`: RK3582, RK3588S und RK3588J verweisen auf `rk3588`);
+wer ihn wählt, baut dieses Board.
 
 GUI: **Build > Targets…** listet jedes Target mit seiner ID (dem Wert für `--target`), Name, Architektur, Boards,
 Formaten und Unterstützungsgrad, oder „keine Fähigkeiten angegeben“ (oder dass sein Fähigkeiten-Block ungültig ist);

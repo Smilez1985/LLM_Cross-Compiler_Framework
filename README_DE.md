@@ -64,7 +64,11 @@ GUI, CLI, Ditto und der MCP-Server bieten genau diese Optionen an und lehnen all
 Ein Board mit RK3588S ist ein `rk3588`: Seine Probe findet dieses Board, ob sein Kernel den SoC `rk3588s` (Mainline-Linux)
 oder `rk3588` (Orange Pis eigener Kernel) nennt. Ein RK3582 (zwei Cortex-A76, vier Cortex-A55, eine NPU mit bis zu
 5 TOPS) ist ebenfalls ein `rk3588`: Sein Device Tree nennt zuletzt den RK3588S, und Radxa gibt für RKNN und RKLLM auf
-ihm die Plattform rk3588 an.
+ihm die Plattform rk3588 an. Die Board-Listen nennen diese Chips als eigene Einträge, die mit dem Grund und seiner
+Quelle auf `rk3588` verweisen: `rk3582`, `rk3588s` und `rk3588j` (der RK3588 für den Industrieeinsatz), im Builder
+(der Tooltip des Eintrags), in `llm-cli targets boards Rockchip` (eine Hinweiszeile) und in den KI-Tools
+(`variants`). Wer einen wählt, baut `rk3588`, und der Build sagt das; ein Target gibt seine eigenen Chips unter
+`capabilities.variants` an.
 
 | Format (`--format`) | Läuft auf | Eingabe | Boards | Quantisierungen | Standard |
 |---|---|---|---|---|---|
@@ -119,6 +123,11 @@ die Hardware-Probe des Boards meldet, also findet ein geprobtes Board sein Board
 - Der Raspberry Pi Zero 2 W hat 512 MB für das System und das Modell: Die kleinsten Typen kommen zuerst, ein Modell
   um 1B liegt selbst mit 2 bis 3 Bit an der Grenze des Boards, und die Board-Messung (der Benchmark des Board-Tests)
   entscheidet den Kontext.
+- Sein Profil sagt, welche Modellgrößen zu welchen Aufgaben passen (`model_sizes`, der Tooltip des Boards im Builder,
+  eine Zeile von `llm-cli targets boards ARM64` und ein Fakt der Startfrage an die KI): Modelle von etwa 135M bis 360M
+  Parametern laufen flüssig und passen zu eng umrissenen Aufgaben (ein Licht oder die Bewässerung über einen
+  MQTT-Trigger schalten, einen Befehl erkennen, ein fester Werkzeugaufruf), nicht zu Chat oder Code-Erstellung; ab
+  etwa 1B gilt die Speicherwarnung, und du entscheidest.
 - Ein Profil empfiehlt, es begrenzt nie: Ein größeres Modell wird gebaut und verteilt, wenn du es willst. Nach dem
   Build nennt eine Warnung seinen Speicher gegen den des Boards (es wird auslagern und viel langsamer laufen); das
   Startskript des Boards startet ein Modell, das laut Messung nicht passt, nur mit dem Kontext, den du angibst (`-c`),

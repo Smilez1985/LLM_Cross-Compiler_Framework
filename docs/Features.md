@@ -101,7 +101,12 @@ recommends, it never caps: a model larger than the board's memory gets a warning
 and the board bundle takes it after your own `--accept-memory-risk`. Radxa's ROCK 5 boards (RK3588, RK3588S, and
 the RK3582 of the ROCK 5C Lite, E52C and E54C) are `rk3588`, the ROCK 4D is `rk3576`. Every `ARM64` build also makes the board package with
 `llama-cli` and `llama-server`, from the board's stored probe or, without one, from the CPU features every chip of
-the board has. `llm-cli targets boards ARM64` and **Build > Targets... > Boards...** show the profiles.
+the board has. `llm-cli targets boards ARM64` and **Build > Targets... > Boards...** show the profiles. A profile can
+say which model sizes suit which tasks (`model_sizes`; on the Zero 2 W models of about 135M to 360M for narrow tasks
+such as switching through MQTT, not chat or code): the board's tooltip in the Builder, a line of `targets boards`
+and a fact of the AI's start question, never a limit. A chip without a profile of its own is listed as an entry that
+points to the board that serves it, with the reason and its source (`capabilities.variants`: the RK3582, RK3588S
+and RK3588J point to `rk3588`); choosing it builds that board.
 
 GUI: **Build > Targets...** lists every target with its ID (the value for `--target`), name, architecture, boards,
 formats and support level, or "no capabilities declared" (or that its capabilities block is invalid); **Targets...**

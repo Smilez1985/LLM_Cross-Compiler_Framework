@@ -514,13 +514,17 @@ llm-cli targets boards TARGET_NAME
 
 Gibt jedes Board des Targets mit seinem Optimierungsprofil aus: die empfohlenen Quantisierungen (der Builder bietet
 sie zuerst an), das Speicherprofil, die Optimierungsstufe, mit der ein Build ohne `--optimization` beginnt, die
-llama.cpp-Optionen und Compiler-Flags, die das Build-Rezept für den SoC des Boards plant, und die CPU des Boards.
+llama.cpp-Optionen und Compiler-Flags, die das Build-Rezept für den SoC des Boards plant, die CPU des Boards und, wo
+das Profil sie hat, `model sizes:` (welche Modellgrößen zu welchen Aufgaben passen; ein Hinweis, nie eine Grenze).
 Darunter stehen die Benchmark-Zeilen des Boards (Modell, Quantisierung, Werte) mit ihrer Quelle am Ende:
 `measured by llmcf (board <Name>, <Datum>)`, `published: <Adresse>` oder `unmeasured` (eine Schätzung; nie als Messung gezeigt).
 Die Board-Tests der Builds dieses Computers stehen vorn: der neueste bestandene Test je Board, Modell und
 Quantisierung, gemessen auf dem Board, das du benannt hast. Eine letzte Zeile nennt Einträge im Format vor 3.2.0, die
-übergangen wurden (`N entries in the old format were ignored: <Namen>`). Exit-Code 2 für ein unbekanntes Target, 1,
-wenn seine Profile oder Benchmarks ungültig sind (`targets validate` nennt den Grund).
+übergangen wurden (`N entries in the old format were ignored: <Namen>`). Nach einem Board stehen die Chips, die es
+ohne eigenes Profil bedient (`capabilities.variants`), jeder als `<Chip>: <Bezeichnung>` mit einer `note:`-Zeile: das
+Board, das er nutzt, der Grund und seine Quelle (`rk3582`, `rk3588s` und `rk3588j` nach `rk3588`). `build start
+--board rk3582` baut `rk3588` und gibt eine `Note:`-Zeile aus, die das sagt. Exit-Code 2 für ein unbekanntes Target,
+1, wenn seine Profile oder Benchmarks ungültig sind (`targets validate` nennt den Grund).
 
 ```bash
 llm-cli targets boards Rockchip

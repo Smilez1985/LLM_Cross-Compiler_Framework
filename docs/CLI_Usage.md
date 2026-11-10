@@ -500,13 +500,16 @@ llm-cli targets boards TARGET_NAME
 
 Prints each board of the target with its optimization profile: the recommended quantizations (offered first by the
 Builder), the memory profile, the optimization level a build starts from when `--optimization` is not given, the
-llama.cpp options and compiler flags the build recipe plans for the board's SoC, and the board's CPU. Under it come the
+llama.cpp options and compiler flags the build recipe plans for the board's SoC, the board's CPU and, where the profile
+has it, `model sizes:` (which model sizes suit which tasks; guidance, never a limit). Under it come the
 board's benchmark rows (model, quantization, values) with their source at the end: `measured by llmcf (board <label>, <date>)`,
 `published: <address>` or `unmeasured` (an estimate; never shown as a measurement). The board tests of this
 computer's builds come first: the newest passed test per board, model and quantization, measured on the board you
 named. A last line names entries in the format before 3.2.0 that were ignored (`N entries in the old format were
-ignored: <names>`). Exit code 2 for an unknown target, 1 when its profiles or benchmarks are not valid
-(`targets validate` names why).
+ignored: <names>`). After a board come the chips it serves without a profile of their own (`capabilities.variants`),
+each as `<chip>: <label>` with a `note:` line: the board it uses, the reason and its source (`rk3582`, `rk3588s` and
+`rk3588j` after `rk3588`). `build start --board rk3582` builds `rk3588` and prints a `Note:` line saying so. Exit
+code 2 for an unknown target, 1 when its profiles or benchmarks are not valid (`targets validate` names why).
 
 ```bash
 llm-cli targets boards Rockchip

@@ -62,7 +62,10 @@ The GUI, the CLI, Ditto and the MCP server offer exactly these options and rejec
 A board with an RK3588S is an `rk3588`: its probe finds that board whether its kernel names the SoC `rk3588s`
 (mainline Linux) or `rk3588` (Orange Pi's own kernel). An RK3582 (two Cortex-A76, four Cortex-A55, an NPU of up to
 5 TOPS) is an `rk3588` too: its device tree names the RK3588S last, and Radxa names the rk3588 platform for RKNN and
-RKLLM on it.
+RKLLM on it. The board lists name these chips as entries of their own that point to `rk3588`, with the reason and its
+source: `rk3582`, `rk3588s` and `rk3588j` (the industrial-grade RK3588), in the Builder (the entry's tooltip),
+`llm-cli targets boards Rockchip` (a note line) and the AI tools (`variants`). Choosing one builds `rk3588`, and the
+build says so; a target declares its own chips under `capabilities.variants`.
 
 | Format (`--format`) | Runs on | Input | Boards | Quantizations | Default |
 |---|---|---|---|---|---|
@@ -116,6 +119,10 @@ hardware probe reports, so a probed board finds its board by itself.
 - The Raspberry Pi Zero 2 W has 512 MB for the system and the model: the smallest types come first, a model of about
   1B is at the board's limit even at 2 to 3 bits, and the board measurement (the board test's benchmark) decides
   the context.
+- Its profile says which model sizes suit which tasks (`model_sizes`, the board's tooltip in the Builder, a line of
+  `llm-cli targets boards ARM64` and a fact of the AI's start question): models of about 135M to 360M parameters run
+  smoothly and suit narrow tasks (switching a light or the watering through an MQTT trigger, recognising a command,
+  a fixed tool call), not chat or writing code; from about 1B the memory warning applies and you decide.
 - A profile recommends, it never caps: a larger model is built and deployed when you want it. After the build a
   warning names its memory against the board's (it will swap and run much slower); the board's start script runs a
   model its measurement says does not fit only with the context you give (`-c`), and the board bundle only after
