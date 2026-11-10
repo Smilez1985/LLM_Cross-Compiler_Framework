@@ -318,7 +318,8 @@ class TestBuilderTabCapabilities:
     def test_npu_format_offers_only_supported_boards_and_types(self, tab):
         self.select(tab.format_combo, "rkllm")
         boards = [tab.board_combo.itemData(i) for i in range(tab.board_combo.count())]
-        assert boards == ["rk3588", "rk3576"]
+        # the chips the rk3588 serves (capabilities.variants) follow it as entries whose value is rk3588
+        assert boards == ["rk3588", "rk3588", "rk3588", "rk3588", "rk3576"]
         self.select(tab.board_combo, "rk3588")
         quants = [tab.quant_combo.itemText(i) for i in range(tab.quant_combo.count())]
         assert "w4a16" not in quants and tab.quant_combo.currentText() == "w8a8"

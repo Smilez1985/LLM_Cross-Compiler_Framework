@@ -281,7 +281,8 @@ def register_framework_prompts(registry: ToolRegistry, framework,
 
     def boards(args: Dict[str, str], _ctx: ToolContext) -> List[str]:
         try:
-            return list(capabilities(args.get("target", ""))[1].boards)
+            found = capabilities(args.get("target", ""))[1]
+            return list(found.boards) + list(found.variants)
         except Exception:
             return []
 

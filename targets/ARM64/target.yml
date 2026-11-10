@@ -214,6 +214,7 @@ optimization_profiles:
     optimization: size
     recommended_quantization: [IQ4_XS, IQ3_M, IQ2_M, Q4_0]
     note: "512 MB: smallest types first, nothing is repacked on the Cortex-A53. IQ3_M and IQ2_M for models near 1B. The board measurement sets the context and refuses a model that does not fit. Threads: the four cores (llama.cpp's default)."
+    model_sizes: "Zero 2 W (512 MB): models of about 135M to 360M parameters run smoothly and suit narrow tasks: switching a light or the watering through an MQTT trigger, recognising a command, a fixed tool call; not chat or writing code. From about 1B the memory warning applies (it will swap and run much slower), and you decide: no size is refused."
 
   sm1:
     arch: arm64

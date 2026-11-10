@@ -3,7 +3,8 @@
 The board a hardware probe points to, as a recommendation only (DESIGN round 8, N9, N9', N9'').
 
 The board comes from the probe: the probe's SoC named like one of the target's boards or a letter variant of it (an
-rk3588s is the board rk3588; source "probe"), or the probe's board name found in the target's list of known boards
+rk3588s is the board rk3588; source "probe"), a chip the target names as served by a board (`capabilities.variants`:
+an rk3582 is the board rk3588; source "probe"), or the probe's board name found in the target's list of known boards
 (`examples` in target.yml capabilities, or `typical_boards`; source "list"). Only an exact match is "sure". Anything weaker is "unsure": then nothing is
 preselected, the candidates are shown with why it is unsure, and the person picks. The person can always change the
 board (they know which board is in their hand), and a board the person chose is never overwritten by a later
@@ -78,6 +79,17 @@ def _boards(target_manager: Any, target: str) -> Dict[str, Tuple[str, List[str]]
     return found
 
 
+def _variant(target_manager: Any, target: str, soc: str):
+    """(chip, entry) of `capabilities.variants` the probe's SoC names, or None."""
+    if not soc or target_manager is None or not hasattr(target_manager, "get_capabilities"):
+        return None
+    try:
+        caps = target_manager.get_capabilities(target)
+        return caps.variant(soc) if caps is not None else None
+    except Exception:  # noqa: BLE001 - no capabilities: no chips
+        return None
+
+
 def recommend_board(profile: Any, target_manager: Any, target: str) -> BoardRecommendation:
     """The board of `target` the probe `profile` points to (see the module docstring)."""
     get = getattr(profile, "get", None)
@@ -97,6 +109,12 @@ def recommend_board(profile: Any, target_manager: Any, target: str) -> BoardReco
         return BoardRecommendation(target, board, "probe", SURE,
                                    (BoardCandidate(board, boards[board][0], f"the probe's SoC is {soc}"),),
                                    f"the probe's SoC {soc} is the board {board} of this target", soc, board_model)
+    chip = _variant(target_manager, target, soc) if not by_soc else None
+    if chip is not None and chip[1].board in boards:
+        board = chip[1].board
+        why = f"the probe's SoC {soc} has no board of its own and uses {board}: {chip[1].reason}"
+        return BoardRecommendation(target, board, "probe", SURE, (BoardCandidate(board, boards[board][0], why),),
+                                   why, soc, board_model)
     name = _canon(board_model)
     exact = [b for b, (_label, names) in boards.items() if name and any(_canon(n) == name for n in names)]
     if len(exact) == 1:

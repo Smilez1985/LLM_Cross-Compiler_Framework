@@ -36,6 +36,18 @@ class BoardInfo(BaseModel):
     examples: List[untrusted_text(200)] = Field(default_factory=list)
 
 
+class BoardVariant(BaseModel):
+    """A chip with no board of its own that a board of the target serves (`capabilities.variants.<chip>`): the board
+    it uses, its label in a board list, why that board serves it and where that comes from. Choosing the chip chooses
+    the board; a build for it runs and is recorded as that board."""
+    model_config = ConfigDict(extra="forbid")
+
+    board: str = Field(min_length=1, max_length=64)
+    label: untrusted_text(200)
+    reason: untrusted_text(500)
+    source: Optional[untrusted_text(300)] = None
+
+
 _DOTTED_VERSION = r"^\d{1,3}(\.\d{1,4}){1,3}$"
 _PROBE_KEY = r"^[A-Z][A-Z0-9_]{1,47}$"
 _SDK_NAME = r"^[A-Za-z0-9][A-Za-z0-9 ._+-]{0,39}$"   # a closed name: it reaches an AI's refusal text
@@ -143,6 +155,8 @@ class TargetCapabilities(BaseModel):
     formats: Dict[str, FormatCapability] = Field(min_length=1)
     # The board the build scripts use when a request names none (must match the config stage, config_module.sh).
     default_board: Optional[str] = None
+    # Chips without a board of their own, each served by one of the boards (BoardVariant).
+    variants: Dict[str, BoardVariant] = Field(default_factory=dict, max_length=50)
 
     @model_validator(mode="after")
     def _boards_exist(self):
@@ -154,6 +168,12 @@ class TargetCapabilities(BaseModel):
             unknown = referenced - set(self.boards)
             if unknown:
                 problems.append(f"format {fmt} references unknown boards {sorted(unknown)}")
+        boards = {b.casefold() for b in self.boards}
+        for chip, variant in self.variants.items():
+            if chip.casefold() in boards:
+                problems.append(f"variant {chip!r} is one of the boards; a variant is a chip without a board")
+            elif variant.board not in self.boards:
+                problems.append(f"variant {chip!r} uses the unknown board {variant.board!r}")
         if problems:
             raise ValueError("; ".join(problems))
         return self
@@ -171,11 +191,35 @@ class TargetCapabilities(BaseModel):
         return next((f for f in self.formats if f.casefold() == wanted), None)
 
     def canonical_board(self, board: Optional[str]) -> Optional[str]:
-        """The declared spelling of a board id (case-insensitive), or None if unknown."""
+        """The declared spelling of a board id (case-insensitive), the board a chip of `variants` uses, or None if
+        unknown."""
         if not board:
             return None
         wanted = board.strip().casefold()
-        return next((b for b in self.boards if b.casefold() == wanted), None)
+        found = next((b for b in self.boards if b.casefold() == wanted), None)
+        if found is None:
+            chip = self.variant(board)
+            found = chip[1].board if chip else None
+        return found
+
+    def variant(self, chip: Optional[str]) -> Optional[Tuple[str, BoardVariant]]:
+        """(declared id, entry) of a chip of `variants` (case-insensitive), or None when it is none."""
+        wanted = str(chip or "").strip().casefold()
+        return next(((c, v) for c, v in self.variants.items() if c.casefold() == wanted), None) if wanted else None
+
+    def variants_of(self, board: str) -> List[str]:
+        """The chips the board serves, in the order target.yml lists them."""
+        return [c for c, v in self.variants.items() if v.board == board]
+
+    def variant_note(self, chip: Optional[str]) -> Optional[str]:
+        """The sentence a person or an AI reads when a request names a chip of `variants`: which board it is built
+        as and why; None when `chip` is none."""
+        found = self.variant(chip)
+        if found is None:
+            return None
+        name, entry = found
+        return (f"{name} has no board of its own and is built as {entry.board}: {entry.reason}"
+                + (f" (source: {entry.source})" if entry.source else ""))
 
     def normalize(self, fmt: str, board: Optional[str], quantization: Optional[str]
                   ) -> Tuple[str, Optional[str], Optional[str]]:
@@ -319,6 +363,8 @@ class OptimizationProfile(BaseModel):
     optimization: Literal[OPTIMIZATION_LEVELS] = "balanced"
     recommended_quantization: List[str] = Field(min_length=1, max_length=12)
     note: Optional[untrusted_text(300)] = None
+    # Which model sizes suit which tasks on this board, as plain text: guidance only, never a limit.
+    model_sizes: Optional[untrusted_text(500)] = None
 
     @model_validator(mode="after")
     def _plain(self):

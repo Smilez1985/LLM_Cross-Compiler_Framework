@@ -11,6 +11,9 @@ blocks of a target's target.yml (schemas in orchestrator/schemas/targets.py), ma
 - The profile's target side is the framework's recommendation for the board: the quantizations offered first
   (ordered_quantizations), the memory profile and the optimization level a build starts from when the person or the
   AI names none (optimization_for). The Builder, `llm-cli build start` and start_build use them.
+- A chip without a board of its own (`capabilities.variants`) is listed after the board that serves it, with the reason
+  (variant_lines), and a profile's guidance on model sizes per task (`model_sizes`) is a line of the
+  board and its tooltip (board_tooltip): guidance only, never a limit.
 - A benchmark row says where its numbers come from: measured by llmcf on a board (a board test record of
   runtime/device/tested.py, measured_row), published (address and date) or unmeasured. board_lines() shows the profile
   and the rows with that mark, labels only (never an address or a path), for `llm-cli targets boards`, Build >
@@ -316,7 +319,29 @@ def profile_text(profile: OptimizationProfile) -> List[str]:
              f"CPU: {profile.cpu} ({', '.join(profile.cpu_features) or 'no optional features'})"]
     if profile.note:
         lines.append(f"note: {profile.note}")
+    if profile.model_sizes:
+        lines.append(f"model sizes: {profile.model_sizes}")
     return lines
+
+
+def variant_lines(caps: Optional[TargetCapabilities], board: str) -> List[str]:
+    """The chips a board serves (`capabilities.variants`), each as an entry of the board list with a note line: the
+    board it uses, the reason and its source."""
+    if caps is None:
+        return []
+    lines: List[str] = []
+    for chip in caps.variants_of(board):
+        entry = caps.variants[chip]
+        lines.append(f"{chip}: {entry.label}")
+        lines.append(f"  note: no profile of its own; choosing {chip} chooses {board}. {entry.reason}"
+                     + (f" (source: {entry.source})" if entry.source else ""))
+    return lines
+
+
+def board_tooltip(data: Optional[BoardData], board: Optional[str]) -> str:
+    """The tooltip of a board in a board list: the profile's guidance on model sizes ("" when it has none)."""
+    profile = profile_for(data, board)
+    return str(profile.model_sizes) if profile is not None and profile.model_sizes else ""
 
 
 def board_lines(caps: Optional[TargetCapabilities], data: Optional[BoardData],
@@ -333,6 +358,7 @@ def board_lines(caps: Optional[TargetCapabilities], data: Optional[BoardData],
         lines += [f"  {line}" for line in (profile_text(profile) if profile else ["no optimization profile"])]
         rows = rows_for(data, board)
         lines += [f"  benchmark: {row_text(row)}" for row in rows] or ["  benchmark: none recorded"]
+        lines += variant_lines(caps, board)
     return lines
 
 
@@ -344,4 +370,5 @@ def benchmark_fields_text() -> str:
 
 __all__ = ["DEFAULT_OPTIMIZATION", "benchmark_fields_text", "board_data", "board_lines", "check_board_data",
            "measured_row", "newest_measured", "old_format_entries", "old_format_note", "optimization_for", "ordered_quantizations", "plan_problems", "planned_profile_values",
-           "profile_for", "profile_text", "recipe_plan", "reference_probe", "row_text", "rows_for"]
+           "profile_for", "profile_text", "recipe_plan", "reference_probe", "row_text", "rows_for", "board_tooltip",
+           "variant_lines"]

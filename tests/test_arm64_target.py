@@ -398,7 +398,8 @@ def test_a_kernel_that_names_no_known_soc_finds_the_board_by_its_name_only_when_
 
 def test_an_rk3582_board_is_the_board_rk3588_also_when_its_kernel_names_the_rk3582():
     """Radxa names the rk3588 platform for RKNN and RKLLM on the RK3582 (ROCK 5C Lite, E52C, E54C), and mainline's
-    last entry is rockchip,rk3588s; a kernel that names rockchip,rk3582 last still finds the board by its name."""
+    last entry is rockchip,rk3588s; a kernel that names rockchip,rk3582 last finds the board by the target's chip entry
+    (capabilities.variants), surely, with the reason."""
     from orchestrator.runtime.board_recommendation import recommend_board
     from orchestrator.runtime.probe_service import match_target
     tm = targets_manager()
@@ -407,7 +408,7 @@ def test_an_rk3582_board_is_the_board_rk3588_also_when_its_kernel_names_the_rk35
     found = match_target(profile, tm)
     assert (found.target, found.board) == ("Rockchip", "rk3588")
     rec = recommend_board(profile, tm, "Rockchip")
-    assert rec.sure and rec.board == "rk3588" and rec.source == "list"
+    assert rec.sure and rec.board == "rk3588" and rec.source == "probe" and "no board of its own" in rec.reason
     caps_rk = yaml.safe_load((REPO_ROOT / "targets" / "Rockchip" / "target.yml").read_text(encoding="utf-8"))
     assert "rk3582" not in caps_rk["capabilities"]["boards"] and "rk3688" not in caps_rk["capabilities"]["boards"]
 

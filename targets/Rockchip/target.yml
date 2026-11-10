@@ -271,6 +271,24 @@ capabilities:
                  "Radxa ROCK 5C", "Radxa ROCK 5C Lite", "Radxa CM5", "Radxa E52C", "Radxa E54C", "Orange Pi 5", "Orange Pi 5B", "Orange Pi 5 Pro", "Orange Pi CM5",
                  "Orange Pi 5 Plus", "Orange Pi 5 Max", "Orange Pi 5 Ultra", "Banana Pi BPI-M7", "Banana Pi BPI-M7S",
                  "Banana Pi BPI-W3"]
+  # Chips without a board of their own, served by a board above (schema: BoardVariant). A list shows each one with its
+  # reason; choosing it chooses the board, and a build for it runs and is recorded as that board.
+  variants:
+    rk3582:
+      board: rk3588
+      label: "RK3582 (2x A76 + 4x A55): the RK3588 profile"
+      reason: "Radxa's instructions name the rk3588 platform for RKNN and RKLLM on the RK3582, mainline Linux's device tree lists it as rk3588s, and its cores are the RK3588's (fewer of them, an NPU of up to 5 TOPS: the board's own probe and measurement show that)."
+      source: "docs.radxa.com: RK3582 NPU explanation (E54C, AI app development); Linux rk3582-radxa-e54c.dts"
+    rk3588s:
+      board: rk3588
+      label: "RK3588S (4x A76 + 4x A55): the RK3588 profile"
+      reason: "The RK3588's cores and NPU in a smaller package with fewer interfaces (no PCIe 3.0, among others): mainline Linux builds rk3588s.dtsi and rk3588.dtsi on the same rk3588-base.dtsi, and the RK3588 adds the interfaces of its larger package."
+      source: "Linux arch/arm64/boot/dts/rockchip: rk3588s.dtsi, rk3588.dtsi, rk3588-extra.dtsi"
+    rk3588j:
+      board: rk3588
+      label: "RK3588J (4x A76 + 4x A55): the RK3588 profile"
+      reason: "The industrial-grade RK3588 (-40 to +85 °C): mainline Linux's rk3588j.dtsi is the RK3588's device tree with its own lower CPU and GPU clock steps, so the same build runs on it."
+      source: "Linux rk3588j.dtsi and its commit \"arm64: dts: rockchip: Add Rockchip RK3588J\""
   formats:
     gguf:
       label: "GGUF (llama.cpp, CPU)"

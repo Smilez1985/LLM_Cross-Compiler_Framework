@@ -337,7 +337,9 @@ def test_the_target_tool_models_keep_their_schemas():
     # Round 36 (on purpose): check_image and build_image, the read-only status of the build container image.
     assert list(TargetCheckIn.model_fields) == ["target", "check_files", "check_image"]
     assert list(TargetDetailsOut.model_fields) == [
-        "notes", "schema_version", "support_level", "boards", "formats", "default_board", "target", "trust",
+        "notes", "schema_version", "support_level", "boards", "formats", "default_board",
+        "variants",   # chips served by a board's profile, with the reason (on purpose: the chip variants row)
+        "target", "trust",
         "untested", "description", "assumptions", "base_image", "base_image_reason", "checked_files", "problems",
         "board_profiles", "benchmarks",   # the board profiles and marked benchmark rows (round 23 item 10)
         "build_image"]
@@ -376,8 +378,9 @@ def test_the_shared_target_models_keep_their_schemas():
         "additionalProperties": False, "required": ["target"], "title": "TargetIn", "type": "object",
         "properties": {"target": {"description": "Target id, e.g. Rockchip", "maxLength": 64, "minLength": 1,
                                   "title": "Target", "type": "string"}}}
+    # variants: chips served by a board's profile, with the reason (on purpose: the chip variants row)
     assert list(TargetCapabilitiesOut.model_fields) == ["notes", "schema_version", "support_level", "boards",
-                                                        "formats", "default_board"]
+                                                        "formats", "default_board", "variants"]
     assert issubclass(TargetCapabilitiesOut, TargetCapabilities) and issubclass(TargetCapabilitiesOut, ToolOutput)
     out, base, notes = (TargetCapabilitiesOut.model_json_schema(), TargetCapabilities.model_json_schema(),
                         ToolOutput.model_json_schema())

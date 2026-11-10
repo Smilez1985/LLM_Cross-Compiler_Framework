@@ -906,6 +906,7 @@ def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[st
             for problem in getattr(e, "problems", None) or [str(e)]:
                 console.print(f"[red]{escape(problem)}[/red]")
             sys.exit(2)
+        _print_variant_note(service, request.target, choices.board if choices is not None else board)
         board, quantization, model = request.board, request.quantization, model or request.model
         if recipe is not None:   # what the recipe is, what you changed, its reference and its target
             _print_recipe(service, recipe, request, choices)
@@ -1003,6 +1004,18 @@ def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[st
     except Exception as e:
         console.print(f"[red]Build failed: {escape(str(e))}[/red]")
         sys.exit(1)
+
+
+def _print_variant_note(service, target: str, asked: Optional[str]) -> None:
+    """The note line when the board asked for is a chip without a board of its own (`capabilities.variants`): which
+    board the build runs and is recorded as, and why."""
+    try:
+        caps = service.capabilities(target) if asked else None
+    except Exception:  # noqa: BLE001 - no capabilities: no chips
+        caps = None
+    note = caps.variant_note(asked) if caps is not None else None
+    if note:
+        console.print(f"Note: {escape(note)}")
 
 
 def _recipe_choices(recipe, model: Optional[str], fmt: Optional[str], board: Optional[str],

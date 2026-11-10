@@ -304,7 +304,8 @@ class BuildService:
                                      architecture=meta.get("architecture_family") or meta.get("architecture"),
                                      support_level=caps.support_level if caps else None,
                                      boards=list(caps.boards) if caps else [], formats=formats,
-                                     board_profiles=profiles, benchmarks=rows))
+                                     board_profiles=profiles, benchmarks=rows,
+                                     variants=dict(caps.variants) if caps else {}))
         return TargetList(targets=targets)
 
     def _status_of(self, state: WorkflowState) -> BuildStatusOut:
@@ -1570,7 +1571,7 @@ class BuildService:
         from orchestrator.runtime.probe_service import ProbeError
         probes = self.probes()
         if not probe_id:
-            found = probes.for_board(board)
+            found = probes.for_board(board, caps.variants_of(board) if caps is not None and board else ())
             if found is None:
                 return None, None
             probe_id = found.probe_id

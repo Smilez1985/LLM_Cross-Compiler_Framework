@@ -76,6 +76,10 @@ class BuildPlan:
     sandbox: bool = True
     hub_problem: str = ""        # Hugging Face could not be asked (network): sizes and commit unknown
     calibration: str = ""        # importance matrix and calibration text as resolved (build_defaults.describe)
+    # the request named a chip without a board of its own (capabilities.variants): which board it is built as, and why
+    board_note: str = ""
+    # the board profile's guidance on model sizes per task (guidance only: it refuses nothing)
+    model_sizes: str = ""
     grant: Optional[Dict[str, Any]] = None  # facts for grants.BUILD_RULE; None: outside every standing approval
     # what a build the person confirmed records (confirmed_builds): the target and recipe as installed, base images
     confirm_record: Optional[Dict[str, Any]] = None
@@ -167,6 +171,10 @@ class BuildPlan:
             facts.append(Fact("Disk", check.sentence(), volatile=True))
         facts.append(Fact("Hardware", self.host.sentence("conversion on this computer"), volatile=True))
         facts.append(Fact("Hardware", self.target.sentence(f"running on {r.board or 'the board'}"), volatile=True))
+        if self.board_note:
+            facts.append(Fact("Board", self.board_note, TARGET_TEXT))
+        if self.model_sizes:
+            facts.append(Fact("Model sizes for this board", self.model_sizes, TARGET_TEXT))
         if self.calibration:
             facts.append(Fact("Calibration", self.calibration))
         if self.mounts:
@@ -658,6 +666,10 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
     plan.calibration = describe(bool(req.use_imatrix), dataset_shown, req.format,
                                 str(_config(framework, "calibration_language", "mixed") or "mixed"))
     caps = service.capabilities(req.target)
+    plan.board_note = caps.variant_note(getattr(request, "board", None)) or ""
+    profile_of = getattr(service, "board_profile", None)
+    profile = profile_of(req.target, req.board) if callable(profile_of) and req.board else None
+    plan.model_sizes = str(getattr(profile, "model_sizes", None) or "")
 
     # target, trust, image build
     try:

@@ -647,12 +647,15 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
     specs = [
         ToolSpec("list_targets", "List targets",
                  "Lists the hardware targets with their boards, output formats, quantization types and trust "
-                 "(shipped, verified or community pack, local, ai-generated, own).",
+                 "(shipped, verified or community pack, local, ai-generated, own); variants: chips served by a "
+                 "board's profile, with the reason; a board profile's model_sizes: which model sizes suit which "
+                 "tasks (guidance, never a limit).",
                  ToolTier.READ, NoInput, TargetListOut, list_targets, idempotent=True,
                  summary=lambda o: count(len(o.targets), "target", "targets") + "."),
         ToolSpec("get_target_capabilities", "Target capabilities",
-                 "Shows what a target can build: boards, formats, quantizations per board, calibration needs, its "
-                 "trust and, for an AI-created target, its assumptions. check_files also checks its files; "
+                 "Shows what a target can build: boards, chips served by a board (variants, with the reason), "
+                 "formats, quantizations per board, calibration needs, its trust and, for an AI-created target, its "
+                 "assumptions. check_files also checks its files; "
                  "check_image shows its build container image and whether an offline build could make one.",
                  ToolTier.READ, TargetCheckIn, TargetDetailsOut, get_target_capabilities, idempotent=True,
                  takes_context=True, fields={"target": target_field},

@@ -228,8 +228,9 @@ def build_fields(service) -> dict:
     # Boards and quantizations of the whole target and format: a known value the combination does not support is
     # refused by the service with reason not_supported and the supported values (e.g. RKLLM on rk3566).
     def boards(args):
+        # a chip of `variants` is a valid value too: the service builds it as its board and says so in the question
         c = caps(args)
-        return Choices(tuple(c.boards), where=f"for {args['target']}") if c else None
+        return Choices(tuple(c.boards) + tuple(c.variants), where=f"for {args['target']}") if c else None
 
     def quantizations(args):
         c = caps(args)

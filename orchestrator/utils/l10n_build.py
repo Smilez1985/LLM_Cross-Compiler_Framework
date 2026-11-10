@@ -112,6 +112,10 @@ TEXTS = {
                                       "names why.",
         "bld.board.profile": "Profile: {quants} first; {memory}; optimization {level}. Benchmark: {bench}",
         "bld.board.no_bench": "none recorded",
+        "bld.board.sizes.tip": "Model sizes: {text}",
+        "bld.board.variant.tip": "{chip} has no profile of its own: choosing it chooses {board}.\nWhy: {reason}",
+        "bld.board.variant.source": "Source: {source}",
+        "bld.board.variant.log": "Board {chip}: no profile of its own, built as {board}. {reason}",
         "bld.targets.pick": "Choose a target in the list first.",
         "bld.targets.unavailable": "The target list is not available: {reason}",
 
@@ -401,6 +405,10 @@ TEXTS = {
                                       "prüfen“ nennt den Grund.",
         "bld.board.profile": "Profil: zuerst {quants}; {memory}; Optimierung {level}. Benchmark: {bench}",
         "bld.board.no_bench": "keiner erfasst",
+        "bld.board.sizes.tip": "Modellgrößen: {text}",
+        "bld.board.variant.tip": "{chip} hat kein eigenes Profil: Wer ihn wählt, wählt {board}.\nGrund: {reason}",
+        "bld.board.variant.source": "Quelle: {source}",
+        "bld.board.variant.log": "Board {chip}: kein eigenes Profil, gebaut als {board}. {reason}",
         "bld.targets.pick": "Wähle zuerst ein Target in der Liste.",
         "bld.targets.unavailable": "Die Target-Liste ist nicht verfügbar: {reason}",
 

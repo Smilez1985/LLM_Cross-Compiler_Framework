@@ -5,8 +5,8 @@ from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from orchestrator.schemas.targets import (OPTIMIZATION_LEVELS, BenchmarkEntry, OptimizationProfile,  # noqa: F401
-                                          SupportLevel)  # OPTIMIZATION_LEVELS: its old place
+from orchestrator.schemas.targets import (OPTIMIZATION_LEVELS, BenchmarkEntry, BoardVariant,  # noqa: F401
+                                          OptimizationProfile, SupportLevel)  # OPTIMIZATION_LEVELS: its old place
 from orchestrator.tools.output import Untrusted, UntrustedText, untrusted_text
 
 # Fields with external text are marked (UntrustedText): build logs and stage names come from the build container,
@@ -205,6 +205,9 @@ class TargetOut(BaseModel):
                                           "recommended quantizations, memory profile and optimization level")
     benchmarks: List[BenchmarkRowOut] = Field(default_factory=list,
                                               description="Benchmark rows of target.yml, each with its source")
+    variants: Dict[str, BoardVariant] = Field(
+        default_factory=dict, description="Chips without a board of their own: the board each one uses (a build for "
+                                          "the chip runs as that board), the reason and its source")
 
 
 class TargetList(BaseModel):

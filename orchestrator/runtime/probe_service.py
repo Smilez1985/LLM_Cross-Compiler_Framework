@@ -23,7 +23,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 from orchestrator.runtime.profile import (PROFILE_FILE_NAME, HardwareProfile, ProfileError, ProfileStore,
                                           default_state_dir, new_device_id, parse_profile, read_profile)
@@ -116,10 +116,23 @@ def access_line(profile: Optional[HardwareProfile], lang: Optional[str] = None) 
     return text("deploy.access.line", facts=access.summary(text))
 
 
+def _variant_board(target_manager: Any, target: str, soc: Optional[str]) -> Optional[str]:
+    """The board of `target` that serves the chip `soc` (`capabilities.variants`), or None."""
+    if not soc:
+        return None
+    try:
+        caps = target_manager.get_capabilities(target)
+        found = caps.variant(soc) if caps is not None else None
+    except Exception:  # noqa: BLE001 - no capabilities: no chips
+        return None
+    return found[1].board if found else None
+
+
 def match_target(profile: HardwareProfile, target_manager: Any) -> Optional[TargetMatch]:
     """The target that fits a probe best, from probe values only (SOC_MODEL, SOC_VENDOR, NPU_VENDOR, ARCH and the
     board's name BOARD_MODEL) against each target's boards, vendor and architecture family: a board named like the
-    probe's SoC is the strongest match (a letter variant of it too: an rk3588s is the board rk3588, soc_fits), then a
+    probe's SoC is the strongest match (a letter variant of it too: an rk3588s is the board rk3588, soc_fits; and a chip
+    the board serves, `capabilities.variants`: an rk3582 is the board rk3588), then a
     board whose list of known boards (`examples`) names the probe's board exactly (a kernel that names its SoC
     otherwise, such as a maker's own kernel), then the SoC's or the NPU's vendor. None when nothing fits; an
     architecture that differs rules a target out."""
@@ -155,7 +168,8 @@ def match_target(profile: HardwareProfile, target_manager: Any) -> Optional[Targ
             data = target_manager.get_target(tid) or {}
             boards = [str(b.get("name")) for b in data.get("supported_boards") or [] if isinstance(b, dict)]
         board = next((b for b in boards if soc and _canon(b) == soc), None) or \
-            next((b for b in boards if soc and soc_fits(soc, b)), None)
+            next((b for b in boards if soc and soc_fits(soc, b)), None) or \
+            _variant_board(target_manager, tid, profile.get("SOC_MODEL"))
         by_name = [b for b in boards if name and name in known.get(b, ())]
         if board:
             found = (4, TargetMatch(tid, board, f"the probe's SoC {profile.get('SOC_MODEL')} is a board of this target"))
@@ -245,15 +259,17 @@ class HardwareProbes:
         out.sort(key=lambda p: p.updated, reverse=True)
         return out[:max(0, int(limit))]
 
-    def for_board(self, board: Optional[str]) -> Optional[ProbeInfo]:
+    def for_board(self, board: Optional[str], chips: Iterable[str] = ()) -> Optional[ProbeInfo]:
         """The probe a build for `board` (a board id such as rk3588) uses when the request names none (DESIGN round
         23 item 5): the newest stored probe whose SoC is that board (SOC_MODEL; letter case and separators ignored)
-        or a letter variant of it (an rk3588s for rk3588, soc_fits), this computer's own included. None when there is
-        none or no board is named."""
+        or a letter variant of it (an rk3588s for rk3588, soc_fits) or one of the `chips` the board serves
+        (`capabilities.variants`), this computer's own included. None when there is none or no board is named."""
         wanted = _canon(board or "")
         if not wanted:
             return None
-        return next((info for info in self.list(limit=10 ** 6) if info.soc and soc_fits(info.soc, wanted)), None)
+        others = {_canon(c) for c in chips if _canon(c)}
+        return next((info for info in self.list(limit=10 ** 6)
+                     if info.soc and (soc_fits(info.soc, wanted) or _canon(info.soc) in others)), None)
 
     # --- adding -------------------------------------------------------------------------------------------------
 

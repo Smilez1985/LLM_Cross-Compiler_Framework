@@ -1059,8 +1059,7 @@ class BuilderTab(QWidget):
         self.board_combo.clear()
         if caps:
             self.board_combo.setEditable(False)
-            for board in caps.boards_for(self.format_combo.currentData()):
-                self.board_combo.addItem(caps.boards[board].label, board)
+            self._add_board_entries(caps, self.format_combo.currentData())
             idx = self.board_combo.findData(current)
             self.board_combo.setCurrentIndex(idx if idx >= 0 else 0)
         else:
@@ -1079,6 +1078,37 @@ class BuilderTab(QWidget):
                     self.board_combo.setEditText(current)
         self.board_combo.blockSignals(False)
         self._update_quant_options()
+
+    # The chip of an entry of `capabilities.variants` (its value is the board it points to)
+    CHIP_ROLE = Qt.UserRole + 1
+
+    def _add_board_entries(self, caps, fmt) -> None:
+        """The target's boards for the format, each with its profile's guidance on model sizes as the tooltip, and
+        after each board the chips it serves (`capabilities.variants`): the entry's value is that board, its tooltip
+        the reason and the source."""
+        from orchestrator.Core.board_profiles import board_tooltip
+        data = self._board_data()
+        for board in caps.boards_for(fmt):
+            self.board_combo.addItem(caps.boards[board].label, board)
+            sizes = board_tooltip(data, board)
+            if sizes:
+                self.board_combo.setItemData(self.board_combo.count() - 1,
+                                             ui_text("bld.board.sizes.tip", text=sizes), Qt.ToolTipRole)
+            for chip in caps.variants_of(board):
+                entry = caps.variants[chip]
+                tip = ui_text("bld.board.variant.tip", chip=chip, board=board, reason=entry.reason)
+                if entry.source:
+                    tip += "\n" + ui_text("bld.board.variant.source", source=entry.source)
+                self.board_combo.addItem(entry.label, board)
+                index = self.board_combo.count() - 1
+                self.board_combo.setItemData(index, tip, Qt.ToolTipRole)
+                self.board_combo.setItemData(index, chip, self.CHIP_ROLE)
+
+    def _selected_chip(self):
+        """The chip of `capabilities.variants` the selected entry names, or None for a board's own entry."""
+        if self.board_combo.isEditable() or self.board_combo.currentIndex() < 0:
+            return None
+        return self.board_combo.itemData(self.board_combo.currentIndex(), self.CHIP_ROLE) or None
 
     def _selected_board(self):
         data = self.board_combo.currentData()
@@ -1454,7 +1484,10 @@ class BuilderTab(QWidget):
             if problems:
                 QMessageBox.warning(self, "Build settings", "\n".join(problems))
                 return
-        
+            chip = caps.variant(self._selected_chip())
+            if chip is not None:   # a chip without a board of its own: built and recorded as the board it uses
+                self._log(ui_text("bld.board.variant.log", chip=chip[0], board=board, reason=chip[1].reason))
+
         # A recipe stays while its target is selected: the target is the template, every other value a variable
         recipe = self._recipe if self._recipe and str(self.target_combo.currentData() or "").casefold() == \
             self._recipe.target.id.casefold() else None

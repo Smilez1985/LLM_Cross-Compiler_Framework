@@ -1144,7 +1144,8 @@ class TestBuilderTabWithoutCapabilities:
         select(tab.target_combo, "Rockchip")
         assert not tab.board_combo.isEditable()
         boards = [tab.board_combo.itemData(i) for i in range(tab.board_combo.count())]
-        assert boards == tab._capabilities().boards_for(tab.format_combo.currentData())
+        # a chip's entry (capabilities.variants) has the value of the board it uses: each board once of its own
+        assert list(dict.fromkeys(boards)) == tab._capabilities().boards_for(tab.format_combo.currentData())
         board = tab._selected_board()
         cap = tab._capabilities().formats[tab.format_combo.currentData()]
         assert tab.quant_combo.currentText() == cap.default_for(board) and not tab._quant_user_set
