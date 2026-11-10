@@ -326,6 +326,11 @@ class ModuleCreationWizard(QWizard):
         b.text("setup_commands", "gui.field.wizard.setup_commands", self.setup_commands, page=3,
                hint="shell commands the source stage runs once before converting (no network, unprivileged); "
                     "what they export reaches the later stages")
+        b.text("formats", "gui.field.wizard.formats", self.formats_edit, page=3,
+               hint="YAML list of output formats, the template's variables: a preset (gguf, rknn, rkllm) or a "
+                    "format's values (id, label, converter with command and args, input, output_extension, "
+                    "quantizations, default_quantization, runtime_libraries, board_paths, sdk, vendor_files) from "
+                    "the probe and the vendor's documentation; empty: GGUF")
 
         def person_only():
             return "only the person decides what a module shares"
@@ -715,6 +720,14 @@ class ModuleCreationWizard(QWizard):
         self.setup_commands.setStyleSheet(mono)
         self.setup_commands.setPlaceholderText(ui_text("bld.wizard.setup_hint"))
         layout.addRow(ui_text("bld.wizard.setup_label"), self.setup_commands)
+
+        # The output formats: the general template's variables (orchestrator/schemas/target_template.py), as YAML;
+        # the template's stages call the declared converter, so no stage code is typed here
+        self.formats_edit = QTextEdit()
+        self.formats_edit.setAcceptRichText(False)
+        self.formats_edit.setStyleSheet(mono)
+        self.formats_edit.setPlaceholderText(ui_text("bld.wizard.formats_hint"))
+        layout.addRow(ui_text("bld.wizard.formats_label"), self.formats_edit)
         
         page.setLayout(layout)
         return page
@@ -769,10 +782,27 @@ class ModuleCreationWizard(QWizard):
                           cpu=self.cpu_flags.text(), cmake=self.cmake_flags.text(),
                           quant=self.quant_logic.toPlainText() or ui_text("bld.wizard.default"),
                           setup=self.setup_commands.toPlainText() or ui_text("bld.wizard.none"))
+        formats = self._formats_summary()
+        if formats:
+            summary += "\n" + ui_text("bld.wizard.summary_formats", formats=formats)
         self.summary_text.setPlainText(summary)   # shell code and AI text: never rich text
         self.chk_knowledge.setEnabled(bool(self.crawled_roots))
         if not self.crawled_roots:
             self.chk_knowledge.setChecked(False)
+
+    def _formats_summary(self) -> str:
+        """The declared formats in one line for the summary (the checks' reasons when they fail; empty: none)."""
+        from orchestrator.Core.module_generator import format_fact_lines, format_problems, parse_formats
+        text = self.formats_edit.toPlainText()
+        if not text.strip():
+            return ""
+        try:
+            _values, problems = format_problems(parse_formats(text))
+        except ValueError as e:
+            problems = [str(e)]
+        if problems:
+            return "; ".join(problems)
+        return "\n  " + "\n  ".join(format_fact_lines({"formats": text}))
 
     # --- DEEP INGEST LOGIC (v1.6.0) ---
     def run_deep_ingest(self):
@@ -1383,7 +1413,8 @@ class ModuleCreationWizard(QWizard):
             "setup_commands": self.setup_commands.toPlainText(),
             "cmake_flags": self.cmake_flags.text(),
             "quantization_logic": self.quant_logic.toPlainText(),
-            "detection_commands": "lscpu"
+            "detection_commands": "lscpu",
+            "formats": self.formats_edit.toPlainText(),
         }
         if self._pinned_image and self._ai_chose_base_image() and \
                 self.module_data["base_os"].strip() == self._pinned_image[0]:

@@ -461,6 +461,11 @@ def _target_profile(probe_file, strict: bool):
 @click.option('--knowledge-root', 'knowledge_roots', multiple=True, metavar='URL',
               help="Attach the knowledge base's pages crawled from this address (Deep Ingest, privacy scrub applied); "
                    "repeatable. Only these pages are attached, never the rest of the knowledge base")
+@click.option('--formats', 'formats_file', type=click.Path(exists=True, dir_okay=False), default=None,
+              help="YAML or JSON file with the output formats of the module, the general template's variables: a "
+                   "list whose entries are a format's values (id, label, converter with its args, input, "
+                   "output_extension, quantizations, default_quantization, runtime_libraries, board_paths, sdk, "
+                   "vendor_files) or a preset name (gguf, rknn, rkllm). Without it the module builds GGUF")
 @click.option('--edit', 'edit_files', is_flag=True,
               help="The module wizard's \"edit all files\" step: the module is made in a scratch folder, each of its "
                    "stage modules, target.yml and Dockerfile opens in $EDITOR, the diff is shown and the checks run "
@@ -469,7 +474,7 @@ def _target_profile(probe_file, strict: bool):
 def module_create(ctx: FrameworkContext, name: Optional[str], arch: Optional[str], sdk: Optional[str],
                   probe_file: Optional[str], description: Optional[str], base_image: Optional[str],
                   packages: Optional[str], cpu_flags: Optional[str], cmake_flags: str, setup_file: Optional[str],
-                  quant_file: Optional[str], knowledge_roots: tuple, edit_files: bool):
+                  quant_file: Optional[str], knowledge_roots: tuple, formats_file: Optional[str], edit_files: bool):
     """Create a new hardware target module (the module wizard's values as options; what is not given is asked)"""
     from orchestrator.Core.module_generator import probe_module_name, probe_sdk
     config, resolve = _settings(ctx)
@@ -514,7 +519,8 @@ def module_create(ctx: FrameworkContext, name: Optional[str], arch: Optional[str
         "setup_commands": read(setup_file),
         "cmake_flags": cmake_flags,
         "quantization_logic": read(quant_file),
-        "detection_commands": "lscpu"
+        "detection_commands": "lscpu",
+        "formats": read(formats_file),
     }
 
     roots = sorted(set(knowledge_roots))
@@ -553,7 +559,8 @@ def module_create(ctx: FrameworkContext, name: Optional[str], arch: Optional[str
         console.print(f"2. Customize {output_path}/modules/convert_module.sh and target_module.sh (the convert and "
                       f"target stages of the build, which the framework's stage runner runs after source and config; "
                       f"the Dockerfile installs the tools they use): llm-cli module edit {Path(output_path).name} "
-                      f"opens them with a diff and the checks")
+                      f"opens them with a diff and the checks. Its formats are the template variables in "
+                      f"target.yml (template_variables): change them there, never the block the generator wrote from them")
         console.print(f"3. To share it: llm-cli zoo export target {Path(output_path).name} --author NAME")
 
     except Exception as e:

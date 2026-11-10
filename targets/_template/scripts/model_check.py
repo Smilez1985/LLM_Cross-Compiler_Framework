@@ -21,7 +21,7 @@ Runs in the target image with its python3 and the standard library only (no nump
 same code. Reads model files, writes only the files named on its command line and the stage's own files, and never
 uses the network. Every target ships the same copy (targets/Rockchip, targets/ARM64 and targets/_template, scripts/).
 
-  model_check.py input PATH --format FORMAT --stats FILE [--onnx-next TEXT]
+  model_check.py input PATH --format FORMAT --stats FILE [--onnx-next TEXT] [--accepts hf,onnx,gguf]
   model_check.py begin FILE --state FILE [--scratch DIR]
   model_check.py watch DIR --state FILE
   model_check.py output (FILE | --watched) --stats FILE --state FILE --format FORMAT [--type TYPE] [--seconds N]
@@ -216,9 +216,27 @@ def describe(info: Dict[str, Any]) -> str:
             "folder": "a folder without config.json", "file": "a file of no model format"}[kind]
 
 
-def refusal(info: Dict[str, Any], path: Path, fmt: str, onnx_next: str) -> Optional[str]:
+# The input formats a module declares for a format (its template variables: hf, onnx, gguf) by the kind found here.
+DECLARED_INPUT = {"huggingface": "hf", "weights-file": "hf", "onnx": "onnx", "gguf": "gguf", "gguf-folder": "gguf"}
+DECLARED_INPUT_NAMES = {"hf": "a Hugging Face model folder", "onnx": "an ONNX model", "gguf": "a GGUF file"}
+
+
+def declared_refusal(info: Dict[str, Any], path: Path, fmt: str, accepts: List[str]) -> Optional[str]:
+    """Why a format the module declares cannot use this input (None: it can, or its converter decides): the input
+    formats it declares (--accepts) against the kind found."""
+    found = DECLARED_INPUT.get(info["kind"])
+    if found is None or found in accepts:
+        return None   # a kind of no declared input format: the converter has the last word
+    takes = ", ".join(DECLARED_INPUT_NAMES.get(a, a) for a in accepts)
+    return f"The model is {describe(info)} ({path.name}); the format {fmt} of this target takes {takes}."
+
+
+def refusal(info: Dict[str, Any], path: Path, fmt: str, onnx_next: str,
+            accepts: Optional[List[str]] = None) -> Optional[str]:
     """Why the build's format cannot use this input (None: it can, or the format's helper decides)."""
     kind, name = info["kind"], path.name
+    if accepts:
+        return declared_refusal(info, path, fmt, accepts)
     if fmt == "rknn":
         return None  # rknn_module.sh finds the ONNX file and refuses everything else itself
     if kind == "onnx":
@@ -662,7 +680,8 @@ def cmd_input(args) -> None:
     if not path.exists():
         raise Problem("The model input does not exist in the container.")
     info = detect(path)
-    reason = refusal(info, path, args.format, args.onnx_next)
+    accepts = [a for a in (args.accepts or "").split(",") if a]
+    reason = refusal(info, path, args.format, args.onnx_next, accepts)
     if reason:
         raise Problem(reason)
     checked = check_input(path, info)
@@ -848,6 +867,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--format", required=True)
     s.add_argument("--stats", required=True)
     s.add_argument("--onnx-next", default="")
+    s.add_argument("--accepts", default="", help="the input formats a declared format takes (hf,onnx,gguf)")
     s = sub.add_parser("begin")
     s.add_argument("file")
     s.add_argument("--state", required=True)

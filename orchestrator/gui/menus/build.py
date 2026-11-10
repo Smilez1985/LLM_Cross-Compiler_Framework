@@ -39,6 +39,7 @@ CLI_PATHS: Dict[str, str] = {
     "module create --setup-commands": "act_tools_module_wizard",       # the flags page: build-time setup
     "module create --quantization-logic": "act_tools_module_wizard",   # the flags page: quantization logic
     "module create --knowledge-root": "act_tools_module_wizard",       # the last page: attach the crawled knowledge
+    "module create --formats": "act_tools_module_wizard",              # the flags page: the output formats
     "module generate-ai": "act_tools_module_wizard",          # its intro page: the AI import (Ditto)
     "module generate-ai --provider": "act_tools_module_wizard",   # "for this analysis only" provider
     "module generate-ai --model": "act_tools_module_wizard",      # "for this analysis only" model

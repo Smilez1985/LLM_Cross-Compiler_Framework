@@ -5,6 +5,8 @@
 # Image:  this target's Dockerfile (base image debian:bookworm-slim) for the build host's architecture; llama.cpp's
 #         converter and tools below LLAMA_CPP_PATH (/usr/src/llama.cpp), built by the Dockerfile from the pin.
 # Target: [MODULE_NAME] ([IHRE_ARCHITEKTUR] Linux).
+# Format: a format the module declares other than gguf (its template variables, config_module.sh) is converted by its
+#         declared converter (convert_declared below); gguf as follows.
 # Stage:  converts the model for the requested type. The quantization block of the module definition becomes
 #         branches of the `case "$QUANT_TYPE"` below (after the SDK setup of the source stage). A branch may call
 #         `build_gguf <TYPE>` or `convert_to_gguf <outtype> <file>`; every other type goes through build_gguf, which
@@ -193,6 +195,57 @@ build_imatrix() {
     stage_output "$IMATRIX_DIR/imatrix.dat"
 }
 
+# ============================================================================
+# A DECLARED FORMAT (the module's template variables, config_module.sh): the vendor's converter
+# ============================================================================
+
+# The converter of the format as words: a program of the image, or a module or script of this target.
+converter_words() {
+    local command="${FORMAT_CONVERTER[$FORMAT]:-}"
+    [ -n "$command" ] || die "The format $FORMAT declares no converter (target.yml template_variables)."
+    case "$command" in
+        modules/*) CONVERTER_WORDS=(bash "$MODULES_DIR/${command#modules/}") ;;
+        scripts/*) CONVERTER_WORDS=(python3 "$(dirname "$MODULES_DIR")/$command") ;;
+        *) CONVERTER_WORDS=("$command") ;;
+    esac
+    case "$command" in
+        modules/*|scripts/*)
+            [ -f "${CONVERTER_WORDS[1]}" ] || die "The converter $command of the format $FORMAT is not in this target." ;;
+        /*)
+            [ -x "$command" ] || die "The converter $command of the format $FORMAT is not in the image: its Dockerfile installs the toolchain (the module's packages, vendor sources or pinned downloads)." ;;
+        *)
+            command -v "$command" >/dev/null 2>&1 || die "The converter $command of the format $FORMAT is not on the image's PATH: its Dockerfile installs the toolchain." ;;
+    esac
+}
+
+# The model in the declared format: the input checked against the format's input formats, the converter run with its
+# declared arguments (one array: never eval, never a shell string; the placeholders get the build's values) and the
+# file it wrote checked and counted. Its functional test is the board's: the converter's runtime runs there.
+convert_declared() {
+    local -n declared_args="FORMAT_ARGS_$FORMAT"
+    local output="$OUTPUT_DIR/${MODEL_NAME}-${QUANT_TYPE}.${FORMAT_EXTENSION[$FORMAT]}" arg started words=()
+    model_check input "$MODEL_SOURCE" --format "$FORMAT" --accepts "${FORMAT_INPUTS[$FORMAT]// /,}" \
+        --stats "$CONVERT_STATS"
+    converter_words
+    for arg in "${declared_args[@]}"; do
+        arg="${arg//\{input\}/"$MODEL_SOURCE"}"
+        arg="${arg//\{output_dir\}/"$OUTPUT_DIR"}"
+        arg="${arg//\{output\}/"$output"}"
+        arg="${arg//\{quant\}/"$QUANT_TYPE"}"
+        arg="${arg//\{model_name\}/"$MODEL_NAME"}"
+        arg="${arg//\{work_dir\}/"$SCRATCH_DIR"}"
+        words+=("$arg")
+    done
+    model_check watch "$OUTPUT_DIR" --state "$CONVERT_STATE"
+    echo ">> Converting -> ${FORMAT_LABEL[$FORMAT]} ($QUANT_TYPE) with ${FORMAT_CONVERTER[$FORMAT]}"
+    started=$SECONDS
+    MODEL_SOURCE="$MODEL_SOURCE" OUTPUT_DIR="$OUTPUT_DIR" QUANTIZATION="$QUANT_TYPE" MODEL_NAME="$MODEL_NAME" \
+        FORMAT_OUTPUT="$output" "${CONVERTER_WORDS[@]}" "${words[@]}"
+    model_check output --watched --state "$CONVERT_STATE" --format "$FORMAT" --type "$QUANT_TYPE" \
+        --seconds "$((SECONDS - started))" --stats "$CONVERT_STATS" \
+        --test-skip "a model in the format $FORMAT runs on the board, where it is measured"
+}
+
 main() {
     # shellcheck source=/dev/null
     source "$BUILD_PLAN"
@@ -210,18 +263,22 @@ main() {
     fi
 
     load_sdk_environment
-    check_input
-    validate_huggingface_model "$MODEL_SOURCE"
     : > "$QUANTIZE_JOBS"
+    if [ "$FORMAT" != gguf ]; then
+        convert_declared
+    else
+        check_input
+        validate_huggingface_model "$MODEL_SOURCE"
 
-    # --- CONVERSION & QUANTIZATION ---
-    case "$QUANT_TYPE" in
+        # --- CONVERSION & QUANTIZATION (gguf: llama.cpp, the template's own converter) ---
+        case "$QUANT_TYPE" in
 [QUANTIZATION_LOGIC]
 
-        *)
-            build_gguf "$QUANT_TYPE"
-            ;;
-    esac
+            *)
+                build_gguf "$QUANT_TYPE"
+                ;;
+        esac
+    fi
 
     model_check keep --state "$CONVERT_STATE"
     stage_output "$CONVERT_STATS"

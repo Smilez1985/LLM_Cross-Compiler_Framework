@@ -27,7 +27,7 @@
 # Inputs (environment, set by BuildEngine):
 #   MODEL_SOURCE   local HF model directory inside the container (staged by the host), or a GGUF file (quantized by
 #                  the target stage, nothing converted)
-#   TARGET_FORMAT  gguf                                       (default: gguf)
+#   TARGET_FORMAT  gguf, or a format the module declares     (default: gguf)
 #   TARGET_BOARD   board id from target.yml                   (optional)
 #   QUANTIZATION   e.g. Q4_K_M, IQ4_XS, Q8_0, F16
 #   JOB_TYPE       build | imatrix
@@ -86,6 +86,39 @@ GGUF_NEEDS_IMATRIX=" IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S IQ2_M IQ3_XXS IQ3_XS Q2_K_
 GGUF_WANTS_IMATRIX=" IQ3_S IQ3_M IQ4_NL IQ4_XS "
 }
 
+# --- The formats of this module (its template variables) -------------------------------------------------------
+# The module generator writes them below from target.yml's template_variables (orchestrator/schemas/
+# target_template.py), as data: single-quoted words, never code. The folder check refuses a module whose block differs
+# from that record, so a format is changed in target.yml (or in the edit step's variables), never here. gguf is the
+# template's llama.cpp format (the GGUF stages); every other format runs its declared converter (convert_module.sh
+# convert_declared) and is packaged with its runtime libraries (target_module.sh package_declared_format). Without
+# a block (a module made before the template had variables) the module builds GGUF only.
+# Per format F: FORMAT_LABEL[F], FORMAT_CONVERTER[F] (llama.cpp, a program of the image, modules/NAME_module.sh or
+# scripts/NAME.py), FORMAT_ARGS_F (its arguments; placeholders {input} {output} {output_dir} {quant} {model_name}
+# {work_dir}), FORMAT_INPUTS[F] (hf onnx gguf), FORMAT_EXTENSION[F], FORMAT_QUANTS[F], FORMAT_DEFAULT_QUANT[F],
+# FORMAT_LIBS_F (NAME|VERSION|IMAGE_PATH|redistributable or reference|SOURCE_URL), FORMAT_VENDOR_FILES_F
+# (NAME|URL|LICENCE_URL) and FORMAT_BOARD_PATHS[F] (install, models, libraries).
+# shellcheck disable=SC2034
+declare -A FORMAT_LABEL=() FORMAT_CONVERTER=() FORMAT_INPUTS=() FORMAT_EXTENSION=() FORMAT_QUANTS=() \
+    FORMAT_DEFAULT_QUANT=() FORMAT_BOARD_PATHS=()
+DECLARED_FORMATS=()
+# [DECLARED_FORMATS]
+
+# FORMAT: whether this module builds it (a module without declared formats builds gguf only)
+declared_format() {
+    local f
+    if [ ${#DECLARED_FORMATS[@]} -eq 0 ]; then
+        [ "$1" = gguf ]
+        return
+    fi
+    for f in "${DECLARED_FORMATS[@]}"; do
+        if [ "$f" = "$1" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 normalize_gguf_type() {
     local q
     q="$(echo "$1" | tr '[:lower:]' '[:upper:]')"
@@ -125,6 +158,10 @@ plan_request() {
         MODEL_NAME="${MODEL_NAME:-$(basename "${MODEL_SOURCE%/}")}"
     fi
     QUANT_TYPE="$(normalize_gguf_type "$requested")"
+    if [ "$FORMAT" != gguf ] && declared_format "$FORMAT"; then
+        # a declared format's types are its own spellings: the requested one, or the format's default
+        QUANT_TYPE="${requested:-${FORMAT_DEFAULT_QUANT[$FORMAT]}}"
+    fi
 
     echo "Model:        $MODEL_SOURCE"
     echo "Task:         ${MODEL_TASK:-LLM}"
@@ -143,10 +180,11 @@ plan_request() {
     # The importance-matrix job converts and measures only; its container has no output folder.
     [ "$JOB" = "imatrix" ] && return 0
 
-    case "$FORMAT" in
-        gguf) ;;
-        *) die "Format '$FORMAT' is not supported by this target (gguf)." ;;
-    esac
+    declared_format "$FORMAT" \
+        || die "Format '$FORMAT' is not supported by this target (${DECLARED_FORMATS[*]:-gguf})."
+    if [ "$FORMAT" != gguf ] && [[ " ${FORMAT_QUANTS[$FORMAT]} " != *" $QUANT_TYPE "* ]]; then
+        die "The format $FORMAT has no quantization '$QUANT_TYPE' (${FORMAT_QUANTS[$FORMAT]})."
+    fi
 
     mkdir -p "$OUTPUT_DIR"
 }

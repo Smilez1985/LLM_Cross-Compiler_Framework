@@ -23,14 +23,14 @@ process and MCP clients alike, through the one tool registry (policy, questions,
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from orchestrator.Core.module_generator import (ARCHITECTURES, DEFAULT_BASE, INPUT_LIST_BOUNDS, MODULE_NAME_RE,
                                                 SHIPPED_TEMPLATE, ModuleGenerator, effective_base, generator_input,
                                                 module_slug, soft_cap_warnings, target_name_collision, uses_gpu_template,
-                                                validate_module_data, vendor_fact_lines)
+                                                format_fact_lines, validate_module_data, vendor_fact_lines)
 # The audit row of a module the person saved lives in Core/module_generator.py (chain c1-imports); the old name stays.
 from orchestrator.Core.module_generator import record_module_saved  # noqa: F401
 from orchestrator.runtime.probe_service import (IMPORT_NEXT, LIST_LIMIT, LOCAL_ID, PROBE_TIMEOUT, HardwareProbes,
@@ -38,6 +38,7 @@ from orchestrator.runtime.probe_service import (IMPORT_NEXT, LIST_LIMIT, LOCAL_I
 from orchestrator.llm.task_prompts import MODULE_FILE_CHARS, MODULE_FILES_CHARS
 from orchestrator.schemas.build import BenchmarkRowOut, BuildTestOut, TargetOut
 from orchestrator.schemas.modules import PackageSourceIn, PinnedDownloadIn
+from orchestrator.schemas.target_template import FormatVariables
 from orchestrator.schemas.targets import OptimizationProfile, TargetCapabilities, TargetIn
 from orchestrator.tools.facts_catalog import warn
 from orchestrator.tools.grants import tool_rule
@@ -250,6 +251,14 @@ class CreateModuleIn(BaseModel):
     assumptions: List[str] = Field(default_factory=list, max_length=10,
                                    description="Values you guessed rather than read from the probe or the "
                                                "documentation, each with what to check first")
+    formats: List[Union[Literal["gguf", "rknn", "rkllm"], FormatVariables]] = Field(
+        default_factory=list, max_length=8,
+        description="The output formats, the general template's variables (no stage code): a preset name (gguf, rknn, "
+                    "rkllm) or a format's values: its vendor converter (a program of the build image by its absolute "
+                    "path) with its arguments as words and the placeholders {input} {output} {quant} {model_name}, "
+                    "the input formats, the output extension, the quantization types, the runtime libraries with "
+                    "their versions and whether they may be passed on, the board paths, its sdk needs and the vendor "
+                    "files that may not be passed on; empty: GGUF")
 
     @field_validator("module_name")
     @classmethod
@@ -614,6 +623,8 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
                 facts.append(Fact("Soft limit", line[len("WARNING: "):]))
             else:
                 facts.append(Fact("Vendor software", line, AI_TEXT))
+        for line in format_fact_lines(data):
+            facts.append(Fact("Output format", line, AI_TEXT))
         for a in data.get("assumptions") or []:
             facts.append(Fact("Guessed by the AI", a, AI_TEXT))
         facts.append(Fact("Runtime block", f"planned from probe {inp.probe_id} ({label})" if inp.probe_id else

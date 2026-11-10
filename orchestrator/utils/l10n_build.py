@@ -329,6 +329,15 @@ TEXTS = {
         "bld.wizard.setup_hint": "Optional: commands the source stage runs once before converting (as the "
                                  "unprivileged build user, without network), e.g. exporting SDK variables; what they "
                                  "export reaches the later stages",
+        "bld.wizard.formats_label": "Output formats (template variables):",
+        "bld.wizard.formats_hint": "Optional, YAML: a list of formats, each a preset (gguf, rknn, rkllm) or its "
+                                   "values: id, label, converter (command: the vendor's program in the image by its "
+                                   "absolute path; args: words with {input} {output} {quant} {model_name}), input "
+                                   "(hf, onnx, gguf), output_extension, quantizations, default_quantization, "
+                                   "runtime_libraries (name, version, image_path, redistributable, source_url), "
+                                   "board_paths, sdk, vendor_files. Empty: GGUF. No stage code: the template's "
+                                   "stages call the declared converter.",
+        "bld.wizard.summary_formats": "Output formats: {formats}",
         "bld.wizard.attach": "Attach the knowledge crawled for this target (Deep Ingest, privacy scrub applied)",
         "bld.wizard.attach_tip": "Only pages crawled in this wizard are attached, never the rest of your knowledge "
                                  "base.",
@@ -745,6 +754,15 @@ TEXTS = {
         "bld.wizard.setup_hint": "Optional: Befehle, die die Source-Stufe einmal vor dem Konvertieren ausführt (als "
                                  "Build-Benutzer ohne Rechte, ohne Netz), z. B. SDK-Variablen exportieren; was sie "
                                  "exportieren, erreicht die späteren Stufen",
+        "bld.wizard.formats_label": "Ausgabeformate (Variablen der Vorlage):",
+        "bld.wizard.formats_hint": "Optional, YAML: eine Liste von Formaten, jedes eine Vorgabe (gguf, rknn, rkllm) "
+                                   "oder seine Werte: id, label, converter (command: das Programm des Herstellers im "
+                                   "Image mit absolutem Pfad; args: Wörter mit {input} {output} {quant} "
+                                   "{model_name}), input (hf, onnx, gguf), output_extension, quantizations, "
+                                   "default_quantization, runtime_libraries (name, version, image_path, "
+                                   "redistributable, source_url), board_paths, sdk, vendor_files. Leer: GGUF. Kein "
+                                   "Code der Stufen: Die Stufen der Vorlage rufen den angegebenen Konverter auf.",
+        "bld.wizard.summary_formats": "Ausgabeformate: {formats}",
         "bld.wizard.attach": "Das für dieses Target gecrawlte Wissen anhängen (Deep Ingest, Datenschutz-Bereinigung "
                              "angewendet)",
         "bld.wizard.attach_tip": "Nur die in diesem Assistenten gecrawlten Seiten werden angehängt, nie der Rest "

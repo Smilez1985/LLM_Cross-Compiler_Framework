@@ -22,6 +22,8 @@
 #         target_module.sh started by hand, the entrypoint modes target and pipeline) also without one, with the
 #         module's own flags (plain defaults), which the manifest names. A build of the BuildEngine gets the board's
 #         stored probe when there is one (DESIGN round 23 item 5), and then makes the package too.
+# Format: a format the module declares other than gguf (its template variables, config_module.sh) is not quantized
+#         here (its converter did that); its package is package_declared_format below.
 
 set -euo pipefail
 
@@ -832,6 +834,57 @@ package_for_board() {
 # END OF PACKAGE
 # ============================================================================
 
+# ============================================================================
+# THE PACKAGE OF A DECLARED FORMAT (the module's template variables, config_module.sh)
+# ============================================================================
+
+# The package of a format other than gguf, in output/packages/<model>_<type>_<format>/: the models the converter wrote,
+# the runtime libraries the vendor allows passing on (copied from the build image into lib/), RUNTIME.txt with every
+# library and its version (one that may not be passed on with the address where the person fetches it under their own
+# licence acceptance; never copied), the vendor files that may not be passed on (referenced only), the board paths,
+# MANIFEST.json and SHA256SUMS.
+package_declared_format() {
+    local -n libs="FORMAT_LIBS_$FORMAT"
+    local -n vendor_files="FORMAT_VENDOR_FILES_$FORMAT"
+    local ext="${FORMAT_EXTENSION[$FORMAT]}" package entry name version path how source models=() model
+    local install_dir model_dir lib_dir libs_json="" vendor_json="" models_json=""
+    read -r install_dir model_dir lib_dir <<< "${FORMAT_BOARD_PATHS[$FORMAT]:-/opt/llmcf /opt/llmcf/models /opt/llmcf/lib}"
+    mapfile -t models < <(find "$OUTPUT_DIR" -maxdepth 1 -type f -name "*.$ext" | sort)
+    [ ${#models[@]} -gt 0 ] || die "No .$ext model in $OUTPUT_DIR to package."
+    package="$OUTPUT_DIR/packages/${MODEL_NAME}_${QUANT_TYPE}_${FORMAT}"
+    rm -rf "$package"
+    mkdir -p "$package/models" "$package/lib"
+    {
+        echo "Runtime of ${FORMAT_LABEL[$FORMAT]} for $PACKAGE_TARGET"
+        echo "On the board: models in $model_dir, libraries in $lib_dir (install folder $install_dir)."
+    } > "$package/RUNTIME.txt"
+    for model in "${models[@]}"; do
+        cp -- "$model" "$package/models/"
+        models_json="$models_json${models_json:+, }\"models/$(basename "$model")\""
+    done
+    for entry in "${libs[@]}"; do
+        IFS='|' read -r name version path how source <<< "$entry"
+        if [ "$how" = redistributable ]; then
+            [ -f "$path" ] || die "The runtime library $name $version is not in the image at $path (the format $FORMAT declares it)."
+            cp -- "$path" "$package/lib/$name"
+            echo "lib/$name $version (in this package)" >> "$package/RUNTIME.txt"
+        else
+            echo "$name $version: not in this package (its licence does not allow passing it on); fetch it from $source under your own licence acceptance into $lib_dir" >> "$package/RUNTIME.txt"
+        fi
+        libs_json="$libs_json${libs_json:+, }{\"name\": \"$name\", \"version\": \"$version\", \"in_package\": $([ "$how" = redistributable ] && echo true || echo false), \"source\": \"$source\"}"
+    done
+    for entry in "${vendor_files[@]}"; do
+        IFS='|' read -r name path source <<< "$entry"
+        echo "$name: a vendor file that may not be passed on; fetch it from $path (licence: $source) under your own licence acceptance" >> "$package/RUNTIME.txt"
+        vendor_json="$vendor_json${vendor_json:+, }{\"name\": \"$name\", \"url\": \"$path\", \"licence\": \"$source\"}"
+    done
+    cat > "$package/MANIFEST.json" <<MANIFEST
+{"model": "$MODEL_NAME", "format": "$FORMAT", "label": "${FORMAT_LABEL[$FORMAT]}", "quantization": "$QUANT_TYPE", "target": "$PACKAGE_TARGET", "board": "${BOARD:-default}", "converter": "${FORMAT_CONVERTER[$FORMAT]}", "models": [$models_json], "runtime_libraries": [$libs_json], "vendor_files": [$vendor_json], "board_paths": {"install": "$install_dir", "models": "$model_dir", "libraries": "$lib_dir"}}
+MANIFEST
+    (cd "$package" && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | sort | xargs -d '\n' sha256sum > SHA256SUMS)
+    log_success "Package for the board: $package"
+}
+
 main() {
     # shellcheck source=/dev/null
     source "$BUILD_PLAN"
@@ -847,8 +900,12 @@ main() {
         || die "No artifact in $OUTPUT_DIR for quantization '$QUANT_TYPE'."
 
     write_build_info
-    if [ "$FORMAT" = "gguf" ] && { [ "$BOARD_PACKAGE" = "1" ] || [ "${PACKAGE_REQUESTED:-0}" = "1" ]; }; then
-        package_for_board
+    if [ "$BOARD_PACKAGE" = "1" ] || [ "${PACKAGE_REQUESTED:-0}" = "1" ]; then
+        if [ "$FORMAT" = "gguf" ]; then
+            package_for_board
+        else
+            package_declared_format
+        fi
     fi
 
     echo "=== Artifacts ==="

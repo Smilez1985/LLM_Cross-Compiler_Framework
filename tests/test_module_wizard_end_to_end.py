@@ -292,10 +292,11 @@ def test_module_create_has_an_option_for_every_value_of_the_wizard(fw, qapp, mon
     values = dict(name="Parity Board", arch="aarch64", sdk="RKNN", description="My board",
                   base="debian:bookworm-slim", packages="cmake git", cpu="-mcpu=cortex-a55",
                   cmake="-DGGML_CUDA=OFF", setup="export A=1\n", quant="    Q4_0) echo q ;;\n",
-                  root="https://docs.example.org/board")
-    setup, quant = tmp_path / "setup.sh", tmp_path / "quant.sh"
+                  root="https://docs.example.org/board", formats="- gguf\n- rknn\n")
+    setup, quant, formats = tmp_path / "setup.sh", tmp_path / "quant.sh", tmp_path / "formats.yml"
     setup.write_text(values["setup"])
     quant.write_text(values["quant"])
+    formats.write_text(values["formats"])
 
     monkeypatch.setattr(wizards, "ModuleGenerator", Recorder)
     message_boxes(monkeypatch, wizards)
@@ -313,6 +314,7 @@ def test_module_create_has_an_option_for_every_value_of_the_wizard(fw, qapp, mon
         wizard.cmake_flags.setText(values["cmake"])
         wizard.setup_commands.setPlainText(values["setup"])
         wizard.quant_logic.setPlainText(values["quant"])
+        wizard.formats_edit.setPlainText(values["formats"])   # the general template's variables
         wizard.crawled_roots.add(values["root"])
         wizard.chk_knowledge.setEnabled(True)
         wizard.chk_knowledge.setChecked(True)
@@ -327,9 +329,9 @@ def test_module_create_has_an_option_for_every_value_of_the_wizard(fw, qapp, mon
         "-q", "module", "create", "--name", values["name"], "--arch", values["arch"], "--sdk", values["sdk"],
         "--description", values["description"], "--base-image", values["base"], "--packages", values["packages"],
         "--cpu-flags", values["cpu"], "--cmake-flags", values["cmake"], "--setup-commands", str(setup),
-        "--quantization-logic", str(quant), "--knowledge-root", values["root"]], input="")
+        "--quantization-logic", str(quant), "--knowledge-root", values["root"], "--formats", str(formats)], input="")
     assert result.exit_code == 0, result.output
     assert len(seen) == 2
     (gui, gui_roots), (cli, cli_roots) = seen
     assert gui_roots == cli_roots == [values["root"]]
-    assert gui == cli
+    assert gui == cli and gui["formats"] == values["formats"]

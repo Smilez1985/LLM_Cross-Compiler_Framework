@@ -85,7 +85,7 @@ SHIPPED_TEMPLATE = Path(__file__).resolve().parents[2] / "targets" / "_template"
 TEMPLATE_PLACEHOLDERS = re.compile(  # not after a name: COMPILER_CONFIG[CMAKE_FLAGS] is a bash array entry
     r"(?<![\w$])\[(?:MODULE_NAME|Hardware-Familie|IHRE_ARCHITEKTUR|Hersteller|QUANTIZATION_LOGIC|CPU_FLAGS|CMAKE_FLAGS"
     r"|SDK_SETUP_COMMANDS|PACKAGING_COMMANDS|ihr-target-name|VENDOR_SOURCES|PIP_PACKAGES|PINNED_DOWNLOADS"
-    r"|PINNED_DOWNLOADS_COPY|GNU_TRIPLET)\]|\{packages_str\}|YYYY-MM-DD")
+    r"|PINNED_DOWNLOADS_COPY|GNU_TRIPLET|DECLARED_FORMATS)\]|\{packages_str\}|YYYY-MM-DD")
 # The GNU system name of each module architecture: the board package's compilers in the image are <triplet>-gcc and
 # -g++ (the image's own on a build computer of that system, else the distribution's cross compilers).
 GNU_TRIPLETS = {"aarch64": "aarch64-linux-gnu", "x86_64": "x86_64-linux-gnu", "armv7l": "arm-linux-gnueabihf",
@@ -281,6 +281,28 @@ def vendor_fact_lines(data: Dict[str, Any]) -> List[str]:
     return lines + [f"WARNING: {w}" for w in soft_cap_warnings(data)]
 
 
+def format_fact_lines(data: Dict[str, Any]) -> List[str]:
+    """What a person must see about a module's declared formats before it is created: each format's converter with its
+    arguments, its inputs and types, and its runtime libraries (which go into a package and which the person fetches
+    under their own licence acceptance). Empty for a module without declared formats (GGUF)."""
+    try:
+        values, _problems = format_problems(parse_formats(data.get("formats")))
+    except ValueError:
+        return []
+    lines = []
+    for f in values:
+        conv = f["converter"]
+        libs = "; ".join(f"{lib['name']} {lib['version']} ("
+                         + ("passed on in the package" if lib.get("redistributable") else
+                            f"not passed on: fetched from {lib.get('source_url')}") + ")"
+                         for lib in f.get("runtime_libraries") or []) or "none"
+        vendor = ", ".join(f"{v['name']} from {v['url']}" for v in f.get("vendor_files") or [])
+        lines.append(f"{f['id']} ({f['label']}): converter {conv['command']} {' '.join(conv.get('args') or [])}".rstrip()
+                     + f"; input {', '.join(f['input'])}; types {', '.join(f['quantizations'])}; runtime libraries "
+                     f"{libs}" + (f"; vendor files not passed on: {vendor}" if vendor else ""))
+    return lines
+
+
 def _validate_vendor_fields(data: Dict[str, Any], out: Dict[str, Any], problems: List[str]) -> None:
     from orchestrator.utils.prebuilt_llama import download_finding
     sources = []
@@ -414,7 +436,7 @@ def vendor_blocks(data: Dict[str, Any]) -> Dict[str, str]:
 
 AI_DEFINITION_FIELDS = ("architecture", "sdk", "base_os", "packages", "cpu_flags", "cmake_flags", "quantization_logic",
                         "setup_commands", "package_sources", "pip_packages", "pip_index_url", "pinned_downloads",
-                        "assumptions", "base_image_reason")
+                        "assumptions", "base_image_reason", "formats")
 
 
 def generator_input(definition: Dict[str, Any], module_name: Optional[str] = None,
@@ -528,9 +550,163 @@ def validate_module_data(data: Dict[str, Any]) -> Dict[str, Any]:
         out[key] = code
 
     _validate_vendor_fields(data, out, problems)
+    out["formats"] = _validate_formats(data.get("formats"), problems)
     if problems:
         raise ValueError("Invalid module definition:\n- " + "\n- ".join(problems))
     return out
+
+
+# --- the template's variables: the formats a module declares (orchestrator/schemas/target_template.py) ------------
+# The generator renders them into config_module.sh between these two lines, as data; the folder check compares the
+# block with target.yml's template_variables.
+FORMATS_BEGIN = ("# >>> template variables: written by the module generator from target.yml (template_variables); "
+                 "change them there")
+FORMATS_END = "# <<< template variables"
+FORMATS_PLACEHOLDER = "# [DECLARED_FORMATS]"
+
+
+def _strings(value) -> Iterable[str]:
+    if isinstance(value, dict):
+        for item in value.values():
+            yield from _strings(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _strings(item)
+    elif isinstance(value, str):
+        yield value
+
+
+def format_problems(formats: Any) -> tuple:
+    """(the formats as validated plain values, the problems): the schema of the template's variables, then the checks
+    of today's fields on every value (control characters, the shell deny patterns)."""
+    from pydantic import ValidationError
+    from orchestrator.schemas.target_template import TemplateVariables, resolve_formats
+    problems: List[str] = []
+    try:
+        variables = TemplateVariables(formats=resolve_formats(formats if isinstance(formats, list) else [formats]))
+    except ValidationError as e:
+        for err in e.errors()[:10]:
+            where = ".".join(str(part) for part in err.get("loc", ()))
+            problems.append(f"{where or 'formats'}: {err.get('msg', 'invalid')}"[:300])
+        return [], problems
+    except ValueError as e:
+        return [], [str(e)[:300]]
+    values = [f.model_dump(exclude_none=True) for f in variables.formats]
+    for value in values:
+        for text in _strings(value):
+            if _CONTROL_CHARS.search(text):
+                problems.append(f"formats ({value['id']}): contains control characters")
+            problems += [f"formats ({value['id']}): '{text[:60]}' is not allowed, {reason}"
+                         for pattern, reason in SHELL_DENY_PATTERNS if pattern.search(text)]
+    return values, problems
+
+
+def parse_formats(value: Any) -> List[Any]:
+    """The formats a module declares, from what the wizard's field, `llm-cli module create --formats FILE` or a tool
+    give: a list of formats (each its values or a preset name), YAML or JSON text of one, or a template_variables
+    block; nothing (empty text, None) declares none (the module builds GGUF)."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return []
+    if isinstance(value, str):
+        try:
+            value = yaml.safe_load(value)
+        except yaml.YAMLError as e:
+            raise ValueError(f"formats: not valid YAML or JSON ({str(e).splitlines()[0][:200]})") from None
+    if isinstance(value, dict) and "formats" in value:
+        value = value["formats"]   # a template_variables block
+    if value is None:
+        return []
+    if isinstance(value, (str, dict)):
+        value = [value]
+    if not isinstance(value, list):
+        raise ValueError("formats: a list of formats, each its values or a preset name (gguf, rknn, rkllm)")
+    return value
+
+
+def _validate_formats(formats: Any, problems: List[str]) -> List[Dict[str, Any]]:
+    try:
+        formats = parse_formats(formats)
+    except ValueError as e:
+        problems.append(str(e))
+        return []
+    if not formats:
+        return []
+    values, found = format_problems(formats)
+    problems += found
+    return values
+
+
+def module_formats(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The formats of a validated module: the declared ones, else the template's GGUF instance with the types of the
+    quantization branches (or the common defaults)."""
+    from orchestrator.schemas.target_template import gguf_format
+    return list(data.get("formats") or []) or [gguf_format(gguf_quantizations(data.get("quantization_logic", "")))]
+
+
+def render_formats(formats: List[Dict[str, Any]]) -> str:
+    """The config stage's block of a module's formats: shell data (single-quoted words), never code."""
+    lines = [FORMATS_BEGIN]
+    for f in formats:
+        i = f["id"]
+        paths = f.get("board_paths") or {}
+        lines += [f"DECLARED_FORMATS+=({_q(i)})",
+                  f"FORMAT_LABEL[{i}]={_q(f['label'])}",
+                  f"FORMAT_CONVERTER[{i}]={_q(f['converter']['command'])}",
+                  f"FORMAT_ARGS_{i}=(" + " ".join(_q(a) for a in f["converter"].get("args") or []) + ")",
+                  f"FORMAT_INPUTS[{i}]={_q(' '.join(f['input']))}",
+                  f"FORMAT_EXTENSION[{i}]={_q(f['output_extension'])}",
+                  f"FORMAT_QUANTS[{i}]={_q(' '.join(f['quantizations']))}",
+                  f"FORMAT_DEFAULT_QUANT[{i}]={_q(f['default_quantization'])}",
+                  f"FORMAT_LIBS_{i}=(" + " ".join(
+                      _q("|".join([lib["name"], lib["version"], lib["image_path"],
+                                   "redistributable" if lib.get("redistributable") else "reference",
+                                   lib.get("source_url") or ""])) for lib in f.get("runtime_libraries") or []) + ")",
+                  f"FORMAT_VENDOR_FILES_{i}=(" + " ".join(
+                      _q("|".join([v["name"], v["url"], v["licence_url"]])) for v in f.get("vendor_files") or []) + ")",
+                  f"FORMAT_BOARD_PATHS[{i}]=" + _q(" ".join([paths.get("install_dir", "/opt/llmcf"),
+                                                            paths.get("model_dir", "/opt/llmcf/models"),
+                                                            paths.get("lib_dir", "/opt/llmcf/lib")]))]
+    return "\n".join(lines + [FORMATS_END])
+
+
+def template_variable_problems(root: Path) -> List[str]:
+    """The checks of a module's template variables (empty: none, or the module records none): target.yml's
+    template_variables valid and allowed, the config stage's block exactly what they render, each format in the
+    capabilities, and every converter of the target folder present."""
+    from orchestrator.schemas.target_template import BUILTIN_CONVERTER
+    root = Path(root)
+    try:
+        meta = yaml.safe_load((root / "target.yml").read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return []
+    record = meta.get("template_variables") if isinstance(meta, dict) else None
+    if record is None:
+        return []
+    if not isinstance(record, dict) or record.get("schema_version", 1) != 1 or \
+            set(record) - {"schema_version", "formats"}:
+        return ["target.yml: template_variables holds schema_version 1 and formats"]
+    values, problems = format_problems(record.get("formats") or [])
+    problems = [f"target.yml: template_variables: {p}" for p in problems]
+    if not values:
+        return problems or ["target.yml: template_variables declares no format"]
+    try:
+        text = (root / "modules" / "config_module.sh").read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    begin, end = text.find(FORMATS_BEGIN), text.find(FORMATS_END)
+    if begin < 0 or end < begin or text[begin:end + len(FORMATS_END)] != render_formats(values):
+        problems.append("modules/config_module.sh: the block of the template variables is not what target.yml's "
+                        "template_variables declare (change the variables, never the block)")
+    caps = (meta.get("capabilities") or {}).get("formats") if isinstance(meta.get("capabilities"), dict) else None
+    missing = [f["id"] for f in values if not isinstance(caps, dict) or f["id"] not in caps]
+    if missing:
+        problems.append(f"target.yml: the capabilities have no format {', '.join(missing)} of the template variables")
+    for f in values:
+        command = f["converter"]["command"]
+        if command != BUILTIN_CONVERTER and command.startswith(("modules/", "scripts/")) and \
+                not (root / command).is_file():
+            problems.append(f"target.yml: the converter {command} of the format {f['id']} is not in the target folder")
+    return problems
 
 
 DEFAULT_BASE = "debian:bookworm-slim"
@@ -560,20 +736,29 @@ def _yaml_text(text: str) -> str:
     return " ".join(re.sub(r"[\[\]{}]", "", str(text)).split())
 
 
-def capabilities_block(board_names: List[str], quantization_logic: str = "",
-                       board_info: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
-    """The capabilities of a generated target: its boards and GGUF with the types its convert stage handles (the
-    labels of the case branches of the quantization logic in modules/convert_module.sh) or common defaults. Support level community: works for its makers.
-    board_info: a board's label and known board names by its name (probe_board), in place of the name as its label."""
-    from orchestrator.schemas.targets import TargetCapabilities
+def gguf_quantizations(quantization_logic: str = "") -> List[str]:
+    """The GGUF types a convert stage handles: the labels of the case branches of its quantization logic, or the
+    common defaults."""
     labels = re.findall(r"^\s*([A-Za-z0-9_|\"' ]+)\)", quantization_logic or "", re.MULTILINE)
     quants = [q.strip(" \"'") for label in labels for q in label.split("|")]
-    quants = list(dict.fromkeys(q for q in quants if re.fullmatch(r"[A-Za-z0-9_]{1,32}", q))) or list(GGUF_DEFAULT_QUANTS)
+    return list(dict.fromkeys(q for q in quants if re.fullmatch(r"[A-Za-z0-9_]{1,32}", q))) or list(GGUF_DEFAULT_QUANTS)
+
+
+def capabilities_block(board_names: List[str], quantization_logic: str = "",
+                       board_info: Optional[Dict[str, Dict[str, Any]]] = None,
+                       formats: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """The capabilities of a generated target: its boards and the formats of its template variables (`formats`, the
+    validated values), or GGUF with the types its convert stage handles (the labels of the case branches of the
+    quantization logic in modules/convert_module.sh) or common defaults. Support level community: works for its
+    makers. board_info: a board's label and known board names by its name (probe_board), in place of the name as its
+    label."""
+    from orchestrator.schemas.target_template import FormatVariables, gguf_format
+    from orchestrator.schemas.targets import TargetCapabilities
+    formats = formats or [gguf_format(gguf_quantizations(quantization_logic))]
     boards = {module_slug(b): dict((board_info or {}).get(b) or {"label": b}) for b in board_names}
     block = {"schema_version": 1, "support_level": "community", "default_board": next(iter(boards)),
              "boards": boards,
-             "formats": {"gguf": {"label": "GGUF (llama.cpp)", "input": ["hf"], "quantizations": quants,
-                                  "default_quantization": quants[0], "imatrix": True, "dataset": "optional"}}}
+             "formats": {f["id"]: FormatVariables.model_validate(f).capability() for f in formats}}
     TargetCapabilities.model_validate(block)
     return block
 
@@ -705,6 +890,7 @@ def validate_target_folder(root: Path, template_dir: Path = SHIPPED_TEMPLATE) ->
     if (root / "target.yml").is_file():
         problems += [p for p in stage_order(root)[1] if p not in problems]
     problems += scan_target_folder(root, skip=(KNOWLEDGE_SNAPSHOT,))
+    problems += template_variable_problems(root)
     problems += [f"template placeholder left: {p}" for p in _leftover_placeholders(root)]
     return problems + check_shell_syntax(root)
 
@@ -821,6 +1007,7 @@ class ModuleGenerator:
             Path: Path to the created module directory
         """
         data = validate_module_data(data)
+        data["formats"] = module_formats(data)
         found = None if data.get("supported_boards") else probe_board(profile)
         if found:   # no boards named: the probe's SoC is the board, so the probe finds the target it made
             data["supported_boards"] = [found["board"]]
@@ -870,17 +1057,20 @@ class ModuleGenerator:
             # of target.yml's stages: block (runtime_layer.stage_order), as the stage account; the target carries no
             # build.sh and no stage_user.sh
             
-            # Specialized Modules (Optional copy if template exists): the convert stage's format helpers, and the
-            # host benchmark that no build runs (models for a board are measured on the board)
-            self._process_template("modules/rknn_module.sh", target_dir, data)
-            self._process_template("modules/rkllm_module.sh", target_dir, data)
+            # The template's format helpers (the Rockchip modules and the converter scripts they start) only when a
+            # declared format's converter names them; and the host benchmark that no build runs (models for a board
+            # are measured on the board)
+            helpers = self._helper_files(data)
+            for rel in helpers:
+                if rel.startswith("modules/"):
+                    self._process_template(rel, target_dir, data)
             self._process_template("modules/benchmark_module.sh", target_dir, data)
 
             # 3. Generate Helper Scripts (Dynamic)
             self._write_profile_script(target_dir, data)
 
             # 4. Copy Python Scripts (Static Helpers)
-            self._copy_scripts(target_dir)
+            self._copy_scripts(target_dir, helpers)
 
             # 5. Fallback stage modules, only when the template folder lacks one
             self._write_standard_modules(target_dir)
@@ -894,6 +1084,7 @@ class ModuleGenerator:
             # image the person approved is the one the builder stage starts from.
             problems = validate_target_folder(target_dir, self.template_dir)
             problems += self._base_problems(target_dir, effective_base(data, self.template_dir))
+            problems += [p for p in self._missing_helpers(data) if p not in problems]
             if problems:
                 raise ValueError("The generated module is not usable:\n- " + "\n- ".join(problems[:20]))
             
@@ -906,6 +1097,21 @@ class ModuleGenerator:
             # neither shows up as a buildable target nor blocks a corrected retry.
             remove_tree(target_dir)
             raise e
+
+    def _helper_files(self, data: Dict[str, Any]) -> List[str]:
+        """The template files the declared formats' converters need (the Rockchip helpers: rknn_module.sh with
+        rknn_converter.py, rkllm_module.sh with export_rkllm.py), in the order of the formats."""
+        from orchestrator.schemas.target_template import FormatVariables
+        files: List[str] = []
+        for f in data.get("formats") or []:
+            files += [rel for rel in FormatVariables.model_validate(f).helper_files() if rel not in files]
+        return files
+
+    def _missing_helpers(self, data: Dict[str, Any]) -> List[str]:
+        """A converter of the target folder that the template does not have: the generator writes no stage code, so
+        such a converter is refused (a program of the build image is named by its path instead)."""
+        return [f"formats: the converter {rel} is not a helper of the template (name a program of the build image "
+                "by its absolute path)" for rel in self._helper_files(data) if not (self.template_dir / rel).is_file()]
 
     @staticmethod
     def _base_problems(target_dir: Path, base_os: str) -> List[str]:
@@ -1015,7 +1221,8 @@ class ModuleGenerator:
                 "[QUANTIZATION_LOGIC]": data.get("quantization_logic", ""),
                 "# [PACKAGING_COMMANDS]": data.get("packaging_commands", ""),  # no build/ folder by default
                 "[CPU_FLAGS]": data.get("cpu_flags", ""),
-                "[CMAKE_FLAGS]": data.get("cmake_flags", "")
+                "[CMAKE_FLAGS]": data.get("cmake_flags", ""),
+                FORMATS_PLACEHOLDER: render_formats(module_formats(data)),
             }
             
             for key, value in replacements.items():
@@ -1098,11 +1305,17 @@ class ModuleGenerator:
                 config["metadata"]["base_image_reason"] = _yaml_text(data["base_image_reason"])
         config["supported_boards"] = [{"name": b} for b in boards]
         config.setdefault("docker", {})["image_name"] = f"llm-framework/{module_slug(name).replace('_', '-')}"
-        config["capabilities"] = capabilities_block(boards, data.get("quantization_logic", ""), data.get("board_info"))
+        formats = module_formats(data)
+        config["capabilities"] = capabilities_block(boards, data.get("quantization_logic", ""), data.get("board_info"),
+                                                    formats)
+        # The template's variables the module was made with: the one record of its formats, rendered into the config
+        # stage (the folder check compares them; the edit step shows them first)
+        config["template_variables"] = {"schema_version": 1, "formats": formats}
         # One optimization profile per board: the build recipe's plan for the board's probe (or the plain defaults of
         # the architecture), so `llm-cli targets validate` finds it in agreement.
         from orchestrator.Core.board_profiles import generated_profile
-        quants = config["capabilities"]["formats"]["gguf"]["quantizations"]
+        caps_formats = config["capabilities"]["formats"]
+        quants = (caps_formats.get("gguf") or next(iter(caps_formats.values())))["quantizations"]
         made = generated_profile(data["architecture"], data.get("optimization_probe"), quants)
         config["optimization_profiles"] = {b: dict(made) for b in config["capabilities"]["boards"]} if made else {}
         config.pop("performance_benchmarks", None)   # none yet: a board test measures them
@@ -1140,15 +1353,21 @@ echo "Generated $OUTPUT_FILE"
         self._write_file(dst, content)
         self._make_executable(dst)
 
-    def _copy_scripts(self, target_dir: Path):
+    def _copy_scripts(self, target_dir: Path, helpers: Iterable[str] = ()):
         """Copies the static helper scripts to the target: the Python helpers and the shell scripts the target stage
-        puts into the package for the board (package_test_model.sh, package_deploy.sh), executable like the stages."""
+        puts into the package for the board (package_test_model.sh, package_deploy.sh), executable like the stages.
+        A format helper's converter script (rknn_converter.py, export_rkllm.py) only when `helpers` names it."""
+        from orchestrator.schemas.target_template import HELPER_SCRIPTS
+        on_request = {Path(rel).name for scripts in HELPER_SCRIPTS.values() for rel in scripts}
+        wanted = {Path(rel).name for rel in helpers}
         src_scripts = self.template_dir / "scripts"
         dst_scripts = target_dir / "scripts"
         
         if src_scripts.exists():
             ensure_directory(dst_scripts)
             for item in src_scripts.glob("*.py"):
+                if item.name in on_request and item.name not in wanted:
+                    continue
                 shutil.copy2(item, dst_scripts / item.name)
             for item in src_scripts.glob("*.sh"):
                 self._write_script(dst_scripts / item.name, item.read_text(encoding="utf-8"))
