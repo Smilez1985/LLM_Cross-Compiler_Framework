@@ -85,11 +85,12 @@ def run(root: Path, home: Path, *args, script=None, stdin=None, timeout=240):
                LLM_FRAMEWORK_NO_AUDIO="1", PYTHON_KEYRING_BACKEND="keyring.backends.null.Keyring",
                XDG_CONFIG_HOME=str(home / ".config"), XDG_CACHE_HOME=str(home / ".cache"),
                XDG_DATA_HOME=str(home / ".local" / "share"), HF_HOME=str(home / ".cache" / "huggingface"),
-               QT_QPA_PLATFORM="offscreen")
+               QT_QPA_PLATFORM="offscreen", PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     work = home / "work"
     work.mkdir(parents=True, exist_ok=True)
     argv = [sys.executable, "-c", script, *args] if script else [sys.executable, "-m", "orchestrator.cli", "-q", *args]
-    return subprocess.run(argv, cwd=work, env=env, capture_output=True, text=True, timeout=timeout, input=stdin)
+    return subprocess.run(argv, cwd=work, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          timeout=timeout, input=stdin)
 
 
 INSTALL_SCRIPT = r'''

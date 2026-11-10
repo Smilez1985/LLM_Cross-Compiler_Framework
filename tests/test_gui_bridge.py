@@ -245,8 +245,8 @@ def test_a_second_window_takes_over_when_the_first_one_closes(booted_framework, 
         call(fm, "fill_form", form="builder", values={"use_gpu": False})
         assert window.state["use_gpu"] is False and second.state["use_gpu"] is True, "the first window still serves"
         window.server.stop()
-        _until(lambda: other.running, "the second window never took over")
-        assert not other.waiting
+        # running is set a moment before waiting is cleared: wait for both
+        _until(lambda: other.running and not other.waiting, "the second window never took over")
         call(fm, "fill_form", form="builder", values={"use_gpu": False})
         assert second.state["use_gpu"] is False, "the open window serves AI apps now"
     finally:
