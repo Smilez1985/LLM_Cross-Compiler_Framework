@@ -575,13 +575,12 @@ EOF
             CMAKE_OPTIONS="$CMAKE_OPTIONS ${X86_CMAKE_FLAGS}${ARM_CMAKE_FLAGS}"
         fi
     fi
+    # Only options llama.cpp has at the pin (tests/test_stage_cmake_options.py): no GGML_NEON or GGML_FP16, since NEON
+    # is the ARMv8-A baseline and FP16 a tag of GGML_CPU_ARM_ARCH (-march), both set by the plan above.
     local feature
-    for feature in NEON FP16 AVX2 AVX512 CUDA; do
+    for feature in AVX2 AVX512 CUDA; do
         if [ -n "$X86_CFLAGS" ] && { [ "$feature" = AVX2 ] || [ "$feature" = AVX512 ]; }; then
             continue  # in the x86 plan above
-        fi
-        if [ -n "$ARM_CFLAGS" ] && { [ "$feature" = NEON ] || [ "$feature" = FP16 ]; }; then
-            continue  # NEON is the ARMv8-A baseline, FP16 a tag of GGML_CPU_ARM_ARCH above
         fi
         if [ "${HW_CONFIG[SUPPORTS_$feature]:-OFF}" == "ON" ]; then
             CMAKE_OPTIONS="$CMAKE_OPTIONS -DGGML_$feature=ON"

@@ -244,7 +244,7 @@ runtime:
   targets: [llama-server, llama-cli, llama-bench, llama-perplexity]
   advisory:
     cpu_flags: -mcpu=cortex-a55
-    cmake_flags: -DGGML_NEON=ON
+    cmake_flags: -DGGML_NATIVE=OFF
     note: "from the module wizard or an AI; a record here, not used by the device runtime ..."
 ```
 
