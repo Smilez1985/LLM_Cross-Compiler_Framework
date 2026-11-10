@@ -202,7 +202,8 @@ build_imatrix() {
     fi
     echo ">> Computing importance matrix..."
     model_check begin "$IMATRIX_DIR/imatrix.dat" --state "$CONVERT_STATE"
-    # -o *.dat keeps the legacy format, which llama-quantize --imatrix accepts.
+    # At the pinned llama.cpp -o writes the GGUF imatrix format (with a warning about the .dat name); llama-quantize
+    # --imatrix reads it.
     "$IMATRIX_BIN" -m "$f16_file" -f "$dataset" -o "$IMATRIX_DIR/imatrix.dat" --chunks 100
     if [ "${INPUT_FORMAT:-model}" != "gguf" ]; then
         rm -f "$f16_file"
