@@ -164,9 +164,9 @@ class TestRemovedSettingsAndCode:
 class TestFeaturesInDevelopment:
     """Settings and modules of features that are still being built (see the roadmap) stay in the code base."""
 
-    SETTINGS = {"logs_dir", "auto_cleanup", "docker_namespace", "default_enable_imatrix",
-                "default_calibration_dataset", "gui_theme", "gui_auto_refresh", "gui_refresh_interval",
-                "api_enabled", "api_port", "api_host"}
+    # default_enable_imatrix and default_calibration_dataset are wired since 3.4.0 (tests/test_build_defaults.py)
+    SETTINGS = {"logs_dir", "auto_cleanup", "docker_namespace", "gui_theme", "gui_auto_refresh",
+                "gui_refresh_interval", "api_enabled", "api_port", "api_host"}
 
     def test_their_settings_keep_their_schema(self):
         assert self.SETTINGS <= set(ConfigManager().config_schemas)

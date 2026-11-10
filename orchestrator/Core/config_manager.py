@@ -403,9 +403,13 @@ class ConfigManager:
             # --- SSOT: Repositories (v2.3) ---
             ConfigSchema("source_repositories", dict, False, {}, "Map of Git Repositories (llama.cpp, etc.)"),
 
-            # --- IMatrix & Smart Calibration Defaults (v2.4) ---
-            ConfigSchema("default_enable_imatrix", bool, False, False, "Enable IMatrix generation by default"),
-            ConfigSchema("default_calibration_dataset", str, False, "wiki.train.raw", "Default dataset filename"),
+            # --- The defaults of the importance matrix and the calibration text (Core/build_defaults.py) ---
+            ConfigSchema("default_enable_imatrix", bool, False, True,
+                         "Importance matrix by default for GGUF types below 5 bits per weight (a type that needs one "
+                         "always gets it; a build's own choice wins)"),
+            ConfigSchema("default_calibration_dataset", str, False, "",
+                         "Default calibration text file for builds that name none (a name inside datasets_dir or an "
+                         "absolute path; GGUF importance matrix and RKLLM). Empty: the shipped calibration text"),
 
             # GUI & API
             ConfigSchema("gui_theme", str, False, "dark", "GUI theme"),
@@ -975,6 +979,46 @@ def set_framework_mode(config: Any, mode: Any) -> str:
         config.set("framework_mode", before)
         raise OSError("The framework mode could not be saved to config.yml; it stays as it was.")
     return framework_mode(config)
+
+
+# The build defaults the person sets with `llmcf config set` and in File > Settings... (Core/build_defaults.py).
+BUILD_DEFAULT_SETTINGS = ("default_enable_imatrix", "default_calibration_dataset", "calibration_language")
+CALIBRATION_LANGUAGES = ("mixed", "de", "en")
+
+
+def set_build_default(config: Any, key: str, value: Any) -> Any:
+    """The person's setter of a build default: `llmcf config set` and File > Settings... (General). Checked
+    (ValueError, nothing changes), set and saved to config.yml (OSError when it cannot be saved; the value stays as it
+    was). default_enable_imatrix: true or false (yes/no, on/off, 1/0); default_calibration_dataset: a file name inside
+    datasets_dir or an absolute path, empty for the shipped calibration text; calibration_language: mixed, de or en.
+    Returns the value now."""
+    if key not in BUILD_DEFAULT_SETTINGS:
+        raise ValueError(f"{key} is not a build default ({', '.join(BUILD_DEFAULT_SETTINGS)}).")
+    if key == "default_enable_imatrix":
+        word = value if isinstance(value, bool) else str(value if value is not None else "").strip().lower()
+        if word in (True, "true", "yes", "on", "1"):
+            new: Any = True
+        elif word in (False, "false", "no", "off", "0"):
+            new = False
+        else:
+            raise ValueError(f"default_enable_imatrix is true or false, not '{value}'.")
+    elif key == "calibration_language":
+        new = str(value if value is not None else "").strip().lower()
+        if new not in CALIBRATION_LANGUAGES:
+            raise ValueError(f"calibration_language is mixed, de or en, not '{value}'.")
+    else:
+        new = str(value if value is not None else "").strip()
+        if len(new) > 1024 or any(ord(c) < 32 for c in new):
+            raise ValueError("default_calibration_dataset is a file name or path on one line (at most 1024 "
+                             "characters), or empty for the shipped calibration text.")
+    before = config.get(key)
+    if config.set(key, new) is False:
+        raise ValueError(f"{key} cannot be '{value}'.")
+    save = getattr(config, "save_user_config", None)
+    if callable(save) and not save():
+        config.set(key, before)
+        raise OSError(f"{key} could not be saved to config.yml; it stays as it was.")
+    return config.get(key)
 
 
 if __name__ == "__main__":

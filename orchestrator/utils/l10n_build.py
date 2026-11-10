@@ -220,6 +220,26 @@ TEXTS = {
         "bld.settings.source.override": "changed while the program runs",
         "bld.settings.output_now": "Output folder for finished models: {path}",
         "bld.settings.output_folder": "Output folder...",
+        # File > Settings... > General: the build defaults (llmcf config set; Core/build_defaults.py)
+        "bld.settings.defaults.title": "Build defaults (used when a build names none)",
+        "bld.settings.defaults.imatrix": "Importance matrix for GGUF types below 5 bits per weight",
+        "bld.settings.defaults.imatrix_tip": "A type that needs one always gets it, and a build's own choice wins "
+                                             "(setting default_enable_imatrix).",
+        "bld.settings.defaults.dataset": "Default calibration text:",
+        "bld.settings.defaults.dataset_hint": "empty: the shipped calibration text",
+        "bld.settings.defaults.dataset_tip": "A text file, a name inside the datasets folder or a full path, used for "
+                                             "the GGUF importance matrix and for RKLLM when a build names no dataset "
+                                             "(setting default_calibration_dataset).",
+        "bld.settings.defaults.browse": "Choose...",
+        "bld.settings.defaults.shipped": "Shipped text",
+        "bld.settings.defaults.language": "Languages of the shipped text:",
+        "bld.settings.defaults.lang.mixed": "German, English and tool use",
+        "bld.settings.defaults.lang.de": "German and tool use",
+        "bld.settings.defaults.lang.en": "English and tool use",
+        "bld.settings.defaults.saved": "Saved: {name}.",
+        "bld.settings.defaults.not_saved": "Not saved: {reason}",
+        "bld.settings.defaults.missing": "Saved, but {name} does not exist yet: a build that would use it is refused "
+                                         "until it does.",
         "bld.settings.tab.repos": "Source repositories",
         "bld.settings.repos.intro": "Repository overrides: builds receive each one as <NAME>_REPO_OVERRIDE. Saved in "
                                     "{path}.",
@@ -482,6 +502,25 @@ TEXTS = {
         "bld.settings.source.override": "während des Laufs geändert",
         "bld.settings.output_now": "Ausgabeordner für fertige Modelle: {path}",
         "bld.settings.output_folder": "Ausgabeordner…",
+        "bld.settings.defaults.title": "Build-Vorgaben (gelten, wenn ein Build keine nennt)",
+        "bld.settings.defaults.imatrix": "Importance-Matrix für GGUF-Typen unter 5 Bit je Gewicht",
+        "bld.settings.defaults.imatrix_tip": "Ein Typ, der eine braucht, bekommt sie immer, und die eigene Wahl eines "
+                                             "Builds gewinnt (Einstellung default_enable_imatrix).",
+        "bld.settings.defaults.dataset": "Vorgegebener Kalibriertext:",
+        "bld.settings.defaults.dataset_hint": "leer: der mitgelieferte Kalibriertext",
+        "bld.settings.defaults.dataset_tip": "Eine Textdatei, ein Name im Datensatz-Ordner oder ein voller Pfad, "
+                                             "genutzt für die GGUF-Importance-Matrix und für RKLLM, wenn ein Build "
+                                             "keinen Datensatz nennt (Einstellung default_calibration_dataset).",
+        "bld.settings.defaults.browse": "Auswählen…",
+        "bld.settings.defaults.shipped": "Mitgelieferter Text",
+        "bld.settings.defaults.language": "Sprachen des mitgelieferten Texts:",
+        "bld.settings.defaults.lang.mixed": "Deutsch, Englisch und Tool-Nutzung",
+        "bld.settings.defaults.lang.de": "Deutsch und Tool-Nutzung",
+        "bld.settings.defaults.lang.en": "Englisch und Tool-Nutzung",
+        "bld.settings.defaults.saved": "Gespeichert: {name}.",
+        "bld.settings.defaults.not_saved": "Nicht gespeichert: {reason}",
+        "bld.settings.defaults.missing": "Gespeichert, aber {name} gibt es noch nicht: Ein Build, der sie nutzen "
+                                         "würde, wird abgelehnt, bis es sie gibt.",
         "bld.settings.tab.repos": "Quell-Repositorys",
         "bld.settings.repos.intro": "Repository-Überschreibungen: Builds erhalten jede als <NAME>_REPO_OVERRIDE. "
                                     "Gespeichert in {path}.",

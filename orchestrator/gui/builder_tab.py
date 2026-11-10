@@ -535,6 +535,8 @@ class BuilderTab(QWidget):
         self.board_combo.currentIndexChanged.connect(self._update_quant_options)
         self._update_quant_options()
         self.format_combo.currentIndexChanged.connect(self._update_calibration_options)
+        # the importance matrix's default follows the type (Core/build_defaults.py) until the person ticks the box
+        self.quant_combo.currentTextChanged.connect(self._update_calibration_options)
         self.opt_combo = QComboBox()
         self.opt_combo.setObjectName("combo_builder_optimization")
         self.opt_combo.addItems(["BALANCED", "SPEED", "SIZE", "AGGRESSIVE", "FAST"])  # every --optimization level
@@ -562,13 +564,20 @@ class BuilderTab(QWidget):
         self.chk_imatrix = QCheckBox("Importance matrix (IMatrix, GGUF)")
         self.chk_imatrix.setObjectName("chk_builder_imatrix")
         self.chk_imatrix.setToolTip("Computes an importance matrix from the calibration dataset to improve "
-                                    "low-bit GGUF quantization (required for IQ1/IQ2 types).")
-        # Recent datasets are offered, never preselected: a dataset changes the quantization.
+                                    "low-bit GGUF quantization (required for IQ1/IQ2 types). Ticked by default "
+                                    "for GGUF types below 5 bits per weight (setting default_enable_imatrix); "
+                                    "once you change it, your choice stays.")
+        # The default follows format and quantization until the person (or a form fill) changes the box.
+        self._imatrix_user_set = False
+        self._imatrix_by_default = False
+        self.chk_imatrix.toggled.connect(self._mark_imatrix_user_set)
+        # Recent datasets are offered, never preselected: a dataset changes the quantization. Empty: the default
+        # (setting default_calibration_dataset, else the shipped text), named in the placeholder.
         self.dataset_combo = QComboBox()
         self.dataset_combo.setObjectName("combo_builder_dataset")
         self.dataset_combo.setEditable(True)
         self.dataset_combo.setInsertPolicy(QComboBox.NoInsert)
-        self.dataset_combo.lineEdit().setPlaceholderText("Calibration dataset (none)")
+        self.dataset_combo.lineEdit().setPlaceholderText(self._dataset_placeholder())
         self.dataset_combo.setAccessibleName("Calibration dataset")
         fill_recent(self.dataset_combo, self._recent("dataset"), text="")
         self.btn_dataset = QPushButton("...")
@@ -1142,6 +1151,7 @@ class BuilderTab(QWidget):
         self.quant_combo.blockSignals(False)
         self._last_default_quant = default
         self._show_board_profile(profile, data, board)
+        self._update_calibration_options()
 
     DATASET_HINTS = {
         "gguf": "Plain text; used to compute the importance matrix.",
@@ -1158,17 +1168,81 @@ class BuilderTab(QWidget):
         uses_imatrix = cap.imatrix if cap else fmt == "gguf"
         self.chk_imatrix.setEnabled(uses_imatrix)
         if not uses_imatrix:
-            self.chk_imatrix.setChecked(False)
+            self._set_imatrix_default(False)
+        elif not self._imatrix_user_set:
+            self._set_imatrix_default(self._imatrix_default(fmt, cap))
         uses_dataset = cap is None or cap.dataset != "none" or cap.imatrix
         hint = self.DATASET_HINTS.get(fmt, cap.notes if cap and cap.notes else "")
         for widget in (self.dataset_combo, self.btn_dataset):
             widget.setEnabled(uses_dataset)
             widget.setToolTip(hint)
+        self.dataset_combo.lineEdit().setPlaceholderText(self._dataset_placeholder())
+        self._sync_no_dataset_item()
+
+    # `build start --no-dataset`: offered while the setting default_calibration_dataset names a file
+    NO_OWN_DATASET = "(no dataset of your own: the shipped text)"
+
+    def _sync_no_dataset_item(self) -> None:
+        from orchestrator.Core.build_defaults import dataset_setting
+        config = getattr(self.framework, "config", None) if self.framework else None
+        idx = self.dataset_combo.findText(self.NO_OWN_DATASET)
+        text = self.dataset_combo.currentText()
+        self.dataset_combo.blockSignals(True)
+        try:
+            if dataset_setting(config) and idx < 0:
+                self.dataset_combo.addItem(self.NO_OWN_DATASET)
+            elif not dataset_setting(config) and idx >= 0:
+                self.dataset_combo.removeItem(idx)
+                text = "" if text == self.NO_OWN_DATASET else text
+            self.dataset_combo.setEditText(text)
+        finally:
+            self.dataset_combo.blockSignals(False)
+
+    def _imatrix_default(self, fmt, cap) -> bool:
+        """The importance matrix a build of the form's format and type gets by default (build_defaults)."""
+        from orchestrator.Core.build_defaults import default_imatrix
+        from orchestrator.Core.orchestrator import LLAMA_CPP_NEEDS_IMATRIX
+        quant = self.quant_combo.currentText().strip() or None
+        caps = self._capabilities()
+        if caps and quant:
+            try:
+                quant = caps.normalize(fmt, self._selected_board(), quant)[2]
+            except Exception:  # noqa: BLE001 - a type the target does not know: as typed
+                pass
+        config = getattr(self.framework, "config", None) if self.framework else None
+        return default_imatrix(config, fmt, quant, format_uses_imatrix=cap.imatrix if cap else fmt == "gguf",
+                               needs=cap.needs_imatrix if cap else LLAMA_CPP_NEEDS_IMATRIX)
+
+    def _set_imatrix_default(self, checked: bool) -> None:
+        """Sets the box to its default without counting as the person's choice."""
+        self._imatrix_by_default = True
+        try:
+            self.chk_imatrix.setChecked(bool(checked))
+        finally:
+            self._imatrix_by_default = False
+
+    def _mark_imatrix_user_set(self, *_):
+        if not self._imatrix_by_default:
+            self._imatrix_user_set = True
+
+    def _dataset_placeholder(self) -> str:
+        """The empty dataset field names what a build then uses: the default file, else the shipped text."""
+        from orchestrator.Core.build_defaults import dataset_setting
+        config = getattr(self.framework, "config", None) if self.framework else None
+        name = dataset_setting(config)
+        if name:
+            from orchestrator.utils.any_path import last_part
+            return f"Calibration dataset (default: {last_part(name)})"
+        return "Calibration dataset (default: the shipped text)"
 
     @property
     def dataset_path(self):
-        """The calibration dataset typed, picked or browsed (None when the field is empty)."""
-        return self.dataset_combo.currentText().strip() or None
+        """The calibration dataset typed, picked or browsed (None when the field is empty: the default; "" for the
+        entry without a dataset of one's own)."""
+        text = self.dataset_combo.currentText().strip()
+        if text == self.NO_OWN_DATASET:
+            return ""
+        return text or None
 
     @dataset_path.setter
     def dataset_path(self, path):
@@ -1195,6 +1269,7 @@ class BuilderTab(QWidget):
         """Refills the recent lists (after a build or after the history was cleared), keeping what is typed."""
         fill_recent(self.model_input, self._recent("model") + MODEL_SUGGESTIONS, text=self.model_input.currentText())
         fill_recent(self.dataset_combo, self._recent("dataset"), text=self.dataset_combo.currentText())
+        self._sync_no_dataset_item()
         if self.board_combo.isEditable():
             self._update_boards()
 

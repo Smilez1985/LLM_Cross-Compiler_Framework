@@ -440,7 +440,7 @@ def test_an_ai_apps_fill_names_the_app_and_never_looks_like_dittos(fm, builder):
          values={"model": "Qwen/Qwen3.5-0.8B"})
     text = builder.fill_banner.label.text()
     assert 'the AI app with the MCP token "laptop" (it calls itself "Claude Code"): Model' in text
-    call(fm, "fill_form", form="builder", values={"imatrix": True})
+    call(fm, "fill_form", form="builder", values={"imatrix": False})  # ticked by default (Q4_K_M)
     text = builder.fill_banner.label.text()
     assert "Filled by Ditto: Importance matrix" in text and MARK_COLOUR in builder.chk_imatrix.styleSheet()
 
@@ -455,7 +455,7 @@ def test_who_filled_reaches_the_ai_in_closed_words(fm, builder):
     """An AI reads who filled a field relative to itself ('you', 'ditto', 'another_app'), never another app's
     self-reported name."""
     call(fm, "fill_form", app(name="Cursor  \u202e evil"), form="builder", values={"use_gpu": False})
-    call(fm, "fill_form", form="builder", values={"imatrix": True})
+    call(fm, "fill_form", form="builder", values={"imatrix": False})  # ticked by default (Q4_K_M)
     by_app = {f.id: f.filled_by for f in call(fm, "read_form", app(name="Cursor  \u202e evil"),
                                               form="builder").form.fields}
     by_other = {f.id: f.filled_by for f in call(fm, "read_form", app(name="Claude Code"), form="builder").form.fields}

@@ -99,7 +99,10 @@ target** names each error.
 
 A build runs these steps; each one is logged:
 
-1. **Calibration text:** for an importance matrix without your own dataset, the framework writes its shipped,
+1. **Calibration text:** a build that names no importance matrix and no dataset gets the defaults (an importance
+   matrix for GGUF types below 5 bits per weight, setting `default_enable_imatrix`; the file of the setting
+   `default_calibration_dataset` for the GGUF importance matrix and RKLLM). For an importance matrix without a
+   dataset, the framework writes its shipped,
    checksummed calibration text (setting `calibration_language`: `mixed`, `de` or `en`; see
    [data/calibration](../data/calibration/README.md)). If that fails for a quantization that requires the matrix,
    the build stops with an error.

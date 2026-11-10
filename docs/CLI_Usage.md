@@ -166,6 +166,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `config doorbell` | Your MQTT broker for the build doorbell, and a test doorbell |
 | `config output-folder` | Show or set the output folder finished models are saved to |
 | `config set framework_mode` | Your framework mode: private (the default) or enterprise (only OpenSSH with sudo on a board) |
+| `config set default_enable_imatrix` | Build defaults: the importance matrix, the calibration text file and the shipped text's languages |
 | `zoo list` / `zoo show` | List the community zoo and the installed packs / show one entry |
 | `zoo install` / `zoo verify` | Install a community pack after checks and your confirmation / check installed packs or a pack file |
 | `zoo uninstall` | Uninstall an installed pack after the exact list and your confirmation ("No" by default) |
@@ -563,8 +564,9 @@ target's defaults. A target without a capabilities block is built unchecked.
 | `--parallel` | Deprecated and hidden from `--help`: it has no effect (one call runs one build) and prints a warning. |
 | `-F, --follow` | Print each stage while the build runs, with its percent (the model download: `Fetching model 37 % (1.2 GB of 3.4 GB)`). |
 | `--gpu / --no-gpu` | Pass the host's GPU into the container (default off): an NVIDIA GPU when `nvidia-smi` is found, otherwise `/dev/dri` if it exists. Rockchip conversions do not need it. |
-| `--imatrix / --no-imatrix` | Importance matrix for GGUF (default off). Required for `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `IQ3_XS`, `Q2_K_S`. |
-| `--dataset PATH` | Your own calibration file (must exist): a text file for the GGUF importance matrix or for RKLLM, a list of sample inputs for RKNN `i8`. Without it, the importance matrix uses the shipped calibration text. |
+| `--imatrix / --no-imatrix` | Importance matrix for GGUF. Left out: on for the types below 5 bits per weight (`Q2_K` to `Q4_K_M`, `Q4_0`, `Q4_1` and every `IQ` type), off for `Q5_*`, `Q6_K`, `Q8_0` and the float types (setting `default_enable_imatrix`, see [config set](#config-set)). Required for `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `IQ3_XS`, `Q2_K_S`: left out, these always get one; `--no-imatrix` is refused for them. |
+| `--dataset PATH` | Your own calibration file (must exist): a text file for the GGUF importance matrix or for RKLLM, a list of sample inputs for RKNN `i8`. Without it, the file of the setting `default_calibration_dataset` (GGUF importance matrix and RKLLM), else the shipped calibration text for the importance matrix. |
+| `--no-dataset` | No dataset of your own, also when `default_calibration_dataset` names one: the importance matrix uses the shipped calibration text. |
 | `--module-flags [allow\|standard]` | Your decision on the module's CMake options that are valid but outside the allowed list (`-G`, `--trace`, ...; [Module Developer Guide, section 3.5](Module_Developer_Guide.md#35-cmake-flags-of-a-module)): allow them, or go on with the standard flags (they are left out). At a terminal without it you are asked, after what each option does and a recommendation for this model and quantization; without a terminal and without it nothing is started (exit 2). A decision remembered for this module version and flag set is used without a question. |
 | `--remember-flags` | Remember this decision for this module version and flag set (an AI-started build of the module uses it; a new version or other flags ask again). |
 
@@ -2818,11 +2820,26 @@ selected...** (asks first; "No" is the default).
 ```bash
 llmcf config set framework_mode enterprise
 llmcf config set framework_mode private
+llmcf config set default_enable_imatrix false
+llmcf config set default_calibration_dataset calib_de.txt
+llmcf config set calibration_language de
 ```
 
 Sets one of your own settings in config.yml. `framework_mode` is private (the default) or enterprise: enterprise mode takes only OpenSSH with sudo on a board (the root-owned key line) and refuses the weaker Dropbear tier and the home gate, at pairing and at every use of a board paired before. Exit code 2 for a value that is neither. Only you set it; an AI may read it (`get_settings`), never change it. The installers ask the same (`install.sh --mode=private|enterprise`, `install.bat --mode=...`, or `LCF_MODE` for an unattended run).
 
 In the GUI: **File > Settings...**, tab **General**, **Framework mode**.
+
+The build defaults, used when a build names none (`build start`, the Builder tab and the AI tools alike):
+`default_enable_imatrix` is true (the default) or false: with true a GGUF build of a type below 5 bits per weight
+gets an importance matrix, with false only a type that needs one. `default_calibration_dataset` is empty (the
+default: the shipped calibration text, [data/calibration](../data/calibration/README.md)) or your own text file, a
+name inside the datasets folder (setting `datasets_dir`) or a full path; it is used for the GGUF importance matrix
+and for RKLLM, never for RKNN. A file that does not exist yet is saved with a warning, and a build that would read it
+is refused until it does; `''` sets the shipped text again. `calibration_language` is `mixed`, `de` or `en`, the
+languages of the shipped text. Exit code 2 for a value that is none of these. `--imatrix`, `--no-imatrix`,
+`--dataset` and `--no-dataset` of `build start` win over the defaults. An AI may change `default_enable_imatrix` and
+`calibration_language` and reads the dataset setting as `datasets:<name>`, never sets it. In the GUI: **File >
+Settings...**, tab **General**, the box "Build defaults".
 
 ### config local-network
 

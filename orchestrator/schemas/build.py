@@ -31,10 +31,16 @@ class BuildRequestIn(BaseModel):
     board: Optional[str] = Field(default=None, max_length=64, description="Board within the target, e.g. rk3566")
     quantization: Optional[str] = Field(default=None, max_length=32,
                                         description="Quantization type; the target's default when omitted")
-    use_imatrix: bool = Field(default=False, description="Compute an importance matrix (GGUF only)")
+    use_imatrix: Optional[bool] = Field(default=None, description="Compute an importance matrix (GGUF only). "
+                                        "Omitted: the person's default (on for GGUF types below 5 bits per weight "
+                                        "unless the setting default_enable_imatrix is false, always for a type that "
+                                        "needs one)")
     dataset_path: Optional[str] = Field(default=None, max_length=1024,
                                         description="Calibration dataset file as <label>:<relative path> (e.g. "
-                                                    "datasets:calib/de.txt) or its file id; never a path")
+                                                    "datasets:calib/de.txt) or its file id; never a path. Omitted: "
+                                                    "the person's default file (setting "
+                                                    "default_calibration_dataset), else the shipped calibration text "
+                                                    "for a GGUF importance matrix; \"\": no dataset of your own")
     use_gpu: bool = False
     max_context_length: Optional[int] = Field(default=None, ge=256, le=1_048_576)
     probe: Optional[str] = Field(default=None, pattern=r"^(local|[0-9a-f]{16})$",

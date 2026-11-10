@@ -363,7 +363,8 @@ class TestBuildServiceValidate:
         (dict(format="rkllm", board="RK3566"), "does not run on rk3566"),
         (dict(format="rknn", board="rk3588", quantization="int8"), "needs a calibration dataset"),
         (dict(format="gguf", board="rk9999"), "Unknown board"),
-        (dict(format="gguf", quantization="IQ2_XS"), "enable IMatrix"),
+        # an explicit no (left out, a type that needs a matrix gets one: Core/build_defaults.py)
+        (dict(format="gguf", quantization="IQ2_XS", use_imatrix=False), "enable IMatrix"),
         (dict(format="rkllm", board="rk3576", use_imatrix=True), "not used by the rkllm"),
     ])
     def test_validate_refuses_what_the_build_would_reject(self, service, overrides, message):
@@ -374,7 +375,7 @@ class TestBuildServiceValidate:
 
     def test_imatrix_without_own_dataset_is_accepted(self, service):
         req = service.validate(build_in(board="rk3588", quantization="iq2_xs", use_imatrix=True))
-        assert (req.quantization, req.use_imatrix, req.dataset_path) == ("IQ2_XS", True, None)
+        assert (req.quantization, req.use_imatrix, req.dataset_path) == ("IQ2_XS", True, "")  # "": none of its own
 
     def test_rknn_alias_with_a_sample_list(self, service, tmp_path):
         # The service serves AI callers, which name the dataset inside the datasets folder (it took a path before).
@@ -609,7 +610,7 @@ class TestCliBuildStart:
         (["-f", "rkllm", "-b", "rk3588", "-q", "int4"], "not supported for rkllm on rk3588"),
         (["-f", "rkllm", "-b", "rk3566"], "does not run on rk3566"),
         (["-f", "rknn", "-b", "rk3588", "-q", "int8"], "needs a calibration dataset"),
-        (["-f", "gguf", "-q", "IQ2_XS"], "enable IMatrix"),
+        (["-f", "gguf", "-q", "IQ2_XS", "--no-imatrix"], "enable IMatrix"),
         (["-f", "gguf", "-b", "rk9999"], "Unknown board 'rk9999'"),
     ])
     def test_invalid_requests_exit_2_and_submit_nothing(self, cli, args, message):

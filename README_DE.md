@@ -80,7 +80,9 @@ quantisiert); die Kurznamen `Q3_K`, `Q4_K` und `Q5_K` werden für `Q3_K_M`, `Q4_
   schnelle ARM-Kernel umgepackt.
 - **Importance Matrix (IMatrix):** nur für GGUF. Sie verbessert Quantisierungen mit wenigen Bits. `IQ1_S`,
   `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `IQ3_XS` und `Q2_K_S` setzen sie voraus
-  (`llama-quantize` lehnt sie ohne ab). Ohne eigene Textdatei nimmt das Framework seinen
+  (`llama-quantize` lehnt sie ohne ab). Für die GGUF-Typen unter 5 Bit je Gewicht ist sie vorgegeben
+  (`--no-imatrix` schaltet sie für einen Build ab, die Einstellung `default_enable_imatrix` für alle). Ohne eigene
+  Textdatei (`--dataset` oder die Einstellung `default_calibration_dataset`) nimmt das Framework seinen
   mitgelieferten Kalibrierungstext ([data/calibration](data/calibration/README_DE.md)).
 - **Kalibrierungsdaten:** für RKLLM und RKNN optional. RKNN `i8` braucht eine Liste mit Beispieleingaben (Pfade
   relativ zur Listendatei).

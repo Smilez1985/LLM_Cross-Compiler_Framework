@@ -48,6 +48,8 @@ CLI_PATHS: Dict[str, str] = {
     "build start --gpu": "chk_builder_gpu",
     "build start --imatrix": "chk_builder_imatrix",
     "build start --dataset": "combo_builder_dataset",
+    # its entry "(no dataset of your own: the shipped text)", offered while default_calibration_dataset names a file
+    "build start --no-dataset": "combo_builder_dataset",
     # the question about the module's CMake options outside the allowlist opens when Start Build is pressed
     "build start --module-flags": "btn_builder_start",
     "build start --remember-flags": "btn_builder_start",

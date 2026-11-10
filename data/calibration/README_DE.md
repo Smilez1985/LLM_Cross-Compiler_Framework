@@ -24,10 +24,12 @@ Datensatz hat.
 
 ## Wie das Framework sie nutzt
 
-- **Nur für GGUF.** Ein GGUF-Build mit eingeschalteter Importance Matrix (`llm-cli build start --imatrix` oder
-  das Kästchen „Importance matrix (IMatrix, GGUF)“ in der GUI) nutzt diesen Text, wenn du keinen eigenen
-  Datensatz angibst (`--dataset`). RKLLM- und RKNN-Builds nutzen ihn nie; sie bekommen nur deinen eigenen
-  Datensatz, falls du einen angibst.
+- **Nur für GGUF.** Ein GGUF-Build mit eingeschalteter Importance Matrix nutzt diesen Text, wenn er keinen eigenen
+  Datensatz hat (`--dataset` oder die Datei der Einstellung `default_calibration_dataset`). Die Matrix ist für die
+  GGUF-Typen unter 5 Bit je Gewicht vorgegeben (Einstellung `default_enable_imatrix`;
+  `llm-cli build start --imatrix` oder `--no-imatrix` oder das Kästchen „Importance matrix (IMatrix, GGUF)“ in der
+  GUI entscheiden für einen Build). RKLLM- und RKNN-Builds nutzen ihn nie; sie bekommen nur deinen eigenen Datensatz, falls du einen
+  angibst (RKLLM auch die vorgegebene Datei).
 - **Vor der Nutzung geprüft.** Bevor ein Build einen Satz nutzt, vergleicht das Framework den sha256 seines Texts
   mit dem Wert oben (`orchestrator/utils/calibration.py`). Eine fehlende oder veränderte Datei wird abgelehnt.
   Der Build läuft dann ohne Importance Matrix weiter und zeigt eine Warnung, oder er bricht vor dem Image-Build

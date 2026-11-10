@@ -338,6 +338,8 @@ class TestBuilderTabCapabilities:
         monkeypatch.setattr(tab.framework, "run_coroutine", lambda *a, **k: submitted.append(a))
         self.select(tab.format_combo, "gguf")
         tab.quant_combo.setCurrentText("IQ2_XS")
+        assert tab.chk_imatrix.isChecked(), "a type that needs a matrix gets one by default"
+        tab.chk_imatrix.click()   # the person's explicit no
         tab._submit_build()
         assert shown and "importance matrix" in shown[0] and not submitted
 

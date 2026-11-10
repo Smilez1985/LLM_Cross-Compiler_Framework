@@ -78,7 +78,9 @@ nothing); its short names `Q3_K`, `Q4_K` and `Q5_K` are accepted for `Q3_K_M`, `
   ARM kernels.
 - **Importance matrix (IMatrix):** GGUF only. It improves low-bit quantization. `IQ1_S`, `IQ1_M`, `IQ2_XXS`,
   `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `IQ3_XS` and `Q2_K_S` require it (`llama-quantize` refuses them without
-  one). Without your own text file the framework uses its shipped calibration text
+  one). It is on by default for the GGUF types below 5 bits per weight (`--no-imatrix` turns it off for a build,
+  the setting `default_enable_imatrix` for all). Without your own text file (`--dataset`, or the setting
+  `default_calibration_dataset`) the framework uses its shipped calibration text
   ([data/calibration](data/calibration/README.md)).
 - **Calibration data:** optional for RKLLM and RKNN. RKNN `i8` needs a list of sample inputs (paths relative to
   the list file).

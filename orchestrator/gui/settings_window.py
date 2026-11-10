@@ -131,8 +131,110 @@ class SettingsDialog(QDialog):
         self.lbl_general_result = plain_label("", page)
         self.lbl_general_result.setObjectName("lbl_settings_general_result")
         layout.addWidget(self.lbl_general_result)
+        layout.addWidget(self._build_defaults(page))
         layout.addStretch(1)
         return page
+
+    # --- the build defaults (`llmcf config set`, config_manager.set_build_default, Core/build_defaults.py) -------
+
+    def _build_defaults(self, page: QWidget) -> QWidget:
+        """The importance matrix and calibration text a build gets when it names none; saved at once to config.yml.
+        Only the person sets the dataset here; an AI may change the importance matrix's default with its settings
+        tool, never the file."""
+        from PySide6.QtWidgets import QCheckBox, QGroupBox
+        from orchestrator.Core.build_defaults import dataset_setting, imatrix_setting
+        from orchestrator.Core.config_manager import CALIBRATION_LANGUAGES
+        box = QGroupBox(self._t("bld.settings.defaults.title"), page)
+        box.setObjectName("group_settings_build_defaults")
+        form = QFormLayout(box)
+        self.chk_default_imatrix = QCheckBox(self._t("bld.settings.defaults.imatrix"), box)
+        self.chk_default_imatrix.setObjectName("chk_settings_default_imatrix")
+        self.chk_default_imatrix.setToolTip(plain_tooltip(self._t("bld.settings.defaults.imatrix_tip")))
+        self.chk_default_imatrix.setChecked(imatrix_setting(self.config))
+        self.chk_default_imatrix.toggled.connect(
+            lambda checked: self._save_build_default("default_enable_imatrix", bool(checked)))
+        form.addRow(self.chk_default_imatrix)
+        row = QHBoxLayout()
+        self.edit_default_dataset = QLineEdit(dataset_setting(self.config), box)
+        self.edit_default_dataset.setObjectName("edit_settings_default_dataset")
+        self.edit_default_dataset.setPlaceholderText(self._t("bld.settings.defaults.dataset_hint"))
+        self.edit_default_dataset.setToolTip(plain_tooltip(self._t("bld.settings.defaults.dataset_tip")))
+        self.edit_default_dataset.editingFinished.connect(self._dataset_edited)
+        row.addWidget(self.edit_default_dataset, 1)
+        self.btn_default_dataset = QPushButton(button_text(self._t("bld.settings.defaults.browse")), box)
+        self.btn_default_dataset.setObjectName("btn_settings_default_dataset")
+        self.btn_default_dataset.setAutoDefault(False)
+        self.btn_default_dataset.clicked.connect(self._choose_default_dataset)
+        row.addWidget(self.btn_default_dataset)
+        self.btn_shipped_dataset = QPushButton(button_text(self._t("bld.settings.defaults.shipped")), box)
+        self.btn_shipped_dataset.setObjectName("btn_settings_shipped_dataset")
+        self.btn_shipped_dataset.setAutoDefault(False)
+        self.btn_shipped_dataset.clicked.connect(lambda: self._set_default_dataset(""))
+        row.addWidget(self.btn_shipped_dataset)
+        form.addRow(self._t("bld.settings.defaults.dataset"), row)
+        self.cmb_calibration_language = QComboBox(box)
+        self.cmb_calibration_language.setObjectName("cmb_settings_calibration_language")
+        for language in CALIBRATION_LANGUAGES:
+            self.cmb_calibration_language.addItem(self._t(f"bld.settings.defaults.lang.{language}"), language)
+        current = str(self.config.get("calibration_language", "mixed") or "mixed")
+        self.cmb_calibration_language.setCurrentIndex(max(0, self.cmb_calibration_language.findData(current)))
+        self.cmb_calibration_language.currentIndexChanged.connect(
+            lambda _i: self._save_build_default("calibration_language", self.cmb_calibration_language.currentData()))
+        form.addRow(self._t("bld.settings.defaults.language"), self.cmb_calibration_language)
+        self.lbl_defaults_result = plain_label("", box)
+        self.lbl_defaults_result.setObjectName("lbl_settings_defaults_result")
+        self.lbl_defaults_result.setWordWrap(True)
+        form.addRow(self.lbl_defaults_result)
+        return box
+
+    def _save_build_default(self, key: str, value: Any) -> bool:
+        from orchestrator.Core.config_manager import set_build_default
+        try:
+            set_build_default(self.config, key, value)
+        except (ValueError, OSError) as e:
+            self.lbl_defaults_result.setText(self._t("bld.settings.defaults.not_saved", reason=one_line(str(e))))
+            return False
+        self.lbl_defaults_result.setText(self._t("bld.settings.defaults.saved", name=key))
+        self.refresh_effective()
+        return True
+
+    def _dataset_edited(self) -> None:
+        from orchestrator.Core.build_defaults import dataset_setting
+        text = self.edit_default_dataset.text().strip()
+        if text != dataset_setting(self.config):
+            self._set_default_dataset(text)
+
+    def _set_default_dataset(self, value: str) -> None:
+        """Saves the default calibration file ("" is the shipped text); a file that is not there is saved with a
+        note, since every build that would read it is refused until it exists."""
+        from orchestrator.Core.build_defaults import dataset_setting, default_dataset_path
+        if not self._save_build_default("default_calibration_dataset", value):
+            self.edit_default_dataset.setText(dataset_setting(self.config))
+            return
+        self.edit_default_dataset.setText(dataset_setting(self.config))
+        path = default_dataset_path(self.config, self._datasets_folder())
+        if path is not None and not path.is_file():
+            self.lbl_defaults_result.setText(self._t("bld.settings.defaults.missing", name=one_line(str(path))))
+
+    def _datasets_folder(self) -> Path:
+        resolve = getattr(self.framework, "resolve_path", None)
+        value = self.config.get("datasets_dir", "datasets") or "datasets"
+        return Path(resolve(value)) if callable(resolve) else Path(str(value)).expanduser()
+
+    def _choose_default_dataset(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        folder = self._datasets_folder()
+        path, _ = QFileDialog.getOpenFileName(self, self._t("bld.settings.defaults.dataset"),
+                                              str(folder if folder.is_dir() else Path.home()),
+                                              "Text (*.txt *.json);;All Files (*)")
+        if not path:
+            return
+        chosen = Path(path)
+        try:  # a file inside the datasets folder by its name there (the setting stays valid if the folder moves)
+            value = str(chosen.resolve().relative_to(folder.resolve()))
+        except (ValueError, OSError):
+            value = str(chosen)
+        self._set_default_dataset(value)
 
     def _mode_changed(self, _index: int) -> None:
         """The person picked private or enterprise mode: saved to config.yml (Core/config_manager.py

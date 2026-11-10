@@ -100,7 +100,10 @@ ungültigem Fähigkeiten-Block sagt der Hinweis das, und **Target prüfen** nenn
 
 Ein Build läuft in diesen Schritten; jeder wird protokolliert:
 
-1. **Kalibrierungstext:** Für eine Importance Matrix ohne eigenen Datensatz schreibt das Framework seinen
+1. **Kalibrierungstext:** Ein Build, der weder Importance Matrix noch Datensatz nennt, bekommt die Vorgaben (eine
+   Importance Matrix für GGUF-Typen unter 5 Bit je Gewicht, Einstellung `default_enable_imatrix`; die Datei der
+   Einstellung `default_calibration_dataset` für die GGUF-Importance-Matrix und RKLLM). Für eine Importance Matrix
+   ohne Datensatz schreibt das Framework seinen
    mitgelieferten, per Prüfsumme gesicherten Kalibrierungstext (Einstellung `calibration_language`: `mixed`, `de`
    oder `en`; siehe [data/calibration](../data/calibration/README_DE.md)). Scheitert das bei einer Quantisierung,
    die die Matrix verlangt, endet der Build mit einem Fehler.

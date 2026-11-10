@@ -90,8 +90,13 @@ class NormalizedOut(BaseModel):
     quantization: Optional[str] = None
     optimization: str
     revision: Optional[str] = Field(default=None, description="The commit the build would fetch (Hugging Face)")
-    use_imatrix: bool = False
-    dataset: Optional[untrusted_text(1024)] = None
+    use_imatrix: bool = Field(default=False, description="As the build would run: your choice, else the person's "
+                                                        "default")
+    dataset: Optional[untrusted_text(1024)] = Field(default=None, description="Your dataset, or the person's default "
+                                                                           "file as datasets:<name>; empty: none (an "
+                                                                           "importance matrix then uses the shipped "
+                                                                           "calibration text)")
+    calibration: str = Field(default="", description="The importance matrix and calibration text in one line")
 
 
 class ModelSourceOut(BaseModel):
@@ -181,7 +186,8 @@ def check_out(plan, decision: str, standing: bool) -> CheckBuildOut:
     return CheckBuildOut(
         normalized=NormalizedOut(model=plan.model, target=r.target, format=r.format, board=r.board,
                                  quantization=r.quantization, optimization=plan.optimization,
-                                 revision=plan.commit, use_imatrix=r.use_imatrix, dataset=r.dataset_path),
+                                 revision=plan.commit, use_imatrix=bool(r.use_imatrix), dataset=r.dataset_path,
+                                 calibration=getattr(plan, "calibration", "") or ""),
         problems=[ProblemOut(code=p.code, message=p.message, next=p.next) for p in plan.problems],
         model_source=source,
         disk=[DiskOut(folders=c.labels, needed_bytes=c.needed, free_bytes=c.free, reserve_bytes=c.reserve,
@@ -246,6 +252,8 @@ def start_request(inp: StartBuildIn, bound: Dict[str, Any]) -> BuildRequestIn:
     'commit unknown')."""
     data = inp.model_dump(exclude={"optimization", "include_download_size"})
     data["revision"] = bound.get("revision") or inp.revision
+    if data.get("use_imatrix") is None and "use_imatrix" in bound:  # the default the question showed
+        data["use_imatrix"] = bool(bound["use_imatrix"])
     return BuildRequestIn(**data)
 
 

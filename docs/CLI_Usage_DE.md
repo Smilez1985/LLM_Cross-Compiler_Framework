@@ -166,6 +166,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `config local-network` | Was der Offline-Modus als lokal zählt, und was du selbst als lokal zählst (ein VPN, ein Host, ein Adressbereich) |
 | `config doorbell` | Dein MQTT-Broker für die Build-Türklingel, und eine Test-Klingel |
 | `config set framework_mode` | Dein Framework-Modus: privat (Standard) oder enterprise (auf einem Board nur OpenSSH mit sudo) |
+| `config set default_enable_imatrix` | Build-Vorgaben: die Importance Matrix, die Kalibrier-Textdatei und die Sprachen des mitgelieferten Texts |
 | `config output-folder` | Den Ausgabeordner zeigen oder festlegen, in dem fertige Modelle gespeichert werden |
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
 | `zoo install` / `zoo verify` | Ein Community-Paket nach Prüfungen und deiner Bestätigung installieren / installierte Pakete oder eine Paketdatei prüfen |
@@ -578,8 +579,9 @@ Target ohne Capabilities-Block wird ungeprüft gebaut.
 | `--parallel` | Veraltet und in `--help` ausgeblendet: Hat keine Wirkung (ein Aufruf startet einen Build) und gibt eine Warnung aus. |
 | `-F, --follow` | Jede Stufe mit ihrem Prozentwert ausgeben, während der Build läuft (der Modell-Download: `Fetching model 37 % (1.2 GB of 3.4 GB)`). |
 | `--gpu / --no-gpu` | Die GPU des Hosts in den Container durchreichen (Standard aus): eine NVIDIA-GPU, wenn `nvidia-smi` gefunden wird, sonst `/dev/dri`, falls vorhanden. Rockchip-Konvertierungen brauchen das nicht. |
-| `--imatrix / --no-imatrix` | Importance Matrix für GGUF (Standard aus). Pflicht für `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `IQ3_XS`, `Q2_K_S`. |
-| `--dataset PATH` | Deine eigene Kalibrierungsdatei (muss existieren): eine Textdatei für die GGUF-Importance-Matrix oder für RKLLM, eine Liste mit Beispieleingaben für RKNN `i8`. Ohne sie nutzt die Importance Matrix den mitgelieferten Kalibrierungstext. |
+| `--imatrix / --no-imatrix` | Importance Matrix für GGUF. Weggelassen: an für die Typen unter 5 Bit je Gewicht (`Q2_K` bis `Q4_K_M`, `Q4_0`, `Q4_1` und jeder `IQ`-Typ), aus für `Q5_*`, `Q6_K`, `Q8_0` und die Gleitkommatypen (Einstellung `default_enable_imatrix`, siehe [config set](#config-set)). Pflicht für `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `IQ3_XS`, `Q2_K_S`: Weggelassen bekommen sie immer eine; `--no-imatrix` wird für sie abgelehnt. |
+| `--dataset PATH` | Deine eigene Kalibrierungsdatei (muss existieren): eine Textdatei für die GGUF-Importance-Matrix oder für RKLLM, eine Liste mit Beispieleingaben für RKNN `i8`. Ohne sie die Datei der Einstellung `default_calibration_dataset` (GGUF-Importance-Matrix und RKLLM), sonst für die Importance Matrix der mitgelieferte Kalibrierungstext. |
+| `--no-dataset` | Kein eigener Datensatz, auch wenn `default_calibration_dataset` einen nennt: Die Importance Matrix nutzt den mitgelieferten Kalibrierungstext. |
 | `--module-flags [allow\|standard]` | Deine Entscheidung zu den CMake-Optionen des Moduls, die gültig sind, aber außerhalb der erlaubten Liste liegen (`-G`, `--trace`, ...; [Modul-Entwicklerhandbuch, Abschnitt 3.5](Module_Developer_Guide_DE.md#35-cmake-flags-eines-moduls)): erlauben oder mit den Standard-Flags weitermachen (die Optionen bleiben draußen). Im Terminal ohne die Option wirst du gefragt, nach dem, was jede Option tut, und einer Empfehlung für dieses Modell und diese Quantisierung; ohne Terminal und ohne die Option startet nichts (Exit 2). Eine für diese Modulversion und diese Flags gemerkte Entscheidung gilt ohne Frage. |
 | `--remember-flags` | Diese Entscheidung für diese Modulversion und diese Flags merken (ein von einer KI gestarteter Build des Moduls nutzt sie; eine neue Version oder andere Flags fragen wieder). |
 
@@ -2947,11 +2949,27 @@ In der GUI: **Datei > Einstellungen…**, Tab **Quell-Repositorys**: die Liste, 
 ```bash
 llmcf config set framework_mode enterprise
 llmcf config set framework_mode private
+llmcf config set default_enable_imatrix false
+llmcf config set default_calibration_dataset calib_de.txt
+llmcf config set calibration_language de
 ```
 
 Setzt eine deiner eigenen Einstellungen in config.yml. `framework_mode` ist private (Standard) oder enterprise: Der Enterprise-Modus nimmt auf einem Board nur OpenSSH mit sudo (die Schlüsselzeile in Root-Besitz) und lehnt die schwächere Dropbear-Stufe und das Home-Tor ab, beim Koppeln und bei jeder Benutzung eines früher gekoppelten Boards. Exit-Code 2 für einen Wert, der keins von beiden ist. Nur du setzt ihn; eine KI darf ihn lesen (`get_settings`), nie ändern. Die Installer fragen dasselbe (`install.sh --mode=private|enterprise`, `install.bat --mode=...` oder `LCF_MODE` für einen unbeaufsichtigten Lauf).
 
 In der GUI: **Datei > Einstellungen…**, Tab **Allgemein**, **Framework-Modus**.
+
+Die Build-Vorgaben, die gelten, wenn ein Build keine nennt (`build start`, der Builder-Tab und die KI-Tools
+gleichermaßen): `default_enable_imatrix` ist true (Standard) oder false: Mit true bekommt ein GGUF-Build eines Typs
+unter 5 Bit je Gewicht eine Importance Matrix, mit false nur ein Typ, der eine braucht. `default_calibration_dataset`
+ist leer (Standard: der mitgelieferte Kalibrierungstext, [data/calibration](../data/calibration/README_DE.md)) oder
+deine eigene Textdatei, ein Name im Datensatz-Ordner (Einstellung `datasets_dir`) oder ein voller Pfad; sie gilt für
+die GGUF-Importance-Matrix und für RKLLM, nie für RKNN. Eine Datei, die es noch nicht gibt, wird mit einer Warnung
+gespeichert, und ein Build, der sie lesen würde, wird abgelehnt, bis es sie gibt; `''` setzt wieder den
+mitgelieferten Text. `calibration_language` ist `mixed`, `de` oder `en`, die Sprachen des mitgelieferten Texts.
+Exit-Code 2 für einen Wert, der keins davon ist. `--imatrix`, `--no-imatrix`, `--dataset` und `--no-dataset` von
+`build start` gewinnen über die Vorgaben. Eine KI darf `default_enable_imatrix` und `calibration_language` ändern
+und liest die Datensatz-Einstellung als `datasets:<Name>`, setzt sie aber nie. In der GUI: **Datei >
+Einstellungen…**, Tab **Allgemein**, der Kasten „Build-Vorgaben“.
 
 ### config local-network
 

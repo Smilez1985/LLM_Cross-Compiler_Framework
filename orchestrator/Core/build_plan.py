@@ -75,6 +75,7 @@ class BuildPlan:
     base_images: List[Tuple[str, str]] = field(default_factory=list)
     sandbox: bool = True
     hub_problem: str = ""        # Hugging Face could not be asked (network): sizes and commit unknown
+    calibration: str = ""        # importance matrix and calibration text as resolved (build_defaults.describe)
     grant: Optional[Dict[str, Any]] = None  # facts for grants.BUILD_RULE; None: outside every standing approval
     # what a build the person confirmed records (confirmed_builds): the target and recipe as installed, base images
     confirm_record: Optional[Dict[str, Any]] = None
@@ -159,6 +160,8 @@ class BuildPlan:
             facts.append(Fact("Disk", check.sentence(), volatile=True))
         facts.append(Fact("Hardware", self.host.sentence("conversion on this computer"), volatile=True))
         facts.append(Fact("Hardware", self.target.sentence(f"running on {r.board or 'the board'}"), volatile=True))
+        if self.calibration:
+            facts.append(Fact("Calibration", self.calibration))
         if self.mounts:
             facts.append(Fact("Mounted into the build", ", ".join(self.mounts) + " (read-only)"))
         facts.append(Fact("Target", f"{self.target_trust}" + (f", support level {self.support_level}"
@@ -187,6 +190,8 @@ class BuildPlan:
                 "target": self.request.target, "board": self.request.board, "grant": self.grant,
                 "confirm_record": self.confirm_record, "size_class": catalog.size_class(self.size()),
                 "grant_scope": self.grant_scope, "weights": self.weights,
+                # the importance matrix the question showed (a default resolved now is not resolved again at start)
+                "use_imatrix": bool(getattr(self.request, "use_imatrix", False)),
                 # False when the Hub could not be asked: under a standing approval or a delegation that is the blocker
                 # commit_required (tools_builds.require_commit), never a build of an unseen commit
                 "commit_resolved": self.source != "hf" or bool(self.facts is not None and self.facts.commit)}
@@ -611,9 +616,14 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
     optimization = resolve(req, given) if callable(resolve) else (given or "balanced")
     pin = getattr(inputs, "model", None)
     shown = pin.ref if pin is not None else req.model
-    plan = BuildPlan(request=req.model_copy(update={"model": shown, "dataset_path": (
-        inputs.dataset.ref if getattr(inputs, "dataset", None) is not None else None)}), model=shown,
-        source="local" if pin is not None else "hf", optimization=optimization)
+    # the caller's dataset by its reference; the person's default file (no pin) by its label, never its path
+    from orchestrator.Core.build_defaults import dataset_label, describe
+    dataset_shown = (inputs.dataset.ref if getattr(inputs, "dataset", None) is not None
+                     else dataset_label(getattr(framework, "config", None)) if req.dataset_path else None)
+    plan = BuildPlan(request=req.model_copy(update={"model": shown, "dataset_path": dataset_shown}), model=shown,
+                     source="local" if pin is not None else "hf", optimization=optimization)
+    plan.calibration = describe(bool(req.use_imatrix), dataset_shown, req.format,
+                                str(_config(framework, "calibration_language", "mixed") or "mixed"))
     caps = service.capabilities(req.target)
 
     # target, trust, image build
@@ -741,8 +751,8 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
         else:
             plan.commit = req.revision
             plan.download_known = False
-    if getattr(inputs, "dataset", None) is not None:
-        plan.mounts.append(inputs.dataset.ref)
+    if plan.request.dataset_path:
+        plan.mounts.append(plan.request.dataset_path)
 
     # disk (a copy on this computer in offline mode: its size, nothing to download)
     size = (plan.download or plan.local_bytes) if plan.source == "hf" else plan.local_bytes

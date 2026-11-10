@@ -1050,7 +1050,8 @@ class BuildService:
                                     next="Call start_recipe_build without dataset_path.")
         request = BuildRequestIn(model=recipe.model.repo, revision=recipe.model.revision, target=recipe.target.id,
                                  format=recipe.format, board=recipe.board, quantization=recipe.quantization,
-                                 use_imatrix=recipe.options.use_imatrix, dataset_path=dataset_path or None,
+                                 # "" when the recipe names no dataset: a recipe never takes the person's default
+                                 use_imatrix=bool(recipe.options.use_imatrix), dataset_path=dataset_path or "",
                                  use_gpu=bool(use_gpu), max_context_length=recipe.options.max_context_length)
         return request, recipe, prov
 
@@ -1244,6 +1245,9 @@ class BuildService:
                 raise BuildServiceError(f"Unknown format '{request.format}'.", code="invalid_value", field="format",
                                         next="Use one of: " + ", ".join(f.value for f in ModelFormat
                                                                         if f is not ModelFormat.HUGGINGFACE) + ".")
+        # Left out (None): the person's defaults (build_defaults); "" for the dataset: none of the caller's own.
+        dataset_left_out = request.dataset_path is None
+        use_imatrix = self._imatrix_of(request.use_imatrix, fmt, quant, caps)
         inputs = None
         if not local_paths:
             request, inputs = self._confined(request)
@@ -1257,11 +1261,13 @@ class BuildService:
                                         next="Name an existing dataset file as <label>:<relative path>.",
                                         field="dataset_path")
             dataset = str(path.resolve())
+        elif dataset_left_out:
+            dataset = self._default_dataset(fmt, use_imatrix)
         probe_id, profile = self._board_probe(request.probe, board, caps, target)
         from orchestrator.Core.build_formats import build_host_arch, format_refusal
         refusal = format_refusal(fmt, profile=profile, board=board, host_arch=build_host_arch())
         problems = caps.check_request(fmt, board, quant, dataset=bool(dataset),
-                                      imatrix=request.use_imatrix) if caps is not None else []
+                                      imatrix=use_imatrix) if caps is not None else []
         if problems:
             # The target's own refusal first, as before; the probe's or the build computer's reason after it
             problems = list(problems) + ([refusal] if refusal else [])
@@ -1288,7 +1294,49 @@ class BuildService:
                 and not Path(model).is_absolute():
             self.check_model_here(model, request.revision, for_ai=not local_paths)
         return request.model_copy(update={"target": target, "format": fmt, "board": board, "quantization": quant,
-                                          "dataset_path": dataset, "model": model, "probe": probe_id}), inputs
+                                          # "" when there is none: a checked request checked again (the CLI's,
+                                          # start_build's) never takes a default it was not given
+                                          "use_imatrix": use_imatrix, "dataset_path": dataset or "", "model": model,
+                                          "probe": probe_id}), inputs
+
+    # --- the defaults of the importance matrix and the calibration text (Core/build_defaults.py) ----------------
+
+    def _imatrix_of(self, chosen: Optional[bool], fmt: str, quant: Optional[str],
+                    caps: Optional[TargetCapabilities]) -> bool:
+        """The caller's choice, else the default for this format and type (build_defaults.default_imatrix)."""
+        if chosen is not None:
+            return bool(chosen)
+        from orchestrator.Core.build_defaults import default_imatrix
+        from orchestrator.Core.orchestrator import LLAMA_CPP_NEEDS_IMATRIX
+        formats = getattr(caps, "formats", None) if caps is not None else None
+        cap = formats.get(fmt) if isinstance(formats, dict) else None
+        return default_imatrix(getattr(self.framework, "config", None), fmt, quant,
+                               format_uses_imatrix=cap.imatrix if cap is not None else caps is None,
+                               needs=cap.needs_imatrix if cap is not None else LLAMA_CPP_NEEDS_IMATRIX)
+
+    def default_dataset_file(self) -> Optional[Path]:
+        """The person's default calibration file (setting default_calibration_dataset; a name inside datasets_dir),
+        None when the setting is empty (the shipped text)."""
+        from orchestrator.Core.build_defaults import default_dataset_path
+        from orchestrator.Core.disk_plan import folder
+        return default_dataset_path(getattr(self.framework, "config", None),
+                                    folder(self.framework, "datasets_dir", "datasets"))
+
+    def _default_dataset(self, fmt: str, use_imatrix: bool) -> Optional[str]:
+        """The default file for a request that names no dataset, where its format reads a text file (GGUF with an
+        importance matrix, RKLLM); a missing file refuses the build, naming the setting and only the file's name."""
+        from orchestrator.Core.build_defaults import SETTING_DATASET, takes_default_dataset
+        if not takes_default_dataset(fmt, use_imatrix):
+            return None
+        path = self.default_dataset_file()
+        if path is None:
+            return None
+        if not path.is_file():
+            raise BuildServiceError(f"The default calibration dataset '{last_part(str(path))}' (setting "
+                                    f"{SETTING_DATASET}) was not found.", code="invalid_value", field="dataset_path",
+                                    next=f"Name a dataset for this build, or ask the person to correct the "
+                                         f"setting {SETTING_DATASET} (empty: the shipped calibration text).")
+        return str(path.resolve())
 
     def probes(self):
         """The hardware probes of this user (runtime.probe_service.HardwareProbes over the profile store)."""
@@ -1460,7 +1508,7 @@ class BuildService:
             description=description,
             use_gpu=req.use_gpu,
             use_imatrix=req.use_imatrix,
-            dataset_path=req.dataset_path,
+            dataset_path=req.dataset_path or None,
             dataset_sha256=dataset_sha256 if req.dataset_path else None,
             target_board=req.board,
             hardware_probe=req.probe,

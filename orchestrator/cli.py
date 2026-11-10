@@ -763,9 +763,16 @@ class _FormatOption(click.Option):
               help='Deprecated: has no effect (one call runs one build)')
 @click.option('--follow', '-F', is_flag=True, help='Follow build output in real-time')
 @click.option('--gpu/--no-gpu', default=False, help='Enable GPU passthrough')
-# --- NEU v2.4.0: IMatrix Flags ---
-@click.option('--imatrix/--no-imatrix', default=False, help='Enable Smart Calibration (IMatrix) for quantization')
-@click.option('--dataset', type=click.Path(exists=True), help='Custom calibration dataset path (txt)')
+# The importance matrix and the calibration text: left out, the defaults (Core/build_defaults.py)
+@click.option('--imatrix/--no-imatrix', default=None,
+              help='Compute an importance matrix (GGUF) or not. Default: on for GGUF types below 5 bits per weight '
+                   '(setting default_enable_imatrix), always for a type that needs one')
+@click.option('--dataset', type=click.Path(exists=True),
+              help='Calibration dataset file (text; for RKNN i8 the sample list). Default: the file of the setting '
+                   'default_calibration_dataset, else the shipped calibration text for a GGUF importance matrix')
+@click.option('--no-dataset', 'no_dataset', is_flag=True, default=False,
+              help='Build without a dataset of your own, also when default_calibration_dataset names one (an '
+                   'importance matrix then uses the shipped calibration text)')
 @click.option('--module-flags', 'module_flags', type=click.Choice(['allow', 'standard']), default=None,
               help="Your decision on the module's CMake options outside llmcf's allowed list: allow them, or go on "
                    "with the standard flags (they are left out). At a terminal without it you are asked")
@@ -775,8 +782,8 @@ class _FormatOption(click.Option):
 def start_build(ctx: FrameworkContext, model: str, target: str, format: str, board: Optional[str],
                 probe: Optional[str], quantization: Optional[str], output_dir: Optional[str], 
                 optimization: Optional[str], priority: str, parallel: bool, follow: bool, gpu: bool,
-                imatrix: bool, dataset: Optional[str], module_flags: Optional[str] = None,
-                remember_flags: bool = False):
+                imatrix: Optional[bool], dataset: Optional[str], no_dataset: bool = False,
+                module_flags: Optional[str] = None, remember_flags: bool = False):
     """Start a new build job. Ctrl+C cancels it (its container is stopped) and exits with code 130.
 
     When a finished build with exactly the same options exists, you are asked first, as in the Builder tab: use it
@@ -790,6 +797,9 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
     ctx.require_framework()
     if parallel:
         Console(stderr=True).print("[yellow]--parallel is deprecated and has no effect.[/yellow]")
+    if dataset and no_dataset:
+        console.print("[red]--dataset and --no-dataset exclude each other.[/red]")
+        sys.exit(2)
 
     try:
         fm = ctx.framework_manager
@@ -818,7 +828,8 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
         def checked(model_value: str):
             return service.validate(service.request_in(
                 model=model_value, target=target, format=format, board=board, quantization=quantization,
-                use_imatrix=imatrix, dataset_path=str(Path(dataset).resolve()) if dataset else None, use_gpu=gpu,
+                use_imatrix=imatrix, use_gpu=gpu,
+                dataset_path=str(Path(dataset).resolve()) if dataset else ("" if no_dataset else None),
                 probe=probe), local_paths=True)
 
         model = _listed_model(ctx, model)   # a label of the models already here (models:...) names its file
@@ -836,6 +847,11 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                 console.print(f"[red]{escape(problem)}[/red]")
             sys.exit(2)
         board, quantization = request.board, request.quantization
+        # the importance matrix and calibration text as the build runs them (your choice, else the defaults)
+        from orchestrator.Core.build_defaults import describe
+        calibration_line = describe(bool(request.use_imatrix), Path(request.dataset_path).name
+                                    if request.dataset_path else None, request.format,
+                                    str(_settings(ctx)[0].get("calibration_language", "mixed") or "mixed"))
         # the level given, else the board profile's (round 23 item 10), as the Builder and start_build choose it
         resolve = getattr(service, "optimization_for", None)
         chosen = resolve(request, optimization) if callable(resolve) else None
@@ -894,7 +910,7 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                 f"[bold]Hardware probe:[/bold] {escape(request.probe or 'none (the target defaults)')}\n"
                 f"[bold]Output:[/bold] {escape(output_dir)}\n"
                 f"[bold]GPU:[/bold] {'✅ Enabled' if gpu else '❌ Disabled'}\n"
-                f"[bold]Smart Calibration (IMatrix):[/bold] {'✅ Enabled' if imatrix else '❌ Disabled'}",
+                f"[bold]Calibration:[/bold] {escape(calibration_line)}",
                 title=f"🚀 Starting Build: {request_id}"
             ))
         _follow_build(ctx, service, request_id, follow=follow, header=header, output_dir=output_dir, chosen=chosen)
@@ -8723,8 +8739,8 @@ def show_config(ctx: FrameworkContext):
 
 
 # The settings `config set` takes: the person's own settings without a command of their own (an AI may read them with
-# get_settings, never change them).
-CONFIG_SET_KEYS = ("framework_mode",)
+# get_settings, never change them), and the build defaults (Core/build_defaults.py; File > Settings... too).
+CONFIG_SET_KEYS = ("framework_mode", "default_enable_imatrix", "default_calibration_dataset", "calibration_language")
 
 
 @config.command('set')
@@ -8735,9 +8751,17 @@ def config_set(ctx: FrameworkContext, key: str, value: str):
     """Set one of your own settings in config.yml. framework_mode: private (the default) or enterprise; enterprise
     mode takes only OpenSSH with sudo on a board (the root-owned key line) and refuses the weaker Dropbear tier and
     home gate, also for boards paired before. Only you set it, here or in File > Settings...; an AI may read it, never
-    change it"""
-    from orchestrator.Core.config_manager import framework_mode, set_framework_mode
-    config, _ = _settings(ctx)
+    change it.
+
+    The build defaults, used when a build names none (also in File > Settings..., General): default_enable_imatrix
+    true or false (an importance matrix for GGUF types below 5 bits per weight); default_calibration_dataset a text
+    file, a name inside the datasets folder or an absolute path, '' for the shipped calibration text;
+    calibration_language mixed, de or en (the shipped text's languages)"""
+    from orchestrator.Core.config_manager import BUILD_DEFAULT_SETTINGS, framework_mode, set_framework_mode
+    config, resolve = _settings(ctx)
+    if key in BUILD_DEFAULT_SETTINGS:
+        _config_set_build_default(config, resolve, key, value)
+        return
     before = framework_mode(config)
     try:
         now = set_framework_mode(config, value)
@@ -8751,6 +8775,30 @@ def config_set(ctx: FrameworkContext, key: str, value: str):
     if now == "enterprise":
         console.print("Enterprise mode refuses boards whose framework key sits on the Dropbear tier or the home "
                       "gate; 'llm-cli deploy devices list' shows each board's key tier.")
+
+
+def _config_set_build_default(config, resolve, key: str, value: str) -> None:
+    """`config set` for a build default (config_manager.set_build_default); a default dataset file that is not there
+    is saved with a warning: every build that would read it is refused until it exists."""
+    from orchestrator.Core.config_manager import set_build_default
+    before = config.get(key)
+    try:
+        now = set_build_default(config, key, value)
+    except ValueError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+    except OSError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    shown = now if now != "" else "'' (the shipped calibration text)"
+    console.print(f"[green]{key}: {escape(str(shown))}[/green]" + ("" if now != before else " (unchanged)"))
+    if key == "default_calibration_dataset" and now:
+        from orchestrator.Core.build_defaults import default_dataset_path
+        folder = resolve(config.get("datasets_dir", "datasets") or "datasets")
+        path = default_dataset_path(config, Path(folder))
+        if path is not None and not path.is_file():
+            console.print(f"[yellow]{escape(str(path))} does not exist yet: a build that would use it is refused "
+                          "until it does.[/yellow]")
 
 
 @config.command('output-folder')
