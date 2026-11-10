@@ -20,7 +20,8 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 STATES = ("ready", "unverified", "missing")   # LocalLLMRuntime.model_state
-NOTES = ("recommended", "chosen", "on request", "not pinned")
+NOTES = ("recommended", "usable here", "candidate to evaluate", "failed here", "passed here", "not evaluated here",
+         "chosen", "on request", "not pinned")
 
 
 def gib(size: Optional[int]) -> str:
@@ -35,17 +36,26 @@ class ModelRow:
     state: str                 # ready | unverified | missing
     recommended: bool
     chosen: bool
+    advice: Optional[str] = None   # the rule's pick only: recommended | usable | candidate | failed (tier_advice)
+    check: Optional[str] = None    # a 2-bit tier: passed | usable | failed on this computer, None when not measured
 
     @property
     def tier(self) -> str:
         return self.model.tier
 
     def notes(self) -> List[str]:
-        """The list's "Note" column, in this order: recommended, chosen, on request (only without the first two), not
-        pinned (never downloaded)."""
+        """The list's "Note" column, in this order: recommended (or usable here, candidate to evaluate, failed here for
+        the rule's pick of a 2-bit tier), for any other 2-bit tier passed here, usable here, failed here or not
+        evaluated here, chosen, on request (only without a note before it), not pinned (never downloaded)."""
         notes = []
-        if self.recommended:
+        if self.advice in ("usable", "candidate", "failed"):
+            notes.append({"usable": "usable here", "candidate": "candidate to evaluate",
+                          "failed": "failed here"}[self.advice])
+        elif self.recommended:
             notes.append("recommended")
+        elif getattr(self.model, "needs_eval", False):
+            notes.append({"passed": "passed here", "usable": "usable here", "failed": "failed here"}.get(
+                self.check or "", "not evaluated here"))
         if self.chosen:
             notes.append("chosen")
         if self.model.on_request and not notes:
@@ -58,10 +68,25 @@ class ModelRow:
 @dataclass
 class ModelsOverview:
     rows: List[ModelRow]
-    recommended: Any           # catalog.ModelEntry recommended for this computer
-    why: str                   # why it is recommended
+    recommended: Any           # catalog.ModelEntry the tier rule picks for this computer (see `state`)
+    why: str                   # the advice in words (why it is recommended, or that it is a candidate or failed)
     preferred: Optional[str]   # the tier chosen with `ditto runtime start --model` (None: the recommendation)
     folder: Path               # where the models are downloaded to
+    state: str = "recommended"  # tier_advice: recommended | usable | candidate | failed
+    action: Optional[str] = None  # the CLI's action for a candidate or failed tier (ditto eval --measure)
+
+    @property
+    def offered(self) -> bool:
+        """Whether the rule's pick is offered to Ditto (recommended or usable), not only a candidate or failed."""
+        return self.state in ("recommended", "usable")
+
+    def heading(self) -> str:
+        """The line under the list: "Recommended for this machine: ..." or the candidate's or failure's advice."""
+        if self.state == "recommended":
+            return f"Recommended for this machine: {self.why}"
+        if self.state == "usable":
+            return f"Offered for this machine as usable: {self.why}"
+        return f"No local model is recommended yet: {self.why}"
 
     def row(self, tier: str) -> ModelRow:
         for row in self.rows:
@@ -72,18 +97,28 @@ class ModelsOverview:
 
 def models_overview(rt: Any) -> ModelsOverview:
     """Everything `ditto models list` shows, from `rt` (a LocalLLMRuntime)."""
-    recommended, why = rt.choose_tier()
+    advice = rt.tier_advice()
+    recommended = advice.model
     preferred = rt.preferred_tier()
-    rows = [ModelRow(model=m, state=rt.model_state(m), recommended=m.tier == recommended.tier,
-                     chosen=m.tier == preferred) for m in rt.catalog.models]
-    return ModelsOverview(rows=rows, recommended=recommended, why=why, preferred=preferred, folder=Path(rt.models_dir))
+    rows = []
+    for m in rt.catalog.models:
+        pick = m.tier == recommended.tier
+        check = None
+        if getattr(m, "needs_eval", False):
+            check = advice.record.get("verdict") if pick and advice.record and not advice.stale else \
+                (None if pick else rt.tier_record(m).verdict)
+        rows.append(ModelRow(model=m, state=rt.model_state(m), recommended=pick and advice.offered,
+                             chosen=m.tier == preferred, advice=advice.state if pick else None, check=check))
+    return ModelsOverview(rows=rows, recommended=recommended, why=advice.text(), preferred=preferred,
+                          folder=Path(rt.models_dir), state=advice.state, action=advice.action)
 
 
 def model_to_download(rt: Any, tier: Optional[str] = None) -> Tuple[Any, Optional[str]]:
     """The model `ditto models download [TIER]` is about: the named tier (why None; KeyError with the known tiers when
     the catalogue has no such tier); without a tier the model a plain `runtime start` loads (LocalLLMRuntime.
     resolve_model): the tier chosen earlier with `runtime start --model` (why None), else the recommendation for this
-    computer with its reason."""
+    computer with its reason (for a 2-bit candidate to evaluate the reason says it is one: it is downloaded to be
+    evaluated)."""
     if tier is None:
         preferred = rt.preferred_tier()
         if preferred:

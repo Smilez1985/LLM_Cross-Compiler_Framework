@@ -313,6 +313,17 @@ class ServerDefaults(_Strict):
     log_backups: int = Field(default=3, ge=0, le=20)
 
 
+class ReferenceFile(_Strict):
+    """A tier's reference for the measurement of `ditto eval --measure` (evals/tier_check.py): a file of the tier's own
+    repository and revision, pinned like the tier's file."""
+    file: str = Field(pattern=_MODEL_NAME, max_length=200)
+    size: int = Field(gt=0)
+    sha256: str = Field(pattern=_SHA256)
+
+
+REFERENCE_TYPES = ("F16", "Q8_0")   # tuning.REFERENCES: the 16-bit original (BF16 or F16 file) and its Q8_0
+
+
 class ModelEntry(_Strict):
     tier: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
     repo: str = Field(pattern=r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
@@ -325,11 +336,24 @@ class ModelEntry(_Strict):
     native_context: int = Field(default=8192, gt=0)
     kv_bytes_per_token: int = Field(default=131072, gt=0)
     on_request: bool = False
+    # Offered to Ditto only after `ditto eval --measure` passed with it on this computer (the 2-bit tiers)
+    needs_eval: bool = False
+    # The references of the measurement: F16 (the 16-bit original) and Q8_0, by tuning.reference_type's rule
+    reference: Dict[Literal["F16", "Q8_0"], ReferenceFile] = Field(default_factory=dict)
     description: str = ""
 
     @property
     def pinned(self) -> bool:
         return bool(self.sha256 and self.size)
+
+    def reference_entry(self, kind: str) -> "ModelEntry":
+        """The reference `kind` (F16 or Q8_0) as a model entry of its own (downloaded, verified and kept in Ditto's
+        models folder like a tier's file); KeyError when the catalogue pins none."""
+        ref = self.reference[kind]
+        return ModelEntry(tier=f"{self.tier}.reference-{kind.lower()}", repo=self.repo, revision=self.revision,
+                          file=ref.file, size=ref.size, sha256=ref.sha256, license=self.license,
+                          native_context=self.native_context, kv_bytes_per_token=self.kv_bytes_per_token,
+                          on_request=True, description=f"{kind} reference of {self.tier}")
 
     @property
     def alias(self) -> str:

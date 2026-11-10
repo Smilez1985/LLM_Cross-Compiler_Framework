@@ -13,7 +13,10 @@ progress and result come back on the application's worker relay. "Download the r
 recommendation the window shows (read with the list, so no probe runs on the GUI thread) and is off until it is read;
 when a tier was chosen earlier for the local server it reads "Download the chosen model..." and takes that tier, the
 model a plain start loads (as `ditto models download` without a tier does). Cancel stops a download between two pieces and keeps
-the `.part` file for a later resume. Closing the window hides it; a running download goes on and the window shows it
+the `.part` file for a later resume. A 2-bit tier is offered to Ditto only after it passed the measurement on this
+computer (runtime/tier_advice.py): the label above the table then says recommended, usable, a candidate to evaluate or
+failed, the Note column says the same per tier, and "Evaluate first..." opens Ditto > Evaluation... with that tier
+and the measurement chosen (`llm-cli ditto eval --measure --tier TIER` by mouse). Closing the window hides it; a running download goes on and the window shows it
 again when it is opened. A download is a task of Ditto's local runtime: it waits while another one runs (a build,
 a server start or a download in Ditto > Local Runtime... or the AI settings), and they wait for it
 (runtime_mode_box.job_begins). Every text is plain text; the person sees the full models folder; nothing goes to
@@ -90,10 +93,12 @@ class LocalModelsWindow(QDialog):
         self.btn_recommended.setEnabled(False)   # on once the list (with the recommendation) is read
         self.btn_download = self._button("ditto_models.download", "btn_ditto_models_download", self.download_selected)
         self.btn_refresh = self._button("ditto_models.refresh", "btn_ditto_models_refresh", self.refresh)
+        self.btn_evaluate = self._button("ditto_models.evaluate", "btn_ditto_models_evaluate", self.evaluate_first)
+        self.btn_evaluate.setEnabled(False)   # on once the list (with the advice) is read
         self.btn_cancel = self._button("ditto_models.cancel", "btn_ditto_models_cancel", self.cancel)
         self.btn_cancel.setVisible(False)
         self.btn_close = self._button("ditto_models.close", "btn_ditto_models_close", self.close)
-        for button in (self.btn_recommended, self.btn_download, self.btn_refresh):
+        for button in (self.btn_recommended, self.btn_download, self.btn_evaluate, self.btn_refresh):
             row.addWidget(button)
         row.addStretch(1)
         row.addWidget(self.btn_cancel)
@@ -146,7 +151,10 @@ class LocalModelsWindow(QDialog):
     def _show(self, view: Any) -> None:
         self.view = view
         self.lbl_intro.setText(self._t("ditto_models.intro", folder=str(view.folder)))
-        text = self._t("ditto_models.recommended", tier=one_line(view.recommended.tier), why=one_line(view.why))
+        key = {"usable": "ditto_models.usable", "candidate": "ditto_models.candidate",
+               "failed": "ditto_models.failed_here"}.get(getattr(view, "state", "recommended"),
+                                                         "ditto_models.recommended")
+        text = self._t(key, tier=one_line(view.recommended.tier), why=one_line(view.why))
         if view.preferred and view.preferred != view.recommended.tier:
             text += "\n" + self._t("ditto_models.chosen", tier=one_line(view.preferred))
         self.lbl_recommended.setText(text)
@@ -166,10 +174,56 @@ class LocalModelsWindow(QDialog):
             if m.tier == selected:
                 self.table.selectRow(index)
         self.btn_recommended.setEnabled(self._job is None)
+        self.btn_evaluate.setEnabled(True)
 
     def selected_tier(self) -> Optional[str]:
         items = self.table.selectedItems()
         return items[0].data(Qt.UserRole) if items else None
+
+    # --- evaluate first (`ditto eval --measure --tier TIER`) ---------------------------------------------------------
+
+    def evaluation_tier(self) -> Optional[str]:
+        """The tier "Evaluate first..." measures: the selected tier when it is a 2-bit tier, else the advice's
+        candidate (or failed tier); None when there is nothing to evaluate."""
+        view = self.view
+        if view is None:
+            return None
+        selected = self.selected_tier()
+        for row in view.rows:
+            if row.tier == selected and getattr(row.model, "needs_eval", False):
+                return row.tier
+        if getattr(view, "state", "recommended") in ("candidate", "failed", "usable") or \
+                getattr(view.recommended, "needs_eval", False):
+            return view.recommended.tier
+        return None
+
+    def evaluate_first(self) -> Optional[Any]:
+        """Opens Ditto > Evaluation... with the tier and the measurement chosen; the person starts it there."""
+        if self.view is None:
+            self._tell("information", self._t("ditto_models.loading"))
+            return None
+        tier = self.evaluation_tier()
+        if tier is None:
+            self._tell("information", self._t("ditto_models.evaluate.none"))
+            return None
+        window = self._open_evaluation()
+        if window is not None:
+            window.preset_measure(tier)
+        return window
+
+    def _open_evaluation(self) -> Optional[Any]:
+        """The main window's Ditto > Evaluation... (menus/ditto_models.open_eval), or one of its own without one."""
+        host = self.parent()
+        if host is not None and hasattr(host, "framework"):
+            from orchestrator.gui.menus.ditto_models import open_eval
+            return open_eval(host)
+        from orchestrator.gui.ditto_eval_window import EvaluationWindow
+        window = getattr(self, "_evaluation", None)
+        if window is None:
+            window = self._evaluation = EvaluationWindow(self.framework, self, runtime_factory=self._factory,
+                                                         lang=self.lang)
+        window.show()
+        return window
 
     # --- download (`ditto models download [TIER]`) ------------------------------------------------------------------
 
@@ -222,6 +276,9 @@ class LocalModelsWindow(QDialog):
                           size=gib(model.size), folder=str(rt.models_dir))
             if chosen is not None:
                 question = self._t("ditto_models.question_chosen", tier=one_line(chosen), **values)
+            elif why is not None and tier is None and view is not None and not getattr(view, "offered", True):
+                # a 2-bit candidate: downloaded to be evaluated, not offered to Ditto yet
+                question = self._t("ditto_models.question_candidate", why=one_line(why), **values)
             elif why is not None:
                 question = self._t("ditto_models.question_recommended", why=one_line(why), **values)
             else:

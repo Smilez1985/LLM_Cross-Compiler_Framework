@@ -70,6 +70,12 @@ class FakeRuntime:
         self.calls.append(("choose_tier", None, on_gui_thread()))
         return self._model(self.recommended), "8 GiB RAM: the small model fits"
 
+    def tier_advice(self, prefer=None):
+        """The one advice (runtime/tier_advice.py): the tier rule's pick and the gate; probes like choose_tier."""
+        from orchestrator.runtime.tier_advice import TierAdvice
+        self.calls.append(("tier_advice", None, on_gui_thread()))
+        return TierAdvice(model=self._model(self.recommended), rule_why="8 GiB RAM: the small model fits")
+
     def preferred_tier(self):
         return self.preferred
 
@@ -239,7 +245,7 @@ class TestModelsList:
 
     def test_the_table_shows_the_catalogue_from_the_same_call_off_the_gui_thread(self, models_ui):
         win, rt = models_ui.win, models_ui.rt
-        assert rt.called("choose_tier") == [(None, False)], "the hardware probe runs off the GUI thread"
+        assert rt.called("tier_advice") == [(None, False)], "the hardware probe runs off the GUI thread"
         assert win.table.rowCount() == 4
         assert cells(win.table, 0) == ["small", "small.gguf", "2.0 GiB", "apache-2.0", "not downloaded",
                                        "recommended"]
@@ -254,7 +260,7 @@ class TestModelsList:
         models_ui.win.btn_refresh.click()
         wait_until(models_ui.qapp, lambda: models_ui.win._load_token is None)
         assert cells(models_ui.win.table, 0)[4] == "downloaded"
-        assert len(models_ui.rt.called("choose_tier")) == 2
+        assert len(models_ui.rt.called("tier_advice")) == 2
 
     def test_a_failing_catalogue_is_said_in_plain_words(self, qapp, tmp_path):
         from orchestrator.gui.ditto_models_window import LocalModelsWindow
@@ -347,7 +353,7 @@ class TestModelsDownload:
         win.btn_download.click()
         assert [q.split("\n")[0] for q, _ in models_ui.asked] == [
             "Recommended: 8 GiB RAM: the small model fits", "example/Model-GGUF / default.gguf (apache-2.0)"]
-        assert rt.called("choose_tier") == [(None, False)], "only the list's probe, off the GUI thread"
+        assert rt.called("tier_advice") == [(None, False)], "only the list's probe, off the GUI thread"
 
     def test_the_recommended_download_waits_for_the_list(self, qapp, tmp_path, monkeypatch):
         from orchestrator.gui import ditto_models_window as module

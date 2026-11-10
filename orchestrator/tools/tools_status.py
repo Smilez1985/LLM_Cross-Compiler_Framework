@@ -114,7 +114,15 @@ class HostSection(BaseModel):
     ram_total_bytes: int
     gpus: List[GpuOut] = Field(default_factory=list)
     recommended_backend: Optional[str] = None
-    recommended_tier: Optional[str] = None
+    recommended_tier: Optional[str] = Field(default=None, description="The tier the tier rule picks for this "
+                                            "computer; see recommended_tier_state")
+    recommended_tier_state: Optional[str] = Field(
+        default=None, description="recommended | usable (offered with that word) | candidate (a 2-bit tier not "
+        "measured on this computer yet: not offered; the person evaluates it with 'llm-cli ditto eval --measure') | "
+        "failed (measured here and failed: not offered). Only the person's measurement changes it")
+    tier_check: Optional[Dict[str, Any]] = Field(default=None, description="The measurement of the recommended tier "
+                                                 "on this computer, when it is a 2-bit tier: verdict, tokens_s, kld, "
+                                                 "top1, reference, at, stale")
     reason: str = ""
 
 
@@ -448,9 +456,11 @@ def host_section(framework, hardware: Callable[[], Any]) -> Optional[HostSection
         from orchestrator.runtime.llama_server import LocalLLMRuntime
         runtime = LocalLLMRuntime.from_framework(framework)
         choice = runtime.select_backend()
-        tier, reason = runtime.choose_tier()
-        section.recommended_backend, section.recommended_tier = choice.backend, tier.tier
-        section.reason = redact_secrets(str(reason))[:500]
+        advice = runtime.tier_advice()   # the one advice of every surface (runtime/tier_advice.py)
+        section.recommended_backend, section.recommended_tier = choice.backend, advice.model.tier
+        section.recommended_tier_state = advice.state
+        section.tier_check = advice.facts().get("measured")
+        section.reason = redact_secrets(advice.text())[:700]
     except Exception:  # noqa: BLE001 - the recommendation is a help; the hardware alone is shown
         pass
     return section

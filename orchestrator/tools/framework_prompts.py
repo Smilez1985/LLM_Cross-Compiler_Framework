@@ -263,10 +263,14 @@ def register_framework_prompts(registry: ToolRegistry, framework,
             rt = LocalLLMRuntime.from_framework(framework)
             hardware = rt.hardware().summary()
             backend, reason = rt.recommend_backend()
-            model, why = rt.choose_tier()
+            advice = rt.tier_advice()   # the one advice of every surface (runtime/tier_advice.py)
+            model = advice.model
             installed = rt.installed()
+            heading = {"recommended": "Recommended model tier", "usable": "Model tier offered as usable",
+                       "candidate": "Model tier to evaluate first (not offered to Ditto yet)",
+                       "failed": "Model tier that failed here (not offered to Ditto)"}[advice.state]
             facts = [f"Hardware: {hardware}", f"Planned builds: CPU build, then {backend} ({reason})",
-                     f"Recommended model tier: {model.tier} ({model.file}): {why}",
+                     f"{heading}: {model.tier} ({model.file}): {advice.text()}",
                      "Built already: " + (f"{installed.name} ({installed.backend}, {installed.label})"
                                           if installed is not None else "nothing yet")]
         except Exception as e:  # noqa: BLE001 - a probe that fails: the client asks get_status

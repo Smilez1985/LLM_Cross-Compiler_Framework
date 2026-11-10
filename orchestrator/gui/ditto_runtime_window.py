@@ -562,17 +562,26 @@ class LocalRuntimeWindow(QDialog):
             rt = factory()
             endpoint = rt.start(tier=values["tier"], ctx=values["ctx"],
                                 sleep_idle_seconds=values["sleep_idle_seconds"])
-            return endpoint, rt.status()
+            status = rt.status()
+            notice = None   # a 2-bit tier chosen by name without a passed measurement here (the CLI says the same)
+            starter = getattr(rt, "start_notice", None)
+            if callable(starter) and status.tier:
+                try:
+                    notice = starter(rt.catalog.model(status.tier))
+                except KeyError:
+                    notice = None
+            return endpoint, status, notice
 
         def done(ok: bool, value: Any) -> None:
             if not ok:
                 self._failed(value)
                 return
-            endpoint, status = value
+            endpoint, status, notice = value
             where = (self._t("ditto_runtime.status.container", name=one_line(status.container)) if status.container
                      else self._t("ditto_runtime.status.pid", pid=endpoint.pid))
-            self._box("information", self._t("ditto_runtime.server.started", url=one_line(endpoint.base_url),
-                                             model=one_line(endpoint.model), where=where, ctx=status.ctx))
+            text = self._t("ditto_runtime.server.started", url=one_line(endpoint.base_url),
+                           model=one_line(endpoint.model), where=where, ctx=status.ctx)
+            self._box("warning" if notice else "information", text + (f"\n\n{one_line(notice)}" if notice else ""))
         self._run("start", work, done, busy_key="ditto_runtime.server.starting")
 
     def stop_server(self) -> None:

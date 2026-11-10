@@ -14,6 +14,7 @@ the Auto-Tuning tab and the AI tools share it:
   computer's memory.
 - logits_bytes and disk_need: what the run puts on disk (the F16, the Q8_0 reference, the logits file, the largest
   candidate), checked by the disk rule before the start.
+- perplexity_args: the one KLD invocation of llama-perplexity, for Ditto's measurement and mirrored by tune.sh.
 - read_results / parse_statistics: the tuning job's files (the runtime layer's tune.sh) into numbers; llama-perplexity's
   output is untrusted text, and only numbers are taken from it.
 - choose: the choice rule. quality_verdict: the KLD verdict the Ditto rows reuse (KLD_GOOD, KLD_FLOOR, SPEED_FLOOR).
@@ -256,6 +257,27 @@ _PATTERNS = {
     "final": re.compile(r"Final estimate:\s*PPL\s*=\s*" + _NUM + r"(?:\s*\+/-\s*" + _NUM + r")?"),
     "chunks": re.compile(r"(?:computing over|calculating perplexity over)\s+(\d+)\s+chunks"),
 }
+
+
+def perplexity_args(*, model: str, ctx: int, chunks: int, logits: str, text: Optional[str] = None) -> List[str]:
+    """The one KLD invocation of llama-perplexity (its arguments after the program): with `text` the reference pass
+    (--kl-divergence-base records the logits of `model` on `text` in `logits`), without it the comparison pass (`model`
+    against the recorded logits, whose file also holds the tokens). Ditto's measurement (evals/tier_check.py) runs
+    these; the runtime layer's tune.sh, which runs in the build container without Python, has the same in its function
+    perplexity_pass, and a test keeps the two the same.
+
+    The batch is the context (`-b`), so every batch holds one sequence: with llama-perplexity's default (a batch of
+    2048 holding four chunks of 512) a hybrid model with recurrent layers (Qwen3.5 at the pin b11429) gives garbage
+    from the second chunk on (measured: a perplexity of 9146 instead of 27.8, NaN for its Q8_0), while a transformer
+    gives the same numbers either way."""
+    args = ["-m", str(model)]
+    if text is not None:
+        args += ["-f", str(text)]
+    args += ["-c", str(int(ctx)), "-b", str(int(ctx)), "--chunks", str(int(chunks)), "--kl-divergence-base",
+             str(logits)]
+    if text is None:
+        args.append("--kl-divergence")
+    return args
 
 
 def _finite(value: str) -> Optional[float]:
@@ -539,5 +561,6 @@ __all__ = ["CHUNKS_DEFAULT", "CHUNKS_MAX", "CHUNKS_MIN", "CTX_CHOICES", "CTX_DEF
            "DEFAULT_TYPES", "IMATRIX_MODES", "KIND", "KLD_FLOOR", "KLD_GOOD", "MAX_CANDIDATES", "REPORT_FILE",
            "RESULTS_FOLDER", "SCHEMA", "SPEED_FLOOR", "TuningError", "TuningPlan", "ai_facts", "build_choice",
            "check_limits", "choose", "disk_need", "load_report", "logits_bytes", "make_report", "parse_statistics",
+           "perplexity_args",
            "plan_candidates", "quality_verdict", "read_results", "reference_type", "report_lines", "row_text",
            "with_speed", "write_report"]

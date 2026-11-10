@@ -69,7 +69,7 @@ fi
 
 digest() { sha256sum | cut -d' ' -f1; }
 file_facts() { printf '%s %s' "${1##*/}" "$(stat -L -c '%s %Y' "$1" 2>/dev/null || wc -c < "$1")"; }
-INPUTS="$( { printf 'tune 1\n'; file_facts "$SOURCE"; printf '\nreference=%s ctx=%s chunks=%s\n' "$REFERENCE" "$CTX" "$CHUNKS"
+INPUTS="$( { printf 'tune 2\n'; file_facts "$SOURCE"; printf '\nreference=%s ctx=%s chunks=%s\n' "$REFERENCE" "$CTX" "$CHUNKS"
              sha256sum "$TUNE_TEXT" | cut -d' ' -f1
              if [ -f "${IMATRIX_PATH:-}" ]; then sha256sum "$IMATRIX_PATH" | cut -d' ' -f1; fi; } | digest)"
 
@@ -86,6 +86,23 @@ run_measured() {
 }
 
 stats_of() { grep -E "$STATS" "$1" || true; }
+
+# perplexity_pass LOG MODEL [TEXT]: the one KLD invocation of llama-perplexity (orchestrator/Core/tuning.py
+# perplexity_args gives the same arguments to Ditto's measurement, evals/tier_check.py; a test keeps both the same).
+# With TEXT the logits of MODEL on TEXT are recorded in $LOGITS; without it MODEL is compared with them (the tokens
+# come from the logits file). The batch is the context, one sequence per batch: a hybrid model with recurrent layers
+# gives garbage with several chunks in one batch.
+perplexity_pass() {
+    _pp_log="$1"
+    _pp_model="$2"
+    if [ "$#" -ge 3 ]; then
+        run_measured "$_pp_log" "$PERPLEXITY" -m "$_pp_model" -f "$3" -c "$CTX" -b "$CTX" --chunks "$CHUNKS" \
+            --kl-divergence-base "$LOGITS"
+    else
+        run_measured "$_pp_log" "$PERPLEXITY" -m "$_pp_model" -c "$CTX" -b "$CTX" --chunks "$CHUNKS" \
+            --kl-divergence-base "$LOGITS" --kl-divergence
+    fi
+}
 
 # --- 1. and 2. The reference and its logits --------------------------------------------------------------------------
 LOGITS="$WORK/reference.kld"
@@ -104,8 +121,7 @@ else
     echo "=== Tuning: the reference's logits ($REFERENCE, $CHUNKS chunks of $CTX tokens) ==="
     started="$(date +%s)"
     rc=0
-    run_measured "$WORK/reference.out" "$PERPLEXITY" -m "$REF" -f "$TUNE_TEXT" -c "$CTX" --chunks "$CHUNKS" \
-        --kl-divergence-base "$LOGITS" || rc=$?
+    perplexity_pass "$WORK/reference.out" "$REF" "$TUNE_TEXT" || rc=$?
     [ "$rc" -eq 0 ] || die "llama-perplexity failed on the reference (exit $rc)."
     [ -s "$LOGITS" ] || die "llama-perplexity wrote no logits of the reference."
     stats_of "$WORK/reference.out" > "$RESULTS/reference.log"
@@ -156,8 +172,7 @@ for spec in $CANDIDATES; do
         status="quantize_failed"
     else
         bytes="$(wc -c < "$candidate" | tr -d ' ')"
-        run_measured "$WORK/candidate.out" "$PERPLEXITY" -m "$candidate" -c "$CTX" --chunks "$CHUNKS" \
-            --kl-divergence-base "$LOGITS" --kl-divergence || rc=$?
+        perplexity_pass "$WORK/candidate.out" "$candidate" || rc=$?
         stats_of "$WORK/candidate.out" > "$RESULTS/$label.log"
         if [ "$rc" -ne 0 ]; then
             status="measure_failed"

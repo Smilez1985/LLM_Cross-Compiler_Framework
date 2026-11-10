@@ -7,6 +7,8 @@ import threading
 from pathlib import Path
 from types import SimpleNamespace
 
+from orchestrator.runtime.tier_advice import TierAdvice
+
 import pytest
 
 from orchestrator.Core import ai_override
@@ -35,6 +37,8 @@ def fake_runtime(tmp_path, models, recommended="small", preferred=None, states=N
     states = states or {}
     return SimpleNamespace(catalog=catalog, models_dir=tmp_path / "models" / "ditto",
                            choose_tier=lambda: (catalog.model(recommended), "8 GiB RAM: the small model fits"),
+                           tier_advice=lambda: TierAdvice(model=catalog.model(recommended),
+                                                          rule_why="8 GiB RAM: the small model fits"),
                            preferred_tier=lambda: preferred,
                            model_state=lambda m: states.get(m.tier, "missing"))
 

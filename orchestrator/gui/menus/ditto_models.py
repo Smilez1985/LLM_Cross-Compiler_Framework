@@ -51,6 +51,14 @@ CLI_PATHS: Dict[str, str] = {
     "ditto eval --pause-minutes": "sp_ditto_eval_pause",
     # the paid OpenAI test's yes: Run evaluation... asks it with the calls and tokens it costs (No by default)
     "ditto eval --i-pay": "btn_ditto_eval_run",
+    # the measurement on this computer (evals/tier_check.py); Local Models' "Evaluate first..." presets it
+    "ditto eval --measure": "chk_ditto_eval_measure",
+    "ditto eval --measure-only": "chk_ditto_eval_measure_only",
+    "ditto eval --chunks": "sp_ditto_eval_chunks",
+    "ditto eval --ctx": "cb_ditto_eval_ctx",
+    "ditto eval --again": "chk_ditto_eval_again",
+    # a missing reference: Run evaluation... asks before it is downloaded (the CLI asks the same at a terminal)
+    "ditto eval --download-reference": "btn_ditto_eval_run",
 }
 # Objects that live in a window, and the menu action that opens it (the chat panel's objects need none).
 WINDOW_OBJECTS: Dict[str, str] = {
@@ -62,7 +70,8 @@ WINDOW_OBJECTS: Dict[str, str] = {
     "btn_prompt_cache_apply": MODELS_ACTION,
     **{name: EVAL_ACTION for name in CLI_PATHS.values() if name.startswith(("btn_ditto_eval", "cb_ditto_eval",
                                                                             "lst_ditto_eval", "grp_ditto_eval",
-                                                                            "sp_ditto_eval"))},
+                                                                            "sp_ditto_eval", "chk_ditto_eval"))},
+    "btn_ditto_models_evaluate": MODELS_ACTION,               # "Evaluate first...": the evaluation with --measure
 }
 WINDOW_OBJECTS["btn_ditto_eval_cancel"] = EVAL_ACTION
 MACHINE_ONLY: Dict[str, str] = {

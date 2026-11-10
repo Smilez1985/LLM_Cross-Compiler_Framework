@@ -11,6 +11,8 @@ action by mouse). The CLI prints what happens and exits with its codes; the GUI 
   one is reported, also when the run ends early through Cancel or an error); then retrieval cases against a temporary
   knowledge base, one report per search variant.
 - summary_table() / retrieval_table(): the result tables (columns and cells, the same strings in both).
+- run_measurement() / measurement_table(): the measurement stage of `--measure` (evals/tier_check.py) on this
+  computer, a missing reference downloaded only after the person's yes, and its table.
 - report_json() / write_report(): the full report (`--json FILE`; the GUI's "Save report...").
 
 What happens is told through EvalEvents (a busy step, a run that starts, each case's result, a replaced server, options
@@ -326,6 +328,60 @@ def _run_ai(framework, ai_cases, runs, make_ditto, make_runtime, tiers, provider
                 events.server_replaced(before.model)
 
 
+def run_measurement(rt: Any, tiers: Sequence[str], *, chunks: int, ctx: int, again: bool = False,
+                    cache_dir: Optional[Path] = None,
+                    confirm_download: Optional[Callable[[List[Any], int], bool]] = None,
+                    plan_lines: Optional[Callable[[List[str]], None]] = None,
+                    download_progress: Any = None, progress: Optional[Callable[[str], None]] = None,
+                    stop: Any = None) -> List[Dict[str, Any]]:
+    """The measurement stage of `ditto eval --measure` (evals/tier_check.py), as the CLI and the window run it: the
+    stage is planned and checked (EvalRunError, exit code 2, before anything runs), `plan_lines` gets its lines, a
+    missing reference is downloaded only when `confirm_download(entries, bytes)` says yes (no: EvalRunError, exit code
+    1; without the callback exit code 2), then each tier is measured and recorded. A set `stop` ends it with
+    EvalCancelled; a failed program run is EvalRunError (exit code 1). Returns the records (tier_advice), in the order
+    of `tiers`."""
+    from orchestrator.evals import tier_check
+    try:
+        stage = tier_check.plan(rt, tiers, chunks=chunks, ctx=ctx, again=again, cache_dir=cache_dir)
+    except tier_check.TierCheckError as e:
+        raise EvalRunError(str(e), 2, f"measure_{e.code}") from None
+    if plan_lines is not None:
+        plan_lines(stage.lines())
+    missing = stage.missing_references()
+    if missing:
+        names = ", ".join(m.file for m in missing)
+        if confirm_download is None:
+            raise EvalRunError(f"The reference {names} is not downloaded; download it with --download-reference (or "
+                               "answer the question at a terminal).", 2, "reference_missing")
+        if not confirm_download(missing, sum(int(m.size or 0) for m in missing)):
+            raise EvalRunError(f"The reference {names} was not downloaded, so nothing was measured.", 1,
+                               "reference_declined")
+        from orchestrator.utils.download import DownloadStopped
+        try:
+            tier_check.download_references(rt, stage, progress=download_progress, stop=stop)
+        except DownloadStopped:
+            raise de.EvalCancelled("The download of the reference was cancelled; nothing was measured.") from None
+    try:
+        return tier_check.measure(rt, stage, cache_dir=cache_dir, stop=stop, progress=progress)
+    except tier_check.TierCheckStopped:
+        raise de.EvalCancelled("The measurement was cancelled; the tier it was measuring has no new record.") from None
+    except tier_check.TierCheckError as e:
+        raise EvalRunError(str(e), 1, f"measure_{e.code}") from None
+
+
+def measurement_table(records: Sequence[Dict[str, Any]]) -> Optional[Tuple[List[str], List[List[str]]]]:
+    """The "Measurement on this computer" table (CLI and window): tier, verdict, tokens/s, KLD, top-1, reference."""
+    if not records:
+        return None
+    rows = []
+    for r in records:
+        kld = "-" if r.get("kld") is None else f"{float(r['kld']):.4f} ± {float(r.get('kld_unc') or 0):.4f}"
+        rows.append([str(r.get("tier", "")), str(r.get("verdict", "")),
+                     "-" if r.get("tokens_s") is None else f"{float(r['tokens_s']):.1f}", kld,
+                     "-" if r.get("top1") is None else f"{float(r['top1']):.1f} %", str(r.get("reference", ""))])
+    return ["Tier", "Verdict", "Tokens/s", "KLD", "Top-1", "Reference"], rows
+
+
 def run_retrieval(framework: Any, cases: Sequence[Any], source: Path, variants: Sequence[str], repeat: int = 1,
                   events: Optional[EvalEvents] = None, stop: Any = None) -> List[Any]:
     """Retrieval cases: the corpus is indexed once into a temporary knowledge base (the person's own is not touched),
@@ -436,22 +492,27 @@ def outcome_note(result: Any) -> str:
             "skipped": "skipped"}.get(result.outcome, "")
 
 
-def report_data(runs: Sequence[Any]) -> Dict[str, Any]:
-    return {"runs": [r.to_dict() for r in runs]}
+def report_data(runs: Sequence[Any], measurement: Optional[Sequence[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """The full report: the runs, and with `measurement` the records of the measurement stage (evals/tier_check.py)."""
+    data: Dict[str, Any] = {"runs": [r.to_dict() for r in runs]}
+    if measurement:
+        data["measurement"] = [dict(r) for r in measurement]
+    return data
 
 
-def report_json(runs: Sequence[Any]) -> str:
+def report_json(runs: Sequence[Any], measurement: Optional[Sequence[Dict[str, Any]]] = None) -> str:
     """The full report as `--json FILE` writes it."""
-    return json.dumps(report_data(runs), indent=2, ensure_ascii=False)
+    return json.dumps(report_data(runs, measurement), indent=2, ensure_ascii=False)
 
 
-def write_report(path: Path, runs: Sequence[Any]) -> Path:
+def write_report(path: Path, runs: Sequence[Any], measurement: Optional[Sequence[Dict[str, Any]]] = None) -> Path:
     path = Path(path)
-    path.write_text(report_json(runs), encoding="utf-8")
+    path.write_text(report_json(runs, measurement), encoding="utf-8")
     return path
 
 
 __all__ = ["CI_VARIABLES", "EvalEvents", "EvalRunError", "OPENAI_CHECK_FILE", "TIER_CONFLICT", "all_cases",
-           "case_files", "check_choice", "check_paid", "in_ci", "openai_check_data", "openai_check_path", "opted_in",
+           "case_files", "check_choice", "check_paid", "in_ci", "measurement_table", "openai_check_data",
+           "openai_check_path", "opted_in", "run_measurement",
            "outcome_note", "paid_estimate", "report_data", "report_json", "retrieval_table", "run_evaluation",
            "run_retrieval", "save_openai_check", "select_cases", "summary_table", "tokens_table", "write_report"]

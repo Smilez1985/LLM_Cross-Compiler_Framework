@@ -11,6 +11,13 @@ finished case, each started run and each busy step come back on the application'
 the next attempt (the case that runs finishes first; a tier's server is stopped as after a normal run). The results are
 the CLI's tables; "Save report..." writes the CLI's JSON report (`--json FILE`) to a file the person chooses.
 
+"Measure on this computer" (`--measure`, `--measure-only`, `--chunks`, `--ctx`, `--again`) first measures each ticked
+tier here (evals/eval_run.run_measurement, the CLI's call: tokens per second with llama-bench, the KL divergence from
+the tier's reference on the fixed evaluation text); a missing reference is downloaded only after the window's question
+(the CLI's `--download-reference` or its question), and the verdict (passed, usable, failed, with the numbers) is shown
+in its own table. Ditto > Local Models... opens this window with a tier and the measurement chosen
+("Evaluate first...", preset_measure).
+
 A run of local tiers is a task of Ditto's local runtime (it stops your server and starts its own): it waits while
 another one runs in Ditto > Local Runtime..., Ditto > Local Models... or the AI settings, and they wait for it
 (runtime_mode_box.job_begins). Every text is plain text; the person sees full paths; nothing here goes to an AI
@@ -94,6 +101,7 @@ class EvaluationWindow(QDialog):
         self.catalog = catalog_of(self.ditto, getattr(framework, "config", None))
         self.cases_file: Optional[Path] = None
         self.runs: List[Any] = []                   # the reports of the last run (what "Save report..." writes)
+        self.measured: List[Dict[str, Any]] = []    # the measurement records of the last run (--measure)
         self.kinds_shown: List[str] = []
         self._job: Optional[object] = None          # the token of the running evaluation
         self._events: Optional[object] = None
@@ -108,6 +116,7 @@ class EvaluationWindow(QDialog):
         body.addWidget(plain_label(self._t("ditto_eval.intro"), inner))
         body.addWidget(self._cases_group())
         body.addWidget(self._model_group())
+        body.addWidget(self._measure_group())
         self.lbl_cost = plain_label(self._t("ditto_eval.cost"), inner)
         self.lbl_cost.setObjectName("lbl_ditto_eval_cost")
         self.lbl_cost.setStyleSheet("color: #ffd27f;")
@@ -260,6 +269,44 @@ class EvaluationWindow(QDialog):
         box.addLayout(form)
         return group
 
+    def _measure_group(self) -> QGroupBox:
+        """`--measure` and its options: the measurement on this computer before the cases."""
+        group = QGroupBox(self._t("ditto_eval.group.measure"), self)
+        group.setObjectName("grp_ditto_eval_measure")
+        box = QVBoxLayout(group)
+        box.addWidget(plain_label(self._t("ditto_eval.measure.intro"), group))
+        self.chk_measure = QCheckBox(self._t("ditto_eval.measure"), group)
+        self.chk_measure.setObjectName("chk_ditto_eval_measure")
+        self.chk_measure_only = QCheckBox(self._t("ditto_eval.measure_only"), group)
+        self.chk_measure_only.setObjectName("chk_ditto_eval_measure_only")
+        self.chk_again = QCheckBox(self._t("ditto_eval.measure_again"), group)
+        self.chk_again.setObjectName("chk_ditto_eval_again")
+        for box_widget in (self.chk_measure, self.chk_measure_only, self.chk_again):
+            box.addWidget(box_widget)
+        form = QFormLayout()
+        self.sp_chunks = QSpinBox(group)
+        self.sp_chunks.setObjectName("sp_ditto_eval_chunks")
+        self.sp_chunks.setRange(4, 48)          # click.IntRange(4, 48), tuning.CHUNKS_MIN/MAX
+        self.sp_chunks.setValue(16)
+        self.cb_ctx = QComboBox(group)
+        self.cb_ctx.setObjectName("cb_ditto_eval_ctx")
+        for value in (256, 512, 1024):          # tuning.CTX_CHOICES
+            self.cb_ctx.addItem(str(value), value)
+        self.cb_ctx.setCurrentIndex(1)
+        form.addRow(plain_label(self._t("ditto_eval.measure_chunks"), group, wrap=False), self.sp_chunks)
+        form.addRow(plain_label(self._t("ditto_eval.measure_ctx"), group, wrap=False), self.cb_ctx)
+        box.addLayout(form)
+        return group
+
+    def preset_measure(self, tier: str) -> None:
+        """Ditto > Local Models... "Evaluate first...": only `tier` ticked and the measurement chosen (the person still
+        starts the run)."""
+        for i in range(self.lst_tiers.count()):
+            item = self.lst_tiers.item(i)
+            if item.data(Qt.UserRole):
+                item.setCheckState(Qt.Checked if item.data(Qt.UserRole) == tier else Qt.Unchecked)
+        self.chk_measure.setChecked(True)
+
     def _results_group(self) -> QGroupBox:
         group = QGroupBox(self._t("ditto_eval.group.results"), self)
         group.setObjectName("grp_ditto_eval_results")
@@ -269,6 +316,12 @@ class EvaluationWindow(QDialog):
         self.log.setReadOnly(True)
         self.log.setMinimumHeight(130)
         box.addWidget(self.log)
+        self.lbl_measure = plain_label(self._t("ditto_eval.measure.table"), group)
+        self.lbl_measure.setVisible(False)
+        box.addWidget(self.lbl_measure)
+        self.tbl_measure = self._table(group, "tbl_ditto_eval_measure")
+        self.tbl_measure.setVisible(False)
+        box.addWidget(self.tbl_measure)
         self.tbl_results = self._table(group, "tbl_ditto_eval_results")
         box.addWidget(self.tbl_results)
         self.lbl_retrieval = plain_label(self._t("ditto_eval.retrieval"), group)
@@ -375,7 +428,10 @@ class EvaluationWindow(QDialog):
                 "case_ids": tuple(self._checked(self.lst_cases)), "repeat": self.sp_repeat.value(),
                 "tiers": tuple(self.tiers()), "provider": provider, "model": model,
                 "effort": self.cb_effort.currentData() or None,
-                "pause_minutes": round(self.sp_pause.value(), 1) if self.sp_pause.value() >= 0.1 else None}
+                "pause_minutes": round(self.sp_pause.value(), 1) if self.sp_pause.value() >= 0.1 else None,
+                "measure": self.chk_measure.isChecked() or self.chk_measure_only.isChecked(),
+                "measure_only": self.chk_measure_only.isChecked(), "again": self.chk_again.isChecked(),
+                "chunks": self.sp_chunks.value(), "ctx": int(self.cb_ctx.currentData() or 512)}
 
     # --- the question before a run ----------------------------------------------------------------------------------
 
@@ -459,6 +515,9 @@ class EvaluationWindow(QDialog):
             self._tell("information", self._t("ditto_eval.busy"))
             return False
         choice = self.choice()
+        if choice["measure"] and not choice["tiers"]:
+            self._tell("warning", self._t("ditto_eval.measure.no_tier"))
+            return False
         try:
             eval_run.check_choice(choice["tiers"], choice["provider"], choice["model"])
         except eval_run.EvalRunError:
@@ -469,15 +528,18 @@ class EvaluationWindow(QDialog):
         except eval_run.EvalRunError as e:
             self._tell("warning", self._t("ditto_eval.failed", reason=one_line(e)))
             return False
+        if choice["measure_only"]:
+            cases = []   # the measurement alone (`--measure-only`)
         ai = any(c.kind != "retrieval" for c in cases)
         if ai and self.ditto is None:
             self._tell("warning", self._t("ditto_eval.no_ditto"))
             return False
-        local_runs = ai and bool(choice["tiers"])   # a tier's server is started: a task of Ditto's local runtime
+        # a tier's server is started, or the measurement runs this computer's llama.cpp: a task of Ditto's local runtime
+        local_runs = (ai or choice["measure"]) and bool(choice["tiers"])
         if local_runs and job_running():
             self._tell("information", self._t("ditto_runtime.busy"))
             return False
-        missing = self._missing_tiers(choice["tiers"]) if ai else []
+        missing = self._missing_tiers(choice["tiers"]) if (ai or choice["measure"]) else []
         if missing:   # starting one would stop your server first and then name a CLI command
             self._tell("warning", self._t("ditto_eval.tiers_missing", tiers=", ".join(missing)))
             return False
@@ -502,8 +564,14 @@ class EvaluationWindow(QDialog):
             cost = eval_run.paid_estimate(cases, choice["repeat"])
             question = self._t("ditto_eval.paid.question", calls=cost["calls"], tokens=cost["input_tokens"],
                                path=str(self._check_path()))
-        else:
+        elif cases:
             question = self.question(choice, cases)
+        else:
+            question = ""
+        if choice["measure"]:
+            measure = self._t("ditto_eval.measure.question", tiers=", ".join(one_line(t) for t in choice["tiers"]),
+                              chunks=choice["chunks"], ctx=choice["ctx"])
+            question = f"{measure}\n\n{question}" if question else measure
         if not ask(self, self._t("ditto_eval.title"), question):
             return False
         guard = object() if local_runs else None
@@ -531,13 +599,40 @@ class EvaluationWindow(QDialog):
         self.kinds_shown = sorted({c.kind for c in cases})
         self._paid = paid
 
+        measured: List[Dict[str, Any]] = []
+        title = self._t("ditto_eval.title")
+        lang = self.lang
+
+        def measure() -> None:
+            from orchestrator.Core.runtime_layer import cache_dir_of
+            from orchestrator.gui.worker_relay import ask_from_worker
+            config = getattr(framework, "config", None)
+            resolve = getattr(framework, "resolve_path", None)
+
+            def confirm(missing, total) -> bool:
+                text = ui_text("ditto_eval.measure.download", lang, files=", ".join(m.file for m in missing),
+                               size=gib(total), folder=str(rt.models_dir))
+                return ask_from_worker(token, title, text, stop=stop.is_set)
+
+            rt = factory()
+            measured.extend(eval_run.run_measurement(
+                rt, choice["tiers"], chunks=choice["chunks"], ctx=choice["ctx"], again=choice["again"],
+                cache_dir=cache_dir_of(config, resolve) / "tier-check", confirm_download=confirm,
+                plan_lines=lambda lines: [events._emit("measure", line) for line in lines],
+                progress=lambda msg: events._emit("measure", msg), stop=stop))
+
         def work():
-            return eval_run.run_evaluation(framework, cases, make_ditto=make_ditto, make_runtime=factory,
+            if choice["measure"]:
+                measure()
+            if not cases:
+                return measured, []
+            runs = eval_run.run_evaluation(framework, cases, make_ditto=make_ditto, make_runtime=factory,
                                            tiers=choice["tiers"], provider=choice["provider"], model=choice["model"],
                                            effort=choice["effort"], cases_file=choice["cases_file"],
                                            rag_variants=choice["rag_variants"], repeat=choice["repeat"],
                                            events=events, stop=stop, pause_minutes=choice["pause_minutes"],
                                            i_pay=paid)
+            return measured, runs
 
         self.log.clear()
         self._done_cases = 0
@@ -571,7 +666,7 @@ class EvaluationWindow(QDialog):
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self.btn_run.setEnabled(not busy)
-        self.btn_save.setEnabled(not busy and bool(self.runs))
+        self.btn_save.setEnabled(not busy and bool(self.runs or self.measured))
         self.btn_cancel.setVisible(busy)
         self.progress.setVisible(busy)
         self.lbl_busy.setText(text)
@@ -583,7 +678,10 @@ class EvaluationWindow(QDialog):
     # --- what comes back --------------------------------------------------------------------------------------------
 
     def _on_relay(self, token: object, payload: Any) -> None:
-        if token is self._events and self._job is not None:
+        from orchestrator.gui.worker_relay import WorkerQuestion
+        if token is self._events and isinstance(payload, WorkerQuestion):   # the reference's download (the CLI's)
+            payload.reply(lambda: ask(self, payload.title, payload.text))
+        elif token is self._events and self._job is not None:
             self._event(payload)
         elif token is self._job:
             self._job = self._events = None
@@ -613,13 +711,19 @@ class EvaluationWindow(QDialog):
             self.log.appendPlainText(self._t("ditto_eval.log.replaced", model=one_line(payload[1])))
         elif kind == "unused":
             self.log.appendPlainText(self._t("ditto_eval.log.unused"))
+        elif kind == "measure":   # the measurement stage's plan and steps (English framework text, like the CLI's)
+            self.log.appendPlainText(one_line(payload[1]))
+            self.lbl_busy.setText(one_line(payload[1])[:200])
 
     def _finished(self, ok: bool, value: Any) -> None:
         from orchestrator.evals.ditto_eval import EvalCancelled
         details = ""
         if ok:
-            self.runs = list(value)
+            measured, runs = value if isinstance(value, tuple) else ([], value)
+            self.measured, self.runs = list(measured), list(runs)
             text = self._t("ditto_eval.done", runs=len(self.runs))
+            for line in self._measure_lines():   # a failed tier said plainly, a usable one with that word
+                self.log.appendPlainText(line)
             if self._paid:   # the paid test's result file, as the CLI writes it
                 try:
                     saved = eval_run.save_openai_check(self._check_path(), self.runs)
@@ -630,9 +734,11 @@ class EvaluationWindow(QDialog):
                     self.log.appendPlainText(self._t("ditto_eval.paid.saved", path=str(saved)))
         elif isinstance(value, EvalCancelled):
             self.runs = list(value.runs)
+            self.measured = []
             text = self._t("ditto_eval.cancelled")
         else:
             self.runs = []
+            self.measured = []
             details = str(getattr(value, "log_tail", "") or "")
             text = self._t("ditto_eval.failed", reason=one_line(value))
         self.show_results(self.runs)
@@ -641,8 +747,27 @@ class EvaluationWindow(QDialog):
         if not ok and not isinstance(value, EvalCancelled):
             self._tell("warning", text, details=details)
 
+    def _measure_lines(self) -> List[str]:
+        """The verdicts of the measurement in the person's language, with the numbers and what a failed tier missed."""
+        from orchestrator.runtime.tier_advice import failure_reasons, numbers_text
+        lines = []
+        for r in self.measured:
+            verdict = r.get("verdict")
+            if verdict not in ("passed", "usable", "failed"):
+                continue
+            lines.append(self._t(f"ditto_eval.measure.{verdict}", tier=one_line(r.get("tier")),
+                                 numbers=one_line(numbers_text(r)), reasons=one_line("; ".join(failure_reasons(r)))))
+        return lines
+
     def show_results(self, runs: Sequence[Any]) -> None:
         """The CLI's tables: one row per run, and the retrieval figures when there are any."""
+        measured = eval_run.measurement_table(self.measured)   # `--measure`: the CLI's table
+        self.lbl_measure.setVisible(measured is not None)
+        self.tbl_measure.setVisible(measured is not None)
+        if measured is not None:
+            header = [self._t(f"ditto_eval.col.measure.{key}") for key in
+                      ("tier", "verdict", "tokens", "kld", "top1", "reference")]
+            self._fill(self.tbl_measure, header, measured[1])
         columns, rows = eval_run.summary_table(runs, self.kinds_shown)
         header = [self._t("ditto_eval.col.run"), self._t("ditto_eval.col.model"), self._t("ditto_eval.col.passed"),
                   *columns[3:-1], self._t("ditto_eval.col.avg")]
@@ -676,7 +801,7 @@ class EvaluationWindow(QDialog):
 
     def save_report(self) -> Optional[Path]:
         """Writes the CLI's JSON report of the last run to a file the person chooses (the save dialog)."""
-        if not self.runs:
+        if not self.runs and not self.measured:
             self._tell("information", self._t("ditto_eval.no_runs"))
             return None
         chosen_path = _save_file(self, self._t("ditto_eval.save_dialog"), "ditto-eval.json",
@@ -687,7 +812,7 @@ class EvaluationWindow(QDialog):
         if not path.suffix:
             path = path.with_suffix(".json")
         try:
-            eval_run.write_report(path, self.runs)
+            eval_run.write_report(path, self.runs, measurement=self.measured or None)
         except OSError as e:
             self._tell("warning", self._t("ditto_eval.save_failed", reason=one_line(e)))
             return None

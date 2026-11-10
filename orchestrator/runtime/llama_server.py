@@ -218,6 +218,12 @@ def runtime_root(data_dir: Path) -> Path:
 _write_private = write_private_exclusive
 
 
+def _no_record():
+    """The record view of a tier without the 2-bit mark: nothing to look up."""
+    from orchestrator.runtime.tier_advice import RecordView
+    return RecordView(None)
+
+
 def _read_json(path: Path) -> Optional[dict]:
     """A state file's object, None when it is missing, unreadable or no JSON object (utils/helpers.safe_json_load)."""
     return safe_json_load(path, None, dict)
@@ -647,9 +653,37 @@ class LocalLLMRuntime:
             return "cpu", f"the GPU backend could not be chosen ({e})"
 
     def choose_tier(self, prefer: Optional[str] = None) -> Tuple[ModelEntry, str]:
-        """Recommended Ditto model for this machine (RAM, and VRAM when a GPU build is used), with the reason. The
-        build in use decides the backend; before anything is built, the backend the self-built install would use
-        (`prefer` names one explicitly)."""
+        """Recommended Ditto model for this machine (RAM, and VRAM when a GPU build is used), with the reason: the tier
+        rule's pick with the gate of the 2-bit tiers (tier_advice()); for a candidate to evaluate or a failed tier the
+        reason says so, and a plain start does not load it."""
+        advice = self.tier_advice(prefer)
+        return advice.model, advice.text()
+
+    def tier_checks(self):
+        """The record of the measurements on this computer (runtime/tier_advice.TierChecks)."""
+        from orchestrator.runtime.tier_advice import TierChecks
+        return TierChecks(self.data_dir)
+
+    def tier_record(self, model: ModelEntry):
+        """This computer's record of `model` (tier_advice.RecordView: the record and whether it is stale)."""
+        from orchestrator.runtime.tier_advice import current_fingerprint
+        return self.tier_checks().lookup(model.tier, current_fingerprint(self, model))
+
+    def tier_advice(self, prefer: Optional[str] = None):
+        """The one advice every surface shows (runtime/tier_advice.advise): the tier rule's pick and the gate."""
+        from orchestrator.runtime.tier_advice import advise
+        model, why = self.rule_tier(prefer)
+        return advise(model, why, self.tier_record(model) if model.needs_eval else _no_record())
+
+    def start_notice(self, model: ModelEntry) -> Optional[str]:
+        """The notice for a 2-bit tier started by name without a passed or usable measurement here (None else)."""
+        from orchestrator.runtime.tier_advice import start_notice
+        return start_notice(model, self.tier_record(model)) if model.needs_eval else None
+
+    def rule_tier(self, prefer: Optional[str] = None) -> Tuple[ModelEntry, str]:
+        """The tier rule's pick for this machine (RAM, and VRAM when a GPU build is used), with the reason, before the
+        gate. The build in use decides the backend; before anything is built, the backend the self-built install would
+        use (`prefer` names one explicitly)."""
         installed = self.installed()
         hw = self.hardware()
         if installed is not None and installed.origin == "prebuilt":
@@ -667,8 +701,10 @@ class LocalLLMRuntime:
         tier = (_read_json(self.active_file) or {}).get("tier")
         return tier if isinstance(tier, str) and tier in {m.tier for m in self.catalog.models} else None
 
-    def resolve_model(self, tier: Optional[str] = None) -> Tuple[ModelEntry, str]:
-        """Explicit tier > the tier chosen earlier > the recommendation for this machine."""
+    def resolve_model(self, tier: Optional[str] = None, *, for_start: bool = False) -> Tuple[ModelEntry, str]:
+        """Explicit tier > the tier chosen earlier > the recommendation for this machine. `for_start`: the
+        recommendation must be offered (a candidate to evaluate or a failed 2-bit tier is not loaded without its name;
+        LocalRuntimeError with the advice)."""
         try:
             if tier and tier != "auto":
                 return self.catalog.model(tier), "chosen"
@@ -677,7 +713,10 @@ class LocalLLMRuntime:
                 return self.catalog.model(remembered), "chosen earlier ('--model auto' returns to the recommendation)"
         except KeyError as e:
             raise LocalRuntimeError(e.args[0]) from None
-        return self.choose_tier()
+        advice = self.tier_advice()
+        if for_start and not advice.offered:
+            raise LocalRuntimeError(f"No model was started: {advice.text()}")
+        return advice.model, advice.text()
 
     def _update_active(self, **values) -> None:
         data = _read_json(self.active_file) or {}
@@ -1317,6 +1356,11 @@ class LocalLLMRuntime:
             model = self.catalog.model(tier)
         except KeyError as e:
             raise LocalRuntimeError(e.args[0]) from None
+        return self.download_entry(model, progress=progress, stop=stop)
+
+    def download_entry(self, model: ModelEntry, progress: Optional[ProgressFn] = None, stop: Any = None) -> Path:
+        """download_model for a catalogue entry, also one that is no tier (a tier's measurement reference,
+        ModelEntry.reference_entry)."""
         if not model.pinned:
             raise IntegrityError(f"No sha256 and size pinned for {model.repo}/{model.file}; refusing to download it.")
         path = self.model_path(model)
@@ -1451,7 +1495,7 @@ class LocalLLMRuntime:
                                     "archive instead, not self-built)")
         for note in installed.notes:
             self.logger.warning(f"Local runtime: {note}")
-        model, _ = self.resolve_model(tier)
+        model, _ = self.resolve_model(tier, for_start=True)
         idle = self._idle_seconds(sleep_idle_seconds)
         with self._lock():
             state = self._load_state() or {}
@@ -1727,7 +1771,7 @@ class LocalLLMRuntime:
         """start() in Docker mode: Ditto's verified image with the model from the framework's models folder (mounted
         read-only, verified here first), on 127.0.0.1 only."""
         image = self.docker_image()
-        model, _ = self.resolve_model(tier)
+        model, _ = self.resolve_model(tier, for_start=True)
         idle = self._idle_seconds(sleep_idle_seconds)
         with self._lock():
             state = self._load_state() or {}

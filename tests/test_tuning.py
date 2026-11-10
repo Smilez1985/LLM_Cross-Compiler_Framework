@@ -100,12 +100,19 @@ def test_the_tuning_job_measures_every_candidate_against_the_reference_logits(im
     assert [s[1] for s in stage_lines(result) if s[2] == "done"] == ["source", "config", "convert", "tune"]
     calls = image.calls()
     assert calls[0] == "convert <root>/input-model --outfile <root>/build-cache/output/model-F16.gguf --outtype f16"
+    # tune.sh's perplexity_pass and tuning.perplexity_args (Ditto's measurement) are the one KLD invocation
+    logits = "<root>/build-cache/work/tune/reference.kld"
+    assert calls[1] == "perplexity " + " ".join(tuning.perplexity_args(
+        model="<root>/build-cache/output/model-F16.gguf", text="<root>/evaluation/evaluation.txt", ctx=512, chunks=8,
+        logits=logits))
     assert calls[1] == ("perplexity -m <root>/build-cache/output/model-F16.gguf -f <root>/evaluation/evaluation.txt "
-                        "-c 512 --chunks 8 --kl-divergence-base <root>/build-cache/work/tune/reference.kld")
+                        "-c 512 -b 512 --chunks 8 --kl-divergence-base <root>/build-cache/work/tune/reference.kld")
     assert calls[2].startswith("quantize --imatrix <root>/build-cache/imatrix/imatrix.dat "
                                "<root>/build-cache/output/model-F16.gguf <root>/build-cache/work/tune/candidate.gguf "
                                "Q4_K_M")
-    assert calls[3] == ("perplexity -m <root>/build-cache/work/tune/candidate.gguf -c 512 --chunks 8 "
+    assert calls[3] == "perplexity " + " ".join(tuning.perplexity_args(
+        model="<root>/build-cache/work/tune/candidate.gguf", ctx=512, chunks=8, logits=logits))
+    assert calls[3] == ("perplexity -m <root>/build-cache/work/tune/candidate.gguf -c 512 -b 512 --chunks 8 "
                         "--kl-divergence-base <root>/build-cache/work/tune/reference.kld --kl-divergence")
     assert len(calls) == 1 + 1 + 3 * 2
     assert not (image.work / "tune" / "candidate.gguf").exists(), "each candidate is deleted after its measurement"

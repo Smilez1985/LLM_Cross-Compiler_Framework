@@ -507,6 +507,18 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             except Exception as e:  # noqa: BLE001 - LocalRuntimeError: an unknown tier
                 raise ToolError(scrub(str(e)), code="invalid_value", field="tier",
                                 next="The lcf://runtime/catalog resource lists the tiers.") from None
+            if getattr(model, "needs_eval", False) and rt.tier_record(model).verdict not in ("passed", "usable"):
+                # a 2-bit tier is Ditto's only after the person's measurement passed on this computer; an AI never
+                # starts it before (the person may, by name) and no tool can mark it as passed
+                from orchestrator.runtime.tier_advice import failure_reasons
+                record = rt.tier_record(model)
+                said = (f"it failed the measurement on this computer ({', '.join(failure_reasons(record.valid))})"
+                        if record.verdict == "failed" else "it has not passed the measurement on this computer")
+                raise ToolError(f"The tier {model.tier} is a 2-bit model, and {said}; it is not offered to Ditto "
+                                "before it passed.", code="needs_person", field="tier",
+                                next="Ask the person to measure it (llm-cli ditto eval --measure --tier "
+                                     f"{model.tier}, or \"Evaluate first...\" in Ditto > Local Models...), or start "
+                                     "another tier.")
             if not rt.model_path(model).is_file():
                 raise blocked("model_not_downloaded", f"The model of tier {model.tier} is not downloaded.",
                               f"Fetch it with build_local_runtime(model_tier='{model.tier}').", field="tier")

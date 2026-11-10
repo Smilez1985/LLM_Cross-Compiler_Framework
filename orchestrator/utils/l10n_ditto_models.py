@@ -47,6 +47,19 @@ TEXTS = {
         "ditto_models.cancel": "Cancel",
         "ditto_models.close": "Close",
         "ditto_models.select_first": "Select a model in the list first.",
+        "ditto_models.usable": "Offered for this computer as usable: {tier} ({why})",
+        "ditto_models.candidate": "No local model is recommended yet: {tier} is a candidate to evaluate first ({why})",
+        "ditto_models.failed_here": "No local model is recommended: {tier} failed the measurement on this computer "
+                                    "({why})",
+        "ditto_models.note.usable here": "usable here",
+        "ditto_models.note.candidate to evaluate": "candidate to evaluate",
+        "ditto_models.note.failed here": "failed here",
+        "ditto_models.note.passed here": "passed here",
+        "ditto_models.note.not evaluated here": "not evaluated here",
+        "ditto_models.evaluate": "Evaluate first...",
+        "ditto_models.evaluate.none": "Select a 2-bit model to evaluate: the other models need no evaluation.",
+        "ditto_models.question_candidate": "To evaluate first, not offered to Ditto yet: {why}\n\n{repo} / {file} "
+                                           "({license})\n\nDownload {size} into {folder}?",
         "ditto_models.busy": "A download is running. Wait until it is done, or cancel it.",
         "ditto_models.ready": "{file} is already downloaded.",
         "ditto_models.question": "{repo} / {file} ({license})\n\nDownload {size} into {folder}?",
@@ -176,6 +189,35 @@ TEXTS = {
         "ditto_eval.col.model": "Model",
         "ditto_eval.col.passed": "Passed",
         "ditto_eval.col.avg": "Avg s/case",
+        "ditto_eval.group.measure": "Measure on this computer",
+        "ditto_eval.measure.intro": "Before the cases, each ticked tier is measured here: tokens per second, and the "
+                                    "KL divergence from its reference on a fixed text. A 2-bit tier is offered to "
+                                    "Ditto only after it passed (at least 8 tokens/s and a KLD of at most 0.05; up to "
+                                    "0.10 it is usable).",
+        "ditto_eval.measure": "Measure each tier on this computer first",
+        "ditto_eval.measure_only": "Only the measurement, no cases",
+        "ditto_eval.measure_again": "Measure again, also when the last measurement here still counts",
+        "ditto_eval.measure_chunks": "Chunks of the evaluation text:",
+        "ditto_eval.measure_ctx": "Tokens per chunk:",
+        "ditto_eval.measure.no_tier": "Tick the tiers to measure: the measurement is for the local models.",
+        "ditto_eval.measure.question": "First {tiers} is measured on this computer: tokens per second, and the KL "
+                                       "divergence on {chunks} chunks of {ctx} tokens. This takes minutes and "
+                                       "uses the processor fully.",
+        "ditto_eval.measure.download": "The measurement needs the reference {files} ({size}), which is not on this "
+                                       "computer.\n\nDownload it into {folder}? It stays there for the next "
+                                       "measurement.",
+        "ditto_eval.measure.table": "Measurement on this computer",
+        "ditto_eval.measure.passed": "{tier} passed on this computer ({numbers}): it is offered to Ditto.",
+        "ditto_eval.measure.usable": "{tier} is usable on this computer ({numbers}): it is offered to Ditto as "
+                                     "usable.",
+        "ditto_eval.measure.failed": "{tier} FAILED on this computer ({numbers}): {reasons}. It is not offered to "
+                                     "Ditto.",
+        "ditto_eval.col.measure.tier": "Tier",
+        "ditto_eval.col.measure.verdict": "Verdict",
+        "ditto_eval.col.measure.tokens": "Tokens/s",
+        "ditto_eval.col.measure.kld": "KLD",
+        "ditto_eval.col.measure.top1": "Top-1",
+        "ditto_eval.col.measure.reference": "Reference",
         "ditto_eval.col.unrelated": "Unrelated: no excerpt",
         "ditto_eval.col.p50": "p50 ms",
         "ditto_eval.kind.tokens": "Token and cache measurement (tokens; several turns, runs only when ticked)",
@@ -238,6 +280,20 @@ TEXTS = {
         "ditto_models.cancel": "Abbrechen",
         "ditto_models.close": "Schließen",
         "ditto_models.select_first": "Wähle zuerst ein Modell in der Liste aus.",
+        "ditto_models.usable": "Für diesen Computer als brauchbar angeboten: {tier} ({why})",
+        "ditto_models.candidate": "Noch kein lokales Modell empfohlen: {tier} ist ein Kandidat, der erst geprüft wird "
+                                  "({why})",
+        "ditto_models.failed_here": "Kein lokales Modell empfohlen: {tier} hat die Messung auf diesem Computer nicht "
+                                    "bestanden ({why})",
+        "ditto_models.note.usable here": "hier brauchbar",
+        "ditto_models.note.candidate to evaluate": "Kandidat zum Prüfen",
+        "ditto_models.note.failed here": "hier nicht bestanden",
+        "ditto_models.note.passed here": "hier bestanden",
+        "ditto_models.note.not evaluated here": "hier nicht geprüft",
+        "ditto_models.evaluate": "Erst prüfen...",
+        "ditto_models.evaluate.none": "Wähle ein 2-Bit-Modell zum Prüfen: Die anderen Modelle brauchen keine Prüfung.",
+        "ditto_models.question_candidate": "Erst zu prüfen, Ditto noch nicht angeboten: {why}\n\n{repo} / {file} "
+                                           "({license})\n\n{size} nach {folder} laden?",
         "ditto_models.busy": "Ein Download läuft. Warte, bis er fertig ist, oder brich ihn ab.",
         "ditto_models.ready": "{file} ist schon heruntergeladen.",
         "ditto_models.question": "{repo} / {file} ({license})\n\n{size} nach {folder} herunterladen?",
@@ -371,6 +427,37 @@ TEXTS = {
         "ditto_eval.col.model": "Modell",
         "ditto_eval.col.passed": "Bestanden",
         "ditto_eval.col.avg": "Mittel s/Fall",
+        "ditto_eval.group.measure": "Auf diesem Computer messen",
+        "ditto_eval.measure.intro": "Vor den Fällen wird jede angehakte Stufe hier gemessen: Tokens pro Sekunde und "
+                                    "die KL-Divergenz von ihrer Referenz auf einem festen Text. Eine 2-Bit-Stufe wird "
+                                    "Ditto erst angeboten, wenn sie bestanden hat (mindestens 8 Tokens/s und eine KLD "
+                                    "von höchstens 0,05; bis 0,10 ist sie brauchbar).",
+        "ditto_eval.measure": "Jede Stufe zuerst auf diesem Computer messen",
+        "ditto_eval.measure_only": "Nur die Messung, keine Fälle",
+        "ditto_eval.measure_again": "Erneut messen, auch wenn die letzte Messung hier noch gilt",
+        "ditto_eval.measure_chunks": "Abschnitte des Bewertungstextes:",
+        "ditto_eval.measure_ctx": "Tokens je Abschnitt:",
+        "ditto_eval.measure.no_tier": "Hake die Stufen an, die gemessen werden: Die Messung gilt den lokalen "
+                                      "Modellen.",
+        "ditto_eval.measure.question": "Zuerst wird {tiers} auf diesem Computer gemessen: Tokens pro Sekunde und die "
+                                       "KL-Divergenz auf {chunks} Abschnitten zu {ctx} Tokens. Das dauert Minuten und "
+                                       "lastet den Prozessor voll aus.",
+        "ditto_eval.measure.download": "Die Messung braucht die Referenz {files} ({size}), die nicht auf diesem "
+                                       "Computer ist.\n\nNach {folder} laden? Sie bleibt dort für die nächste "
+                                       "Messung.",
+        "ditto_eval.measure.table": "Messung auf diesem Computer",
+        "ditto_eval.measure.passed": "{tier} hat auf diesem Computer bestanden ({numbers}): Ditto wird es "
+                                     "angeboten.",
+        "ditto_eval.measure.usable": "{tier} ist auf diesem Computer brauchbar ({numbers}): Ditto wird es als "
+                                     "brauchbar angeboten.",
+        "ditto_eval.measure.failed": "{tier} hat auf diesem Computer NICHT bestanden ({numbers}): {reasons}. Ditto "
+                                     "wird es nicht angeboten.",
+        "ditto_eval.col.measure.tier": "Stufe",
+        "ditto_eval.col.measure.verdict": "Urteil",
+        "ditto_eval.col.measure.tokens": "Tokens/s",
+        "ditto_eval.col.measure.kld": "KLD",
+        "ditto_eval.col.measure.top1": "Top-1",
+        "ditto_eval.col.measure.reference": "Referenz",
         "ditto_eval.col.unrelated": "Unpassend: kein Auszug",
         "ditto_eval.col.p50": "p50 ms",
         "ditto_eval.kind.tokens": "Token- und Cache-Messung (tokens; mehrere Runden, läuft nur angehakt)",

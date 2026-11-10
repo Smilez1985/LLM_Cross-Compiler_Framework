@@ -20,7 +20,7 @@ class Broken:
     def _fail(self, *args, **kwargs):
         raise self.error
 
-    cache_budget = cache_settings = choose_tier = status = _fail
+    cache_budget = cache_settings = choose_tier = tier_advice = status = _fail
 
 
 def _run(monkeypatch, error, *args):

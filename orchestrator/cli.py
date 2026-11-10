@@ -3972,6 +3972,13 @@ def runtime_start(ctx: FrameworkContext, tier: Optional[str], ctx_len: Optional[
     if status.kv_fallback:
         from orchestrator.runtime.llama_server import kv_fallback_text
         console.print(f"[yellow]{escape(kv_fallback_text(status.kv_fallback))}[/yellow]")
+    if status.tier:   # a 2-bit tier started by name without a passed measurement here: said plainly
+        try:
+            notice = rt.start_notice(rt.catalog.model(status.tier))
+        except KeyError:
+            notice = None
+        if notice:
+            console.print(f"[yellow]{escape(notice)}[/yellow]")
     console.print("Ditto uses it as the 'local' AI provider; the API key changes with every start and is readable "
                   "only by you.")
 
@@ -4066,7 +4073,7 @@ def models_list(ctx: FrameworkContext):
         table.add_row(escape(m.tier), escape(m.file), _gib(m.size), escape(m.license), labels[row.state],
                       ", ".join(notes))
     console.print(table)
-    console.print(f"Recommended for this machine: {escape(view.why)}")
+    console.print(escape(view.heading()))   # the one advice: recommended, usable, a candidate to evaluate or failed
 
 
 @ditto_models.command('download')
@@ -4084,7 +4091,9 @@ def models_download(ctx: FrameworkContext, tier: Optional[str], yes: bool):
         console.print(f"[red]{escape(str(e.args[0]))}[/red]")
         sys.exit(2)
     if why is not None:
-        console.print(f"Recommended: {escape(why)}")
+        offered = _plain_runtime_call("The model choice for this computer", lambda: rt.tier_advice().offered)
+        console.print(f"Recommended: {escape(why)}" if offered else
+                      f"[yellow]Downloaded to be evaluated, not offered to Ditto yet:[/yellow] {escape(why)}")
     elif tier is None:   # the tier chosen earlier: the model a plain `runtime start` loads
         console.print(f"Chosen earlier with 'runtime start --model': {escape(model.tier)}")
     if rt.model_ready(model):
@@ -4274,15 +4283,31 @@ def ditto_ask(ctx: FrameworkContext, question: str, no_tools: bool, provider: Op
               help='Exit code 1 if a run passes fewer cases than this share (e.g. 0.8)')
 @click.option('--effort', type=click.Choice(["low", "medium", "high"]), default=None,
               help='Reasoning effort for the run (local models: low = no thinking); default: AI settings')
+@click.option('--measure', is_flag=True, default=False,
+              help='With --tier: first measure each tier on this computer (tokens/s with llama-bench, KL divergence '
+                   'from its reference on the fixed evaluation text); the result decides whether a 2-bit tier is '
+                   'offered to Ditto (at least 8 tokens/s and KLD at most 0.05; up to 0.10 "usable")')
+@click.option('--measure-only', is_flag=True, default=False, help='--measure without the cases')
+@click.option('--chunks', type=click.IntRange(4, 48), default=16, show_default=True,
+              help='--measure: chunks of the evaluation text (more: a finer number, more time and disk)')
+@click.option('--ctx', 'measure_ctx', type=click.Choice(["256", "512", "1024"]), default="512", show_default=True,
+              help='--measure: tokens per chunk')
+@click.option('--again', is_flag=True, default=False,
+              help='--measure: measure a tier again although its measurement on this computer still counts')
+@click.option('--download-reference', is_flag=True, default=False,
+              help="--measure: download a missing reference (the tier's 16-bit original or its Q8_0) without asking")
 @pass_context
 def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Optional[str], model: Optional[str],
                tiers: Tuple[str, ...], kinds: Tuple[str, ...], rag_variants: Tuple[str, ...],
                case_ids: Tuple[str, ...], repeat: int, json_out: Optional[Path], min_pass: Optional[float],
-               effort: Optional[str], pause_minutes: Optional[float], i_pay: bool):
+               effort: Optional[str], pause_minutes: Optional[float], i_pay: bool, measure: bool = False,
+               measure_only: bool = False, chunks: int = 16, measure_ctx: str = "512", again: bool = False,
+               download_reference: bool = False):
     """Grade Ditto on fixed cases with the chosen provider/model, e.g. to check whether a 2-bit local model is
-    good enough, or the knowledge-base search (--kind retrieval, works offline once the embedding model is
-    downloaded), or measure tokens and cache hits per turn (--kind tokens). Nothing is built or changed. Cloud
-    providers bill every request (about 20 per run and repeat)."""
+    good enough (--measure --tier small-q2 measures its speed and KL divergence on this computer first), or the
+    knowledge-base search (--kind retrieval, works offline once the embedding model is downloaded), or measure tokens
+    and cache hits per turn (--kind tokens). Nothing is built or changed. Cloud providers bill every request (about 20
+    per run and repeat)."""
     from orchestrator.Core.ai_override import CLI_SOURCE, override_values
     from orchestrator.Core.ditto_manager import DittoError
     from orchestrator.evals.eval_run import (EvalEvents, EvalRunError, check_choice, check_paid, openai_check_path,
@@ -4291,6 +4316,17 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
                                              write_report)
     from orchestrator.runtime.llama_server import LocalRuntimeError
     ctx.require_framework()
+    measure = measure or measure_only
+    if measure and not tiers:
+        console.print("[red]--measure measures the managed local model of a tier: name it with --tier.[/red]")
+        sys.exit(2)
+    measured = _measure_tiers(ctx, tiers, chunks=chunks, ctx_len=int(measure_ctx), again=again,
+                              download=download_reference) if measure else []
+    if measure_only:
+        if json_out:
+            json_out.write_text(json.dumps({"measurement": measured}, indent=2), encoding="utf-8")
+            console.print(f"Report written to {escape(str(json_out))}")
+        sys.exit(0 if all(r.get("verdict") != "failed" for r in measured) else 1)
     # The same run as the GUI's Ditto > Evaluation... (evals/eval_run.py); this command prints it.
     try:
         check_choice(tiers, provider, model)
@@ -4395,10 +4431,101 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
         if saved is not None:
             console.print(f"Measurement written to {escape(str(saved))}")
     if json_out:
-        write_report(json_out, runs)
+        write_report(json_out, runs, measurement=measured or None)
         console.print(f"Report written to {escape(str(json_out))}")
+    if measured:
+        _print_measurement(measured)   # again under the cases, so the verdict is the last thing read
     if min_pass is not None and any(r.pass_rate < min_pass for r in runs):
         sys.exit(1)
+
+
+def _print_measurement(records) -> None:
+    """The measurement stage's table (eval_run.measurement_table, as the window shows it); a failed tier is said
+    plainly, with what it missed, a usable one with that word."""
+    from orchestrator.evals.eval_run import measurement_table
+    from orchestrator.evals.tier_check import result_lines
+    from orchestrator.runtime.tier_advice import failure_reasons
+    shown = measurement_table(records)
+    if shown is None:
+        return
+    columns, rows = shown
+    table = Table(title="Measurement on this computer")
+    for column in columns:
+        table.add_column(column)
+    styles = {"passed": "green", "usable": "yellow", "failed": "red"}
+    for row in rows:
+        table.add_row(escape(row[0]), f"[{styles.get(row[1], 'white')}]{escape(row[1])}[/]", *map(escape, row[2:]))
+    console.print(table)
+    for r, line in zip(records, result_lines(records)):
+        if r.get("verdict") == "failed":
+            console.print(f"[red]{escape(str(r.get('tier')))} failed on this computer: "
+                          f"{escape('; '.join(failure_reasons(r)))}. It is not offered to Ditto.[/red]")
+        elif r.get("verdict") == "usable":
+            console.print(f"[yellow]{escape(line)}: offered to Ditto as usable.[/yellow]")
+
+
+def _measure_tiers(ctx: FrameworkContext, tiers, *, chunks: int, ctx_len: int, again: bool, download: bool):
+    """The measurement stage of `ditto eval --measure` (eval_run.run_measurement, as the window runs it): planned and
+    checked first, a missing reference downloaded only after your yes (or --download-reference), then measured;
+    Ctrl+C stops it."""
+    import threading
+    from orchestrator.Core.runtime_layer import cache_dir_of
+    from orchestrator.evals.ditto_eval import EvalCancelled
+    from orchestrator.evals.eval_run import EvalRunError, run_measurement
+    from orchestrator.runtime.llama_server import LocalRuntimeError
+    rt = _local_runtime(ctx)
+    bar, update = _download_progress()
+
+    def confirm(missing, total) -> bool:
+        if download:
+            return True
+        if not _interactive():
+            return False
+        names = ", ".join(m.file for m in missing)
+        return click.confirm(f"Download the reference {names} ({_gib(total)}) into {rt.models_dir}?", default=True)
+
+    def downloading(*args):
+        if not bar.live.is_started:
+            bar.start()
+        update(*args)
+
+    def measuring(msg: str) -> None:
+        if bar.live.is_started:   # one live display at a time: the download's bar ends before the spinner
+            bar.stop()
+        status.start()
+        status.update(escape(msg))
+
+    if rt.endpoint() is not None:
+        console.print("[dim]Ditto's local server is running and shares this computer with the measurement; stop it "
+                      "for a clean number: llm-cli ditto runtime stop[/dim]")
+    stop = threading.Event()
+    status = console.status("Measuring on this computer ...")
+    try:
+        records = run_measurement(
+            rt, tiers, chunks=chunks, ctx=ctx_len, again=again,
+            cache_dir=cache_dir_of(*_settings(ctx)) / "tier-check",
+            confirm_download=confirm if (download or _interactive()) else None,
+            plan_lines=lambda lines: [console.print(escape(line)) for line in lines],
+            download_progress=downloading, progress=measuring,
+            stop=stop)
+    except KeyboardInterrupt:
+        stop.set()
+        console.print("[yellow]The measurement was stopped; nothing was recorded for the tier it measured.[/yellow]")
+        sys.exit(1)
+    except EvalCancelled as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        sys.exit(1)
+    except EvalRunError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(e.exit_code)
+    except LocalRuntimeError as e:
+        _runtime_failure(e)
+    finally:
+        status.stop()
+        if bar.live.is_started:
+            bar.stop()
+    _print_measurement(records)
+    return records
 
 
 # ============================================================================

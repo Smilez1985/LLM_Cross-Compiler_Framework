@@ -301,6 +301,11 @@ server:
 # Ditto models. kv_bytes_per_token: f16 KV cache per token, 2 (K,V) * attention layers * KV heads *
 # head dim * 2 bytes, from the base model's config.json (Qwen3.5 has full attention in 1 of 4 layers).
 # A newer model is a new entry here (plus a tier rule if it should be chosen automatically).
+# needs_eval: offered to Ditto only after `llm-cli ditto eval --measure` passed with it on this computer (the
+# 2-bit tiers; DESIGN "Ditto, the local runtime and the LLM layer"). reference: the tier's references for that
+# measurement, files of the same repository and revision: F16 the 16-bit original (the repository's BF16 file), Q8_0
+# for a computer whose memory the F16 does not fit (tuning.reference_type). Sizes and sha256 from the Hugging Face
+# API's LFS records of the pinned revision (api/models/<repo>/tree/<revision>), read on 2026-11-10.
 models:
   - tier: small
     repo: unsloth/Qwen3.5-2B-GGUF
@@ -311,6 +316,9 @@ models:
     license: apache-2.0
     native_context: 262144
     kv_bytes_per_token: 12288    # 2 * 6 full-attention layers * 2 KV heads * 256 * 2 bytes
+    reference:
+      F16: {file: Qwen3.5-2B-BF16.gguf, size: 3775709216, sha256: dc11be2ca4519954a3e4b013ef59497b5522209987d67891851113eda89619f1}
+      Q8_0: {file: Qwen3.5-2B-Q8_0.gguf, size: 2012012800, sha256: 1b04acba824817554f4ce23639bc8495ff70453b8fcb047900c731521021f2c1}
     description: Qwen3.5 2B (Q4_K_M) for machines with up to 4 GB RAM
 
   - tier: small-q2
@@ -322,6 +330,10 @@ models:
     license: apache-2.0
     native_context: 262144
     kv_bytes_per_token: 12288
+    needs_eval: true
+    reference:
+      F16: {file: Qwen3.5-2B-BF16.gguf, size: 3775709216, sha256: dc11be2ca4519954a3e4b013ef59497b5522209987d67891851113eda89619f1}
+      Q8_0: {file: Qwen3.5-2B-Q8_0.gguf, size: 2012012800, sha256: 1b04acba824817554f4ce23639bc8495ff70453b8fcb047900c731521021f2c1}
     description: Qwen3.5 2B at 2-bit (UD-Q2_K_XL) for weak hardware (3 GB RAM or less); less accurate
 
   - tier: default
@@ -333,6 +345,9 @@ models:
     license: apache-2.0
     native_context: 262144
     kv_bytes_per_token: 32768    # 2 * 8 full-attention layers * 4 KV heads * 256 * 2 bytes
+    reference:
+      F16: {file: Qwen3.5-4B-BF16.gguf, size: 8424393632, sha256: 9e6e2841a75f503ccb330831832fd7861266e187e0dbf149a954219ccb8c197a}
+      Q8_0: {file: Qwen3.5-4B-Q8_0.gguf, size: 4482403488, sha256: 10cc391b403021dd11c614679d2fd92f611c3681d29e29651b717316965d61e1}
     description: Qwen3.5 4B (Q4_K_M), the default
 
   - tier: default-q2
@@ -345,6 +360,10 @@ models:
     license: apache-2.0
     native_context: 262144
     kv_bytes_per_token: 32768
+    needs_eval: true
+    reference:
+      F16: {file: Qwen3.5-4B-BF16.gguf, size: 8424393632, sha256: 9e6e2841a75f503ccb330831832fd7861266e187e0dbf149a954219ccb8c197a}
+      Q8_0: {file: Qwen3.5-4B-Q8_0.gguf, size: 4482403488, sha256: 10cc391b403021dd11c614679d2fd92f611c3681d29e29651b717316965d61e1}
     description: Qwen3.5 4B at 2-bit (UD-Q2_K_XL), only on request; for comparing with the 2B at 4-bit
 
   - tier: large
@@ -356,6 +375,9 @@ models:
     license: apache-2.0
     native_context: 262144
     kv_bytes_per_token: 32768
+    reference:
+      F16: {file: Qwen3.5-9B-BF16.gguf, size: 17920697312, sha256: daebe40eeea7057c1cdf35ac56d13f507d8bf12171bbb7a6b6b0d3f05439159a}
+      Q8_0: {file: Qwen3.5-9B-Q8_0.gguf, size: 9527502048, sha256: 809626574d0cb43d4becfa56169980da2bb448f2299270f7be443cb89d0a6ae4}
     description: Qwen3.5 9B (Q4_K_M) for GPUs with 8 GB VRAM or more (e.g. RTX 2080 Ti, RTX 3090)
 
   - tier: large-iq2
@@ -368,6 +390,10 @@ models:
     license: apache-2.0
     native_context: 262144
     kv_bytes_per_token: 32768
+    needs_eval: true
+    reference:
+      F16: {file: Qwen3.5-9B-BF16.gguf, size: 17920697312, sha256: daebe40eeea7057c1cdf35ac56d13f507d8bf12171bbb7a6b6b0d3f05439159a}
+      Q8_0: {file: Qwen3.5-9B-Q8_0.gguf, size: 9527502048, sha256: 809626574d0cb43d4becfa56169980da2bb448f2299270f7be443cb89d0a6ae4}
     description: Qwen3.5 9B at 2-bit (UD-IQ2_M), only on request; noticeably less accurate
 
   - tier: granite
@@ -380,6 +406,9 @@ models:
     license: apache-2.0
     native_context: 131072
     kv_bytes_per_token: 81920    # 2 * 40 layers * 8 KV heads * 64 * 2 bytes
+    reference:
+      F16: {file: granite-4.2-3b-bf16.gguf, size: 7323461152, sha256: 8aad15f38ab5796190c9701b1913fd8f0bef01968a42cd16ffe469831564ef47}
+      Q8_0: {file: granite-4.2-3b-Q8_0.gguf, size: 3892651552, sha256: fbe986738041418e26de9e123ba740cb654931f85bf572a71bd01f9e6b85e53d}
     description: IBM Granite 4.2 3B (Q4_K_M), fallback model family
 
 # Automatic tier choice: the first rule whose conditions hold AND whose model fits next to the system
