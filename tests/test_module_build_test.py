@@ -3,6 +3,7 @@ beside target.yml (never target.yml itself, never the target's digest), the buil
 repair by hand and from the error log through the edit step (only the person saves), and the state in the CLI's
 `targets list`, the targets window, the Builder and the AI's tools."""
 import json
+import os
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -63,7 +64,8 @@ def test_a_new_module_is_untested_and_a_passed_build_marks_it_tested_with_id_dat
     # the record is beside target.yml: target.yml, its marks and the target's digest stay as they were
     assert (module / "target.yml").read_text() == yml and "untested: true" in yml
     assert installed_digest(module) == digest
-    assert (module / module_test.RECORD_NAME).stat().st_mode & 0o077 == 0
+    if os.name != "nt":  # Windows keeps a file private by its folder's permissions, not by POSIX modes
+        assert (module / module_test.RECORD_NAME).stat().st_mode & 0o077 == 0
     # a later pass keeps the first passed build as the tested mark
     module_test.record_build(module, build_id="b_again", passed=True)
     assert module_test.state_of(module).tested_build == "b_pass"
@@ -474,7 +476,7 @@ def test_targets_list_shows_the_build_test_of_each_target(make_framework, tmp_pa
     assert data["rockchip"]["build_test"]["state"] == "untested"
 
 
-def test_the_builder_logs_the_state_and_offers_the_repair_after_a_failed_build(module, monkeypatch):
+def test_the_builder_logs_the_state_and_offers_the_repair_after_a_failed_build(qapp, module, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
     from orchestrator.gui import builder_tab
     fail(module)
