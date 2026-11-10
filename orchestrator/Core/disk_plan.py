@@ -109,7 +109,12 @@ def reserve_for(disk_total: int, standing: bool = False) -> int:
 
 
 def bits_of(quantization: Optional[str]) -> float:
-    """Bits per weight a quantization type keeps, roughly (16 for F16/BF16, 32 for F32, 8 and below otherwise)."""
+    """Bits per weight a quantization type keeps: the framework's one table (memory_estimate.QUANT_BITS, also the NPU
+    formats' types), else roughly (16 for F16/BF16, 32 for F32, 8 and below otherwise)."""
+    from orchestrator.Core.memory_estimate import bits_per_weight
+    known = bits_per_weight(quantization)
+    if known is not None:
+        return known
     q = (quantization or "").upper()
     if "F32" in q or "FP32" in q:
         return 32.0

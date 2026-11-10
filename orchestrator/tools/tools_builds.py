@@ -386,7 +386,8 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
             service.take_preload(inp.target, inp.preload)
         return start_accepted(service, bound, ctx, lambda reservation: service.start_build(
             start_request(inp, bound), owner=ctx.owner, optimization=bound.get("optimization") or inp.optimization,
-            disk_reservation=reservation, preflight_accepted=list(bound.get("preflight") or [])))
+            disk_reservation=reservation, preflight_accepted=list(bound.get("preflight") or []),
+            memory_estimate=bound.get("memory_estimate") if isinstance(bound.get("memory_estimate"), dict) else None))
 
     def check_build_request(inp, ctx):
         look_up = inp.include_download_size and hub_lookup_allowed(inp, ctx)

@@ -88,6 +88,9 @@ CLI_PATHS: Dict[str, str] = {
     "build preflight --board": "combo_builder_board",
     "build preflight --probe": "btn_deploy_scan",
     "build preflight --gpu": "chk_builder_gpu",
+    # the memory estimate of the model at the type: the Builder's line under the quantization (lbl_builder_memory_estimate)
+    "build preflight --model": "combo_builder_model",
+    "build preflight --quantization": "combo_builder_quantization",
     "build save": "btn_deploy_save",                          # Deployment tab > Save...
     "build save --to": "btn_deploy_save",                     # its folder dialog chooses the folder
     # Build > Build Dependencies...: the dependency cache of module CMake options (runtime/build/deps.py)

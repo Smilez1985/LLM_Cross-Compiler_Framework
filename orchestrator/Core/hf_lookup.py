@@ -191,3 +191,30 @@ def look_up(repo: str, revision: Optional[str], token: Optional[str], api: Any =
                                  "stored in the framework has no access to it.", code="permission_denied",
                                  next=TOKEN_NEXT)
     return facts
+
+
+CONFIG_MAX = 1 << 20   # a model's config.json larger than this is not read
+
+
+def model_config(facts: ModelFacts, token: Optional[str], fetcher: Any = None) -> Optional[dict]:
+    """The model's config.json at the commit its facts were looked up for (the shape the memory estimate before the
+    build reads: Core/memory_estimate.shape_from_config): one small file from huggingface.co through the framework's
+    fetcher (HubFetcher; the stored token only where the Hub needs it), into a temporary folder that is removed. None
+    when the repository has none, it is larger than CONFIG_MAX, no commit is known or it cannot be fetched or read.
+    Repository text: untrusted, only numbers are taken from it."""
+    import json
+    import tempfile
+    from pathlib import Path
+    file = next((f for f in facts.files if f.name == "config.json"), None)
+    if file is None or not facts.commit or not isinstance(file.size, int) or not 0 < file.size <= CONFIG_MAX:
+        return None
+    if fetcher is None:
+        from orchestrator.Core.hf_hub import HubFetcher
+        fetcher = HubFetcher(token, token_needed=facts.gated != "false" or facts.token_access == "yes")
+    try:
+        with tempfile.TemporaryDirectory(prefix="llmcf-config-") as tmp:
+            path, _digest = fetcher.fetch_file(facts.repo, facts.commit, file, Path(tmp) / "config.json", attempts=2)
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - not fetched or not JSON: the estimate falls back to the parameter count
+        return None
+    return data if isinstance(data, dict) else None

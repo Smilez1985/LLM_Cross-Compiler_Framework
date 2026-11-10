@@ -124,6 +124,9 @@ class BuildRequest:
     # A recipe build (BuildService.recipe_record): the recipe, the variables the person changed, its target pin and
     # reference results; the build engine compares the result with them and records it in build_info.json
     recipe: Optional[Dict[str, Any]] = None
+    # The memory estimate before the build (BuildService.memory_estimate, MemoryEstimate.as_dict): handed to the build
+    # engine, which records it next to the real file size and counts its KV cache in the warning after the build
+    memory_estimate: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if not self.request_id:
@@ -614,6 +617,7 @@ class LLMOrchestrator:
             disk_reservation=getattr(req, "disk_reservation", "") or "",
             module_flags=getattr(req, "flag_decision", None),
             recipe=dict(req.recipe) if getattr(req, "recipe", None) else None,
+            memory_estimate=dict(req.memory_estimate) if getattr(req, "memory_estimate", None) else None,
         )
 
     @staticmethod

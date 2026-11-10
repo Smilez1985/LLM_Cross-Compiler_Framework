@@ -237,7 +237,10 @@ class TestCheckBuildRequest:
         assert out.normalized.quantization == "Q4_K_M" and out.normalized.revision == COMMIT_A
         assert out.model_source.download_bytes == 15 * GB + 700 and out.model_source.weights == "safetensors"
         assert out.disk and out.disk[0].fits and out.fit.host.state in ("fits", "tight", "does_not_fit")
-        assert out.fit.target.state == "unknown" and "scan --import" in out.fit.target.source
+        # the board's memory before the build: the most the board comes with (no probe), the model's size guessed from
+        # the download (no parameter count, no config.json): an estimate, and the way to the board's own memory
+        assert out.fit.target.state == "fits" and "the most memory a" in out.fit.target.source
+        assert "scan --import" in out.fit.target.source
         assert out.decision == "ask" and out.problems == []
         assert any("pre-flight" in n for n in out.notes)
 

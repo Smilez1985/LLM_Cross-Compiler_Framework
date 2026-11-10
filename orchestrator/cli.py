@@ -1320,6 +1320,9 @@ def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[st
                 console.print(f"[red]{escape(problem)}[/red]")
             sys.exit(2)
         ignore_preflight = _decide_preflight(ctx, preflight, ignore_preflight, "Build anyway?")
+        # The memory estimate before the build (Core/memory_estimate.py): the model at its type against the board's
+        # memory; a warning, never a refusal (you decide), recorded with the build next to the real file size
+        memory_estimate = _print_memory_estimate(service, request)
         # the level given, else the board profile's (round 23 item 10), as the Builder and start_build choose it; with a
         # recipe the given level, else the recipe's, else the board profile's (Core/recipe_optimization.py)
         if recipe is not None:
@@ -1368,7 +1371,8 @@ def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[st
         try:
             options = dict(local_paths=True, priority=priority, output_dir=output_dir,
                            flag_decision=module_flags, remember_flags=remember_flags, flag_channel="framework-cli",
-                           ignore_preflight=ignore_preflight, description=f"CLI build: {model} -> {target} ({format})")
+                           ignore_preflight=ignore_preflight, description=f"CLI build: {model} -> {target} ({format})",
+                           memory_estimate=memory_estimate)
             if recipe is not None:   # the level is one of the recipe's variables (choices.optimization)
                 request_id = service.start_recipe(recipe.id, dataset_path=recipe_dataset, use_gpu=gpu, probe=probe,
                                                   choices=choices, **options).request_id
@@ -1708,6 +1712,22 @@ def _print_preflight(result, *, quiet_pass: bool = False) -> None:
         console.print(f"  [{style}]{escape(finding.line())}[/{style}]")
     for line in lines[1 + len(result.findings):]:
         console.print(f"  {escape(line)}")
+
+
+def _print_memory_estimate(service, request) -> Optional[dict]:
+    """Prints the memory estimate of a validated request before its build (BuildService.memory_estimate: the model at
+    its type against the board's memory; green fits, yellow tight or unknown, red does not fit) and returns it for the
+    build's record. Never stops anything: a warning, the person decides. Nothing without a board."""
+    try:
+        est = service.memory_estimate(request)
+    except Exception as e:  # noqa: BLE001 - an estimate that cannot be made is said, never a stop
+        console.print(f"[yellow]Memory estimate: not made ({escape(str(e))[:200]}).[/yellow]")
+        return None
+    if est is None:
+        return None
+    color = {"fits": "green", "tight": "yellow", "does_not_fit": "red"}.get(est.state, "yellow")
+    console.print(f"[{color}]{escape(est.text())}[/{color}]")
+    return est.as_dict() if est.state != "unknown" else None
 
 
 def _decide_preflight(ctx: FrameworkContext, result, ignore: bool, question: str) -> bool:
@@ -2140,29 +2160,47 @@ def build_save(ctx: FrameworkContext, artifact: str, destination: Optional[str])
               help="The board's hardware probe by its id ('llm-cli device list'); default: the newest stored probe "
                    "of a board of this SoC")
 @click.option('--gpu/--no-gpu', default=False, help='Check a GPU build (this computer\'s NVIDIA driver)')
+@click.option('--model', '-m', default=None,
+              help="The model (Hugging Face id or local path): with it the memory estimate of the model at the "
+                   "quantization against the board's memory is shown too")
+@click.option('--quantization', '-q', default=None,
+              help="The quantization for the memory estimate (default: the board's default type)")
 @click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
 @pass_context
 def build_preflight(ctx: FrameworkContext, target: str, format: str, board: Optional[str], probe: Optional[str],
-                    gpu: bool, as_json: bool):
+                    gpu: bool, as_json: bool, model: Optional[str] = None, quantization: Optional[str] = None):
     """The pre-flight check of a build, without starting anything: compares the hardware probes with what the build
     needs (for a GPU build this computer's NVIDIA driver with the CUDA version of the target's GPU image; for an NPU
     format the board's NPU driver and runtime with the target's toolkit) and says what stops the build, what is only a
     warning, and what could not be compared. `build start` runs the same check. Exit code 0 passed or warnings only, 1
-    the build would stop, 2 an invalid request"""
+    the build would stop, 2 an invalid request. With --model the memory estimate of the model at the quantization
+    against the board's memory is shown as well (a warning only, it never changes the exit code)"""
     import json as _json
     from orchestrator.Core.build_service import BuildServiceError
     ctx.require_framework()
     service = _build_service(ctx)
     try:
         result = service.preflight_for(target, format, board, probe, gpu)
+        request = service.validate(service.request_in(model=model, target=target, format=format, board=board,
+                                                      quantization=quantization, use_gpu=gpu, probe=probe),
+                                   local_paths=True) if model else None
     except BuildServiceError as e:
         for problem in getattr(e, "problems", None) or [str(e)]:
             console.print(f"[red]{escape(problem)}[/red]")
         sys.exit(2)
     if as_json:
-        click.echo(_json.dumps(result.as_dict(), indent=2))
+        out = result.as_dict()
+        if request is not None:
+            try:
+                est = service.memory_estimate(request)
+            except Exception:  # noqa: BLE001 - not made: left out
+                est = None
+            out["memory_estimate"] = {**est.as_dict(), "text": est.text()} if est is not None else None
+        click.echo(_json.dumps(out, indent=2))
     else:
         _print_preflight(result)
+        if request is not None:
+            _print_memory_estimate(service, request)
     sys.exit(1 if result.stopped else 0)
 
 

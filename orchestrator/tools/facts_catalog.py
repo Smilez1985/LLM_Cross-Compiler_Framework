@@ -168,8 +168,9 @@ WARNINGS: Dict[str, WarningSpec] = {
         "situation", "On the board: tight ({needed_gb} GB needed, {usable_gb} GB).",
         "yes when the person asked for this board"),
     "target_fit_does_not_fit": WarningSpec(
-        "situation", "On the board: does not fit ({needed_gb} GB needed, {usable_gb} GB): the model will not run "
-                     "there.", "no, unless the person said to build anyway; suggest a smaller quantization",
+        "situation", "On the board: does not fit ({needed_gb} GB needed, {usable_gb} GB; estimate): the model will "
+                     "run there only with swap and much slower, if at all.",
+        "no, unless the person said to build anyway; suggest a smaller quantization",
         safer="safer.smaller_quantization", if_unsure="no"),
     "image_build_needed": WarningSpec(
         "situation", "First build for this target: its image is built first from Docker Official Images (network).",

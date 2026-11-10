@@ -293,6 +293,23 @@ class CommitLookupWorker(QThread):
         self.found.emit(commit)
 
 
+class MemoryEstimateWorker(QThread):
+    """The memory estimate of the form's build before it starts (BuildService.memory_estimate: the model's
+    config.json may be read from Hugging Face) off the GUI thread. `token` names the form state it was asked for."""
+    done = Signal(int, object)  # the token, the MemoryEstimate or None
+
+    def __init__(self, service, request, token):
+        super().__init__()
+        self.service, self.request, self.token = service, request, token
+
+    def run(self):
+        try:
+            est = self.service.memory_estimate(self.request)
+        except Exception:  # noqa: BLE001 - an estimate that cannot be made shows nothing, never a stop
+            est = None
+        self.done.emit(self.token, est)
+
+
 class CancelBuildWorker(QThread):
     """Cancels a build through the build service and waits until it has stopped (off the GUI thread)."""
     finished = Signal(str, str)  # outcome ("cancelled", "finished", "running" or "error"), message
@@ -548,6 +565,19 @@ class BuilderTab(QWidget):
         self.lbl_board_profile.setObjectName("lbl_builder_board_profile")
         self.lbl_board_profile.setWordWrap(True)
         self.lbl_board_profile.setVisible(False)
+        # The memory estimate of the model at the chosen type against the board's memory, before the build
+        # (Core/memory_estimate.py): a warning, never a refusal; updated when model, board or type change
+        self.lbl_memory_estimate = plain_label("", self)
+        self.lbl_memory_estimate.setObjectName("lbl_builder_memory_estimate")
+        self.lbl_memory_estimate.setWordWrap(True)
+        self.lbl_memory_estimate.setVisible(False)
+        self._memory_token = 0
+        self._memory_shown = None      # (form key, MemoryEstimate) of the line shown
+        self._memory_workers = []
+        self._memory_timer = QTimer(self)
+        self._memory_timer.setSingleShot(True)
+        self._memory_timer.setInterval(600)
+        self._memory_timer.timeout.connect(self._update_memory_estimate)
         self._update_quant_options()
         # The queue orders by it; a failed critical build stops the pipeline (`build start --priority`)
         self.priority_combo = QComboBox()
@@ -599,6 +629,7 @@ class BuilderTab(QWidget):
         build_layout.addRow("Board:", self.board_combo)
         build_layout.addRow("", self.lbl_board_profile)
         build_layout.addRow(self.lbl_quant, self.quant_combo)
+        build_layout.addRow("", self.lbl_memory_estimate)
         build_layout.addRow("Optimization:", self.opt_combo)
         build_layout.addRow(ui_text("bld.builder.priority"), self.priority_combo)
         build_layout.addRow("Calibration:", row_dataset)
@@ -607,6 +638,10 @@ class BuilderTab(QWidget):
         self.target_combo.currentIndexChanged.connect(self._apply_target_capabilities)
         self._apply_target_capabilities()
         build_layout.addRow("", self.chk_gpu)
+        for signal in (self.quant_combo.currentTextChanged, self.board_combo.currentIndexChanged,
+                       self.format_combo.currentIndexChanged, self.target_combo.currentIndexChanged,
+                       self.model_input.currentTextChanged):
+            signal.connect(self._schedule_memory_estimate)
         
         build_group.setLayout(build_layout)
         left_col.addWidget(build_group)
@@ -1538,6 +1573,79 @@ class BuilderTab(QWidget):
             self._set_state("fail")
             self._log(f"AI Failed: {msg}")
 
+    # --- the memory estimate before the build (Core/memory_estimate.py) ---------------------------------------------
+
+    def _schedule_memory_estimate(self, *_):
+        """A change of model, board, format or type: the estimate is asked again shortly after the last change."""
+        if hasattr(self, "_memory_timer"):
+            self._memory_timer.start()
+
+    def _memory_request(self):
+        """(form key, validated build request) of the form as it would build, or (key, None) when it names no model or
+        no board, or the service refuses it (start shows why)."""
+        board = self._selected_board()
+        quant = self.quant_combo.currentText().strip() or None
+        fmt = self.format_combo.currentData()
+        caps = self._capabilities()
+        if caps:
+            _, board, quant = caps.normalize(fmt, board, quant)
+        model = self.model_input.currentText().strip()
+        target = self.target_combo.currentData()
+        key = (model, target, fmt, board, quant)
+        service = self._build_service()
+        if not (model and target and board) or service is None:
+            return key, None
+        try:
+            request = service.validate(service.request_in(
+                model=model, target=target, format=fmt, board=board, quantization=quant,
+                use_imatrix=self.chk_imatrix.isChecked(), probe=self._board_probe_id(target)), local_paths=True)
+        except Exception:  # noqa: BLE001 - a form the service refuses: no estimate (Start says why)
+            return key, None
+        return key, request
+
+    def _update_memory_estimate(self):
+        """Asks the service for the estimate of the form's build in a worker; the line says it is reading meanwhile."""
+        key, request = self._memory_request()
+        self._memory_token += 1
+        if request is None:
+            self._memory_shown = None
+            self.lbl_memory_estimate.setVisible(False)
+            return
+        self.lbl_memory_estimate.setText(ui_text("mem.estimating"))
+        self.lbl_memory_estimate.setStyleSheet("")
+        self.lbl_memory_estimate.setVisible(True)
+        self._memory_pending = key
+        worker = MemoryEstimateWorker(self._build_service(), request, self._memory_token)
+        worker.done.connect(self._on_memory_estimate)
+        worker.finished.connect(lambda w=worker: self._memory_workers.remove(w)
+                                if w in self._memory_workers else None)
+        self._memory_workers.append(worker)
+        worker.start()
+
+    def _on_memory_estimate(self, token, est):
+        """The estimate's line under the quantization (an older answer than the form's last change is dropped)."""
+        if token != self._memory_token:
+            return
+        if est is None:
+            self._memory_shown = None
+            self.lbl_memory_estimate.setVisible(False)
+            return
+        self._memory_shown = (getattr(self, "_memory_pending", None), est)
+        colors = {"does_not_fit": "color: #c62828;", "tight": "color: #b26a00;"}
+        self.lbl_memory_estimate.setStyleSheet(colors.get(est.state, ""))
+        self.lbl_memory_estimate.setText(est.text(None))
+        self.lbl_memory_estimate.setVisible(True)
+
+    def _memory_record(self, values):
+        """The estimate the line showed for exactly these form values, for the build's record (None otherwise)."""
+        shown = getattr(self, "_memory_shown", None)
+        if not shown:
+            return None
+        key, est = shown
+        if key != (values["model"], values["target"], values["target_fmt"].value, values["board"], values["quant"]):
+            return None
+        return est.as_dict() if est.state != "unknown" else None
+
     def _submit_build(self):
         if not board_confirmed(self):  # a probe that was not sure about the board: the person confirms it (N9')
             return
@@ -1767,7 +1875,8 @@ class BuilderTab(QWidget):
             return service.start_recipe(recipe.id, dataset_path=dataset, use_gpu=values["use_gpu"],
                                         expect=self._recipe_expect(values), probe=values.get("probe"),
                                         choices=choices, **options).request_id
-        return service.start_build(self._service_request(values), **options).request_id
+        return service.start_build(self._service_request(values), memory_estimate=self._memory_record(values),
+                                   **options).request_id
 
     def _log_recipe_changes(self, service, recipe, values, choices) -> None:
         """One line in the Builder log before a recipe build: built as the recipe pins it, or what the person changed

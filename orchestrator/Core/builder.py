@@ -266,6 +266,9 @@ class BuildConfiguration:
     # A recipe build (BuildService.recipe_record): compared with the target the build uses (_record_target) and with
     # the result (_recipe_outcome), written into build_info.json as "recipe"
     recipe: Optional[Dict[str, Any]] = None
+    # The memory estimate before the build (Core/memory_estimate.py MemoryEstimate.as_dict, made by BuildService):
+    # recorded in build_info.json next to the real file size, its KV cache counted by the warning after the build
+    memory_estimate: Optional[Dict[str, Any]] = None
     # Who started it through a tool (BuildRequest.owner: "mcp#<session>", "ditto"; empty for the GUI and the CLI):
     # an AI-started build stops at the soft cap (_step_limits)
     owner: str = ""
@@ -2883,6 +2886,10 @@ class BuildEngine:
             build_identity.MANIFEST_KEY: options,
             build_identity.DIGEST_KEY: build_identity.options_sha256(options),
         })
+        estimate = self._memory_estimate(config)
+        if estimate is not None:   # the estimate before the build next to the real size, for later calibration
+            real = next((a["bytes"] for a in artifacts if a["file"] == primary), None)
+            info["memory_estimate"] = {**estimate, "real_model_bytes": real}
         if getattr(config, "recipe", None):   # a recipe build: what was changed and whether the result reproduced the recipe's reference
             info["recipe"] = self._recipe_outcome(config, next((a for a in artifacts if a["file"] == primary), None),
                                                   progress)
@@ -3006,39 +3013,48 @@ class BuildEngine:
     def _board_ram(self, config: BuildConfiguration) -> Tuple[Optional[float], str]:
         """(MiB, where it comes from) of the build's board: its probe's RAM_TOTAL_MB when the build has a probe,
         else the most memory the board comes with (ram_max_gb of the target's capabilities); (None, "") when
-        neither says."""
+        neither says (board_profiles.board_memory, the source the estimate before the build reads too)."""
+        from orchestrator.Core.board_profiles import board_memory
+        probe = None
         if config.hardware_probe:
             try:
                 from orchestrator.runtime.probe_service import HardwareProbes
                 state = getattr(self.config, "user_state_dir", None)
                 probes = HardwareProbes(Path(state)) if isinstance(state, (str, Path)) else HardwareProbes()
-                ram = probes.get(config.hardware_probe).int_value("RAM_TOTAL_MB")
-                if ram:
-                    return float(ram), "the board's probe"
+                probe = probes.get(config.hardware_probe)
             except Exception:  # noqa: BLE001 - a probe that cannot be read: the capabilities' value
-                pass
-        board = config.target_board
+                probe = None
+        caps = None
         tm = self.target_manager
-        if not board or tm is None or not hasattr(tm, "get_capabilities"):
-            return None, ""
-        try:
-            caps = tm.get_capabilities(config.target_arch)
-            name = caps.canonical_board(board) if caps is not None else None
-            gb = caps.boards[name].ram_max_gb if name else None
-        except Exception:  # noqa: BLE001 - no capabilities: nothing to compare with
-            return None, ""
-        return (float(gb) * 1024, f"the most memory a {name} comes with") if gb else (None, "")
+        if config.target_board and tm is not None and hasattr(tm, "get_capabilities"):
+            try:
+                caps = tm.get_capabilities(config.target_arch)
+            except Exception:  # noqa: BLE001 - no capabilities: nothing to compare with
+                caps = None
+        return board_memory(probe, caps, config.target_board)
+
+    def _memory_estimate(self, config: BuildConfiguration) -> Optional[Dict[str, Any]]:
+        """The memory estimate made before the build (BuildService.memory_estimate) when it is of this build's type."""
+        est = getattr(config, "memory_estimate", None)
+        if not isinstance(est, dict):
+            return None
+        if str(est.get("quantization") or "").casefold() != str(config.quantization or "").casefold():
+            return None
+        return est
 
     def _board_memory_warning(self, config: BuildConfiguration, manifest: Dict[str, Any],
                               progress: BuildProgress) -> None:
-        """A warning when the build's model is large for its board's memory (board_profiles.memory_warning): the
-        build is never stopped for it, the person decides what they ask of their board."""
+        """A warning when the build's model is large for its board's memory (board_profiles.memory_warning, with the
+        KV cache the estimate before the build counted and that estimate's need named beside it): the build is never
+        stopped for it, the person decides what they ask of their board."""
         primary = next((a for a in manifest.get("artifacts", []) if a["file"] == manifest.get("primary")), None)
         if primary is None or not config.target_board:
             return
         from orchestrator.Core.board_profiles import memory_warning
         ram, source = self._board_ram(config)
-        text = memory_warning(int(primary.get("bytes") or 0), ram, str(config.target_board), source)
+        est = self._memory_estimate(config) or {}
+        text = memory_warning(int(primary.get("bytes") or 0), ram, str(config.target_board), source,
+                              kv_bytes=int(est.get("kv_bytes") or 0), estimate_mib=est.get("need_mib"))
         if text:
             progress.add_warning(text)
 

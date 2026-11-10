@@ -221,30 +221,74 @@ def ordered_quantizations(offered: Sequence[str], profile: Optional[Optimization
 
 # --- the board's memory: a warning, the person decides ---------------------------------------------------------
 
-# The server's buffers next to the weights (compute buffers, a small context) as a share of the model file: an
-# estimate for the warning only; the board measurement says the real need.
+# The server's buffers next to the weights (compute buffers) as a share of the model file: an estimate for the
+# warning only; the board measurement says the real need. The KV cache of the context comes on top when it is known
+# (the memory estimate before the build counts it, and the warning after the build takes the same number).
 SERVER_SHARE = 0.10
 TIGHT_SHARE = 0.75
 
 
-def memory_warning(model_bytes: int, ram_mib: Optional[float], board: str, source: str) -> Optional[str]:
+def memory_state(need_mib: float, ram_mib: float) -> str:
+    """The verdict of a need against the board's memory, for the estimate before the build (memory_estimate) and the
+    warning after it alike, so the two never disagree on the same numbers: does_not_fit above the memory, tight above
+    TIGHT_SHARE of it, else fits."""
+    if need_mib > ram_mib:
+        return "does_not_fit"
+    return "tight" if need_mib > ram_mib * TIGHT_SHARE else "fits"
+
+
+def memory_need_mib(model_bytes: int, kv_bytes: int = 0) -> int:
+    """MiB a model needs on the board: the file plus SERVER_SHARE of it for the server, plus the KV cache when it is
+    known."""
+    return int((model_bytes * (1 + SERVER_SHARE) + max(0, int(kv_bytes or 0))) / 1048576 + 0.5)
+
+
+def memory_warning(model_bytes: int, ram_mib: Optional[float], board: str, source: str,
+                   kv_bytes: int = 0, estimate_mib: Optional[int] = None) -> Optional[str]:
     """The warning when a model file is large for the board's memory (`ram_mib`, from `source`: "the board's probe"
-    or "the most memory a <board> comes with"), None when it fits with room. Never a refusal: a profile recommends,
-    the person decides what they ask of their board (the board measurement then says the real need)."""
+    or "the most memory a <board> comes with"), None when it fits with room. `kv_bytes`: the KV cache the estimate
+    before the build counted (the same context and type), `estimate_mib` that estimate's need, named next to the real
+    one. Never a refusal: a profile recommends, the person decides what they ask of their board (the board
+    measurement then says the real need)."""
     if not model_bytes or not ram_mib or ram_mib <= 0:
         return None
-    need = int(model_bytes * (1 + SERVER_SHARE) / 1048576 + 0.5)
+    need = memory_need_mib(model_bytes, kv_bytes)
     ram = int(ram_mib)
-    if need > ram:
-        return (f"The model needs about {need} MB of memory on the board (the file and about a tenth for the "
-                f"server), and {board} has {ram} MB ({source}): it will run only with swap and much slower, if at "
-                "all. Your choice: deploy it anyway, or pick a smaller model or quantization (the board's profile "
-                "lists the ones that suit it); the benchmark on the board measures what really fits.")
-    if need > ram * TIGHT_SHARE:
-        return (f"The model needs about {need} MB of memory on the board, of the {ram} MB of {board} ({source}): "
-                "little room is left for the system and the context; the benchmark on the board measures what "
-                "really fits.")
+    state = memory_state(need, ram)
+    what = "the file and about a tenth for the server" + (", and the KV cache of the context" if kv_bytes else "")
+    before = f"; estimated before the build: about {estimate_mib} MB" if estimate_mib else ""
+    if state == "does_not_fit":
+        return (f"The model needs about {need} MB of memory on the board ({what}{before}), and {board} has {ram} MB "
+                f"({source}): it will run only with swap and much slower, if at all. Your choice: deploy it anyway, "
+                "or pick a smaller model or quantization (the board's profile lists the ones that suit it); the "
+                "benchmark on the board measures what really fits.")
+    if state == "tight":
+        return (f"The model needs about {need} MB of memory on the board ({what}{before}), of the {ram} MB of "
+                f"{board} ({source}): little room is left for the system and the context; the benchmark on the "
+                "board measures what really fits.")
     return None
+
+
+def board_memory(probe: Any, caps: Optional[TargetCapabilities], board: Optional[str]) -> Tuple[Optional[float], str]:
+    """(MiB, where it comes from) of a build's board: its probe's RAM_TOTAL_MB when the build has a probe, else the
+    most memory the board comes with (ram_max_gb of the target's capabilities); (None, "") when neither says. The
+    one source of the board's memory for the estimate before the build and the warning after it."""
+    int_value = getattr(probe, "int_value", None)
+    if callable(int_value):
+        try:
+            ram = int_value("RAM_TOTAL_MB")
+        except Exception:  # noqa: BLE001 - a probe without the value: the capabilities' value
+            ram = None
+        if ram:
+            return float(ram), "the board's probe"   # memory_estimate.PROBE_SOURCE
+    if caps is None or not board:
+        return None, ""
+    try:
+        name = caps.canonical_board(board)
+        gb = caps.boards[name].ram_max_gb if name else None
+    except Exception:  # noqa: BLE001 - no capabilities: nothing to compare with
+        return None, ""
+    return (float(gb) * 1024, f"the most memory a {name} comes with") if gb else (None, "")
 
 
 # --- benchmarks ---------------------------------------------------------------------------------------------------
@@ -368,7 +412,8 @@ def benchmark_fields_text() -> str:
             "(llama-bench on the board, device_tests.json)")
 
 
-__all__ = ["DEFAULT_OPTIMIZATION", "benchmark_fields_text", "board_data", "board_lines", "check_board_data",
+__all__ = ["DEFAULT_OPTIMIZATION", "benchmark_fields_text", "board_data", "board_lines", "board_memory",
+           "check_board_data", "memory_need_mib", "memory_state", "memory_warning",
            "measured_row", "newest_measured", "old_format_entries", "old_format_note", "optimization_for", "ordered_quantizations", "plan_problems", "planned_profile_values",
            "profile_for", "profile_text", "recipe_plan", "reference_probe", "row_text", "rows_for", "board_tooltip",
            "variant_lines"]

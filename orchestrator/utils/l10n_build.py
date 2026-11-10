@@ -13,6 +13,33 @@ nothing from the framework.
 
 TEXTS = {
     "en": {
+        # the memory estimate before a build (Core/memory_estimate.py): the Builder's line, the CLI and the AI's fact
+        "mem.line": "Memory estimate for {board}: about {need} MB needed ({parts}) of {ram} MB ({source}): {verdict}. "
+                    "{uncertainty}",
+        "mem.part.weights": "weights about {mb} MB at {quant}",
+        "mem.part.server": "server buffers about {mb} MB",
+        "mem.part.kv": "KV cache about {mb} MB for {ctx} tokens ({kv})",
+        "mem.source.probe": "the board's probe",
+        "mem.source.max": "the most memory a {board} comes with",
+        "mem.probe_hint": "; a probe of the board gives its own: llm-cli scan --import FILE",
+        "mem.verdict.fits": "fits",
+        "mem.verdict.tight": "tight: little room is left for the system and a longer context",
+        "mem.verdict.does_not_fit": "does not fit: it runs only with swap and much slower, if at all; your choice "
+                                    "(the build is not stopped), or pick a smaller model or quantization",
+        "mem.uncertainty.per_tensor": "An estimate from the model's shape and llama.cpp's rules for this type "
+                                      "(typically within a few per cent of the file); the benchmark on the board "
+                                      "measures what really fits.",
+        "mem.uncertainty.parameters": "A rough estimate from the parameter count and the type's bits per weight: "
+                                      "embeddings and output keep more bits, so a small model's file can be up to a "
+                                      "third larger; the benchmark on the board measures what really fits.",
+        "mem.unknown": "Memory estimate for {board}: unknown ({reason}).",
+        "mem.reason.no_shape": "the model's size is not known before the build",
+        "mem.reason.no_quantization": "no quantization type is chosen",
+        "mem.reason.unknown_type": "the size of this type is not known to the estimate",
+        "mem.reason.no_parameters": "the model's parameter count is not known before the build",
+        "mem.reason.no_memory": "the memory of {board} is not known: no probe of the board (import one with llm-cli "
+                                "scan --import FILE) and no ram_max_gb",
+        "mem.estimating": "Memory estimate: reading the model's size ...",
         # a module's CMake options outside the allowlist: the person decides (DESIGN round 25 Q6; Core/module_flags)
         "bld.builder.start": "🚀 Start Build Pipeline",
         "bld.flags.title": "CMake options of the module",
@@ -440,6 +467,35 @@ TEXTS = {
         "bld.repair.module_line": "Module {target}: {line}",
     },
     "de": {
+        # die Speicherschätzung vor einem Build (Core/memory_estimate.py): die Zeile im Builder
+        "mem.line": "Speicherschätzung für {board}: etwa {need} MB nötig ({parts}) von {ram} MB ({source}): "
+                    "{verdict}. {uncertainty}",
+        "mem.part.weights": "Gewichte etwa {mb} MB in {quant}",
+        "mem.part.server": "Puffer des Servers etwa {mb} MB",
+        "mem.part.kv": "KV-Cache etwa {mb} MB für {ctx} Token ({kv})",
+        "mem.source.probe": "die Probe des Boards",
+        "mem.source.max": "der größte Speicher, mit dem ein {board} kommt",
+        "mem.probe_hint": "; eine Probe des Boards nennt seinen eigenen: llm-cli scan --import FILE",
+        "mem.verdict.fits": "passt",
+        "mem.verdict.tight": "knapp: wenig Platz bleibt für das System und einen längeren Kontext",
+        "mem.verdict.does_not_fit": "passt nicht: Es läuft nur mit Swap und viel langsamer, wenn überhaupt; deine "
+                                    "Wahl (der Build wird nicht angehalten), oder wähle ein kleineres Modell oder "
+                                    "eine kleinere Quantisierung",
+        "mem.uncertainty.per_tensor": "Eine Schätzung aus der Form des Modells und den Regeln von llama.cpp für "
+                                      "diesen Typ (meist auf wenige Prozent an der Datei); der Benchmark auf dem "
+                                      "Board misst, was wirklich passt.",
+        "mem.uncertainty.parameters": "Eine grobe Schätzung aus der Parameterzahl und den Bits je Gewicht des Typs: "
+                                      "Embeddings und Ausgabe behalten mehr Bits, die Datei eines kleinen Modells "
+                                      "kann also bis zu einem Drittel größer sein; der Benchmark auf dem Board misst, "
+                                      "was wirklich passt.",
+        "mem.unknown": "Speicherschätzung für {board}: unbekannt ({reason}).",
+        "mem.reason.no_shape": "die Größe des Modells ist vor dem Build nicht bekannt",
+        "mem.reason.no_quantization": "keine Quantisierung gewählt",
+        "mem.reason.unknown_type": "die Größe dieses Typs kennt die Schätzung nicht",
+        "mem.reason.no_parameters": "die Parameterzahl des Modells ist vor dem Build nicht bekannt",
+        "mem.reason.no_memory": "der Speicher von {board} ist nicht bekannt: keine Probe des Boards (importiere eine "
+                                "mit llm-cli scan --import FILE) und kein ram_max_gb",
+        "mem.estimating": "Speicherschätzung: lese die Größe des Modells ...",
         "bld.builder.start": "🚀 Build-Pipeline starten",
         "bld.flags.title": "CMake-Optionen des Moduls",
         "bld.flags.allow": "Diese Optionen erlauben",

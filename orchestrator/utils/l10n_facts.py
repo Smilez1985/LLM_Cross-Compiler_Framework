@@ -24,8 +24,9 @@ TEXTS = {
                                          "({needed_gb} GB needed, {usable_gb} GB usable).",
         "warning.target_fit_tight": "The board's memory is tight for this model ({needed_gb} GB needed, {usable_gb} "
                                     "GB).",
-        "warning.target_fit_does_not_fit": "The model will not run on the board: too little memory ({needed_gb} GB "
-                                           "needed, {usable_gb} GB).",
+        "warning.target_fit_does_not_fit": "The board has too little memory for this model ({needed_gb} GB needed, "
+                                           "{usable_gb} GB; estimate): it will run only with swap and much slower, if "
+                                           "at all.",
         "warning.image_build_needed": "The first build for this hardware prepares its build environment first "
                                       "(needs the internet).",
         "warning.long_build": "Takes about {minutes} minutes (from {n} earlier builds).",
@@ -211,8 +212,9 @@ TEXTS = {
                                          "Arbeitsspeicher ({needed_gb} GB nötig, {usable_gb} GB nutzbar).",
         "warning.target_fit_tight": "Der Speicher des Boards ist für dieses Modell knapp ({needed_gb} GB nötig, "
                                     "{usable_gb} GB).",
-        "warning.target_fit_does_not_fit": "Das Modell läuft auf dem Board nicht: zu wenig Speicher ({needed_gb} GB "
-                                           "nötig, {usable_gb} GB).",
+        "warning.target_fit_does_not_fit": "Das Board hat für dieses Modell zu wenig Speicher ({needed_gb} GB nötig, "
+                                           "{usable_gb} GB; Schätzung): Es läuft nur mit Swap und viel langsamer, wenn "
+                                           "überhaupt.",
         "warning.image_build_needed": "Der erste Build für diese Hardware richtet zuerst seine Build-Umgebung ein "
                                       "(braucht Internet).",
         "warning.long_build": "Dauert etwa {minutes} Minuten (aus {n} früheren Builds).",

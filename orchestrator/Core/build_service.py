@@ -1381,6 +1381,98 @@ class BuildService:
             return None
         return profile_for(data, board)
 
+    # --- the memory estimate before the build (Core/memory_estimate.py) -------------------------------------------
+
+    def hub_config(self, facts) -> Optional[dict]:
+        """The config.json of a Hugging Face model at the commit of its facts (hf_lookup.model_config), kept per
+        repository and commit for this service (the Builder asks again on every change of board or type)."""
+        from orchestrator.Core.hf_lookup import model_config
+        cache = self.__dict__.setdefault("_hub_configs", {})
+        key = (getattr(facts, "repo", ""), getattr(facts, "commit", None))
+        if key not in cache:
+            if len(cache) > 32:
+                cache.clear()
+            cache[key] = model_config(facts, self.hf_token())
+        return cache[key]
+
+    def model_shape(self, model: str, revision: Optional[str] = None, *, model_path: Optional[Path] = None,
+                    facts: Any = None, look_up_hub: bool = True):
+        """The model's shape before the build (memory_estimate.ModelShape), or None when nothing is known: a local
+        model's folder or GGUF file (`model_path`, or `model` when it is a path), a Hugging Face model's config.json
+        and parameter count (`facts` when the caller looked them up, else looked up now when `look_up_hub`), its
+        copy on this computer when the Hub is not asked (offline mode) or cannot be reached."""
+        from orchestrator.Core import memory_estimate as me
+        from orchestrator.utils.locality import offline_mode
+        path = Path(model_path) if model_path is not None else None
+        if path is None and model and not HF_REPO_ID.match(str(model)):
+            candidate = Path(str(model)).expanduser()
+            path = candidate if candidate.exists() else None
+        if path is not None:
+            return me.shape_from_local(path)
+        if not model:
+            return None
+        if facts is None and look_up_hub and not offline_mode(getattr(self.framework, "config", None)):
+            try:
+                facts = self.hub_facts(model, revision)
+            except Exception:  # noqa: BLE001 - the Hub cannot be asked: the copy here, if any
+                facts = None
+        if facts is not None:
+            config = self.hub_config(facts)
+            if config is not None:
+                return me.shape_from_config(config, facts.parameters, source="the model's config.json on the Hub")
+            if facts.parameters:
+                return me.ModelShape(parameters=facts.parameters, source="the Hub's parameter count")
+            if facts.weights == "safetensors" and facts.download_bytes:   # the disk rule's guess: 16-bit weights
+                return me.ModelShape(parameters=facts.download_bytes // 2,
+                                     source="the parameter count guessed from the download size")
+        try:
+            copy = self.local_copy(model, revision)
+        except Exception:  # noqa: BLE001 - no copy here
+            copy = None
+        return me.shape_from_local(Path(copy.path)) if copy is not None else None
+
+    def memory_estimate(self, request: BuildRequestIn, *, model_path: Optional[Path] = None, facts: Any = None,
+                        look_up_hub: bool = True):
+        """The memory estimate of a validated build request before the build (memory_estimate.estimate): the model
+        at the request's quantization against its board's memory (the request's probe, else the board's newest
+        stored probe, else ram_max_gb: board_profiles.board_memory, as the warning after the build reads it). None
+        without a board; an "unknown" estimate with the reason when the size or the memory is not known. A warning
+        for the person, never a refusal: no caller stops a build for it."""
+        from orchestrator.Core import memory_estimate as me
+        from orchestrator.Core.board_profiles import board_memory
+        board = getattr(request, "board", None)
+        if not board:
+            return None
+        quant = getattr(request, "quantization", None)
+        try:
+            caps = self.capabilities(request.target)
+        except Exception:  # noqa: BLE001 - a target without capabilities: the probe alone
+            caps = None
+        try:
+            _pid, probe = self._board_probe(getattr(request, "probe", None), board, caps, request.target)
+        except Exception:  # noqa: BLE001 - a probe start_build refuses is refused there; no RAM from it here
+            probe = None
+        ram, source = board_memory(probe, caps, board)
+        try:
+            shape = self.model_shape(request.model, getattr(request, "revision", None), model_path=model_path,
+                                     facts=facts, look_up_hub=look_up_hub)
+        except Exception:  # noqa: BLE001 - a model that cannot be read: unknown, said as such
+            shape = None
+        return me.estimate(shape, quant, board=board, ram_mib=ram, ram_source=source,
+                           ctx=getattr(request, "max_context_length", None),
+                           imatrix=bool(getattr(request, "use_imatrix", True)))
+
+    def _estimate_record(self, req: BuildRequestIn, inputs: Optional[LocalInputs]) -> Optional[Dict[str, Any]]:
+        """The estimate a build records when its caller passed none: from the local model or the copy on this
+        computer only (no look-up at the start); None when it cannot be made."""
+        pin = getattr(inputs, "model", None)
+        try:
+            est = self.memory_estimate(req, model_path=Path(pin.path) if pin is not None else None,
+                                       look_up_hub=False)
+        except Exception:  # noqa: BLE001 - an estimate is never a reason not to start
+            return None
+        return est.as_dict() if est is not None and est.state != "unknown" else None
+
     def optimization_for(self, request: Any, optimization: Optional[str] = None) -> str:
         """The optimization level of a build: the one given, else the board profile's level for the request's
         target and board (the board the scripts fall back to when none is named), else balanced."""
@@ -1719,7 +1811,8 @@ class BuildService:
                     description: str = "Build service request", flag_decision: Optional[str] = None,
                     remember_flags: bool = False, flag_channel: str = "", ignore_preflight: bool = False,
                     preflight_accepted: Optional[List[str]] = None,
-                    recipe: Optional[Dict[str, Any]] = None) -> BuildHandle:
+                    recipe: Optional[Dict[str, Any]] = None,
+                    memory_estimate: Optional[Dict[str, Any]] = None) -> BuildHandle:
         """Validates and queues a build: the one build-submission path of the CLI, the GUI and AI callers. `owner` is
         the tool caller that starts it (ToolContext.owner; empty for the person's own CLI and GUI, whose builds the
         queue limit for tool callers never refuses); `disk_reservation` the reservation an AI caller's accepted build
@@ -1734,7 +1827,9 @@ class BuildService:
         request's checks (_preflight_gate): a stop refuses the build with PreflightStopped unless the person overrides it
         (`ignore_preflight`, their own callers only) or, for an AI caller, the person accepted exactly these stops in
         the start question (`preflight_accepted`). `recipe`: start_recipe's recipe record (recipe_record), which the
-        build engine compares the result with; a warning names a target whose files are not the recipe's."""
+        build engine compares the result with; a warning names a target whose files are not the recipe's.
+        `memory_estimate`: the estimate the caller showed before the build (MemoryEstimate.as_dict); without one it is
+        made here from what is on this computer (no look-up). It is recorded with the build, never a refusal."""
         try:
             level = OptimizationLevel(str(optimization).lower()) if optimization else None
         except ValueError:
@@ -1753,6 +1848,8 @@ class BuildService:
         if level is None:
             level = OptimizationLevel(self.optimization_for(req))
         flags = self._flag_decision(request, local_paths, flag_decision, remember_flags, flag_channel)
+        if memory_estimate is None:
+            memory_estimate = self._estimate_record(req, inputs)
         build_request = BuildRequest(
             request_id="",
             workflow_type=WorkflowType.SIMPLE_CONVERSION,
@@ -1779,6 +1876,7 @@ class BuildService:
             flag_decision=flags,
             preflight_notes=notes,
             recipe=dict(recipe) if recipe else None,
+            memory_estimate=dict(memory_estimate) if isinstance(memory_estimate, dict) else None,
         )
         if disk_reservation:
             self._orchestrator.disk_ledger = self.disk_ledger()

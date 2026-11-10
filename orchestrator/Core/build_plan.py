@@ -80,6 +80,8 @@ class BuildPlan:
     board_note: str = ""
     # the board profile's guidance on model sizes per task (guidance only: it refuses nothing)
     model_sizes: str = ""
+    # the memory estimate before the build (Core/memory_estimate.MemoryEstimate): a fact, and the board's Fit
+    memory: Optional[Any] = None
     grant: Optional[Dict[str, Any]] = None  # facts for grants.BUILD_RULE; None: outside every standing approval
     # what a build the person confirmed records (confirmed_builds): the target and recipe as installed, base images
     confirm_record: Optional[Dict[str, Any]] = None
@@ -130,7 +132,8 @@ class BuildPlan:
         if disk:
             parts.append(f"Disk: {disk}.")
         parts.append(self.host.sentence("Conversion on this computer") + ".")
-        parts.append(self.target.sentence(f"On {r.board or 'the board'}") + ".")
+        parts.append(f"On {r.board or 'the board'}: {self.memory.short()}." if self.memory is not None else
+                     self.target.sentence(f"On {r.board or 'the board'}") + ".")
         return " ".join(parts)
 
     def question_facts(self) -> Tuple[Fact, ...]:
@@ -170,7 +173,11 @@ class BuildPlan:
         for check in self.disk:
             facts.append(Fact("Disk", check.sentence(), volatile=True))
         facts.append(Fact("Hardware", self.host.sentence("conversion on this computer"), volatile=True))
-        facts.append(Fact("Hardware", self.target.sentence(f"running on {r.board or 'the board'}"), volatile=True))
+        if self.memory is not None:   # numbers of an estimate; their verdict is a warning (target_fit_*)
+            facts.append(Fact("Memory estimate", self.memory.text(), volatile=True))
+        else:
+            facts.append(Fact("Hardware", self.target.sentence(f"running on {r.board or 'the board'}"),
+                              volatile=True))
         if self.board_note:
             facts.append(Fact("Board", self.board_note, TARGET_TEXT))
         if self.model_sizes:
@@ -219,7 +226,10 @@ class BuildPlan:
                 "commit_resolved": self.source != "hf" or bool(self.facts is not None and self.facts.commit),
                 # the pre-flight stops the person is shown: their yes overrides exactly these (start_build's
                 # preflight_accepted); a stop found after the question refuses the start
-                "preflight": self.preflight_stops()}
+                "preflight": self.preflight_stops(),
+                # the memory estimate the question showed: recorded with the build next to the real file size
+                "memory_estimate": self.memory.as_dict() if self.memory is not None and self.memory.state != "unknown"
+                else None}
 
     # What a decision about the build is bound to (design 4.4): the request, the size class, the grant facts without
     # the disk-derived flag, what a confirmed build records (target, recipe, module, base image digests) and the
@@ -837,7 +847,18 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
     hw = service.host_hardware()
     plan.host = disk_plan.host_fit(req.format, req.use_imatrix, params, getattr(hw, "ram_total", None),
                                    _best_vram(hw) if hw is not None else None, req.use_gpu, basis)
-    board = caps.boards.get(req.board) if req.board else None
-    output = int(size * disk_plan.output_share(req.quantization)) if size else 0
-    plan.target = disk_plan.target_fit(output, None, req.board, getattr(board, "ram_max_gb", None))
+    # the memory estimate before the build (Core/memory_estimate.py): the model at its type against the board's memory,
+    # with the thresholds of the warning after the build; a situation warning, never a refusal
+    estimate = getattr(service, "memory_estimate", None)
+    if callable(estimate) and req.board:
+        try:
+            plan.memory = estimate(req, model_path=Path(pin.path) if pin is not None else None, facts=plan.facts,
+                                   look_up_hub=look_up_hub and plan.source == "hf")
+        except Exception:  # noqa: BLE001 - an estimate that cannot be made is "unknown", never a stop
+            plan.memory = None
+    if plan.memory is not None:
+        plan.target = plan.memory.fit()
+    else:
+        board = caps.boards.get(req.board) if req.board else None
+        plan.target = disk_plan.target_fit(0, None, req.board, getattr(board, "ram_max_gb", None))
     return plan
