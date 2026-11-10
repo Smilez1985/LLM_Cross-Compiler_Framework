@@ -110,7 +110,7 @@ def test_off_without_the_yes_is_a_warning_naming_the_offset_and_nothing_is_set(t
     state = board_clock.on_contact(board, tmp_path, DEVICE, via="cli", audit=Audit(), label="pi")
     assert [verb for verb, _ in board.sent] == ["clock-read"]
     assert state.reading.off and not state.set_ok and "2 h 0 min behind" in state.warning
-    assert "--clock-from-pc yes" in state.warning
+    assert "board's settings" in state.warning
     record = board_clock.load_record(tmp_path, DEVICE)
     assert record["rtc"] == "none" and record["warning"] == state.warning and "set_at" not in record
     settings(tmp_path, clock_from_pc="no", clock_answered_at="2026-11-10T12:00:00Z")

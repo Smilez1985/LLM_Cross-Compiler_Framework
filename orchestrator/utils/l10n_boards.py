@@ -533,9 +533,9 @@ TEXTS = {
                                   "not set up, or its sudo rule is an older one. Set it up with Prepare root in "
                                   "{path:act_boards_bundle}.",
         "boards.clock.set_failed": "The clock of {label} was not set: {reason}",
-        "boards.clock.question": "May llmcf set the clock of board {board} from this computer's time whenever it is "
-                                 "off by more than a minute? A board without a battery-backed clock that is offline "
-                                 "cannot know the time; llmcf sets it as root through llmcf-install's clock action "
+        "boards.clock.question": "May the framework set the clock of board {board} from this computer's time whenever "
+                                 "it is off by more than a minute? A board without a battery-backed clock that is "
+                                 "offline cannot know the time; the framework sets it as root through llmcf-install's clock action "
                                  "only (it needs the board's root readiness), and writes every set to the audit log. "
                                  "You can change this in the board's settings.",
         "bundle.ask.root_keep_clock": "This board has no working clock of its own: llmcf-install also sets up keeping "
@@ -1210,9 +1210,9 @@ TEXTS = {
                                   "llmcf-install ist nicht eingerichtet, oder ihre sudo-Regel ist eine ältere. Richte "
                                   "sie mit Root vorbereiten in {path:act_boards_bundle} ein.",
         "boards.clock.set_failed": "Die Uhr von {label} wurde nicht gestellt: {reason}",
-        "boards.clock.question": "Darf llmcf die Uhr von Board {board} von der Zeit dieses Rechners stellen, wann "
-                                 "immer sie um mehr als eine Minute abweicht? Ein Board ohne batteriegepufferte Uhr, "
-                                 "das offline ist, kann die Zeit nicht kennen; llmcf stellt sie als root nur über die "
+        "boards.clock.question": "Darf das Framework die Uhr von Board {board} von der Zeit dieses Rechners stellen, "
+                                 "wann immer sie um mehr als eine Minute abweicht? Ein Board ohne batteriegepufferte "
+                                 "Uhr, das offline ist, kann die Zeit nicht kennen; das Framework stellt sie als root nur über die "
                                  "Uhr-Aktion von llmcf-install (sie braucht die Root-Bereitschaft des Boards) und "
                                  "schreibt jedes Stellen ins Audit-Log. Du kannst das in den Einstellungen des Boards "
                                  "ändern.",

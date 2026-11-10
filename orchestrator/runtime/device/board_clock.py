@@ -45,8 +45,8 @@ READ_TIMEOUT = 20.0
 ROOT_TIMEOUT = 60.0
 AUDIT_TOOL = "board_clock_set"
 KEEP_AUDIT_TOOL = "board_clock_keep"
-CLOCK_QUESTION = ("May llmcf set the clock of board {board} from this computer's time whenever it is off by more "
-                  "than a minute? A board without a battery-backed clock that is offline cannot know the time; llmcf "
+CLOCK_QUESTION = ("May the framework set the clock of board {board} from this computer's time whenever it is off by "
+                  "more than a minute? A board without a battery-backed clock that is offline cannot know the time; it "
                   "sets it as root through llmcf-install's clock action only (it needs the board's root readiness), "
                   "and writes every set to the audit log. You can change this in the board's settings.")
 SET_QUESTION = ("Set the clock of board {board} to this computer's time now ({stamp} UTC), as root through "
@@ -299,9 +299,9 @@ def warning_text(label: str, reading: ClockReading, *, yes: Optional[bool], why:
     if why:
         return f"{base}; it was not set: {why}"
     if yes is None:
-        return (f"{base}. Allow llmcf to set it in the board's settings (llm-cli device settings DEVICE "
-                "--clock-from-pc yes, or the Boards window), or set it once with llm-cli device clock DEVICE --set.")
-    return (f"{base}; your answer for this board is not to set it (llm-cli device clock DEVICE --set sets it once).")
+        return (f"{base}. Allow the framework to set it in the board's settings, or set it once by hand from the "
+                "board's clock.")
+    return f"{base}; your answer for this board is not to set it (it can still be set once by hand)."
 
 
 def on_contact(session: Any, state_dir: Path, device_id: str, *, via: str, audit: Any = None,

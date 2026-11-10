@@ -7496,7 +7496,8 @@ def _clock_warning(state_dir: Path, device_id: str) -> None:
     from orchestrator.runtime.device import board_clock
     warning = board_clock.clock_state(state_dir, device_id)["warning"]
     if warning:
-        console.print(f"[yellow]{escape(warning)}[/yellow]")
+        console.print(f"[yellow]{escape(warning)} (llm-cli device settings {device_id} --clock-from-pc yes, or "
+                      f"llm-cli device clock {device_id} --set)[/yellow]")
 
 
 def _open_failed(ctx: Optional[FrameworkContext], e, host: str, port: int) -> None:

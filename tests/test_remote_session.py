@@ -85,7 +85,9 @@ def test_a_clean_deploy_runs_these_commands_in_this_order(manager, board, packag
     start = DeploymentManager._remote_start_cmd(TARGET, package.name)
     poll = (f"cat {TARGET}/{dmod.INSTALL_STATUS} 2>/dev/null || "
             f"{{ [ -d {TARGET} ] && echo running || echo gone; }}")
+    from orchestrator.runtime.device import board_clock
     assert commands == [
+        board_clock.READ_SCRIPT,          # the board's clock, read over the deploy's login (it changes nothing)
         DeploymentManager.REMOTE_MKTEMP,
         f"sha256sum {PART}",
         f"mv -f {PART} {FINAL}",

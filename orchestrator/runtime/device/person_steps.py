@@ -568,7 +568,7 @@ def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: 
     _note(state_dir, device_id, step, "")   # reached and logged in: a recorded problem ends
     # the board's clock, read over this login (set with the person's standing yes for it; never fails the step)
     from orchestrator.runtime.device import board_clock
-    board_clock.on_contact(session, state_dir, str(device_id or ""), via=via or "cli",
+    board_clock.on_contact(session, state_dir, str(device_id or ""), via=via or "contact",
                            audit=audit if audit is not None else (lambda: device_audit(None, state_dir)))
     return session, session.key
 
