@@ -4,9 +4,10 @@ Building an installed community recipe (MCP design 2.8, work package T9): `start
 `lcf://packs/index` resource.
 
 A recipe is a target template: it names a target (the build code) and the values one person tested with it, a Hugging
-Face model at a commit, format, board, quantization, importance matrix and context length. Each of those values is a
-variable the caller may change (model, revision, format, board, quantization, use_imatrix, own_dataset_path) except
-the context length, which the recipe tuned to the board's memory; a value left out is the recipe's.
+Face model at a commit, format, board, quantization, importance matrix, context length and optimization level. Each of
+those values is a variable the caller may change (model, revision, format, board, quantization, use_imatrix,
+own_dataset_path, optimization) except the context length, which the recipe tuned to the board's memory; a value left
+out is the recipe's (the level: the recipe's, else the board profile's; Core/recipe_optimization.py).
 `start_recipe_build` maps an installed recipe and the changes to a build request (BuildService.recipe_request) and
 takes start_build's normal two-phase path: the same plan with the commit, download size, disk rule, hardware estimate,
 licence, gating, mounts, target trust and image build in the question, the same disk reservation, the same standing
@@ -14,13 +15,14 @@ approval scope (grants.BUILD_RULE). A recipe pack installed under a standing app
 covered by a build standing approval only after the person confirmed one build of it (confirmed_builds). A calibration
 dataset given as dataset_path is the recipe's own and must be exactly the file it pins (sha256); a file of the
 caller's own is named as own_dataset_path. The question lists the changed variables, a target whose files are not the
-recipe's, and the recipe's reference results, which the build compares its result with.
+recipe's, the optimization level and whether it is the recipe's, and the recipe's reference results, which the build
+compares its result with.
 
 Recipe values (model, target, ids) come from a community pack: the question labels them as pack text.
 """
 
 import dataclasses
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -67,13 +69,16 @@ class RecipeBuildIn(BaseModel):
                                             description="A calibration file of your own instead of the recipe's, as "
                                                         "<label>:<relative path> or its file id (\"\" for none); "
                                                         "never together with dataset_path")
+    optimization: Optional[Literal["fast", "balanced", "size", "speed", "aggressive"]] = Field(
+        default=None, description="Another optimization level; omitted: the recipe's level, else the level of the "
+                                  "board's optimization profile")
 
     def choices(self):
         """The variables this call changes (schemas.recipes.RecipeChoices)."""
         from orchestrator.schemas.recipes import RecipeChoices
         return RecipeChoices(model=self.model, revision=self.revision, format=self.format, board=self.board,
                              quantization=self.quantization, use_imatrix=self.use_imatrix,
-                             own_dataset_path=self.own_dataset_path)
+                             own_dataset_path=self.own_dataset_path, optimization=self.optimization)
 
 
 def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_out) -> List[Any]:
@@ -105,7 +110,9 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
         request, recipe, prov = mapped(inp)
         record = {"id": prov.id, "installed_via": str(getattr(prov, "installed_via", "") or ""),
                   "pack_sha256": str(getattr(prov, "pack_sha256", "") or "")}
-        plan = service.plan(StartBuildIn(**request.model_dump()), recipe=record)
+        # the level the build takes (the caller's, else the recipe's, else the board profile's): the plan shows it
+        level = service.recipe_level(recipe, request, inp.choices())[0]
+        plan = service.plan(StartBuildIn(**request.model_dump(), optimization=level), recipe=record)
         if plan.problems:
             raise problem_error(plan.problems)
         try:
@@ -122,6 +129,7 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
                       RECIPE_TEXT),
                  Fact("Recipe options", f"importance matrix {'yes' if recipe.options.use_imatrix else 'no'}, context "
                       f"length {recipe.options.max_context_length or 'the target default'}"),
+                 Fact("Optimization level", service.recipe_level_text(recipe, validated, inp.choices())),
                  Fact("Changed from the recipe", ", ".join(changed) if changed else
                       "nothing: built as the recipe pins it, and the result is compared with its reference")]
         target_note = service.recipe_target_note(recipe)
@@ -152,7 +160,8 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
         from orchestrator.Core.build_service import BuildServiceError
         expect = {"model": bound.get("model"), "revision": bound.get("revision"), "target": bound.get("target"),
                   "format": bound.get("format"), "board": bound.get("board"),
-                  "quantization": bound.get("quantization"), "recipe_sha256": bound.get("recipe_sha256")}
+                  "quantization": bound.get("quantization"), "optimization": bound.get("optimization"),
+                  "recipe_sha256": bound.get("recipe_sha256")}
 
         def start(reservation):
             try:
@@ -173,9 +182,10 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
         "start_recipe_build", "Build a community recipe",
         "Builds with an installed community recipe, a target template: its target and, for every value you leave "
         "out, the recipe's (its Hugging Face model at the recipe's commit, format, board, quantization, importance "
-        "matrix, context length). model, revision, format, board, quantization, use_imatrix and own_dataset_path "
-        "change a value; built unchanged, the result is compared with the recipe's reference. Same "
-        "question and checks as start_build (download size, disk, hardware estimate, licence, gating, image build). "
+        "matrix, context length, optimization level). model, revision, format, board, quantization, use_imatrix, "
+        "own_dataset_path and optimization change a value; built unchanged, the result is compared with the "
+        "recipe's reference. Same question and checks as start_build (download size, disk, hardware estimate, "
+        "licence, gating, image build). "
         "dataset_path only for the recipe's own calibration file; probe names the board's hardware probe "
         '(get_hardware_probe) as for start_build. Returns a request id. Example: {"recipe_id": '
         '"qwen2.5-0.5b-instruct-rk3588-gguf-q4_k_m", "quantization": "Q8_0"}',

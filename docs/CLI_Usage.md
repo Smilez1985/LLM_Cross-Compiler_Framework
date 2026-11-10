@@ -555,14 +555,14 @@ target's defaults. A target without a capabilities block is built unchecked.
 
 | Option | Meaning |
 |---|---|
-| `--recipe ID` | Build with an installed community recipe (`zoo list --kind recipe`) as a target template: its target holds the build code, and every option you leave out takes the recipe's value (the model at the recipe's commit, format, board, quantization, importance matrix; the context length is always the recipe's). `--model`, `--format`, `--board`, `--quantization`, `--imatrix/--no-imatrix` and `--dataset/--no-dataset` change a value; `--target` may only name the recipe's target. A revoked or unreadable recipe stops with exit code 2. |
+| `--recipe ID` | Build with an installed community recipe (`zoo list --kind recipe`) as a target template: its target holds the build code, and every option you leave out takes the recipe's value (the model at the recipe's commit, format, board, quantization, importance matrix, optimization level; the context length is always the recipe's). `--model`, `--format`, `--board`, `--quantization`, `--imatrix/--no-imatrix`, `--dataset/--no-dataset` and `--optimization` change a value; `--target` may only name the recipe's target. A revoked or unreadable recipe stops with exit code 2. |
 | `-m, --model TEXT` | **Required** without `--recipe`. Hugging Face ID (e.g. `HuggingFaceTB/SmolLM2-135M-Instruct`) or a local folder or file. |
 | `-t, --target TEXT` | **Required** without `--recipe`. Target id as listed by `targets list`, e.g. `Rockchip`, or the target's folder name. Not case-sensitive. An unknown target stops with exit code 2 and the list of known targets. |
 | `-f, --format FORMAT` | Output format (default `gguf`): one the target builds, as its `target.yml` capabilities declare it (the formats the Builder tab offers for it). `--help` and the shell completion list what each installed target builds (Rockchip: `gguf`, `rkllm`, `rknn`). A target without capabilities takes any format but `hf`, unchecked. A format the target does not build stops with exit code 2 and names what each installed target builds. Not case-sensitive. |
 | `-b, --board TEXT` | Board of the target family, e.g. `rk3588`, `rk3576`, `rk3566`. Default: the target's default board (Rockchip: `rk3588`). Not case-sensitive. |
 | `-q, --quantization TEXT` | Quantization, e.g. `Q4_K_M`, `IQ4_XS`, `F16` (GGUF), `w8a8`, `w4a16` (RKLLM), `fp16`, `i8` (RKNN). Default: the format's default for the board. Common spellings such as `INT8` are translated. |
 | `-o, --output TEXT` | Folder the finished model (golden artifact) is saved to, relative to the current folder; made when it does not exist. Default: the output folder ([`config output-folder`](#config-output-folder), `~/llmcf/output`). At a terminal without it you are asked, with the output folder as the default; `-` keeps the build in the framework's build folder ([`build save`](#build-save) saves it later). A system folder or the framework's program folder is refused (exit code 2). `--output-dir` is the old name and still works. |
-| `--optimization [fast\|balanced\|size\|speed\|aggressive]` | Optimization level, passed to the build scripts as `OPTIMIZATION_LEVEL`. Default: the level of the board's optimization profile (`targets boards`; for example `size` on an RK3566), else `balanced`. The Rockchip scripts do not use it. |
+| `--optimization [fast\|balanced\|size\|speed\|aggressive]` | Optimization level, passed to the build scripts as `OPTIMIZATION_LEVEL`. Default: the level of the board's optimization profile (`targets boards`; for example `size` on an RK3566), else `balanced`; with `--recipe` the recipe's level when it names one, else the board profile's. The Rockchip scripts do not use it. |
 | `--priority [low\|normal\|high\|urgent\|critical]` | Position in this process's build queue (default `normal`). |
 | `--parallel` | Deprecated and hidden from `--help`: it has no effect (one call runs one build) and prints a warning. |
 | `-F, --follow` | Print each stage while the build runs, with its percent (the model download: `Fetching model 37 % (1.2 GB of 3.4 GB)`). |
@@ -626,14 +626,15 @@ Behaviour:
   board's NPU driver below what the format needs) starts nothing unless you override it; warnings (a newer CUDA
   minor version, no NVIDIA GPU, a board runtime older than the toolkit) are printed and kept in the build's
   warnings, and the build starts.
-- With `--recipe` the command first prints the recipe (author, model and commit, model licence, context length),
-  what you changed from it, its reference results (artifact, sha256, framework version, toolchain image, a device
-  test) and, when the installed target's files differ from the ones the recipe was made with, a warning. A `--dataset`
-  file with the sha256 the recipe pins is the recipe's own; any other file is yours (the variable `dataset`). A recipe
-  that names a calibration file needs `--dataset` or `--no-dataset`. A build that changes nothing on the recipe's own
-  target is compared with the reference when it ends: `build_info.json` records the recipe, the changed variables and
-  `reproduced` (true or false; null when there was nothing to compare), and a differing result is a warning naming
-  both framework versions and toolchain images.
+- With `--recipe` the command first prints the recipe (author, model and commit, model licence, context length), the
+  optimization level and whether it is the recipe's, yours or the board profile's, what you changed from it, its
+  reference results (artifact, sha256, framework version, toolchain image, a device test) and, when the installed
+  target's files differ from the ones the recipe was made with, a warning. A `--dataset` file with the sha256 the
+  recipe pins is the recipe's own; any other file is yours (the variable `dataset`). A recipe that names a calibration
+  file needs `--dataset` or `--no-dataset`. A build that changes nothing on the recipe's own target is compared with
+  the reference when it ends: `build_info.json` records the recipe, the changed variables and `reproduced` (true or
+  false; null when there was nothing to compare), and a differing result is a warning naming both framework versions
+  and toolchain images.
 
 In the GUI: the **Builder** tab: model, target (**Targets...** shows every target), format (exactly the formats the
 target declares, the list `--format` takes for it; a target without capabilities offers every format, with the note

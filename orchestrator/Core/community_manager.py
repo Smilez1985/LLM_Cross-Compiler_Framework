@@ -553,11 +553,15 @@ def read_provenance(folder: Path) -> Optional[Provenance]:
 
 def read_recipe(folder: Path):
     """The one reader of a recipe pack's recipe.yml (installed, or staged for its install check): the Recipe.
-    Raises OSError (FileNotFoundError when it is missing), yaml.YAMLError or pydantic.ValidationError; each caller
-    says what that means for it (the install check names it, the listings show no values, BuildService.installed_recipe
-    refuses the build)."""
+    Raises OSError (FileNotFoundError when it is missing), yaml.YAMLError, RecipeFormatError (a recipe format this
+    version does not read, naming the llmcf version it needs: Core/recipe_optimization.py) or
+    pydantic.ValidationError; each caller says what that means for it (the install check names it, the listings show
+    no values, BuildService.installed_recipe refuses the build)."""
+    from orchestrator.Core.recipe_optimization import check_raw
     from orchestrator.schemas.recipes import Recipe
-    return Recipe.model_validate(yaml.safe_load((Path(folder) / RECIPE_FILE).read_text(encoding="utf-8")))
+    data = yaml.safe_load((Path(folder) / RECIPE_FILE).read_text(encoding="utf-8"))
+    check_raw(data)
+    return Recipe.model_validate(data)
 
 
 def trust_of_folder(folder: Path, index: Optional[CommunityIndex]) -> Tuple[Optional[TrustLevel], str]:
@@ -1369,11 +1373,14 @@ class CommunityManager:
                      and p.is_dir() and not p.is_symlink()), None)
 
     def _check_recipe(self, root: Path, manifest: PackManifest, notes: List[str]) -> List[str]:
+        from orchestrator.Core.recipe_optimization import RecipeFormatError
         from orchestrator.schemas.targets import TargetCapabilities
         try:
             recipe = read_recipe(root)
         except FileNotFoundError:
             return [f"{RECIPE_FILE}: missing"]
+        except RecipeFormatError as e:   # a later format: the sentence names the llmcf version it needs
+            return [f"{RECIPE_FILE}: {e}"]
         except (yaml.YAMLError, ValidationError) as e:
             return [f"{RECIPE_FILE}: invalid ({str(e).splitlines()[0][:200]})"]
         problems = [] if recipe.id == manifest.id else [f"{RECIPE_FILE}: id {recipe.id} differs from the pack id"]

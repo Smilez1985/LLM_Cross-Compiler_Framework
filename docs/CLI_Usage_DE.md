@@ -570,14 +570,14 @@ Target ohne Capabilities-Block wird ungeprüft gebaut.
 
 | Option | Bedeutung |
 |---|---|
-| `--recipe ID` | Mit einem installierten Community-Rezept (`zoo list --kind recipe`) als Target-Vorlage bauen: Sein Target enthält den Build-Code, und jede Option, die du weglässt, nimmt den Wert des Rezepts (das Modell beim Commit des Rezepts, Format, Board, Quantisierung, Importance Matrix; die Kontextlänge ist immer die des Rezepts). `--model`, `--format`, `--board`, `--quantization`, `--imatrix/--no-imatrix` und `--dataset/--no-dataset` ändern einen Wert; `--target` darf nur das Target des Rezepts nennen. Ein widerrufenes oder unlesbares Rezept stoppt mit Exit-Code 2. |
+| `--recipe ID` | Mit einem installierten Community-Rezept (`zoo list --kind recipe`) als Target-Vorlage bauen: Sein Target enthält den Build-Code, und jede Option, die du weglässt, nimmt den Wert des Rezepts (das Modell beim Commit des Rezepts, Format, Board, Quantisierung, Importance Matrix, Optimierungsstufe; die Kontextlänge ist immer die des Rezepts). `--model`, `--format`, `--board`, `--quantization`, `--imatrix/--no-imatrix`, `--dataset/--no-dataset` und `--optimization` ändern einen Wert; `--target` darf nur das Target des Rezepts nennen. Ein widerrufenes oder unlesbares Rezept stoppt mit Exit-Code 2. |
 | `-m, --model TEXT` | **Pflicht** ohne `--recipe`. Hugging-Face-ID (z. B. `HuggingFaceTB/SmolLM2-135M-Instruct`) oder ein lokaler Ordner bzw. eine Datei. |
 | `-t, --target TEXT` | **Pflicht** ohne `--recipe`. Target-ID, wie `targets list` sie zeigt, z. B. `Rockchip`, oder der Ordnername des Targets. Groß- und Kleinschreibung spielt keine Rolle. Ein unbekanntes Target stoppt mit Exit-Code 2 und der Liste der bekannten Targets. |
 | `-f, --format FORMAT` | Ausgabeformat (Standard `gguf`): eines, das das Target baut, wie seine Capabilities in `target.yml` es angeben (die Formate, die der Builder-Tab dafür anbietet). `--help` und die Shell-Vervollständigung nennen, was jedes installierte Target baut (Rockchip: `gguf`, `rkllm`, `rknn`). Ein Target ohne Capabilities nimmt jedes Format außer `hf`, ungeprüft. Ein Format, das das Target nicht baut, stoppt mit Exit-Code 2 und nennt, was jedes installierte Target baut. Groß- und Kleinschreibung spielt keine Rolle. |
 | `-b, --board TEXT` | Board der Target-Familie, z. B. `rk3588`, `rk3576`, `rk3566`. Standard: das Standard-Board des Targets (Rockchip: `rk3588`). Groß- und Kleinschreibung spielt keine Rolle. |
 | `-q, --quantization TEXT` | Quantisierung, z. B. `Q4_K_M`, `IQ4_XS`, `F16` (GGUF), `w8a8`, `w4a16` (RKLLM), `fp16`, `i8` (RKNN). Standard: der Standard des Formats für das Board. Gängige Schreibweisen wie `INT8` werden übersetzt. |
 | `-o, --output TEXT` | Ordner, in dem das fertige Modell (Golden-Artefakt) gespeichert wird, relativ zum aktuellen Ordner; er wird angelegt, wenn es ihn noch nicht gibt. Standard: der Ausgabeordner ([`config output-folder`](#config-output-folder), `~/llmcf/output`). An einem Terminal ohne diese Angabe wirst du gefragt, mit dem Ausgabeordner als Vorgabe; `-` lässt den Build im Build-Ordner des Frameworks ([`build save`](#build-save) speichert ihn später). Ein Systemordner oder der Programmordner des Frameworks wird abgelehnt (Exit-Code 2). `--output-dir` ist der alte Name und geht weiter. |
-| `--optimization [fast\|balanced\|size\|speed\|aggressive]` | Optimierungsstufe, wird den Build-Skripten als `OPTIMIZATION_LEVEL` übergeben. Standard: die Stufe des Optimierungsprofils des Boards (`targets boards`; etwa `size` bei einem RK3566), sonst `balanced`. Die Rockchip-Skripte werten sie nicht aus. |
+| `--optimization [fast\|balanced\|size\|speed\|aggressive]` | Optimierungsstufe, wird den Build-Skripten als `OPTIMIZATION_LEVEL` übergeben. Standard: die Stufe des Optimierungsprofils des Boards (`targets boards`; etwa `size` bei einem RK3566), sonst `balanced`; mit `--recipe` die Stufe des Rezepts, wenn es eine nennt, sonst die des Board-Profils. Die Rockchip-Skripte werten sie nicht aus. |
 | `--priority [low\|normal\|high\|urgent\|critical]` | Position in der Build-Warteschlange dieses Prozesses (Standard `normal`). |
 | `--parallel` | Veraltet und in `--help` ausgeblendet: Hat keine Wirkung (ein Aufruf startet einen Build) und gibt eine Warnung aus. |
 | `-F, --follow` | Jede Stufe mit ihrem Prozentwert ausgeben, während der Build läuft (der Modell-Download: `Fetching model 37 % (1.2 GB of 3.4 GB)`). |
@@ -649,11 +649,12 @@ Verhalten:
   Runtime auf dem Board, die älter als das Toolkit ist) werden ausgegeben und in den Warnungen des Builds behalten,
   und der Build startet.
 - Mit `--recipe` gibt der Befehl zuerst das Rezept aus (Autor, Modell und Commit, Lizenz des Modells, Kontextlänge),
-  was du daran geändert hast, seine Referenzergebnisse (Artefakt, sha256, Framework-Version, Toolchain-Image, ein
-  Gerätetest) und eine Warnung, wenn die Dateien des installierten Targets von denen abweichen, mit denen das Rezept
-  entstand. Eine `--dataset`-Datei mit dem sha256, den das Rezept festlegt, ist die des Rezepts; jede andere Datei ist
-  deine (die Variable `dataset`). Ein Rezept, das eine Kalibrierdatei nennt, braucht `--dataset` oder `--no-dataset`.
-  Ein Build, der auf dem eigenen Target des Rezepts nichts ändert, wird an seinem Ende mit der Referenz verglichen:
+  die Optimierungsstufe und ob sie die des Rezepts, deine oder die des Board-Profils ist, was du daran geändert hast,
+  seine Referenzergebnisse (Artefakt, sha256, Framework-Version, Toolchain-Image, ein Gerätetest) und eine Warnung,
+  wenn die Dateien des installierten Targets von denen abweichen, mit denen das Rezept entstand. Eine
+  `--dataset`-Datei mit dem sha256, den das Rezept festlegt, ist die des Rezepts; jede andere Datei ist deine (die
+  Variable `dataset`). Ein Rezept, das eine Kalibrierdatei nennt, braucht `--dataset` oder `--no-dataset`. Ein Build,
+  der auf dem eigenen Target des Rezepts nichts ändert, wird an seinem Ende mit der Referenz verglichen:
   `build_info.json` vermerkt das Rezept, die geänderten Variablen und `reproduced` (true oder false; null, wenn es
   nichts zu vergleichen gab), und ein abweichendes Ergebnis ist eine Warnung, die beide Framework-Versionen und
   Toolchain-Images nennt.

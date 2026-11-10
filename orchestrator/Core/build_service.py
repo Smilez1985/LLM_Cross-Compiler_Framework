@@ -1102,8 +1102,12 @@ class BuildService:
         if trust is not None and trust.value == "revoked":
             raise BuildServiceError(f"The recipe {prov.id} was revoked by the community index; it is not built.",
                                     code="not_supported", next="Tell the person; they remove it in the Community Hub.")
+        from orchestrator.Core.recipe_optimization import RecipeFormatError
         try:
             recipe = read_recipe(folder)
+        except RecipeFormatError as e:   # a later recipe format: the sentence names the llmcf version it needs
+            raise BuildServiceError(f"The installed recipe {prov.id} cannot be built here: {e}", code="not_supported",
+                                    next="Tell the person; a newer llmcf version builds it (llm-cli update).") from None
         except Exception:  # noqa: BLE001 - details of a broken pack are not shown
             raise BuildServiceError(f"The installed recipe {prov.id} cannot be read.", code="not_supported",
                                     next="Tell the person; list_packs with verify true checks the installed "
@@ -1167,10 +1171,28 @@ class BuildService:
             return recipe.format, recipe.board, recipe.quantization
         return caps.normalize(recipe.format, recipe.board, recipe.quantization)
 
+    def recipe_level(self, recipe, validated: BuildRequestIn, choices: Any = None) -> Tuple[str, str, str]:
+        """(level, source, board level) of a recipe build (Core/recipe_optimization.py): the person's choice
+        (`choices.optimization`), else the recipe's level, else the board profile's for the checked request; source is
+        recipe_optimization.YOURS, RECIPES or BOARDS. The rule is the module's; this only finds the board's level."""
+        from orchestrator.Core import recipe_optimization
+        board_level = self.optimization_for(validated)
+        level, source = recipe_optimization.resolve(recipe, getattr(choices, "optimization", None), board_level)
+        return level, source, board_level
+
+    def recipe_level_text(self, recipe, validated: BuildRequestIn, choices: Any = None) -> str:
+        """The level of a recipe build in words, and whether it is the recipe's (the CLI's summary, the start question,
+        the Builder log)."""
+        from orchestrator.Core import recipe_optimization
+        level, source, board_level = self.recipe_level(recipe, validated, choices)
+        return recipe_optimization.describe(recipe, level, source, board_level)
+
     def recipe_changes(self, recipe, validated: BuildRequestIn, choices: Any = None) -> List[str]:
         """The variables (schemas.recipes.RECIPE_VARIABLES) whose value in the checked request is not the recipe's:
-        the model (another repo or commit), format, board, quantization, importance matrix, and the calibration file
-        when it is the person's own."""
+        the model (another repo or commit), format, board, quantization, importance matrix, the calibration file
+        when it is the person's own, and the optimization level when it is not the one the recipe's build takes
+        (recipe_optimization.changed)."""
+        from orchestrator.Core import recipe_optimization
         fmt, board, quant = self.recipe_pins(recipe)
         same = lambda a, b: str(a or "").casefold() == str(b or "").casefold()  # noqa: E731
         changed = []
@@ -1185,6 +1207,9 @@ class BuildService:
         own = getattr(choices, "own_dataset_path", None)
         if own is not None and (own or recipe.options.dataset is not None):
             changed.append("dataset")
+        level, _source, board_level = self.recipe_level(recipe, validated, choices)
+        if recipe_optimization.changed(recipe, level, board_level):
+            changed.append(recipe_optimization.VARIABLE)
         return changed
 
     def recipe_target_note(self, recipe) -> str:
@@ -1236,7 +1261,9 @@ class BuildService:
     def recipe_digest(recipe) -> str:
         """sha256 of every field of a recipe (canonical JSON): the recipe the person was asked about is the one that
         is built, including the importance matrix, context length and dataset the question showed."""
-        text = json.dumps(recipe.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        from orchestrator.Core.recipe_optimization import canonical
+        # a format-1 recipe keeps the digest it had before the optimization level existed
+        text = json.dumps(canonical(recipe.model_dump(mode="json")), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     @staticmethod
@@ -1265,9 +1292,12 @@ class BuildService:
         file is used, and the recipe record the build engine compares the result with (recipe_record). `expect`: the
         request values the person was shown (model, revision, target, format, board, quantization, recipe_sha256); a
         recipe changed since is refused. `probe`: the board's hardware probe the caller named (BuildRequestIn.probe; a
-        recipe pins none), checked like start_build's; without one the board's newest stored probe. `build_options`:
-        start_build's optimization, priority, output_dir, parallel_builds, description and its pre-flight and flag
-        answers."""
+        recipe pins none), checked like start_build's; without one the board's newest stored probe. The optimization
+        level is a variable (`choices.optimization`): the person's, else the recipe's, else the board profile's
+        (recipe_level); `expect` may name the level shown. `build_options`: start_build's priority, output_dir,
+        parallel_builds, description and its pre-flight and flag answers (never the level: it is a choice)."""
+        if "optimization" in build_options:
+            raise TypeError("start_recipe takes the optimization level as choices.optimization (a recipe variable)")
         request, recipe, _prov = self.recipe_request(recipe_id, dataset_path, use_gpu, choices=choices)
         if probe:
             request = request.model_copy(update={"probe": probe})
@@ -1275,6 +1305,8 @@ class BuildService:
         if expect is not None:
             now = {"model": request.model, "revision": request.revision, "target": validated.target,
                    "format": validated.format, "board": validated.board, "quantization": validated.quantization}
+            if "optimization" in expect:   # the level the question or the form showed
+                now["optimization"] = self.recipe_level(recipe, validated, choices)[0]
             changed = [k for k, v in now.items() if str(v or "").casefold() != str(expect.get(k) or "").casefold()]
             if not changed and self.recipe_digest(recipe) != str(expect.get("recipe_sha256") or ""):
                 changed = ["recipe"]  # any other field (importance matrix, context length, dataset, target pin)
@@ -1289,9 +1321,10 @@ class BuildService:
         # with exactly the pinned sha256), so a file swapped after this check is never used
         named = recipe.options.dataset
         record = self.recipe_record(recipe, self.recipe_changes(recipe, validated, choices))
+        level = self.recipe_level(recipe, validated, choices)[0]
         return self.start_build(request, local_paths=local_paths, owner=owner, disk_reservation=disk_reservation,
                                 dataset_sha256=named.sha256 if named is not None and not own_dataset else None,
-                                recipe=record, **build_options)
+                                recipe=record, optimization=level, **build_options)
 
     # --- the board's optimization profile (Core/board_profiles.py) ----------------------------------------------
 

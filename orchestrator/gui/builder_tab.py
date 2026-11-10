@@ -1343,13 +1343,26 @@ class BuilderTab(QWidget):
             self._quant_user_set = True
         self.chk_imatrix.setChecked(recipe.options.use_imatrix)
         self._imatrix_user_set = True   # the recipe's value, kept when quantization or format change (a variable)
+        # The recipe's optimization level is the start value of the field (Core/recipe_optimization.py), kept when the
+        # board changes; a recipe without one leaves the field to the board profile's level
+        from orchestrator.Core.recipe_optimization import level_of
+        level = level_of(recipe)
+        chosen = ["model", "target", "format", "board", "quantization", "imatrix"]
+        if level:
+            found = self.opt_combo.findText(level.upper())
+            if found >= 0:
+                self.opt_combo.setCurrentIndex(found)
+                self._opt_user_set = True
+                chosen.append("optimization")
         # The recipe the person chose to build: its values are the person's (an AI never overwrites them)
-        self.gui_form.person_chose(["model", "target", "format", "board", "quantization", "imatrix"])
+        self.gui_form.person_chose(chosen)
         self._log(f"Recipe {recipe.id} by {recipe.author}: {recipe.model.repo} at commit "
                   f"{recipe.model.revision[:12]}, context length "
                   f"{recipe.options.max_context_length or 'the target default'}, model licence "
-                  f"{recipe.model.license}. Model, format, board, quantization, importance matrix and calibration "
-                  "file are yours to change; the target is the recipe's.")
+                  f"{recipe.model.license}, optimization level "
+                  + (f"{level} (the recipe's)" if level else "not named (the board profile's)")
+                  + ". Model, format, board, quantization, importance matrix, calibration file and optimization level "
+                  "are yours to change; the target is the recipe's.")
         if recipe.options.dataset:
             self._log(f"The recipe was calibrated with {recipe.options.dataset.name} (sha256 "
                       f"{recipe.options.dataset.sha256[:16]}...); choose that file to build with it, or a file of "
@@ -1632,6 +1645,8 @@ class BuilderTab(QWidget):
         if recipe is not None:
             dataset, choices = self._recipe_choices(values)
             self._log_recipe_changes(service, recipe, values, choices)
+            # the level is one of the recipe's variables (choices.optimization), not a build option
+            options = {k: v for k, v in options.items() if k != "optimization"}
             return service.start_recipe(recipe.id, dataset_path=dataset, use_gpu=values["use_gpu"],
                                         expect=self._recipe_expect(values), probe=values.get("probe"),
                                         choices=choices, **options).request_id
@@ -1651,6 +1666,13 @@ class BuilderTab(QWidget):
         if choices.own_dataset_path is not None and (choices.own_dataset_path or recipe.options.dataset is not None):
             own = choices.own_dataset_path
             changes.append(f"calibration file {Path(own).name if own else 'none'}")
+        level_of = getattr(service, "recipe_level", None)   # the level and whether it is the recipe's
+        if callable(level_of):
+            from orchestrator.Core import recipe_optimization
+            level, source, board_level = level_of(recipe, self._service_request(values), choices)
+            if recipe_optimization.changed(recipe, level, board_level):
+                changes.append("optimization level " + recipe_optimization.describe(recipe, level, source,
+                                                                                    board_level))
         if changes:
             self._log(f"Recipe {recipe.id} with your choices: " + ", ".join(changes) + ".")
         else:
@@ -1693,7 +1715,8 @@ class BuilderTab(QWidget):
         return pinned, RecipeChoices(
             model=None if str(model).casefold() == recipe.model.repo.casefold() else model,
             format=values["target_fmt"].value, board=values["board"] or None,
-            quantization=values["quant"] or None, use_imatrix=bool(values["use_imatrix"]), own_dataset_path=own)
+            quantization=values["quant"] or None, use_imatrix=bool(values["use_imatrix"]), own_dataset_path=own,
+            optimization=getattr(values["opt_lvl"], "value", None))
 
     @staticmethod
     def _recipe_expect(values):
@@ -1704,6 +1727,7 @@ class BuilderTab(QWidget):
         model = values["model"]
         return {"model": model, "revision": BuilderTab._recipe_commit(values), "target": values["target"],
                 "format": values["target_fmt"].value, "board": values["board"], "quantization": values["quant"],
+                "optimization": getattr(values["opt_lvl"], "value", None),
                 "recipe_sha256": BuildService.recipe_digest(recipe)}
 
     @staticmethod

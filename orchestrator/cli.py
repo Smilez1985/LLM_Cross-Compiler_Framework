@@ -744,8 +744,8 @@ class _FormatOption(click.Option):
 @click.option('--recipe', 'recipe_id', default=None, metavar='ID',
               help="Build with an installed community recipe ('llm-cli zoo list --kind recipe'), a target template: "
                    "its target, and its values for every option you leave out; --model, --format, --board, "
-                   "--quantization, --imatrix/--no-imatrix and --dataset/--no-dataset change them. Built unchanged, "
-                   "the result is compared with the recipe's reference")
+                   "--quantization, --imatrix/--no-imatrix, --dataset/--no-dataset and --optimization change them. "
+                   "Built unchanged, the result is compared with the recipe's reference")
 @click.option('--format', '-f', default=None, type=_TargetFormat(), cls=_FormatOption,
               help="Target format, one the target builds (default: gguf; with --recipe the recipe's)")
 @click.option('--board', '-b', help='Board within the target family, e.g. rk3588, rk3576, rk3566')
@@ -762,7 +762,7 @@ class _FormatOption(click.Option):
               type=click.Choice(['fast', 'balanced', 'size', 'speed', 'aggressive']),
               help='Optimization level, passed to the target\'s build scripts as OPTIMIZATION_LEVEL '
                    '(the Rockchip target ignores it). Default: the level of the board\'s optimization profile '
-                   '(\'llm-cli targets boards\'), else balanced')
+                   '(\'llm-cli targets boards\'), else balanced; with --recipe the recipe\'s level when it names one')
 @click.option('--priority', default='normal',
               type=click.Choice(['low', 'normal', 'high', 'urgent', 'critical']),
               help='Build priority')
@@ -812,8 +812,8 @@ def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[st
     anyway.
 
     With --recipe ID the build uses an installed community recipe as a target template: the recipe's target holds the
-    build code, and model, format, board, quantization, importance matrix and calibration file are the recipe's unless
-    you give them. A --dataset file with the sha256 the recipe pins is the recipe's; any other file is your own. A build
+    build code, and model, format, board, quantization, importance matrix, calibration file and optimization level are
+    the recipe's unless you give them (a recipe without a level takes the board profile's). A --dataset file with the sha256 the recipe pins is the recipe's; any other file is your own. A build
     that changes nothing is compared with the recipe's reference result when it ends."""
     from orchestrator.Core.build_service import BuildServiceError, ModelNotHere, PreflightStopped
     ctx.require_framework()
@@ -881,7 +881,7 @@ def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[st
             nonlocal recipe_dataset, choices
             if recipe is not None:   # the recipe's request with your choices (BuildService.recipe_request)
                 recipe_dataset, choices = _recipe_choices(recipe, model_value, format, board, quantization, imatrix,
-                                                          dataset, no_dataset)
+                                                          dataset, no_dataset, optimization)
                 request, _r, _p = service.recipe_request(recipe.id, recipe_dataset, gpu, choices=choices)
                 return service.validate(request.model_copy(update={"probe": probe}) if probe else request,
                                         local_paths=True)
@@ -924,10 +924,14 @@ def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[st
                 console.print(f"[red]{escape(problem)}[/red]")
             sys.exit(2)
         ignore_preflight = _decide_preflight(ctx, preflight, ignore_preflight, "Build anyway?")
-        # the level given, else the board profile's (round 23 item 10), as the Builder and start_build choose it
-        resolve = getattr(service, "optimization_for", None)
-        chosen = resolve(request, optimization) if callable(resolve) else None
-        optimization = chosen if isinstance(chosen, str) else (optimization or "balanced")
+        # the level given, else the board profile's (round 23 item 10), as the Builder and start_build choose it; with a
+        # recipe the given level, else the recipe's, else the board profile's (Core/recipe_optimization.py)
+        if recipe is not None:
+            optimization = service.recipe_level(recipe, request, choices)[0]
+        else:
+            resolve = getattr(service, "optimization_for", None)
+            chosen = resolve(request, optimization) if callable(resolve) else None
+            optimization = chosen if isinstance(chosen, str) else (optimization or "balanced")
 
         # A finished build with 100 % the same options (eighth round N11; round 23 item 9): the Builder tab's check
         # and question. Use it (copied into the folder below), build it again, or cancel; nothing is skipped by itself.
@@ -964,14 +968,14 @@ def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[st
         # The orchestrator runs on the framework's background loop (as for the GUI and the build service), so the
         # build service can cancel the build from here on Ctrl+C.
         try:
-            options = dict(local_paths=True, optimization=optimization, priority=priority, output_dir=output_dir,
+            options = dict(local_paths=True, priority=priority, output_dir=output_dir,
                            flag_decision=module_flags, remember_flags=remember_flags, flag_channel="framework-cli",
                            ignore_preflight=ignore_preflight, description=f"CLI build: {model} -> {target} ({format})")
-            if recipe is not None:
+            if recipe is not None:   # the level is one of the recipe's variables (choices.optimization)
                 request_id = service.start_recipe(recipe.id, dataset_path=recipe_dataset, use_gpu=gpu, probe=probe,
                                                   choices=choices, **options).request_id
             else:
-                request_id = service.start_build(request, **options).request_id
+                request_id = service.start_build(request, optimization=optimization, **options).request_id
         except PreflightStopped as e:   # a probe changed since the check above: the new stop, nothing started
             _print_preflight(e.preflight)
             console.print("Nothing was started. Give --ignore-preflight to build anyway.")
@@ -1002,9 +1006,10 @@ def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[st
 
 
 def _recipe_choices(recipe, model: Optional[str], fmt: Optional[str], board: Optional[str],
-                    quantization: Optional[str], imatrix: Optional[bool], dataset: Optional[str], no_dataset: bool):
+                    quantization: Optional[str], imatrix: Optional[bool], dataset: Optional[str], no_dataset: bool,
+                    optimization: Optional[str] = None):
     """(the recipe's own calibration file or None, schemas.recipes.RecipeChoices) of `build start --recipe`: the
-    options given are the variables. A --dataset file with the sha256 the recipe pins is the recipe's; any other
+    options given are the variables (--optimization the level). A --dataset file with the sha256 the recipe pins is the recipe's; any other
     file is your own, and --no-dataset builds without one."""
     from orchestrator.schemas.recipes import RecipeChoices
     from orchestrator.utils.helpers import digest_matches, sha256_file
@@ -1022,7 +1027,8 @@ def _recipe_choices(recipe, model: Optional[str], fmt: Optional[str], board: Opt
         model = None
     changed_format = fmt if fmt and fmt.casefold() != recipe.format.casefold() else None
     return pinned, RecipeChoices(model=model or None, format=changed_format, board=board or None,
-                                 quantization=quantization or None, use_imatrix=imatrix, own_dataset_path=own)
+                                 quantization=quantization or None, use_imatrix=imatrix, own_dataset_path=own,
+                                 optimization=optimization or None)
 
 
 def _print_recipe(service, recipe, request, choices) -> None:
@@ -1031,6 +1037,7 @@ def _print_recipe(service, recipe, request, choices) -> None:
     console.print(f"Recipe {escape(recipe.id)} by {escape(recipe.author)}: {escape(recipe.model.repo)} at commit "
                   f"{recipe.model.revision[:12]}, model licence {escape(recipe.model.license)}, context length "
                   f"{recipe.options.max_context_length or 'the target default'}.")
+    console.print(f"Optimization level: {escape(service.recipe_level_text(recipe, request, choices))}.")
     changed = service.recipe_changes(recipe, request, choices)
     if changed:
         console.print("Changed from the recipe: " + escape(", ".join(changed)) + ".")
