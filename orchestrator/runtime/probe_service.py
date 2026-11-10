@@ -144,9 +144,13 @@ def match_target(profile: HardwareProfile, target_manager: Any) -> Optional[Targ
         try:
             caps = target_manager.get_capabilities(tid)
             boards = list(caps.boards) if caps else []
-            known = {b: [_canon(n) for n in (info.examples or [])] for b, info in caps.boards.items()} if caps else {}
         except Exception:  # noqa: BLE001
             boards = []
+        try:
+            known = {b: [_canon(n) for n in (getattr(info, "examples", None) or [])]
+                     for b, info in caps.boards.items()} if boards else {}
+        except Exception:  # noqa: BLE001 - boards without their descriptions: no names to match
+            known = {}
         if not boards:
             data = target_manager.get_target(tid) or {}
             boards = [str(b.get("name")) for b in data.get("supported_boards") or [] if isinstance(b, dict)]
