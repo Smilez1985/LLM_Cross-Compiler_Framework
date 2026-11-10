@@ -1,8 +1,10 @@
-# The one Rust toolchain of the framework's own static tools (llmcf-setpriv, llmcf-install): a pinned stable
-# release with the three static musl targets the release builds make (linked with rust-lld and the toolchain's own
-# self-contained musl, no C cross toolchain).
+# The one Rust toolchain of the framework's own board programs: a pinned stable release with the three static musl
+# targets the release builds make (linked with rust-lld and the toolchain's own self-contained musl, no C cross
+# toolchain), and aarch64 with glibc for the vision engine llmcf-detect (linked by zig through cargo-zigbuild against
+# glibc 2.31, since Rockchip's NPU runtime exists only for glibc).
 [toolchain]
 channel = "1.97.0"
 profile = "minimal"
 components = ["rustfmt", "clippy"]
-targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl", "armv7-unknown-linux-musleabihf"]
+targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl", "armv7-unknown-linux-musleabihf",
+           "aarch64-unknown-linux-gnu"]

@@ -198,12 +198,16 @@ jobs:
   rust:
     # The Rust workspace (rust/): llmcf-install, the board bundle's root helper, llmcf-setpriv, llmcf-gateway (the
     # board's token-saving middleware, tested against a stub llama-server) and llmcf-pair (pairing by code, SPAKE2 over
-    # a local link; its test build's loopback-as-link mode runs against the framework's side). The toolchain is
+    # a local link; its test build's loopback-as-link mode runs against the framework's side) and llmcf-detect (the
+    # board's vision engine: its test build with the simulated NPU, cargo feature sim-npu, runs end to end behind the
+    # gateway; its release program is linked for aarch64 with glibc 2.31 by zig through cargo-zigbuild, both pinned,
+    # and its ELF checked: the aarch64 interpreter, only the C library's own libraries, no glibc symbol above 2.31,
+    # the simulated NPU refused). The toolchain is
     # the one rust/rust-toolchain.toml pins (rustup on the runner installs it with its three musl targets); the
     # release programs are static musl binaries linked with the toolchain's own rust-lld (rust/.cargo/config.toml).
     # The release build of llmcf-install must refuse the test mode (--root, only under the cargo feature test-root),
     # and the framework's tests of llmcf-install run against the test build on a fake board.
-    name: Rust (fmt, clippy, tests, static musl builds, cargo-deny)
+    name: Rust (fmt, clippy, tests, static musl builds, the vision engine's glibc build, cargo-deny)
     runs-on: ubuntu-latest
     timeout-minutes: 40
     defaults:
@@ -230,11 +234,13 @@ jobs:
           cargo clippy --locked --workspace --all-targets -- -D warnings
           cargo clippy --locked -p llmcf-install --all-targets --features test-root -- -D warnings
           cargo clippy --locked -p llmcf-pair --all-targets --features test-mode -- -D warnings
+          cargo clippy --locked -p llmcf-detect --all-targets --features sim-npu -- -D warnings
 
       - name: cargo test (the test build of llmcf-install against a fake root prefix)
         run: |
           cargo test --locked --workspace --features llmcf-install/test-root
           cargo test --locked -p llmcf-pair --features test-mode
+          cargo test --locked -p llmcf-detect --features sim-npu
 
       - name: Static musl release builds (x86_64, aarch64, armv7)
         # llmcf-gateway's TLS (rustls with ring) compiles a little C: clang cross-compiles it for each target
@@ -274,6 +280,47 @@ jobs:
           echo "$out"
           [ "$code" -eq 2 ] && echo "$out" | grep -q "no test mode"
 
+      - name: The vision engine for aarch64 with glibc 2.31 (zig and cargo-zigbuild, pinned)
+        # Rockchip's NPU runtime exists only for glibc, so llmcf-detect is the one board program that is no static
+        # musl binary (orchestrator/runtime/bundle/root_helper.py GNU_PROGRAMS: the same pins in the builder image)
+        env:
+          ZIG_VERSION: "0.13.0"
+          ZIG_SHA256: d45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/zig.tar.xz" "https://ziglang.org/download/$ZIG_VERSION/zig-linux-x86_64-$ZIG_VERSION.tar.xz"
+          echo "$ZIG_SHA256  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/zig"
+          tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+          cargo install --locked cargo-zigbuild --version =0.19.8
+          PATH="$RUNNER_TEMP/zig:$PATH" cargo zigbuild --locked --release -p llmcf-detect \
+            --target aarch64-unknown-linux-gnu.2.31
+
+      - name: The vision engine's ELF (interpreter, libraries, glibc baseline) and its refusal of the simulated NPU
+        run: |
+          bin=target/aarch64-unknown-linux-gnu/release/llmcf-detect
+          file "$bin"
+          readelf -lW "$bin" | grep -q 'interpreter: /lib/ld-linux-aarch64.so.1' || { echo "not the aarch64 interpreter" >&2; exit 1; }
+          for lib in $(readelf -dW "$bin" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
+            case "$lib" in libc.so.6|libm.so.6|libdl.so.2|libpthread.so.0|libgcc_s.so.1|librt.so.1|ld-linux-aarch64.so.1) ;;
+              *) echo "llmcf-detect needs $lib" >&2; exit 1 ;; esac
+          done
+          newest="$(readelf -VW "$bin" | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -n 1)"
+          echo "newest glibc symbol version: $newest"
+          [ "$(printf '%s\n2.31\n' "$newest" | sort -V | tail -n 1)" = "2.31" ] || { echo "a glibc symbol above 2.31" >&2; exit 1; }
+          if PATH="$RUNNER_TEMP/zig:$PATH" cargo zigbuild --locked --release -p llmcf-detect --features sim-npu \
+              --target aarch64-unknown-linux-gnu.2.31 2>"$RUNNER_TEMP/sim.log"; then
+            echo "a release build took the simulated NPU" >&2; exit 1
+          fi
+          grep -q "for test builds only" "$RUNNER_TEMP/sim.log"
+          cargo build --locked --release -p llmcf-detect
+          set +e
+          out="$(./target/release/llmcf-detect serve --port 8093 --model m --card c --sim-npu /tmp 2>&1)"
+          code=$?
+          set -e
+          echo "$out"
+          [ "$code" -eq 2 ] && echo "$out" | grep -q "no simulated NPU"
+
       - name: cargo-deny (pinned version)
         run: |
           cargo install --locked cargo-deny --version =0.19.9
@@ -298,6 +345,56 @@ jobs:
           cargo build --locked --manifest-path rust/Cargo.toml -p llmcf-pair --features test-mode
           LLMCF_PAIR_TEST_BIN="$GITHUB_WORKSPACE/rust/target/debug/llmcf-pair" \
             python -m pytest -ra tests/test_pair_pake.py
+
+      - name: The vision engine end to end behind the gateway (the simulated NPU)
+        working-directory: .
+        run: |
+          cargo build --locked --manifest-path rust/Cargo.toml -p llmcf-detect --features sim-npu
+          cargo build --locked --manifest-path rust/Cargo.toml -p llmcf-gateway
+          LLMCF_DETECT_TEST_BIN="$GITHUB_WORKSPACE/rust/target/debug/llmcf-detect" \
+          LLMCF_GATEWAY_TEST_BIN="$GITHUB_WORKSPACE/rust/target/debug/llmcf-gateway" \
+            python -m pytest -ra tests/test_bundle_detect.py tests/test_model_card.py
+
+  rust-arm64:
+    # The vision engine's tests once more on aarch64 (GitHub's arm64 runner): its unit tests with the simulated NPU and
+    # the end-to-end run behind the gateway, the test builds made the same way as on x86_64.
+    name: Rust on arm64 (the vision engine's tests and end-to-end run)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: rust
+    env:
+      CARGO_TERM_COLOR: never
+      PYTHONUTF8: "1"
+      LLM_SECRET_STORAGE: ephemeral
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The pinned toolchain (rust-toolchain.toml)
+        run: |
+          command -v rustup || { curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none; echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"; }
+          "$HOME/.cargo/bin/rustup" show active-toolchain || "$HOME/.cargo/bin/rustup" toolchain install
+
+      - name: cargo test (the vision engine with the simulated NPU)
+        run: |
+          cargo test --locked -p llmcf-detect --features sim-npu
+          cargo build --locked -p llmcf-detect --features sim-npu
+          cargo build --locked -p llmcf-gateway
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: The vision engine end to end behind the gateway on aarch64
+        working-directory: .
+        run: |
+          python -m pip install --no-deps -r requirements.txt -r requirements-dev.txt
+          LLMCF_DETECT_TEST_BIN="$GITHUB_WORKSPACE/rust/target/debug/llmcf-detect" \
+          LLMCF_GATEWAY_TEST_BIN="$GITHUB_WORKSPACE/rust/target/debug/llmcf-gateway" \
+            python -m pytest -ra tests/test_bundle_detect.py tests/test_model_card.py
 
   test-headless:
     # The install without the optional extra 'gui' (DESIGN round 11, A3): a headless or server install and the

@@ -63,7 +63,7 @@ ENGINE_MODES = ("together", "in-turn")
 ROOT_HELPER_RECORD = "llmcf-install.json"
 STORE_DIR = "bundles"
 _MAGIC = {"gguf": (b"GGUF",), "mmproj-gguf": (b"GGUF",), "ggml-whisper": (b"lmgg", b"ggjt", b"ggml"),
-          "elf": (b"\x7fELF",), "tar.gz": (b"\x1f\x8b",)}
+          "elf": (b"\x7fELF",), "tar.gz": (b"\x1f\x8b",), "rknn": (b"RKNN",)}
 _ELF_ARCH = {0x3E: "x86_64", 0xB7: "arm64", 0x28: "arm", 0xF3: "riscv64", 0x03: "x86"}
 
 
@@ -266,6 +266,13 @@ def detect_format(path: Path, fmt: str) -> bool:
     if fmt in ("onnx", "sherpa-onnx"):
         return path.suffix.lower() == ".onnx"
     if fmt == "text":
+        return True
+    if fmt == "model-card":
+        from orchestrator.runtime.bundle.model_card import CardError, check_file
+        try:
+            check_file(path)
+        except CardError:
+            return False
         return True
     try:
         with open(path, "rb") as fh:
@@ -613,6 +620,7 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         _component_check(plan, comp_id, block, comp_runtime, board_arch, comp_memory, measured_usable)
         if block.kind == "vision" and comp_runtime is not None:
             _vision_checks(plan, comp_id, comp_runtime, picked)
+        _card_checks(plan, comp_id, block, entries, picked, board_arch)
         program = block.program
         args: Tuple[str, ...] = ()
         startable = True
@@ -1309,6 +1317,37 @@ def start_script_takes(package: Path, option: str) -> Optional[bool]:
     except (OSError, tarfile.TarError, EOFError):
         return None
     return None
+
+
+def _card_checks(plan: BundlePlan, comp_id: str, block: Block, entries: List[FileEntry], picked: Dict[str, Path],
+                 board_arch: Optional[str]) -> None:
+    """A block with an RKNN model and its model card (formats rknn and model-card): the card is checked by its rules
+    (model_card.py, the engine's own) and names exactly the model (its rknn.sha256 is the model file's), as a model
+    and its projector are checked to be a pair; the card's facts are shown. A model or card that is an online item is
+    checked by the board's engine at its start."""
+    fmt_of = {need.role: (need.formats[0] if need.formats else "") for need in block.files}
+    card_role = next((r for r, f in fmt_of.items() if f == "model-card"), None)
+    model_role = next((r for r, f in fmt_of.items() if f == "rknn"), None)
+    if card_role is None or model_role is None:
+        return
+    model_entry = next((e for e in entries if e.role == model_role), None)
+    card_path = picked.get(card_role)
+    if model_entry is None or card_path is None:
+        if model_entry is not None:
+            plan.notes.append(f"{comp_id}: the model card is not a local file here; the engine checks it against the "
+                              "model when it starts")
+        return
+    from orchestrator.runtime.bundle.model_card import CardError, check_file
+    try:
+        card = check_file(card_path, model_entry.sha256)
+    except CardError as e:
+        plan.problems.append(f"{comp_id}: the model card: {e}")
+        plan.checks.append({"check": f"model card {comp_id}", "result": "failed", "detail": str(e)[:200]})
+        return
+    if board_arch and str(board_arch).lower() not in ("aarch64", "arm64"):
+        plan.problems.append(f"{comp_id}: the vision engine runs on aarch64 Rockchip boards, the board is "
+                             f"{board_arch}")
+    plan.checks.append({"check": f"model card {comp_id}", "result": "passed", "detail": card.summary()[:300]})
 
 
 def _vision_checks(plan: BundlePlan, comp_id: str, pkg: RuntimePackage, picked: Dict[str, Path]) -> None:

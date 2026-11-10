@@ -12,14 +12,15 @@ pub struct Serve {
     pub card: PathBuf,
     /// `board`, `pinned` or an absolute path (rknn.rs resolve)
     pub runtime: String,
-    /// `auto` or a list of NPU cores such as 0,1
+    /// `auto` or a list of NPU cores such as 0.1
     pub npu_cores: String,
     pub score_pct: Option<u32>,
     pub nms_pct: Option<u32>,
     pub max_results: Option<u32>,
     pub classes: Option<Vec<u32>>,
-    /// the folder of still images played as the engine's source, and its rate
-    pub source_files: Option<PathBuf>,
+    /// the folder of still images played as the engine's source (a plain name: a folder next to the model, the
+    /// engine's own media folder, never a path), and its rate
+    pub source_files: Option<String>,
     pub source_fps: u32,
     /// the simulated NPU's folder (a test build only)
     pub sim_npu: Option<PathBuf>,
@@ -85,9 +86,9 @@ pub fn parse(argv: &[String]) -> Result<Call, String> {
             "--rknn-runtime" => s.runtime = v.clone(),
             "--npu-cores" => {
                 if v != "auto"
-                    && !(v.len() <= 16 && v.split(',').all(|c| c.len() == 1 && c.as_bytes()[0].is_ascii_digit()))
+                    && !(v.len() <= 16 && v.split('.').all(|c| c.len() == 1 && c.as_bytes()[0].is_ascii_digit()))
                 {
-                    return Err("--npu-cores is auto or a list of cores such as 0,1".into());
+                    return Err("--npu-cores is auto or a list of cores such as 0.1".into());
                 }
                 s.npu_cores = v.clone();
             }
@@ -104,7 +105,17 @@ pub fn parse(argv: &[String]) -> Result<Call, String> {
                     s.classes = Some(ids);
                 }
             }
-            "--source-files" => s.source_files = Some(path(v, "--source-files")?),
+            "--source-files" => {
+                let plain = !v.is_empty()
+                    && v.len() <= 64
+                    && v != "."
+                    && v != ".."
+                    && v.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
+                if !plain {
+                    return Err("--source-files names a folder next to the model (a plain name, never a path)".into());
+                }
+                s.source_files = Some(v.clone());
+            }
             "--source-fps" => s.source_fps = number(v, "--source-fps", 1, 60)?,
             "--sim-npu" => {
                 #[cfg(feature = "sim-npu")]
@@ -144,17 +155,19 @@ mod tests {
         let Call::Serve(s) = parse(&a(&BASE)).unwrap() else { panic!() };
         assert_eq!((s.port, s.runtime.as_str(), s.npu_cores.as_str(), s.source_fps), (8093, "board", "auto", 2));
         let mut more = a(&BASE);
-        more.extend(a(&["--classes", "0.2.15", "--score-pct", "30", "--npu-cores", "0,1"]));
+        more.extend(a(&["--classes", "0.2.15", "--score-pct", "30", "--npu-cores", "0.1"]));
         let Call::Serve(s) = parse(&more).unwrap() else { panic!() };
         assert_eq!((s.classes, s.score_pct), (Some(vec![0, 2, 15]), Some(30)));
         for bad in [
             &["--port", "80"][..],
             &["--score-pct", "0"],
             &["--classes", "1,2"],
-            &["--npu-cores", "0;1"],
+            &["--npu-cores", "0,1"],
             &["--port", "8094"],
             &["--bind", "0.0.0.0"],
             &["--source-fps"],
+            &["--source-files", "../media"],
+            &["--source-files", "/media"],
         ] {
             let mut v = a(&BASE);
             v.extend(a(bad));

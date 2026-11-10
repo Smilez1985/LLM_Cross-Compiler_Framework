@@ -1,0 +1,68 @@
+schema: llmcf-bundle-block/1
+id: vision-rknn-detect
+version: 1.0.0
+kind: detect
+title: Object detection on the NPU (llmcf-detect)
+status: ready
+summary: >-
+  llmcf-detect, the framework's vision engine built for the board (aarch64 with glibc), runs one RKNN detection model
+  on Rockchip's NPU through its model card (YOLO with anchors, anchor-free, DFL, NMS-free, NMS in the model, SSD
+  priors), on 127.0.0.1, reached only through the gateway: an image in, the detections out as JSON, and the results
+  of its source as an event stream.
+variables:
+  - {name: port, type: port, default: 8093, help: "Loopback port of the engine"}
+  - {name: rknn_runtime, type: choice, default: board, choices: [board, pinned], help: "Rockchip's NPU runtime: the board's own copy, or the pinned download (placed by the board installer)"}
+  - {name: npu_cores, type: word, default: auto, help: "NPU cores on an RK3588 or RK3576: auto, or cores joined by '.' such as 0.1"}
+  - {name: score_pct, type: uint, default: 0, min: 0, max: 100, help: "Score threshold in percent (0: the model card's)"}
+  - {name: nms_pct, type: uint, default: 0, min: 0, max: 100, help: "NMS IoU threshold in percent (0: the model card's)"}
+  - {name: max_results, type: uint, default: 0, min: 0, max: 1000, help: "Most detections per image (0: the model card's)"}
+  - {name: classes, type: word, default: all, help: "The class ids to report, joined by '.' such as 0.2.15 (all: every class)"}
+  - {name: file_source, type: bool, default: false, help: "Play the still images of the component's media folder as the engine's source"}
+  - {name: source_fps, type: uint, default: 2, min: 1, max: 60, help: "Frames a second of the source"}
+  - {name: memory_limit_mb, type: memory_mb, default: 512, help: "Memory limit of its unit (autostart only)"}
+  - {name: user, type: user, default: llmcf-vision, help: "Account its unit runs as (autostart only)"}
+  - {name: autostart, type: bool, default: false, help: "Start at boot through its own unit (needs llmcf-install)"}
+files:
+  - {role: program, from: framework, name: llmcf-detect, mode: "0755", formats: [elf]}
+  - {role: model, from: person, name: model.rknn, formats: [rknn], licence: required, min_bytes: 1024}
+  # the model card (llmcf-model-card/1) the Rockchip target module wrote next to the .rknn, or the person's own
+  - {role: data, from: person, name: model.card.json, formats: [model-card], max_bytes: 1048576}
+# the engine's memory: 96 MB plus twice the model file (the runtime holds the file and the NPU's copy of the weights)
+# until "measure the engines" measures it
+memory: {base_mb: 96, model_factor: 2.0}
+unit: true
+reach:
+  routes:
+    - path: /api/detect
+      protocol: http-multipart
+      upstream_path: /detect
+      max_body_kb: 8192
+      timeout_s: 60
+      engine_route_key: detect
+      fields:
+        - {name: image, file: true, types: [jpeg, png], required: true}
+        - {name: options}
+    - {path: /api/detect/image, protocol: http-binary, upstream_path: /detect/image, max_body_kb: 8192, timeout_s: 60,
+       types: [jpeg, png], engine_route_key: image}
+    - {path: /api/detect/events, method: GET, protocol: http-sse, upstream_path: /events, timeout_s: 30,
+       engine_route_key: events}
+start:
+  program: llmcf-detect
+  args:
+    - serve
+    - --port
+    - "{port}"
+    - --model
+    - "@FILE:model@"
+    - --card
+    - "@FILE:data@"
+    - --rknn-runtime
+    - "{rknn_runtime}"
+    - --npu-cores
+    - "{npu_cores}"
+    - --classes
+    - "{classes}"
+    - {when: score_pct, args: [--score-pct, "{score_pct}"]}
+    - {when: nms_pct, args: [--nms-pct, "{nms_pct}"]}
+    - {when: max_results, args: [--max-results, "{max_results}"]}
+    - {when: file_source, args: [--source-files, media, --source-fps, "{source_fps}"]}

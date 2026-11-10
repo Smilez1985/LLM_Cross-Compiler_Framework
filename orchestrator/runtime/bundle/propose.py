@@ -12,8 +12,10 @@ person. The draft is a template block (status template: its program comes from t
 engine) and passes the block schema's own check (blocks.parse_block, reach.parse_reach) before anyone sees it.
 
 For a detection-type task (MODEL_CARD_TASKS) the draft notes what the engine needs to know (input size, classes,
-pre- and post-processing) and where it should come from (the model's files, else the target module); there is no
-engine program here.
+pre- and post-processing) and where it comes from: the model card (llmcf-model-card/1, model_card.py) the target
+module writes at conversion from the model's own files; there is no engine program here. An object-detection model
+for a Rockchip NPU runs with the framework's own block vision-rknn-detect (the engine llmcf-detect and its card), which
+the draft names.
 
 Who does what: the rules propose; the person reviews the draft with its reasons, may change it, and writes it as an
 own block (unsigned, trust "own") with `--write` after a yes at a terminal or with Save in the window's review
@@ -350,6 +352,9 @@ def _routes(profile: Profile, kind: str, task: str, reasons: List[Reason], origi
 
 # --- the model card hints ------------------------------------------------------------------------------------------
 
+CARD_SOURCE = "the model card (llmcf-model-card/1) the target module writes at conversion"
+
+
 def _model_card(summary: ModelSummary, task: str) -> List[CardHint]:
     if task not in MODEL_CARD_TASKS:
         return []
@@ -359,18 +364,18 @@ def _model_card(summary: ModelSummary, task: str) -> List[CardHint]:
     hints = [
         CardHint("input size (width and height the engine scales an image to)",
                  "the model's preprocessor_config.json (size)" if pre else
-                 "the model's config.json (image_size)" if config else "the target module that builds the engine",
+                 "the model's config.json (image_size)" if config else CARD_SOURCE,
                  f"{summary.image_size} px" if summary.image_size else ""),
         CardHint("classes (the label of each output index)",
                  "the model's config.json (id2label)" if config else
                  "a labels file of the model" if names & {"labels.txt", "classes.txt"} else
-                 "the target module that builds the engine",
+                 CARD_SOURCE,
                  f"{summary.classes} classes" if summary.classes else ""),
         CardHint("pre-processing (colour order, mean and standard deviation, letterboxing)",
-                 "the model's preprocessor_config.json" if pre else "the target module that builds the engine"),
+                 "the model's preprocessor_config.json" if pre else CARD_SOURCE),
         CardHint("post-processing (score threshold, non-maximum suppression, box or mask format)"
                  if task != "image-classification" and task != "video-classification" else
-                 "post-processing (softmax, top-k)", "the target module that builds the engine"),
+                 "post-processing (softmax, top-k)", CARD_SOURCE),
     ]
     return hints
 
@@ -414,6 +419,11 @@ def propose(summary: ModelSummary) -> Draft:
         {"role": "program", "from": "person", "note": "the engine program its target module builds"}]
     reasons.append(Reason("files.program", "needs the person",
                           "the engine program comes from the target module that builds it for the board"))
+    if task == "object-detection":
+        reasons.append(Reason("files.program", "task",
+                              "an object-detection model converted for a Rockchip NPU (RKNN) runs with the "
+                              "framework's block vision-rknn-detect: its engine llmcf-detect reads the model card "
+                              "the Rockchip target module writes at conversion; use that block instead of this draft"))
     if kind == "llm" and "gguf" in files.formats:
         reasons.append(Reason("files.program", "model files",
                               "a GGUF language model also runs with the framework's block llm-llama-server (the "

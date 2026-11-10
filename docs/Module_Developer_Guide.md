@@ -1535,6 +1535,12 @@ the memory on the board, and the licence. The framework's guides are examples:
   projector whose embedding size differs from the model's, or one over four times the model's size, is a warning.
   The memory in the plan counts both files. A runtime package built before its start script took `--mmproj` is a
   problem until it is packed again (the framework does that from the kept source).
+- **Object detection on the NPU (`vision-rknn-detect`):** an RKNN model (format `rknn`, its first bytes `RKNN`)
+  converted by the Rockchip target module for the board's SoC, and its model card (format `model-card`,
+  `llmcf-model-card/1`, `<name>.card.json` next to the `.rknn`), which the target module writes at conversion or which
+  you give with the model. The plan checks the card by the engine's own rules and that its `rknn.sha256` is the
+  model's; the program `llmcf-detect` comes from the framework (aarch64 with glibc 2.31). Rockchip's NPU runtime is
+  never part of the bundle: `rknn_runtime` board or pinned. The block's guide lists the routes, variables and kinds.
 - **Speech output (`tts-sherpa-onnx`, a template):** sherpa-onnx's offline TTS server for the board's architecture and
   a TTS model in the layout sherpa-onnx reads (format `sherpa-onnx`: the ONNX model with its token and voice files from
   the sherpa-onnx model list); a plain ONNX file from elsewhere does not fit.

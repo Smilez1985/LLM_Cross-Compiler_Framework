@@ -166,9 +166,10 @@ def test_the_framework_ships_llm_and_stt_blocks_and_the_others_as_documented_tem
     assert catalog.notes == []
     # since the bundle components: stt-whisper-cpp is the framework's own whisper.cpp build, the program the person
     # picks is the explicit block stt-whisper-cpp-program, and vision-mmproj is a ready block; since the gateway
-    # component, gateway-llmcf is ready too; since the board harness run, harness-agent (the person's own harness)
+    # component, gateway-llmcf is ready too; since the board harness run, harness-agent (the person's own harness);
+    # since the vision engine's step 1, vision-rknn-detect (llmcf-detect on the NPU)
     assert {b.id for b in catalog.ready()} == {"llm-llama-server", "stt-whisper-cpp", "stt-whisper-cpp-program",
-                                               "vision-mmproj", "gateway-llmcf", "harness-agent"}
+                                               "vision-mmproj", "gateway-llmcf", "harness-agent", "vision-rknn-detect"}
     templates = {b.kind for b in catalog.blocks.values() if not b.ready}
     assert templates == {"tts", "stt"}
     for block in catalog.blocks.values():

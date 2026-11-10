@@ -1598,6 +1598,13 @@ Format, die Größe und den Speicher auf dem Board und die Lizenz. Die Anleitung
   Weckwort wird nicht angeboten: whisper.cpp hat eines nur in einem Beispiel, das SDL2 und ein Mikrofon braucht,
   nicht in seinem Server. `stt-whisper-cpp-program` behält den älteren Weg, ein selbst gewähltes `whisper-server`,
   mit einer Warnung im Plan, dass es nicht vom Framework gebaut ist.
+- **Objekterkennung auf der NPU (`vision-rknn-detect`):** ein RKNN-Modell (Format `rknn`, seine ersten Bytes `RKNN`),
+  vom Rockchip-Target-Modul für den SoC des Boards umgewandelt, und seine Modellkarte (Format `model-card`,
+  `llmcf-model-card/1`, `<Name>.card.json` neben der `.rknn`), die das Target-Modul bei der Umwandlung schreibt oder
+  die du mit dem Modell gibst. Der Plan prüft die Karte nach den eigenen Regeln der Engine und dass ihr `rknn.sha256`
+  der des Modells ist; das Programm `llmcf-detect` kommt vom Framework (aarch64 mit glibc 2.31). Rockchips
+  NPU-Laufzeit ist nie Teil des Bündels: `rknn_runtime` board oder pinned. Die Anleitung des Bausteins nennt Routen,
+  Variablen und Arten.
 - **Bilderkennung (`vision-mmproj`):** ein GGUF-Vision-Modell und sein multimodaler Projektor, die `mmproj`-GGUF-Datei
   genau dieses Modells (Format `mmproj-gguf`), gestartet vom Startskript der llama.cpp-Laufzeit mit `--mmproj`. Der
   Plan liest beide GGUF-Köpfe: ein Projektor, der kein Vision-Projektor ist oder für ein anderes Modell benannt ist,

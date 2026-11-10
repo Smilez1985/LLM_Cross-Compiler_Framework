@@ -111,13 +111,16 @@ fn main() -> ExitCode {
     };
     let source = match &s.source_files {
         None => None,
-        Some(dir) => match server::Source::open(dir, s.source_fps) {
-            Ok(src) => Some(src),
-            Err(e) => {
-                eprintln!("llmcf-detect: {e}");
-                return ExitCode::from(1);
+        Some(name) => {
+            match server::Source::open(&s.model.parent().unwrap_or(std::path::Path::new(".")).join(name), s.source_fps)
+            {
+                Ok(src) => Some(src),
+                Err(e) => {
+                    eprintln!("llmcf-detect: {e}");
+                    return ExitCode::from(1);
+                }
             }
-        },
+        }
     };
     let rt = match tokio::runtime::Builder::new_current_thread().enable_all().max_blocking_threads(4).build() {
         Ok(rt) => rt,

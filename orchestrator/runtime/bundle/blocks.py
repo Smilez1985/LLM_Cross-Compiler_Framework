@@ -51,8 +51,9 @@ SOURCES = ("person", "runtime", "framework", "harness", "routes")
 # The two files of a harness block (from: harness): the taken-in tree and the watch.
 HARNESS_FILES = {"data": "harness.tar", "program": "harness_watch.sh"}
 # The formats a block may name for a file, and how the generator recognizes each by its first bytes (or by its name
-# where a format has no magic number).
-FORMATS = ("gguf", "mmproj-gguf", "ggml-whisper", "onnx", "sherpa-onnx", "elf", "tar.gz", "text")
+# where a format has no magic number). rknn: an RKNN model of Rockchip's NPU (its first bytes "RKNN"); model-card:
+# its model card (model_card.py, llmcf-model-card/1), checked by its rules and paired with the model by its SHA256.
+FORMATS = ("gguf", "mmproj-gguf", "ggml-whisper", "onnx", "sherpa-onnx", "elf", "tar.gz", "text", "rknn", "model-card")
 TRUSTS = ("framework", "indexed", "signed", "own")
 ENTERPRISE_TRUSTS = ("framework", "indexed")
 MAX_BLOCK_BYTES = 64 * 1024

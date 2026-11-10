@@ -2713,6 +2713,7 @@ class BuildEngine:
             for f in sorted(output_dir.iterdir())
             if f.is_file() and f.name.lower().endswith(MODEL_FILE_SUFFIXES) and (own is None or f.resolve() in own)
         ]
+        cards = self._model_cards(output_dir, artifacts, progress)
         target_ext = f".{config.target_format.value}"
         preferred = [a for a in artifacts if a["file"].lower().endswith(target_ext)] or artifacts
         primary = max(preferred, key=lambda a: a["bytes"])["file"] if preferred else None
@@ -2745,6 +2746,9 @@ class BuildEngine:
             "imatrix": bool(config.use_imatrix and config.target_format == ModelFormat.GGUF),
             "created": datetime.now().isoformat(timespec="seconds"),
             "artifacts": artifacts,
+            # the model card of each RKNN vision model (<name>.card.json, written by the Rockchip target module),
+            # checked by the rules the board's engine checks it with
+            "model_cards": cards,
             "primary": primary,
             "multi_file": multi_file,
             # What a recipe needs to reproduce the build
@@ -2762,6 +2766,34 @@ class BuildEngine:
         })
         manifest_path.write_text(json.dumps(info, indent=2), encoding="utf-8")
         return info
+
+    @staticmethod
+    def _model_cards(output_dir: Path, artifacts: List[Dict[str, Any]],
+                     progress: Optional[BuildProgress]) -> List[Dict[str, Any]]:
+        """The model card next to each .rknn artifact, checked (runtime/bundle/model_card.py: the schema and that
+        it names exactly this model by its SHA256); a missing or refused card is a warning, never a failed build: the
+        person can give a card with the model."""
+        from orchestrator.runtime.bundle.model_card import CardError, card_path_for, check_file
+        out: List[Dict[str, Any]] = []
+        for a in artifacts:
+            if not a["file"].lower().endswith(".rknn"):
+                continue
+            path = card_path_for(output_dir / a["file"])
+            if not path.is_file():
+                out.append({"file": a["file"], "card": None, "result": "missing"})
+                if progress is not None:
+                    progress.add_warning(f"No model card next to {a['file']}: the conversion could not tell every "
+                                         "fact the board's vision engine needs (its log says what); give the "
+                                         "model's card with the model.")
+                continue
+            try:
+                card = check_file(path, a["sha256"])
+                out.append({"file": a["file"], "card": path.name, "result": "passed", "detail": card.summary()})
+            except CardError as e:
+                out.append({"file": a["file"], "card": path.name, "result": "refused", "detail": str(e)[:300]})
+                if progress is not None:
+                    progress.add_warning(f"The model card {path.name} is refused: {e}")
+        return out
 
     @staticmethod
     def _build_options(config: BuildConfiguration, info: Dict[str, Any],

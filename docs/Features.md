@@ -638,7 +638,9 @@ board...**).
 Deploy way 3 beside the golden ZIP and the runtime package: one bundle for the whole board, made from building blocks
 (the framework's `llm-llama-server` with the board's self-built llama.cpp runtime and a GGUF model, and
 `stt-whisper-cpp` with the framework's own whisper.cpp server build for the board and a ggml model, and
-`vision-mmproj` with the llama.cpp runtime started with `--mmproj` for a vision model and its projector; a
+`vision-mmproj` with the llama.cpp runtime started with `--mmproj` for a vision model and its projector, and
+`vision-rknn-detect` with the framework's vision engine `llmcf-detect` for an RKNN detection model and its model card
+on a Rockchip NPU; a
 `whisper-server` you pick yourself stays possible with `stt-whisper-cpp-program`, with a warning; speech output with
 sherpa-onnx is a documented template; `gateway-llmcf` is the framework's own gateway in front of the model, which
 lets a request that finds the model busy wait its turn in a fair queue instead of refusing it, holds new requests

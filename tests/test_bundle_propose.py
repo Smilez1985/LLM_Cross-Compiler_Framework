@@ -126,7 +126,10 @@ def test_the_model_card_hints_of_the_detection_type_tasks():
         hints = p.propose_task(task).model_card
         assert [h.what.split(" (")[0] for h in hints] == ["input size", "classes", "pre-processing",
                                                           "post-processing"], task
-        assert all(h.source == "the target module that builds the engine" for h in hints)
+        assert all(h.source == p.CARD_SOURCE for h in hints)
+        assert "llmcf-model-card/1" in p.CARD_SOURCE
+    detect = p.propose_task("object-detection")
+    assert any("vision-rknn-detect" in r.text for r in detect.reasons if r.field == "files.program")
     for task in ("text-generation", "text-to-speech", "zero-shot-classification"):
         assert p.propose_task(task).model_card == []
     summary = p.ModelSummary(repo="example/det", task="object-detection", classes=80, image_size=640,

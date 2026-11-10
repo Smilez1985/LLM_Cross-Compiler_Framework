@@ -180,7 +180,7 @@ pub fn npu_cores(soc: &str) -> u32 {
     }
 }
 
-/// The core mask of `--npu-cores` ("auto", or a list of cores such as "0,1") for the board's SoC.
+/// The core mask of `--npu-cores` ("auto", or a list of cores such as "0.1") for the board's SoC.
 pub fn core_mask(spec: &str, soc: &str) -> Result<u32, String> {
     if spec == "auto" {
         return Ok(0);
@@ -190,9 +190,9 @@ pub fn core_mask(spec: &str, soc: &str) -> Result<u32, String> {
         return Err(format!("the {soc} has one NPU core: --npu-cores takes only auto there"));
     }
     let mut mask = 0u32;
-    for part in spec.split(',') {
+    for part in spec.split('.') {
         let c: u32 =
-            part.parse().map_err(|_| format!("--npu-cores is auto or a list of cores such as 0,1 (not {spec})"))?;
+            part.parse().map_err(|_| format!("--npu-cores is auto or a list of cores such as 0.1 (not {spec})"))?;
         if c >= cores || mask & (1 << c) != 0 {
             return Err(format!("the {soc} has the NPU cores 0 to {}; --npu-cores names each once", cores - 1));
         }
@@ -276,8 +276,8 @@ mod tests {
     fn the_core_mask_is_refused_on_a_single_core_soc() {
         assert_eq!(core_mask("auto", "rk3566"), Ok(0));
         assert!(core_mask("0", "rk3566").unwrap_err().contains("one NPU core"));
-        assert_eq!(core_mask("0,2", "rk3588"), Ok(0b101));
-        assert!(core_mask("0,3", "rk3588").is_err() && core_mask("1,1", "rk3576").is_err());
+        assert_eq!(core_mask("0.2", "rk3588"), Ok(0b101));
+        assert!(core_mask("0.3", "rk3588").is_err() && core_mask("1.1", "rk3576").is_err());
         assert!(core_mask("x", "rk3588").is_err());
     }
 }

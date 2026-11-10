@@ -698,7 +698,9 @@ entfernen...**, **Ältere Builds auf dem Board entfernen...**).
 Deploy-Weg 3 neben dem Golden-ZIP und dem Laufzeitpaket: ein Bündel für das ganze Board, gebaut aus Bausteinen (die
 des Frameworks: `llm-llama-server` mit der selbst gebauten llama.cpp-Laufzeit des Boards und einem GGUF-Modell, und
 `stt-whisper-cpp` mit dem eigenen Build des whisper.cpp-Servers des Frameworks für das Board und einem ggml-Modell,
-und `vision-mmproj` mit der llama.cpp-Laufzeit, gestartet mit `--mmproj` für ein Vision-Modell und seinen Projektor;
+und `vision-mmproj` mit der llama.cpp-Laufzeit, gestartet mit `--mmproj` für ein Vision-Modell und seinen Projektor,
+und `vision-rknn-detect` mit der Vision-Engine `llmcf-detect` des Frameworks für ein RKNN-Erkennungsmodell und seine
+Modellkarte auf einer Rockchip-NPU;
 ein selbst gewähltes `whisper-server` bleibt mit `stt-whisper-cpp-program` möglich, mit einer Warnung; Sprachausgabe
 mit sherpa-onnx ist eine dokumentierte Vorlage; `gateway-llmcf` ist das eigene Gateway des Frameworks vor dem
 Modell, das eine Anfrage bei beschäftigtem Modell in einer fairen Warteschlange warten lässt, statt sie abzulehnen,
