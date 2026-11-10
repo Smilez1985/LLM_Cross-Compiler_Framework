@@ -16,7 +16,7 @@ one llmcf-preload/ folder, manifest.txt, SHA256SUMS), of kind build.
 - the build engine asks preload_sources() for the plan and stage() for the build context; image_files() takes the
   files of source images (online through the registry, offline from the person's cache).
 
-Taking from source images reads the image without running it (orchestrator/utils/image_files.py); a file whose
+Taking from source images reads the image without running it (scripts/image_files.py); a file whose
 licence forbids passing it on stays with the person (their cache, their image, their own preload).
 """
 
@@ -61,21 +61,33 @@ class PreloadProblem(WithSteps, ValueError):
         self.code, self.next = code, next
 
 
+_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
+_LOADED: Dict[str, Any] = {}
+
+
+def _script(name: str):
+    """A standard-library program of scripts/ (the preload scripts carry them), loaded once."""
+    if name not in _LOADED:
+        spec = importlib.util.spec_from_file_location(f"llmcf_{name}", _SCRIPTS / f"{name}.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _LOADED[name] = module
+    return _LOADED[name]
+
+
 def _preload_lock():
     """scripts/preload_lock.py of this installation (the installer's preload; standard library only)."""
-    path = Path(__file__).resolve().parents[2] / "scripts" / "preload_lock.py"
-    spec = importlib.util.spec_from_file_location("llmcf_preload_lock", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return _script("preload_lock")
+
+
+def reader():
+    """scripts/image_files.py: reads images through the registry without running them (standard library only)."""
+    return _script("image_files")
 
 
 def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    from orchestrator.utils.helpers import sha256_file
+    return sha256_file(path)
 
 
 def _key(section: Any) -> str:
@@ -204,7 +216,7 @@ def image_files(state_dir: Any, target_dir: Path, context: Path, *, online: bool
     """Takes the files the target names from its source images into the build context (sources/image-files/DEST),
     from the person's cache, fetching what is missing through the registry when `online` (the image read, never run;
     the rest discarded). Returns the images whose files are missing offline (the plan names them)."""
-    from orchestrator.utils import image_files as reader
+    images_reader = reader()
     images = source_images(target_dir)
     if not images:
         return []
@@ -220,14 +232,14 @@ def image_files(state_dir: Any, target_dir: Path, context: Path, *, online: bool
                 log(f"Taking {len(absent)} file(s) from {image.image} (its layers read, nothing run; the rest of the "
                     "image is discarded)")
             try:
-                reader.take_files(image.image, absent, cache, image.platform or "")
-            except reader.ImageFilesError as e:
+                images_reader.take_files(image.image, absent, cache, image.platform or "")
+            except images_reader.ImageFilesError as e:
                 raise PreloadProblem(f"The files of the source image could not be taken: {e}", "failed",
                                      "Check the image's digest and the files' paths and sha256 in the target's "
                                      "template variables.") from None
         for item in image.files:
             dest = Path(context) / "sources" / CONTEXT_IMAGE_FILES / item.dest.lstrip("/")
-            reader.copy_file(cache / item.sha256, dest)
+            images_reader.copy_file(cache / item.sha256, dest)
             os.chmod(dest, 0o755 if item.executable else 0o644)  # nosec B103 - a program of the image, no secret
     return missing
 
@@ -241,11 +253,11 @@ def _ref_of(source: Any) -> str:
 def recipe(plan: Any, target: str, target_dir: Path, dockerfile_text: str, *, gpu: bool = False,
            platform: str = "") -> Dict[str, Any]:
     """The build's preload recipe (sources.json) for the plan's missing sources."""
-    from orchestrator.utils import image_files as reader
     from orchestrator.utils.locality import url_host
+    images_reader = reader()
     missing = [s for s in plan.sources if not s.local]
     kinds = {s.kind for s in missing}
-    out: Dict[str, Any] = {"format": "1", "target": target, "platform": platform or reader.host_platform(),
+    out: Dict[str, Any] = {"format": "1", "target": target, "platform": platform or images_reader.host_platform(),
                            "images": [], "llama_cpp": None, "llama_cpp_bundle": False, "pip": None, "downloads": [],
                            "source_images": [], "not_covered": []}
     for source in missing:
@@ -253,9 +265,9 @@ def recipe(plan: Any, target: str, target_dir: Path, dockerfile_text: str, *, gp
             continue
         ref = _ref_of(source)
         try:
-            reader.load_name(ref)
+            images_reader.load_name(ref)
             out["images"].append(ref)
-        except reader.ImageFilesError as e:
+        except images_reader.ImageFilesError as e:
             out["not_covered"].append(f"{source.label}: {e}")
     pip = declared_pip(target_dir, gpu)
     needs_pin = "llama_cpp" in kinds or bool(pip and any(g.get("llama_cpp_requirements") for g in pip["groups"]))
@@ -269,7 +281,7 @@ def recipe(plan: Any, target: str, target_dir: Path, dockerfile_text: str, *, gp
             out["pip"] = pip
         else:
             out["not_covered"].append("pip packages: the target declares no build_preload in its target.yml; use a "
-                                      "pip index in your own network (llm-cli build image sources --pip-index)")
+                                      "pip index in your own network (the build source setting build_pip_index)")
     downloads = pinned_downloads(dockerfile_text)
     for source in missing:
         if source.kind == "download" and source.label.startswith("downloads from "):
@@ -374,16 +386,6 @@ def write_scripts(state_dir: Any, data: Dict[str, Any], version: str) -> Written
     return Written(folder, (sh, ps), what, digest, list(data["not_covered"]))
 
 
-def steps(written: Written) -> List[str]:
-    """The person's steps after the scripts were written (the CLI and a run without a terminal print them)."""
-    return [f"On a computer with a network (Python 3 with pip; git for llama.cpp), run {written.scripts[0].name} "
-            f"(Linux, macOS) or {written.scripts[1].name} (Windows) from {written.folder}; they need nothing else of "
-            "llmcf.",
-            "Carry the archive it writes (llmcf-preload-build-...tar.gz) to this computer.",
-            f"Give its path when the build asks, or: llm-cli build start ... --preload FILE, or llm-cli build preload "
-            f"take FILE --target {written.folder.name[len('build-'):]}."]
-
-
 # --- taking an archive in --------------------------------------------------------------------------------------------
 
 @dataclass
@@ -426,7 +428,7 @@ def _check_image_archive(file: Path, name: str) -> None:
     wanted = {name, f"docker.io/{name}", f"docker.io/library/{name}"}
     if not names or any(n not in wanted for n in names):
         raise PreloadProblem(f"An image of the preload would be named {', '.join(names) or 'nothing'}, not {name}; "
-                             "nothing was loaded.", "mismatch", "Make the preload again with the scripts llmcf wrote.")
+                             "nothing was loaded.", "mismatch", "Make the preload again with the scripts the framework wrote.")
 
 
 def take(state_dir: Any, target: str, archive: Path, *, client: Any, sha256: str = "", actor: str = "cli",
@@ -434,7 +436,7 @@ def take(state_dir: Any, target: str, archive: Path, *, client: Any, sha256: str
     """Checks the build's preload `archive` for `target` and takes it in. Every check runs before anything is
     loaded or copied; an AI caller (actor other than cli and gui) may name only an archive of a recipe written here,
     which every caller must anyway."""
-    from orchestrator.utils import image_files as reader
+    images_reader = reader()
     say = log or (lambda _text: None)
     archive = Path(archive).expanduser()
     if not archive.is_file():
@@ -447,20 +449,21 @@ def take(state_dir: Any, target: str, archive: Path, *, client: Any, sha256: str
             manifest = lock.open_archive(archive, work, sha256.strip().lower(), kind="build")
         except lock.PreloadError as e:
             raise PreloadProblem(f"The preload was refused: {e}", "mismatch",
-                                 "Copy the archive again, or make it anew with the scripts llmcf wrote.") from None
+                                 "Copy the archive again, or make it anew with the scripts the framework wrote.") from None
         top = Path(manifest["folder"])
         if str(manifest.get("target", "")).casefold() != str(target).casefold():
             raise PreloadProblem(f"The preload is for the target {manifest.get('target')}, not {target}.", "mismatch",
                                  "Give the preload of this target.")
-        if manifest.get("platform") != reader.host_platform():
+        if manifest.get("platform") != images_reader.host_platform():
             raise PreloadProblem(f"The preload is for {manifest.get('platform')}, this computer is "
-                                 f"{reader.host_platform()}.", "mismatch",
+                                 f"{images_reader.host_platform()}.", "mismatch",
                                  "Write the preload scripts on this computer and run them again.")
         digest = str(manifest.get("recipe_sha256") or "")
         if _recorded(state_dir).get(digest, "").casefold() != str(target).casefold():
-            raise PreloadProblem("The preload was not made from a recipe llmcf wrote on this computer for you; nothing "
+            raise PreloadProblem("The preload was not made from a recipe the framework wrote on this computer for you; "
+                                 "nothing "
                                  "was taken in.", "needs_person" if actor not in ("cli", "gui") else "mismatch",
-                                 "Run the preload scripts llmcf wrote here (llm-cli build preload write TARGET).")
+                                 "Write the preload scripts on this computer again and run them.")
         body = (top / "sources.json").read_bytes() if (top / "sources.json").is_file() else b""
         if hashlib.sha256(body).hexdigest() != digest:
             raise PreloadProblem("The preload's recipe is not the one its manifest names.", "mismatch")
@@ -469,7 +472,7 @@ def take(state_dir: Any, target: str, archive: Path, *, client: Any, sha256: str
         images = []
         listing = (top / "images.txt").read_text(encoding="utf-8").splitlines() if (top / "images.txt").is_file() \
             else []
-        wanted = {reader.load_name(ref) for ref in data.get("images") or []}
+        wanted = {images_reader.load_name(ref) for ref in data.get("images") or []}
         for line in listing:
             parts = line.split()
             if len(parts) != 4 or not re.fullmatch(r"images/\d{2}\.tar", parts[0]) or parts[1] not in wanted:
@@ -505,7 +508,7 @@ def take(state_dir: Any, target: str, archive: Path, *, client: Any, sha256: str
             from orchestrator.runtime.build.source import SourceError, catalog_pin, import_source
             pin = catalog_pin()
             if data["llama_cpp"]["commit"] != pin.commit:
-                raise PreloadProblem("The preload's llama.cpp is another commit than this llmcf pins.", "mismatch")
+                raise PreloadProblem("The preload's llama.cpp is another commit than this framework pins.", "mismatch")
             say("Taking llama.cpp into the source store (checked by its commit)...")
             try:
                 import_source(pin, state_dir, bundle)
@@ -597,5 +600,5 @@ def take_in(framework: Any, target: str, archive: Path, *, actor: str, sha256: s
 
 __all__ = ["PreloadProblem", "PreloadSources", "Taken", "Written", "declared_pip", "describe", "fetches",
            "image_cache", "image_files", "missing_image_files", "needed", "pinned_downloads", "preload_sources",
-           "recipe", "recipe_bytes", "scripts_folder", "source_images", "stage", "steps", "store_root", "take",
+           "reader", "recipe", "recipe_bytes", "scripts_folder", "source_images", "stage", "store_root", "take",
            "take_in", "target_store", "write", "write_scripts"]

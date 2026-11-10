@@ -302,7 +302,7 @@ class BuildImageDialog(QDialog):
         """Takes in an archive the preload scripts wrote: checked first, then images loaded and sources kept."""
         if path is None:
             path, _ = QFileDialog.getOpenFileName(self, self._t("bimg.preload.take.title"), str(Path.home()),
-                                                  "llmcf preload (*.tar.gz)")
+                                                  "Preload archive (*.tar.gz)")
         if not path:
             return
         framework, target = self.framework, self.target()
@@ -424,7 +424,7 @@ class PreloadDialog(QDialog):
 
     def browse(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, ui_text("bimg.preload.take.title", self.lang), str(Path.home()),
-                                              "llmcf preload (*.tar.gz)")
+                                              "Preload archive (*.tar.gz)")
         if path:
             self.txt_path.setText(path)
 

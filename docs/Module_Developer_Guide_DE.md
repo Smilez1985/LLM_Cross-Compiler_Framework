@@ -504,6 +504,39 @@ enthalten, neu und zeigt sie als ihren Diff.
 Die Werte oben sind ein Beispiel, kein getestetes Target: Ein Format belegt erst sein erster Build und ein Lauf auf dem
 Board ([Abschnitt 3.7](#37-durch-einen-build-getestet-nach-einem-gescheiterten-repariert)).
 
+**Dateien aus dem Image eines Herstellers oder der Community** (`source_images`, neben `formats` unter
+`template_variables:`): Hat ein Image die SDK-Dateien schon, die dein Build-Image braucht, nenne das über seinen
+Digest gepinnte Image und die Dateien, die genommen werden; llmcf baut sein eigenes Image aus seiner Basis mit nur
+diesen Dateien.
+
+```yaml
+template_variables:
+  schema_version: 1
+  formats: [gguf]
+  source_images:
+    - image: "registry.example.com/vendor/sdk:2.3@sha256:<64 hex>"   # der Digest des Manifests oder des Index
+      platform: linux/amd64          # optional; Vorgabe: die des Build-Rechners
+      licence_url: "https://vendor.example.com/licence"
+      files:
+        - {path: /opt/sdk/lib/libvendorrt.so, sha256: "<64 hex>", dest: /opt/vendor/lib/libvendorrt.so}
+        - {path: /opt/sdk/bin/compile, sha256: "<64 hex>", dest: /opt/vendor/bin/compile, executable: true,
+           redistributable: false}
+```
+
+Das Image wird nie ausgeführt und nie in die Container-Engine gezogen: Sein Manifest wird über die HTTP-API der
+Registry gelesen und gegen den gepinnten Digest geprüft, seine Schichten von oben nach unten, jede gegen ihren Digest
+geprüft, mit beachteten Whiteouts, und das Lesen hört auf, sobald jede genannte Datei gefunden ist. Eine genannte
+Datei muss eine reguläre Datei sein (nenne die Datei, auf die ein Link zeigt), und jede Kopie wird gegen ihr sha256
+geprüft; der Rest des Images wird verworfen. Die Kopien bleiben in deinem Zustandsordner
+(`build-preload/image-files/`), jeder Build legt sie in seinen Kontext unter `sources/image-files/ZIEL`, und das
+Dockerfile der Vorlage kopiert diesen Ordner ins Image (`COPY sources/image-files/ /`). Offline sind Dateien, die
+nicht in diesem Cache liegen, eine fehlende Quelle des Plans, und das [Preload des Builds](CLI_Usage_DE.md#build-preload)
+bringt sie. `redistributable` ist standardmäßig nein: Eine solche Datei bleibt bei der Person (ihr Cache, ihr Image,
+ihr eigenes Preload, mit `personal=yes` markiert), nie in einem Pack oder dem Repository; dein Pack trägt nur den
+Verweis. Ändere den Block mit `llm-cli module edit --variables DATEI` (eine Datei mit `formats:` und
+`source_images:`; eine nur mit Formaten behält die Quell-Images). Ein Image, das nur als Datei veröffentlicht ist,
+nicht in einer Registry, lässt sich noch nicht nennen.
+
 ## 4. target.yml und der Capabilities-Block
 
 ### 4.1 metadata
@@ -824,6 +857,7 @@ online wird keines übergeben, also baut ein Dockerfile, das sie annimmt, wie bi
 | `APT_MIRROR`, `APT_PROXY` | In jeder Stufe deklariert (`ARG`, ohne Vorgabe), die apt ausführt: Die Quellen werden auf den Spiegel umgeschrieben (`sed` über `/etc/apt/sources.list*`), der Proxy kommt nach `/etc/apt/apt.conf.d/01llmcf-proxy`, vor dem ersten `apt-get update`. |
 | `PIP_INDEX_URL`, `PIP_TRUSTED_HOST` | In jeder Stufe deklariert, die pip ausführt; pip liest beide aus der Umgebung. Mit einem Index fallen die eigenen `--extra-index-url`-Zeilen der Requirements weg. |
 | `LLAMA_CPP_SOURCE` | `ARG LLAMA_CPP_SOURCE=git` und `COPY sources/ /tmp/llmcf-sources/` vor dem Abruf von llama.cpp; mit `context` kopiert der Abrufschritt `/tmp/llmcf-sources/llama.cpp` (mit seinem `.git`) und prüft seinen Commit und dass nichts geändert ist, wie bei einem Abruf. Das Framework legt `sources/` in jedem Build-Kontext an. |
+| `PIP_FIND_LINKS`, `PIP_NO_INDEX` | Erklärt (`ARG`, ohne Vorgabe) in jeder Stufe, die pip ausführt, nach `COPY sources/ /tmp/llmcf-sources/`: Das [Preload des Builds](CLI_Usage_DE.md#build-preload) brachte die Python-Pakete des Images, nach `sources/wheels` gelegt, und pip installiert nur aus ihnen. Ein Zweig, der ein Wheel aus dem Index lädt (`if [ -n "${PIP_INDEX_URL:-}" ]`), nimmt `${PIP_INDEX_URL:-}${PIP_FIND_LINKS:-}`. |
 
 Jede andere Adresse, von der das Dockerfile holt (eine URL jedes Schemas, etwa `https://`, `git://` oder `ssh://`,
 oder das scp-artige `user@host:pfad`, in einer `RUN`- oder `ADD`-Zeile oder ein `ARG`-Vorgabewert), wird nach ihrem
@@ -835,6 +869,30 @@ Name auf `_PIP_URL` endet, ist ein pip-Ort, den der pip-Index ersetzt (Rockchips
 `RKLLM_PIP_URL`): Nutze ihn als `${PIP_INDEX_URL:-${TORCH_PIP_URL}}` oder lade ein Wheel mit festgelegter sha256 aus
 dem Index und prüfe dieselbe sha256. Diese Argumente sind keine Eingaben des Images, also wird ein online gebautes
 Image offline gefunden. Die mitgelieferten Dockerfiles und die Vorlagen tun all das.
+
+**Das Preload des Builds** ([CLI](CLI_Usage_DE.md#build-preload)) trägt die Python-Pakete eines Targets nur, wenn
+`target.yml` erklärt, was das pip seines Images installiert; halte es im Gleichschritt mit den pip-Zeilen des
+Dockerfiles (der Modul-Generator schreibt es für ein erzeugtes Modul: die Anforderungen des Konverters von llama.cpp,
+die Pakete der Vorlage und deine `pip_packages`):
+
+```yaml
+build_preload:
+  python: "3.11"            # das Python des Images (Debian bookworm); gpu_python für Dockerfile.gpu
+  glibc: "2.36"             # die glibc des Images: die neuesten manylinux-Wheels, die pip nehmen darf
+  pip:
+    - llama_cpp_requirements: ["requirements/requirements-convert_hf_to_gguf.txt"]   # beim gepinnten Commit
+    - requirements: ["torch==2.4.0"]
+      index_url: "https://download.pytorch.org/whl/cpu"
+    - requirements: ["vendor-sdk==1.2.3"]
+      platforms: ["linux/amd64"]   # nur für diesen Build-Rechner (Wheels nur für x86_64)
+  tools: ["pip", "setuptools", "wheel", "poetry-core"]   # worauf das pip des Images aktualisiert oder womit es baut
+```
+
+Jede Gruppe wird mit `pip download --only-binary=:all:` samt ihren Abhängigkeiten für das Python des Images und die
+Plattform des Build-Rechners geholt; ein Paket, das nur als Quellarchiv veröffentlicht ist, lässt sich nicht tragen.
+Ein gepinnter Download in der Form des Generators (eine https-Adresse, Größe und sha256) wird als Datei getragen und
+nach `sources/files/NAME` gelegt, was das erzeugte Dockerfile nimmt, bevor es lädt. apt-Pakete werden nie getragen:
+Nutze einen apt-Spiegel im eigenen Netz.
 
 ## 6. Die Stufen des Builds
 

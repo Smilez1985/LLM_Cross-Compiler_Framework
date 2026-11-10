@@ -4,7 +4,7 @@
 An offline build whose build container image is not here and whose sources are not all local writes preload scripts
 for exactly those sources (Core/build_preload.py), in the installer's preload format of kind build
 (scripts/preload_lock.py pack-build); the archive is checked and taken in as local sources. Images are read without a
-container engine and without running them (orchestrator/utils/image_files.py): here a tiny registry in memory and
+container engine and without running them (scripts/image_files.py): here a tiny registry in memory and
 synthetic layer tars, never a real pull or docker build.
 """
 
@@ -29,7 +29,9 @@ from conftest import REPO_ROOT
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import preload_lock  # noqa: E402
 
-from orchestrator.utils import image_files  # noqa: E402
+from orchestrator.Core.build_preload import reader  # noqa: E402
+
+image_files = reader()   # the one loaded copy the framework uses
 
 
 def sha(data: bytes) -> str:
@@ -464,7 +466,7 @@ class TestThePreload:
         assert result.returncode == 0, result.stderr
         assert (capture / "preload_lock.py").read_bytes() == (REPO_ROOT / "scripts" / "preload_lock.py").read_bytes()
         assert (capture / "image_files.py").read_bytes() == \
-            (REPO_ROOT / "orchestrator" / "utils" / "image_files.py").read_bytes()
+            (REPO_ROOT / "scripts" / "image_files.py").read_bytes()
         assert json.loads((capture / "spec" / "sources.json").read_text())["downloads"][0]["name"] == "sdk.tgz"
         assert "pack-build" in (capture / "args").read_text()
 

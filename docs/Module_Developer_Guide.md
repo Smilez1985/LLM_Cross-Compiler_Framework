@@ -482,6 +482,37 @@ first, `--variables FILE`): a changed value makes the files that hold them anew,
 The values above are an illustration, not a tested target: a format is proved by its first build and a run on the
 board ([section 3.7](#37-tested-by-a-build-repaired-after-a-failed-one)).
 
+**Files taken from a vendor's or a community's image** (`source_images`, next to `formats` under
+`template_variables:`): when an image already has the SDK files your build image needs, name the image pinned by its
+digest and the files to take; llmcf builds its own image from its base with only those files.
+
+```yaml
+template_variables:
+  schema_version: 1
+  formats: [gguf]
+  source_images:
+    - image: "registry.example.com/vendor/sdk:2.3@sha256:<64 hex>"   # the manifest's or the index's digest
+      platform: linux/amd64          # optional; default: the build computer's
+      licence_url: "https://vendor.example.com/licence"
+      files:
+        - {path: /opt/sdk/lib/libvendorrt.so, sha256: "<64 hex>", dest: /opt/vendor/lib/libvendorrt.so}
+        - {path: /opt/sdk/bin/compile, sha256: "<64 hex>", dest: /opt/vendor/bin/compile, executable: true,
+           redistributable: false}
+```
+
+The image is never run and never pulled into the container engine: its manifest is read through the registry's HTTP
+API and checked against the pinned digest, its layers from the top down, each checked against its digest, with the
+whiteouts honoured, and reading stops once every named file is found. A named file must be a regular file (name the
+file a link points to), and each copy is checked against its sha256; the rest of the image is discarded. The copies
+stay in your state folder (`build-preload/image-files/`), every build puts them into its context at
+`sources/image-files/DEST`, and the template's Dockerfile copies that folder into the image (`COPY
+sources/image-files/ /`). Offline, files that are not in that cache are a missing source of the plan, and the
+[build's preload](CLI_Usage.md#build-preload) brings them. `redistributable` defaults to no: such a file stays with
+the person (their cache, their image, their own preload, marked `personal=yes`), never in a pack or the repository;
+your pack carries only the reference. Change the block with `llm-cli module edit --variables FILE` (a file with
+`formats:` and `source_images:`; one with formats only keeps the source images). An image published only as a file,
+not in a registry, cannot be named yet.
+
 ## 4. target.yml and the capabilities block
 
 ### 4.1 metadata
@@ -791,6 +822,7 @@ so a Dockerfile that takes them builds as before:
 | `APT_MIRROR`, `APT_PROXY` | Declared (`ARG`, no default) in every stage that runs apt: the sources are rewritten to the mirror (`sed` over `/etc/apt/sources.list*`), the proxy goes into `/etc/apt/apt.conf.d/01llmcf-proxy`, before the first `apt-get update`. |
 | `PIP_INDEX_URL`, `PIP_TRUSTED_HOST` | Declared in every stage that runs pip; pip reads both from the environment. With an index, drop the requirements' own `--extra-index-url` lines. |
 | `LLAMA_CPP_SOURCE` | `ARG LLAMA_CPP_SOURCE=git` and `COPY sources/ /tmp/llmcf-sources/` before the llama.cpp fetch; with `context` the fetch step copies `/tmp/llmcf-sources/llama.cpp` (with its `.git`) and checks its commit and that nothing changed, as for a fetch. The framework creates `sources/` in every build context. |
+| `PIP_FIND_LINKS`, `PIP_NO_INDEX` | Declared (`ARG`, no default) in every stage that runs pip, after `COPY sources/ /tmp/llmcf-sources/`: the [build's preload](CLI_Usage.md#build-preload) brought the image's Python packages, staged into `sources/wheels`, and pip installs only from them. A branch that downloads a wheel from the index (`if [ -n "${PIP_INDEX_URL:-}" ]`) takes `${PIP_INDEX_URL:-}${PIP_FIND_LINKS:-}`. |
 
 Every other address the Dockerfile fetches from (a URL of any scheme, such as `https://`, `git://` or `ssh://`, or the
 scp-like `user@host:path`, in a `RUN` or `ADD` line or an `ARG` default) is judged by its host; an offline build stops
@@ -801,6 +833,29 @@ location that the pip index replaces (Rockchip's `TORCH_PIP_URL` and `RKLLM_PIP_
 `${PIP_INDEX_URL:-${TORCH_PIP_URL}}` or, for a wheel with a pinned sha256, download it from the index and check the
 same sha256. These arguments are no inputs of the image, so an image built online is found offline. The shipped
 Dockerfiles and the templates do all of this.
+
+**The build's preload** ([CLI](CLI_Usage.md#build-preload)) carries a target's Python packages only when `target.yml`
+declares what its image's pip installs; keep it in step with the Dockerfile's pip lines (the module generator writes
+it for a generated module: llama.cpp's converter requirements, the template's packages and your `pip_packages`):
+
+```yaml
+build_preload:
+  python: "3.11"            # the image's Python (Debian bookworm); gpu_python for Dockerfile.gpu
+  glibc: "2.36"             # the image's glibc: the newest manylinux wheels pip may take
+  pip:
+    - llama_cpp_requirements: ["requirements/requirements-convert_hf_to_gguf.txt"]   # at the pinned commit
+    - requirements: ["torch==2.4.0"]
+      index_url: "https://download.pytorch.org/whl/cpu"
+    - requirements: ["vendor-sdk==1.2.3"]
+      platforms: ["linux/amd64"]   # only for this build computer (wheels for x86_64 only)
+  tools: ["pip", "setuptools", "wheel", "poetry-core"]   # what the image's pip upgrades to or builds with
+```
+
+Each group is fetched with `pip download --only-binary=:all:` with its dependencies for the image's Python and the
+build computer's platform; a package published only as a source archive cannot be carried. A pinned download of the
+generator's form (an https address, its size and sha256) is carried as a file and staged into `sources/files/NAME`,
+which the generated Dockerfile takes before it would fetch. apt packages are never carried: use an apt mirror in the
+own network.
 
 ## 6. The build stages
 

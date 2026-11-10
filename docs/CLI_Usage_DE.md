@@ -140,6 +140,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `build preflight` | Die Prüfung vor dem Build, ohne ihn zu starten: die Hardware-Probes gegen das, was der Build und das SDK des Targets brauchen |
 | `build save` | Einen Build, der im Build-Ordner des Frameworks wartet, im Ausgabeordner oder einem anderen Ordner speichern |
 | `build image plan/sources/export/import` | Das Build-Container-Image eines Targets: Kann ein Offline-Build es bauen, die Build-Quellen in deinem Netz, auf einen anderen Offline-Rechner als geprüfte Datei bringen |
+| `build preload write/take` | Das Preload des Builds für einen Rechner ganz ohne Netz: Skripte für genau das, was einem Offline-Build fehlt, und das Archiv, das sie schreiben, aufgenommen |
 | `build deps` | Die Abhängigkeiten von CMake-Optionen der Module, die vor einem Build geholt werden, listen, holen und löschen |
 | `build interrupted list/continue/delete` | Ein Build, der mit aufbewahrten fertigen Stufen angehalten hat: fortsetzen oder löschen, was er hinterlassen hat |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | Fertige Builds auflisten / einen Build in eine ZIP-Datei packen / sie auf ein Board laden und installieren |
@@ -599,6 +600,7 @@ Target ohne Capabilities-Block wird ungeprüft gebaut.
 | `--module-flags [allow\|standard]` | Deine Entscheidung zu den CMake-Optionen des Moduls, die gültig sind, aber außerhalb der erlaubten Liste liegen (`-G`, `--trace`, ...; [Modul-Entwicklerhandbuch, Abschnitt 3.5](Module_Developer_Guide_DE.md#35-cmake-flags-eines-moduls)): erlauben oder mit den Standard-Flags weitermachen (die Optionen bleiben draußen). Im Terminal ohne die Option wirst du gefragt, nach dem, was jede Option tut, und einer Empfehlung für dieses Modell und diese Quantisierung; ohne Terminal und ohne die Option startet nichts (Exit 2). Eine für diese Modulversion und diese Flags gemerkte Entscheidung gilt ohne Frage. |
 | `--remember-flags` | Diese Entscheidung für diese Modulversion und diese Flags merken (ein von einer KI gestarteter Build des Moduls nutzt sie; eine neue Version oder andere Flags fragen wieder). |
 | `--ignore-preflight` | Auch dann bauen, wenn die [Prüfung vor dem Build](#build-preflight) sagt, dass dieser Build nicht gelingen kann. Deine Entscheidung für diesen einen Build, nie gemerkt und in den Warnungen des Builds vermerkt. Im Terminal ohne die Option wirst du gefragt „Build anyway?“ (Nein ist die Vorgabe); ohne Terminal und ohne die Option startet nichts (Exit 2). |
+| `--preload DATEI` | Offline: das Archiv des [Preloads des Builds](#build-preload), vor dem Build geprüft und aufgenommen. Ohne die Option schreibt ein Offline-Build, dessen Image nicht hier ist und dem Quellen fehlen, die Preload-Skripte und fragt im Terminal nach dem Pfad des Archivs; ohne Terminal hält er mit den Schritten an (Exit 2). |
 
 Verhalten:
 
@@ -927,6 +929,50 @@ festgelegte IPv6-Adresse eines Spiegels erreicht BuildKit als `NAME=[ADRESSE]`, 
 In der GUI: **Build > Build-Container-Images...** (Target, die Images, **Offline-Quellen prüfen**, die Quellen in
 deinem Netz mit **Quellen speichern**, **In Datei exportieren...** und **Aus Datei importieren...** mit dem
 sha256-Feld).
+
+### build preload
+
+Das Preload des Builds für einen Rechner ganz ohne Netz: Fehlen einem Offline-Build Quellen (das Build-Container-Image
+des Targets ist nicht hier, und `build image plan` nennt Quellen, die nicht lokal sind), schreibt llmcf Preload-Skripte
+für genau diese, du führst eins auf einem Rechner mit Netz aus, und das Archiv, das es schreibt, wird als lokale
+Quellen aufgenommen.
+
+```
+llm-cli build preload write TARGET [--gpu]
+llm-cli build preload take DATEI --target TARGET [--sha256 HEX]
+llm-cli build start ... --preload DATEI
+```
+
+- `write` schreibt `preload.sh` und `preload.ps1` nach `llmcf-preload-scripts/build-TARGET/` in deinem Zustandsordner
+  (`~/.llm-framework`) und sagt, was sie holen: die Basis-Images, die der Plan nennt (über die HTTP-API der Registry
+  gelesen, jeder Blob gegen seinen Digest geprüft, als `docker save`-Archiv geschrieben; auf dem Rechner mit Netz ist
+  keine Container-Engine nötig), llama.cpp beim gepinnten Commit (ein Git-Bundle; dort braucht es git), die
+  Python-Pakete des Build-Images, wie das Target sie in `target.yml` `build_preload` erklärt (Wheels für das Python
+  des Images und die Plattform dieses Rechners, mit ihren Abhängigkeiten), die gepinnten Downloads des Dockerfiles
+  (Größe und sha256 geprüft) und die Dateien, die die Vorlage des Targets aus Quell-Images nimmt. Was ein Preload
+  nicht tragen kann, wird mit seinem eigenen Weg genannt: apt-Pakete (ein apt-Spiegel oder -Cache in deinem Netz,
+  `build image sources`), andere Paketverwaltungen, ein über seinen Digest gepinntes Basis-Image, ein Download ohne
+  gepinntes sha256. Die Skripte brauchen nur Python 3 mit pip (und git für llama.cpp); sie schreiben
+  `llmcf-preload-build-TARGET-ARCH-REZEPT.tar.gz` und geben sein sha256 aus. Mach es auf einem Rechner mit derselben
+  Architektur wie dieser: pip wählt die Abhängigkeiten der Pakete nach den Markern des Rechners, der lädt.
+- `take` prüft das Archiv, bevor etwas verändert wird: nur Dateien und Ordner unter `llmcf-preload/`, keine Links,
+  jede Datei in `SHA256SUMS` mit ihrem sha256 (wie beim Preload des Installers), dann die Art `build`, das Target, die
+  Plattform dieses Rechners, ein hier geschriebenes Rezept (ein Archiv aus dem Rezept eines anderen Rechners oder
+  eines anderen Builds wird abgelehnt), jedes Image-Archiv, das genau sein Basis-Image nennt, llama.cpp über seinen
+  Commit und jeder Download und jede genommene Datei über ihr gepinntes sha256; `--sha256` vergleicht auch das sha256
+  des Archivs selbst. Dann werden die Basis-Images in die Container-Engine geladen, llama.cpp kommt in den
+  Quellspeicher, und die Wheels, Downloads und genommenen Dateien bleiben in `build-preload/` deines Zustandsordners
+  für jeden späteren Offline-Build des Targets. Exit-Code 1 bei einer Ablehnung.
+- `build start` macht das im Offline-Modus von selbst: Ist das Image nicht hier und fehlen Quellen, schreibt er die
+  Skripte, sagt, wo sie liegen und was sie holen, und fragt im Terminal nach dem Pfad des Archivs (Enter ohne Pfad
+  startet nichts); `--preload DATEI` gibt es vorab; ohne Terminal hält der Lauf mit den Schritten an (Exit-Code 2).
+
+Ein Archiv, das eine Datei enthält, deren Lizenz die Weitergabe nicht erlaubt (`redistributable: false` in den
+`source_images` der Vorlage), ist mit `personal=yes` markiert: Es ist für deine eigenen Rechner; gib es nicht weiter.
+In der GUI: **Start Build** im Builder fragt im Offline-Modus dasselbe in einem Dialog (**Aufnehmen und bauen**), und
+**Build > Build-Container-Images...** hat **Preload-Skripte schreiben...** und **Ein Preload aufnehmen...**. Ein
+KI-Client nennt ein Archiv nur über das Feld `preload` von `start_build`, als Verweis auf eine lokale Datei, und nur
+eins aus einem hier geschriebenen Rezept.
 
 ---
 

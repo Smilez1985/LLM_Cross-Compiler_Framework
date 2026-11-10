@@ -2,8 +2,8 @@
 """
 Reading container images without running them (docs/DESIGN.md, Installer, platforms and dependencies: the build's
 preload and the taking from vendor and community images). Standard library only: the build's preload scripts carry
-this file next to scripts/preload_lock.py and run it on a computer with a network that has neither llmcf nor a
-container engine; the build (Core/build_preload.py) imports it for an online build.
+this file next to scripts/preload_lock.py and run it on a computer with a network that has neither the framework nor
+a container engine; the build (Core/build_preload.reader) loads it for an online build.
 
 - Registry: the registry's HTTP API (Docker Registry v2 / OCI distribution) with an anonymous bearer token when the
   registry asks for one. A manifest is checked against the digest it was asked by (or the index entry that named

@@ -58,7 +58,7 @@ class StartBuildIn(BuildRequestIn):
                                   "(get_target_capabilities), else balanced")
     preload: Optional[str] = Field(default=None, max_length=1024,
                                    description="Offline mode only: the archive of the build's preload the person made "
-                                               "with the preload scripts llmcf wrote for this build, as a local file "
+                                               "with the preload scripts the framework wrote for this build, as a local file "
                                                "reference (<label>:<relative path> or its file id); checked and taken "
                                                "in before the build. Never a path, never an archive of another "
                                                "recipe")

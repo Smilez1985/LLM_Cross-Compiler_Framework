@@ -139,6 +139,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `build preflight` | The pre-flight check of a build without starting it: the hardware probes against what the build and the target's SDK need |
 | `build save` | Save a build that waits in the framework's build folder to the output folder or another folder |
 | `build image plan/sources/export/import` | The build container image of a target: can an offline build make it, the build sources in your network, move it to another offline computer as a checked file |
+| `build preload write/take` | The build's preload for a computer without any network: scripts for exactly what an offline build lacks, and the archive they write taken in |
 | `build deps` | List, fetch and delete the dependencies of module CMake options that are fetched before a build |
 | `build interrupted list/continue/delete` | A build that stopped with finished stages kept: continue it, or delete what it left |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | List finished builds / pack a build into a ZIP / upload and install it on a board |
@@ -582,6 +583,7 @@ target's defaults. A target without a capabilities block is built unchecked.
 | `--module-flags [allow\|standard]` | Your decision on the module's CMake options that are valid but outside the allowed list (`-G`, `--trace`, ...; [Module Developer Guide, section 3.5](Module_Developer_Guide.md#35-cmake-flags-of-a-module)): allow them, or go on with the standard flags (they are left out). At a terminal without it you are asked, after what each option does and a recommendation for this model and quantization; without a terminal and without it nothing is started (exit 2). A decision remembered for this module version and flag set is used without a question. |
 | `--remember-flags` | Remember this decision for this module version and flag set (an AI-started build of the module uses it; a new version or other flags ask again). |
 | `--ignore-preflight` | Build even when the [pre-flight check](#build-preflight) says this build cannot succeed. Your decision for this one build, never remembered, and noted in the build's warnings. At a terminal without it you are asked "Build anyway?" (No is the default); without a terminal and without it nothing is started (exit 2). |
+| `--preload FILE` | Offline: the archive of [the build's preload](#build-preload), checked and taken in before the build. Without it, an offline build whose image is not here and whose sources are missing writes the preload scripts and asks for the archive's path at a terminal; without a terminal it stops with the steps (exit 2). |
 
 Behaviour:
 
@@ -887,6 +889,49 @@ address of a mirror reaches BuildKit as `NAME=[ADDRESS]`, which needs a recent d
 
 In the GUI: **Build > Build Container Images...** (target, the images, **Check offline sources**, the sources in your
 network with **Save sources**, **Export to file...** and **Import from file...** with the sha256 field).
+
+### build preload
+
+The build's preload for a computer without any network: when an offline build lacks sources (the build container
+image of the target is not here and `build image plan` names sources that are not local), llmcf writes preload
+scripts for exactly those, you run one on a computer with a network, and the archive it writes is taken in as local
+sources.
+
+```
+llm-cli build preload write TARGET [--gpu]
+llm-cli build preload take FILE --target TARGET [--sha256 HEX]
+llm-cli build start ... --preload FILE
+```
+
+- `write` writes `preload.sh` and `preload.ps1` into `llmcf-preload-scripts/build-TARGET/` of your state folder
+  (`~/.llm-framework`) and says what they fetch: the base images the plan names (read through the registry's HTTP
+  API, every blob checked against its digest, written as a `docker save` archive; no container engine is needed on
+  the computer with a network), llama.cpp at the pinned commit (a git bundle; git is needed there), the build image's
+  Python packages as the target declares them in `target.yml` `build_preload` (wheels for the image's Python and this
+  computer's platform, with their dependencies), the Dockerfile's pinned downloads (size and sha256 checked) and the
+  files the target's template takes from source images. What a preload cannot carry is named with its own way: apt
+  packages (an apt mirror or cache in your network, `build image sources`), other package managers, a base image
+  pinned by digest, a download without a pinned sha256. The scripts need only Python 3 with pip (and git for
+  llama.cpp); they write `llmcf-preload-build-TARGET-ARCH-RECIPE.tar.gz` and print its sha256. Make it on a computer
+  of the same architecture as this one: pip chooses the packages' dependencies by the markers of the computer that
+  downloads.
+- `take` checks the archive before anything is changed: only files and folders under `llmcf-preload/`, no links,
+  every file in `SHA256SUMS` with its sha256 (as the installer's preload), then the kind `build`, the target, this
+  computer's platform, a recipe written here (an archive of another computer's or another build's recipe is refused),
+  each image archive naming exactly its base image, llama.cpp by its commit and each download and taken file by its
+  pinned sha256; `--sha256` compares the archive's own sha256 too. Then the base images are loaded into the container
+  engine, llama.cpp goes into the source store, and the wheels, downloads and taken files are kept in
+  `build-preload/` of your state folder for every later offline build of the target. Exit code 1 on a refusal.
+- `build start` in offline mode does this by itself: when the image is not here and sources are missing, it writes
+  the scripts, says where they are and what they fetch, and asks at the terminal for the archive's path (Enter
+  without a path starts nothing); `--preload FILE` gives it up front; without a terminal the run stops with the steps
+  (exit code 2).
+
+An archive that holds a file whose licence does not allow passing it on (`redistributable: false` in the template's
+`source_images`) is marked `personal=yes`: it is for your own computers; do not share it. In the GUI: the Builder's
+**Start Build** in offline mode asks the same in a dialog (**Take in and build**), and **Build > Build Container
+Images...** has **Write preload scripts...** and **Take in a preload...**. An AI client names an archive only through
+`start_build`'s field `preload`, as a local file reference, and only one made from a recipe written here.
 
 ---
 

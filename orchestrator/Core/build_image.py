@@ -553,8 +553,8 @@ def stop_text(target: str, plan: ImagePlan) -> str:
             f"Building it offline needs every source on this computer or in your own network, and "
             f"{len(missing)} {'is' if len(missing) == 1 else 'are'} not: {numbered}. Its base images: {bases}. "
             "Provide what is missing and start the build again: the build's preload brings what a computer with a "
-            f"network can fetch for it (llm-cli build preload write {target}, or start the build at a terminal or in "
-            "the Builder, which offer it), or import a build container image exported on another computer. Start this build once with offline mode off; later builds with the same settings use "
+            "network can fetch for it (the person starts the build themselves, which offers its preload scripts), "
+            "or import a build container image exported on another computer. Start this build once with offline mode off; later builds with the same settings use "
             "that image offline. An image built before the framework also recorded the modules and scripts copied "
             "into it is not reused (it may hold older copies of them).")
 

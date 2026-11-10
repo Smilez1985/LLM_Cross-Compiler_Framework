@@ -28,11 +28,16 @@ CLI_PATHS: Dict[str, str] = {
     "build image import": "btn_bimg_import",
     "build image import --sha256": "txt_bimg_sha256",
     "build image import --target": "combo_bimg_target",
+    "build preload write": "btn_bimg_preload_write",
+    "build preload write --gpu": "chk_bimg_gpu",
+    "build preload take": "btn_bimg_preload_take",
+    "build preload take --target": "combo_bimg_target",
+    "build preload take --sha256": "txt_bimg_sha256",
 }
 WINDOW_OBJECTS: Dict[str, str] = {name: "act_build_images" for name in (
     "btn_bimg_plan", "chk_bimg_gpu", "txt_bimg_apt_mirror", "txt_bimg_apt_proxy", "txt_bimg_pip_index",
     "btn_bimg_export", "list_bimg_images", "btn_bimg_import", "txt_bimg_sha256", "combo_bimg_target",
-    "combo_bimg_toolbox")}
+    "combo_bimg_toolbox", "btn_bimg_preload_write", "btn_bimg_preload_take")}
 MACHINE_ONLY: Dict[str, str] = {
     "build image plan --json": "machine-readable output for scripts; the window shows the same plan",
     "build image import --yes": "skips the question before the image is loaded, for scripts; the window always asks",

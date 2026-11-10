@@ -25,7 +25,7 @@ this computer and wait for the archive's path. Needs only Python 3 (the standard
     preload_lock.py pack-build --spec SPEC [--out FOLDER]
         a build's preload (kind=build): the recipe SPEC (manifest.base, sources.json) that llmcf wrote for an offline
         build's missing sources; fetches its base images, llama.cpp, Python packages, downloads and the files taken
-        from source images (image_files.py, next to this file or in the checkout) and writes
+        from source images (image_files.py, next to this file) and writes
         llmcf-preload-build-TARGET-ARCH-RECIPE.tar.gz into FOLDER. The scripts llmcf writes for a build run it.
     preload_lock.py pip-args --target T --python X.Y [--glibc 2.NN]     the pip download options, one per line
     preload_lock.py this-computer                                       target, Python version, glibc of this computer
@@ -559,19 +559,18 @@ def write_scripts(spec: Path, out: Path):
 # A build's preload carries exactly the sources an offline build of one target's build container image lacks
 # (Core/build_preload.py writes the recipe, BUILD_SPEC_FILES): base images, the pinned llama.cpp commit, the image's
 # Python packages, pinned downloads and the files taken from source images; same folder, manifest, SHA256SUMS and
-# checks as the installer's preload. The image reader is orchestrator/utils/image_files.py, standard library only,
+# checks as the installer's preload. The image reader is scripts/image_files.py, standard library only,
 # next to this file in the scripts the build writes.
 BUILD_SPEC_FILES = ("manifest.base", "sources.json")
 ARCHES = {"linux/amd64": "x86_64", "linux/arm64": "aarch64"}
 
 
 def _image_files_path() -> Path:
-    """orchestrator/utils/image_files.py: next to this file (in the scripts the build writes) or in the checkout."""
-    here = Path(__file__).resolve()
-    for path in (here.with_name("image_files.py"), here.parents[1] / "orchestrator" / "utils" / "image_files.py"):
-        if path.is_file():
-            return path
-    raise PreloadError("image_files.py is missing next to preload_lock.py")
+    """image_files.py next to this file (scripts/ of the checkout, and the folder the build's scripts unpack into)."""
+    path = Path(__file__).resolve().with_name("image_files.py")
+    if not path.is_file():
+        raise PreloadError("image_files.py is missing next to preload_lock.py")
+    return path
 
 
 def _image_files():

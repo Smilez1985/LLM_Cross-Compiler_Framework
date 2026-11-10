@@ -2523,6 +2523,16 @@ def build_preload_take(ctx: FrameworkContext, archive: str, target: str, digest:
     _take_preload(_image_framework(ctx), target, archive, digest)
 
 
+def _preload_steps(written) -> List[str]:
+    """The person's steps after the build's preload scripts were written (a run without a terminal prints them)."""
+    return [f"On a computer with a network (Python 3 with pip; git for llama.cpp), run {written.scripts[0].name} "
+            f"(Linux, macOS) or {written.scripts[1].name} (Windows) from {written.folder}; they need nothing else of "
+            "llmcf.",
+            "Carry the archive it writes (llmcf-preload-build-...tar.gz) to this computer.",
+            f"Give its path when the build asks, or: llm-cli build start ... --preload FILE, or llm-cli build preload "
+            f"take FILE --target {written.folder.name[len('build-'):]}."]
+
+
 def _offline_preload(ctx: FrameworkContext, target: str, gpu: bool, preload: Optional[str]) -> None:
     """Before an offline build: when its build container image is not here and sources are missing, the build's
     preload. --preload FILE is taken in; at a terminal the scripts are written and the path of the archive is asked
@@ -2547,7 +2557,7 @@ def _offline_preload(ctx: FrameworkContext, target: str, gpu: bool, preload: Opt
                   "offline build lacks sources.[/yellow]")
     _print_written(written)
     if sys.stdin is None or not sys.stdin.isatty():
-        for number, step in enumerate(build_preload.steps(written), 1):
+        for number, step in enumerate(_preload_steps(written), 1):
             console.print(f"{number}. {escape(step)}")
         console.print("Nothing was started.")
         sys.exit(2)

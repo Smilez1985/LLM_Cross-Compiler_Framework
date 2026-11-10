@@ -9,7 +9,10 @@ the vendor's converter and its arguments, the input formats it takes, its output
 the runtime libraries the board needs (with their versions, their path in the build image and whether the vendor's
 licence allows passing them on), the paths on the board, the format's `sdk:` needs for the pre-flight check and the
 vendor files that may not be passed on (only referenced; the person fetches them under their own licence acceptance).
-GGUF with llama.cpp is the pattern's built-in instance (converter `llama.cpp`).
+GGUF with llama.cpp is the pattern's built-in instance (converter `llama.cpp`). Next to the formats, `source_images`
+names a vendor's or a community's image pinned by digest and the files the build image takes from it (read without
+running it, Core/build_preload.py); BuildPreload is target.yml's `build_preload:` block, the Python packages of the
+build image for the build's preload of a computer without a network.
 
 Every value is a plain word or address: no quote, no `$`, no backtick, no space in a word, no bracket in a text
 (a bracketed text reads as a template placeholder). The module generator checks every value again with the shell
@@ -239,7 +242,7 @@ class ImageFile(BaseModel):
 
 class SourceImage(BaseModel):
     """A vendor's or a community's image that already has files the build image needs: pinned by digest, read
-    without running it, only the named files taken (orchestrator/utils/image_files.py, Core/build_preload.py)."""
+    without running it, only the named files taken (scripts/image_files.py, Core/build_preload.py)."""
     model_config = ConfigDict(extra="forbid")
 
     image: str = Field(pattern=IMAGE_PIN_RE, max_length=400, description="name@sha256:DIGEST (manifest or index)")
