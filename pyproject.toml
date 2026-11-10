@@ -143,6 +143,9 @@ requires = ["uv_build>=0.11.32,<0.14"]
 build-backend = "uv_build"
 
 [tool.pytest.ini_options]
+# Only tests/ holds tests: without it a bare "pytest" (as CI runs it) also collects a framework module whose name
+# matches pytest's test-file pattern (orchestrator/Core/module_test.py) and imports it under the wrong name.
+testpaths = ["tests"]
 # The folder of a passed test is removed when it ends. A Qdrant Edge store sets up some 160 MB of files (write-ahead
 # log, segments) that stay empty and sparse on Linux but take real room on NTFS: keeping every test's folder to the end
 # of the run filled the Windows runner's disk.
