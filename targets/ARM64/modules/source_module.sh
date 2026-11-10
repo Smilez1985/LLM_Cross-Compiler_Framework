@@ -4,8 +4,9 @@
 # Image:  targets/ARM64/Dockerfile: Debian bookworm for the build host's architecture. Every tool in it runs on the
 #         machine that builds; nothing of the image is copied to a board.
 # Target: 64-bit ARM boards without a vendor SDK, aarch64 Linux, CPU only (GGUF): the boards of target.yml, today
-#         bcm2711 (Raspberry Pi 4) and bcm2712 (Raspberry Pi 5). The board package's llama-cli and llama-server are cross-built by the target
-#         stage; a runtime planned from the board's own probe comes from `llm-cli device runtime build`.
+#         bcm2711 (Raspberry Pi 4), bcm2712 (Raspberry Pi 5), bcm2837 (Raspberry Pi Zero 2 W), sm1 (Amlogic S905X3),
+#         sun50i-h616 and sun50i-h618 (Allwinner H616 and H618). The board package's llama-cli and llama-server are cross-built by
+#         the target stage; a runtime planned from the board's own probe comes from `llm-cli device runtime build`.
 # Stage:  names the sources the image was built from, for the build log and the resume digest of the stage runner:
 #         the llama.cpp build tag and commit the Dockerfile fetched and checked (the one pin: configs/llama_runtime.yml).
 #         Build containers have no network, so nothing is downloaded, and this stage stops no build: each later stage

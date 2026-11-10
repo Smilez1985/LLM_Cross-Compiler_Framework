@@ -210,7 +210,8 @@ tables:
     "0x1010": imagination
     "0x14e4": broadcom
   # SOC_MODEL values the framework takes decisions on; any other value that matches the pattern is display only.
-  soc_models_known: [bcm2711, bcm2712, rk3399, rk3528, rk3562, rk3566, rk3568, rk3576, rk3588, rk3588s]
+  soc_models_known: [bcm2711, bcm2712, bcm2837, sm1, sun50i-h616, sun50i-h618, rk3399, rk3528, rk3562, rk3566,
+                     rk3568, rk3576, rk3588, rk3588s]
   # SMBIOS memory type (Windows Win32_PhysicalMemory.SMBIOSMemoryType, dmidecode) -> RAM_TYPE
   smbios_memory_types:
     24: DDR3

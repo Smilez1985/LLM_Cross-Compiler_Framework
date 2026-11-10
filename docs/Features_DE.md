@@ -86,12 +86,19 @@ ab, bevor etwas läuft. Die Werte für Rockchip stehen in der [README](../README
 
 Das Framework liefert zwei Targets mit: **Rockchip** (RK3566, RK3568, RK3576, RK3588: GGUF auf der CPU, RKLLM und
 RKNN auf der NPU) und das **allgemeine ARM64-CPU-Target** `ARM64` (nur GGUF, kein Hersteller-SDK) mit den Boards
-`bcm2711` (Raspberry Pi 4, Pi 400, Compute Module 4: Cortex-A72) und `bcm2712` (Raspberry Pi 5, Pi 500, Compute
-Module 5: Cortex-A76). Eine Board-ID ist bei beiden der SoC, den die Hardware-Probe des Boards meldet, also wählen
-`llm-cli scan --import` und der Probe-Import des Builders Target und Board von selbst. Jedes `ARM64`-Board hat sein
-Optimierungsprofil: `-march=armv8-a` auf dem Raspberry Pi 4 und `-march=armv8.2-a+dotprod+fp16` auf dem Raspberry
-Pi 5 (der Plan des Build-Rezepts, `GGML_NATIVE` OFF), die zuerst angebotenen Quantisierungen in der Reihenfolge, die
-zum Speicher des Boards und zu den ARM-Kerneln von llama.cpp passt, und die Optimierungsstufe. Jeder `ARM64`-Build
+`bcm2711` (Raspberry Pi 4, Pi 400, Compute Module 4: Cortex-A72), `bcm2712` (Raspberry Pi 5, Pi 500, Compute
+Module 5: Cortex-A76), `bcm2837` (Raspberry Pi Zero 2 W: Cortex-A53, 512 MB), `sun50i-h616` und `sun50i-h618`
+(Allwinner H616 und H618: Orange Pi Zero 2, Zero 3, Zero 2W, Banana Pi BPI-M4 Berry, BPI-M4 Zero; Cortex-A53) und
+`sm1` (Amlogic S905X3: Banana Pi BPI-M5, BPI-M2 Pro; Cortex-A55). Die Rockchip-Boards von Orange Pi und Banana Pi
+(Orange-Pi-5-Familie, 3B, Banana Pi BPI-M7, BPI-W3, BPI-M5 Pro, BPI-R2 Pro und weitere) sind über ihren SoC Boards
+des Rockchip-Targets. Eine Board-ID ist bei beiden Targets der SoC, den die Hardware-Probe des Boards meldet (ein
+RK3588S ist das Board `rk3588`; ein Board, dessen Kernel seinen SoC anders nennt, wird über seinen Namen in der Liste
+bekannter Boards gefunden), also wählen `llm-cli scan --import` und der Probe-Import des Builders Target und Board
+von selbst. Jedes `ARM64`-Board hat sein Optimierungsprofil: `-march=armv8-a` auf den Boards mit Cortex-A53 und A72
+und `-march=armv8.2-a+dotprod+fp16` auf denen mit Cortex-A55 und A76 (der Plan des Build-Rezepts, `GGML_NATIVE`
+OFF), die zuerst angebotenen Quantisierungen in der Reihenfolge, die zum Speicher des Boards und zu den ARM-Kerneln
+von llama.cpp passt (auf den 512 MB des Zero 2 W die kleinsten Typen zuerst: `IQ4_XS`, `IQ3_M`, `IQ2_M`, `Q4_0`;
+was dort passt, entscheidet die Board-Messung), und die Optimierungsstufe. Jeder `ARM64`-Build
 macht auch das Board-Paket mit `llama-cli` und `llama-server`, aus der gespeicherten Probe des Boards oder, ohne
 eine, aus den CPU-Features, die jeder Chip des Boards hat. `llm-cli targets boards ARM64` und **Build > Targets... >
 Boards...** zeigen die Profile.

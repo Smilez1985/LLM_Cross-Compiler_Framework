@@ -45,7 +45,7 @@ RKLLM und RKNN installierst du selbst (siehe [Das Board](#das-board)).
 |---|---|---|---|
 | Rockchip | offiziell | RK3566, RK3568, RK3576, RK3588 | GGUF, RKLLM, RKNN |
 | NVIDIA-GPUs, AMD (Ryzen Z1 Extreme) | geplant ([Roadmap](docs/ROADMAP_DE.md)) | – | – |
-| Allgemeine ARM64-CPU (`ARM64`) | offiziell | `bcm2711` (Raspberry Pi 4), `bcm2712` (Raspberry Pi 5) | GGUF |
+| Allgemeine ARM64-CPU (`ARM64`) | offiziell | `bcm2711` (Raspberry Pi 4), `bcm2712` (Raspberry Pi 5), `bcm2837` (Raspberry Pi Zero 2 W), `sm1` (Amlogic S905X3), `sun50i-h616`, `sun50i-h618` (Allwinner H616, H618) | GGUF |
 
 Andere Hardware kannst du selbst ergänzen: [docs/Module_Developer_Guide_DE.md](docs/Module_Developer_Guide_DE.md).
 
@@ -56,10 +56,13 @@ GUI, CLI, Ditto und der MCP-Server bieten genau diese Optionen an und lehnen all
 
 | Board (`--board`) | CPU | NPU | RAM (max.) | Beispiel-Boards |
 |---|---|---|---|---|
-| `rk3566` | 4× Cortex-A55 | 1 TOPS | 8 GB | Radxa ZERO 3W, Radxa CM3, ROCK 3C |
-| `rk3568` | 4× Cortex-A55 | 1 TOPS | 8 GB | ROCK 3A, Radxa E25 |
-| `rk3576` | 4× Cortex-A72 + 4× Cortex-A53 | 6 TOPS | 16 GB | Radxa ROCK 4D |
-| `rk3588` | 4× Cortex-A76 + 4× Cortex-A55 | 6 TOPS | 32 GB | Radxa ROCK 5B, Radxa ROCK 5ITX, Orange Pi 5 |
+| `rk3566` | 4× Cortex-A55 | 1 TOPS | 8 GB | Radxa ZERO 3W, Radxa CM3, ROCK 3C, Orange Pi 3B |
+| `rk3568` | 4× Cortex-A55 | 1 TOPS | 8 GB | ROCK 3A, Radxa E25, Banana Pi BPI-R2 Pro |
+| `rk3576` | 4× Cortex-A72 + 4× Cortex-A53 | 6 TOPS | 16 GB | Radxa ROCK 4D, Banana Pi BPI-M5 Pro, BPI-CM5 Pro |
+| `rk3588` | 4× Cortex-A76 + 4× Cortex-A55 | 6 TOPS | 32 GB | Radxa ROCK 5B, Radxa ROCK 5ITX, Orange Pi 5, 5B, 5 Pro, CM5 (RK3588S), Orange Pi 5 Plus, 5 Max, 5 Ultra, Banana Pi BPI-M7, BPI-W3, BPI-M7S (RK3588S) |
+
+Ein Board mit RK3588S ist ein `rk3588`: Seine Probe findet dieses Board, ob sein Kernel den SoC `rk3588s` (Mainline-Linux)
+oder `rk3588` (Orange Pis eigener Kernel) nennt.
 
 | Format (`--format`) | Läuft auf | Eingabe | Boards | Quantisierungen | Standard |
 |---|---|---|---|---|---|
@@ -91,23 +94,36 @@ quantisiert); die Kurznamen `Q3_K`, `Q4_K` und `Q5_K` werden für `Q3_K_M`, `Q4_
 - Gängige Schreibweisen werden angenommen und übersetzt, zum Beispiel `INT8` → `Q8_0` für GGUF oder `int4` →
   `w4a16` für RKLLM. Bei Board-Namen spielt Groß- und Kleinschreibung keine Rolle.
 
-### Allgemeine ARM64-CPU (Raspberry Pi 4 und 5)
+### Allgemeine ARM64-CPU (Raspberry Pi, Orange Pi, Banana Pi)
 
 Das Target `ARM64` ([`targets/ARM64/target.yml`](targets/ARM64/target.yml)) baut GGUF-Modelle und `llama-cli` und
 `llama-server` von llama.cpp für 64-Bit-ARM-Boards, die kein Hersteller-SDK brauchen. Eine Board-ID ist der SoC, den
-die Hardware-Probe des Boards meldet, also findet ein geprobter Raspberry Pi sein Board von selbst.
+die Hardware-Probe des Boards meldet, also findet ein geprobtes Board sein Board von selbst.
 
 | Board (`--board`) | CPU | Build-Flags | RAM (max.) | Empfohlen, in dieser Reihenfolge | Beispiel-Boards |
 |---|---|---|---|---|---|
 | `bcm2711` | 4× Cortex-A72 (Armv8-A) | `-march=armv8-a` | 8 GB | `Q4_K_M`, `Q4_0`, `IQ4_XS`, `Q5_K_M` | Raspberry Pi 4 Model B, Pi 400, Compute Module 4 |
 | `bcm2712` (Standard) | 4× Cortex-A76 (Armv8.2-A, Dot Product, FP16) | `-march=armv8.2-a+dotprod+fp16` | 16 GB | `Q4_K_M`, `Q4_0`, `IQ4_NL`, `Q5_K_M`, `Q6_K`, `Q8_0` | Raspberry Pi 5, Pi 500, Compute Module 5 |
+| `bcm2837` | 4× Cortex-A53 (Armv8-A) | `-march=armv8-a` | 512 MB (Pi 3: 1 GB) | `IQ4_XS`, `IQ3_M`, `IQ2_M`, `Q4_0` | Raspberry Pi Zero 2 W; Raspberry Pi 3 Model B, B+, Compute Module 3 |
+| `sm1` | 4× Cortex-A55 (Armv8.2-A, Dot Product, FP16) | `-march=armv8.2-a+dotprod+fp16` | 4 GB | `Q4_0`, `IQ4_NL`, `Q4_K_M` | Banana Pi BPI-M5, BPI-M2 Pro (Amlogic S905X3) |
+| `sun50i-h616` | 4× Cortex-A53 (Armv8-A) | `-march=armv8-a` | 4 GB | `Q4_K_M`, `IQ4_XS`, `Q4_0` | Orange Pi Zero 2; Orange Pi Zero 3 und Zero 2W mit Orange Pis eigenem Kernel |
+| `sun50i-h618` | 4× Cortex-A53 (Armv8-A) | `-march=armv8-a` | 4 GB | `Q4_K_M`, `IQ4_XS`, `Q4_0` | Orange Pi Zero 3, Zero 2W, Banana Pi BPI-M4 Berry, BPI-M4 Zero |
 
-- Ein Format, `gguf`, mit denselben 35 Typen wie Rockchip; `Q4_K_M` ist auf beiden Boards der Standard.
-- Auf dem Raspberry Pi 5 packt llama.cpp jeden empfohlenen Typ für seine Dot-Product-Kernel um; der Cortex-A72 des
-  Raspberry Pi 4 hat kein Dot Product, dort wird also nichts umgepackt und die Qualität je Bit entscheidet.
+- Ein Format, `gguf`, mit denselben 35 Typen wie Rockchip; Standard ist der erste empfohlene Typ des Boards
+  (`Q4_K_M`, `IQ4_XS` auf dem Zero 2 W, `Q4_0` auf dem S905X3).
+- Auf dem Raspberry Pi 5 und dem S905X3 packt llama.cpp jeden empfohlenen Typ für seine Dot-Product-Kernel um; der
+  Cortex-A72 und der Cortex-A53 haben kein Dot Product, dort wird also nichts umgepackt und die Qualität je Bit
+  entscheidet.
+- Der Raspberry Pi Zero 2 W hat 512 MB für das System und das Modell: Die kleinsten Typen kommen zuerst, ein Modell
+  um 1B liegt selbst mit 2 bis 3 Bit an der Grenze des Boards, und die Board-Messung (der Benchmark des Board-Tests)
+  entscheidet den Kontext und lehnt ein Modell ab, das nicht passt.
+- Orange-Pi- und Banana-Pi-Boards mit einem Rockchip-SoC sind Boards des Rockchip-Targets (siehe oben). Noch nicht
+  bedient: der Orange Pi 4A (der Kernel seines Herstellers nennt keinen SoC, den die Probe unterscheiden kann), Boards
+  mit RK3399, Allwinner H6, A64 oder H5 oder Amlogic G12B und RISC-V-Boards.
 - Jeder Build macht auch das Board-Paket mit `llama-cli` und `llama-server`, für das Board cross-gebaut: aus der
   gespeicherten Probe des Boards, wenn es eine gibt, sonst aus den CPU-Features, die jeder Chip des Boards hat.
-  Installiere das 64-Bit-Raspberry-Pi-OS: Ein 32-Bit-System wird abgelehnt.
+  Installiere das 64-Bit-System des Boards (auf einem Raspberry Pi das 64-Bit-Raspberry-Pi-OS): Ein 32-Bit-System
+  wird abgelehnt.
 - Kein Hersteller-SDK: Die Vorabprüfung vor einem Build hat nichts vom Board zu verlangen.
 
 ---

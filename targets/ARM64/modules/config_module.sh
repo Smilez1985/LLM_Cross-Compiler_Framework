@@ -4,8 +4,9 @@
 #
 # Image:  targets/ARM64/Dockerfile: Debian bookworm for the build host's architecture.
 # Target: 64-bit ARM boards without a vendor SDK, aarch64 Linux, CPU only (GGUF): the boards of target.yml, today
-#         bcm2711 (Raspberry Pi 4, Pi 400, Compute Module 4: Cortex-A72) and bcm2712 (Raspberry Pi 5, Pi 500, Compute
-#         Module 5: Cortex-A76); each has a row of BOARD_DEFAULTS below.
+#         bcm2711 (Raspberry Pi 4, Pi 400, Compute Module 4: Cortex-A72), bcm2712 (Raspberry Pi 5, Pi 500, Compute
+#         Module 5: Cortex-A76), bcm2837 (Raspberry Pi Zero 2 W: Cortex-A53), sm1 (Amlogic S905X3: Cortex-A55),
+#         sun50i-h616 and sun50i-h618 (Allwinner H616 and H618: Cortex-A53); each has a row of BOARD_DEFAULTS below.
 # Stage:  reads the request from the environment, normalizes it (lower-case format and board, the GGUF type names
 #         and their aliases) and refuses what this target cannot build before anything slow runs. Then it writes the
 #         build plan, build_config.sh in the stage folder, which the convert and target stages read.
@@ -29,7 +30,7 @@
 #   MODEL_SOURCE   local HF model directory inside the container (staged by the host), or a GGUF file (quantized by
 #                  the target stage, nothing converted)
 #   TARGET_FORMAT  gguf                                       (default: gguf)
-#   TARGET_BOARD   bcm2712 | bcm2711                          (default: bcm2712)
+#   TARGET_BOARD   bcm2712 | bcm2711 | bcm2837 | sm1 | sun50i-h616 | sun50i-h618   (default: bcm2712)
 #   QUANTIZATION   e.g. Q4_K_M, Q4_0, IQ4_NL, IQ4_XS, Q8_0, F16
 #   JOB_TYPE       build | imatrix
 #   USE_IMATRIX / IMATRIX_PATH, DATASET_PATH, MODEL_NAME, MODEL_REVISION, MAX_CONTEXT_LENGTH (optional)
@@ -230,13 +231,19 @@ check_profile_system() {
 # it has. They are data, one row per board of target.yml (tests/test_arm64_target.py checks every row against the
 # board's optimization profile, cpu and cpu_features, and every board of the capabilities against a row): the board
 # id, the cores as the probe names them (CPU_MODEL), the number of cores, and the ARM features the build recipe plans
-# (dotprod, fp16, i8mm, sve; NEON is every ARMv8-A core's, "-" for none). A new board of this target, such as a
-# Cortex-A53 board with little memory, is a new row here and a new profile in target.yml, nothing else.
-# Sources of the rows: the Raspberry Pi documentation (BCM2711: 4x Cortex-A72; BCM2712: 4x Cortex-A76) and GCC's core
-# table aarch64-cores.def (cortex-a72: Armv8-A with CRC; cortex-a76: Armv8.2-A with FP16, RCpc and the dot product).
+# (dotprod, fp16, i8mm, sve; NEON is every ARMv8-A core's, "-" for none). A new board of this target is a new row
+# here and a new profile in target.yml, nothing else.
+# Sources of the rows: the Raspberry Pi documentation (BCM2711: 4x Cortex-A72; BCM2712: 4x Cortex-A76; RP3A0, the
+# BCM2837's die with 512 MB: 4x Cortex-A53), the makers' pages (Allwinner H616 and H618: 4x Cortex-A53, Orange Pi and
+# Banana Pi; Amlogic S905X3: 4x Cortex-A55, Banana Pi) and GCC's core table aarch64-cores.def (cortex-a53 and
+# cortex-a72: Armv8-A with CRC; cortex-a55 and cortex-a76: Armv8.2-A with FP16, RCpc and the dot product).
 BOARD_DEFAULTS=(
     "bcm2711 Cortex-A72 4 -"
     "bcm2712 Cortex-A76 4 dotprod,fp16"
+    "bcm2837 Cortex-A53 4 -"
+    "sm1 Cortex-A55 4 dotprod,fp16"
+    "sun50i-h616 Cortex-A53 4 -"
+    "sun50i-h618 Cortex-A53 4 -"
 )
 
 # A board without a row (a run by hand) gets the plain baseline every ARMv8-A core runs: generic ARMv8-A with NEON.

@@ -5,7 +5,8 @@
 # Image:  targets/ARM64/Dockerfile: Debian bookworm for the build host's architecture; llama-quantize is the image's
 #         own (build/bin of the pinned llama.cpp, built for the build host).
 # Target: 64-bit ARM boards without a vendor SDK, aarch64 Linux, CPU only (GGUF): the boards of target.yml, today
-#         bcm2711 (Raspberry Pi 4) and bcm2712 (Raspberry Pi 5).
+#         bcm2711 (Raspberry Pi 4), bcm2712 (Raspberry Pi 5), bcm2837 (Raspberry Pi Zero 2 W), sm1 (Amlogic S905X3),
+#         sun50i-h616 and sun50i-h618 (Allwinner H616 and H618).
 # Stage:  quantizes what the convert stage left for it (quantize_jobs.sh: the F16 intermediate to the requested GGUF
 #         type, with the importance matrix when the build has one) and removes the intermediate (a GGUF input, the
 #         --input FILE.gguf of target_module.sh of version 1.x, and a file named with --output stay); writes

@@ -117,13 +117,16 @@ def access_line(profile: Optional[HardwareProfile], lang: Optional[str] = None) 
 
 
 def match_target(profile: HardwareProfile, target_manager: Any) -> Optional[TargetMatch]:
-    """The target that fits a probe best, from validated probe values only (SOC_MODEL, SOC_VENDOR, NPU_VENDOR, ARCH)
-    against each target's boards, vendor and architecture family: a board named like the probe's SoC is the strongest
-    match, then the SoC's or the NPU's vendor. None when nothing fits; an architecture that differs rules a target
-    out."""
+    """The target that fits a probe best, from probe values only (SOC_MODEL, SOC_VENDOR, NPU_VENDOR, ARCH and the
+    board's name BOARD_MODEL) against each target's boards, vendor and architecture family: a board named like the
+    probe's SoC is the strongest match (a letter variant of it too: an rk3588s is the board rk3588, soc_fits), then a
+    board whose list of known boards (`examples`) names the probe's board exactly (a kernel that names its SoC
+    otherwise, such as a maker's own kernel), then the SoC's or the NPU's vendor. None when nothing fits; an
+    architecture that differs rules a target out."""
     if profile is None or target_manager is None:
         return None
     soc, arch = _canon(profile.get("SOC_MODEL")), profile.get("ARCH") or ""
+    name = _canon(profile.get("BOARD_MODEL"))
     vendors = {v for v in (_canon(profile.get("SOC_VENDOR")), _canon(profile.get("NPU_VENDOR"))) if v}
     best: Optional[Tuple[int, TargetMatch]] = None
     try:
@@ -137,17 +140,24 @@ def match_target(profile: HardwareProfile, target_manager: Any) -> Optional[Targ
         if not arch_fits(arch, meta.get("architecture_family")):
             continue
         boards: List[str] = []
+        known: Dict[str, List[str]] = {}
         try:
             caps = target_manager.get_capabilities(tid)
             boards = list(caps.boards) if caps else []
+            known = {b: [_canon(n) for n in (info.examples or [])] for b, info in caps.boards.items()} if caps else {}
         except Exception:  # noqa: BLE001
             boards = []
         if not boards:
             data = target_manager.get_target(tid) or {}
             boards = [str(b.get("name")) for b in data.get("supported_boards") or [] if isinstance(b, dict)]
-        board = next((b for b in boards if soc and _canon(b) == soc), None)
+        board = next((b for b in boards if soc and _canon(b) == soc), None) or \
+            next((b for b in boards if soc and soc_fits(soc, b)), None)
+        by_name = [b for b in boards if name and name in known.get(b, ())]
         if board:
-            found = (3, TargetMatch(tid, board, f"the probe's SoC {profile.get('SOC_MODEL')} is a board of this target"))
+            found = (4, TargetMatch(tid, board, f"the probe's SoC {profile.get('SOC_MODEL')} is a board of this target"))
+        elif len(by_name) == 1:
+            found = (3, TargetMatch(tid, by_name[0], f"the probe's board {profile.get('BOARD_MODEL')} is a known "
+                                                     f"board of {by_name[0]}"))
         elif _canon(meta.get("vendor") or "") in vendors:
             found = (2, TargetMatch(tid, None, f"the probe's SoC or NPU vendor is {meta.get('vendor')}"))
         else:
@@ -233,12 +243,13 @@ class HardwareProbes:
 
     def for_board(self, board: Optional[str]) -> Optional[ProbeInfo]:
         """The probe a build for `board` (a board id such as rk3588) uses when the request names none (DESIGN round
-        23 item 5): the newest stored probe whose SoC is that board (SOC_MODEL; letter case and separators ignored),
-        this computer's own included. None when there is none or no board is named."""
+        23 item 5): the newest stored probe whose SoC is that board (SOC_MODEL; letter case and separators ignored)
+        or a letter variant of it (an rk3588s for rk3588, soc_fits), this computer's own included. None when there is
+        none or no board is named."""
         wanted = _canon(board or "")
         if not wanted:
             return None
-        return next((info for info in self.list(limit=10 ** 6) if _canon(info.soc or "") == wanted), None)
+        return next((info for info in self.list(limit=10 ** 6) if info.soc and soc_fits(info.soc, wanted)), None)
 
     # --- adding -------------------------------------------------------------------------------------------------
 

@@ -31,7 +31,7 @@ supported_boards:
       gpu: "Mali-G52"
       npu: "1 TOPS"
       memory_max: "8GB LPDDR4"
-      typical_boards: ["Radxa ZERO 3W", "Radxa CM3", "ROCK 3C"]
+      typical_boards: ["Radxa ZERO 3W", "Radxa CM3", "ROCK 3C", "Orange Pi 3B"]
       
   - name: "RK3568" 
     description: "Quad-core ARM Cortex-A55, Mali-G52 GPU"
@@ -42,7 +42,7 @@ supported_boards:
       gpu: "Mali-G52"
       npu: "1 TOPS"
       memory_max: "8GB LPDDR4"
-      typical_boards: ["ROCK 3A", "Radxa E25"]
+      typical_boards: ["ROCK 3A", "Radxa E25", "Banana Pi BPI-R2 Pro"]
       
   - name: "RK3576"
     description: "Octa-core ARM (4xA72 + 4xA53), Mali-G52 GPU" 
@@ -55,7 +55,7 @@ supported_boards:
       gpu: "Mali-G52"
       npu: "6 TOPS"
       memory_max: "16GB LPDDR5"
-      typical_boards: ["ROCK 4D"]
+      typical_boards: ["ROCK 4D", "Banana Pi BPI-M5 Pro", "Banana Pi BPI-CM5 Pro"]
       
   - name: "RK3588"
     description: "Octa-core ARM (4xA76 + 4xA55), Mali-G610 GPU"
@@ -68,7 +68,9 @@ supported_boards:
       gpu: "Mali-G610"
       npu: "6 TOPS"
       memory_max: "32GB LPDDR5"
-      typical_boards: ["ROCK 5B", "Radxa CM5", "Orange Pi 5"]
+      typical_boards: ["ROCK 5B", "Radxa CM5", "Orange Pi 5", "Orange Pi 5B", "Orange Pi 5 Pro", "Orange Pi CM5",
+                       "Orange Pi 5 Plus", "Orange Pi 5 Max", "Orange Pi 5 Ultra", "Banana Pi BPI-M7",
+                       "Banana Pi BPI-M7S", "Banana Pi BPI-W3"]
 
 # Docker configuration
 docker:
@@ -240,28 +242,32 @@ capabilities:
       ram_max_gb: 8
       npu: "1 TOPS"
       gpu: "Mali-G52"
-      examples: ["Radxa ZERO 3W", "Radxa CM3", "ROCK 3C"]
+      examples: ["Radxa ZERO 3W", "Radxa CM3", "ROCK 3C", "Orange Pi 3B"]
     rk3568:
       label: "RK3568 (4x Cortex-A55)"
       cpu: "4x Cortex-A55"
       ram_max_gb: 8
       npu: "1 TOPS"
       gpu: "Mali-G52"
-      examples: ["ROCK 3A", "Radxa E25"]
+      examples: ["ROCK 3A", "Radxa E25", "Banana Pi BPI-R2 Pro"]
     rk3576:
       label: "RK3576 (4x A72 + 4x A53)"
       cpu: "4x Cortex-A72 + 4x Cortex-A53"
       ram_max_gb: 16
       npu: "6 TOPS"
       gpu: "Mali-G52"
-      examples: ["Radxa ROCK 4D"]
+      examples: ["Radxa ROCK 4D", "Banana Pi BPI-M5 Pro", "Banana Pi BPI-CM5 Pro"]
     rk3588:
       label: "RK3588 (4x A76 + 4x A55)"
       cpu: "4x Cortex-A76 + 4x Cortex-A55"
       ram_max_gb: 32
       npu: "6 TOPS"
       gpu: "Mali-G610"
-      examples: ["Radxa ROCK 5B", "Radxa ROCK 5ITX", "Orange Pi 5"]
+      # RK3588 and RK3588S boards (mainline Linux names an RK3588S rockchip,rk3588s, the probe's letter variant of
+      # this board); Orange Pi's and Banana Pi's from their makers' pages (orangepi.org, docs.banana-pi.org).
+      examples: ["Radxa ROCK 5B", "Radxa ROCK 5ITX", "Orange Pi 5", "Orange Pi 5B", "Orange Pi 5 Pro", "Orange Pi CM5",
+                 "Orange Pi 5 Plus", "Orange Pi 5 Max", "Orange Pi 5 Ultra", "Banana Pi BPI-M7", "Banana Pi BPI-M7S",
+                 "Banana Pi BPI-W3"]
   formats:
     gguf:
       label: "GGUF (llama.cpp, CPU)"

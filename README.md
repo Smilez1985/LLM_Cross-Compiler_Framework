@@ -43,7 +43,7 @@ runtimes stay yours to install (see [The board](#the-board)).
 |---|---|---|---|
 | Rockchip | official | RK3566, RK3568, RK3576, RK3588 | GGUF, RKLLM, RKNN |
 | NVIDIA GPUs, AMD (Ryzen Z1 Extreme) | planned ([roadmap](docs/ROADMAP.md)) | – | – |
-| Generic ARM64 CPU (`ARM64`) | official | `bcm2711` (Raspberry Pi 4), `bcm2712` (Raspberry Pi 5) | GGUF |
+| Generic ARM64 CPU (`ARM64`) | official | `bcm2711` (Raspberry Pi 4), `bcm2712` (Raspberry Pi 5), `bcm2837` (Raspberry Pi Zero 2 W), `sm1` (Amlogic S905X3), `sun50i-h616`, `sun50i-h618` (Allwinner H616, H618) | GGUF |
 
 You can add other hardware yourself: [docs/Module_Developer_Guide.md](docs/Module_Developer_Guide.md).
 
@@ -54,10 +54,13 @@ The GUI, the CLI, Ditto and the MCP server offer exactly these options and rejec
 
 | Board (`--board`) | CPU | NPU | RAM (max.) | Example boards |
 |---|---|---|---|---|
-| `rk3566` | 4× Cortex-A55 | 1 TOPS | 8 GB | Radxa ZERO 3W, Radxa CM3, ROCK 3C |
-| `rk3568` | 4× Cortex-A55 | 1 TOPS | 8 GB | ROCK 3A, Radxa E25 |
-| `rk3576` | 4× Cortex-A72 + 4× Cortex-A53 | 6 TOPS | 16 GB | Radxa ROCK 4D |
-| `rk3588` | 4× Cortex-A76 + 4× Cortex-A55 | 6 TOPS | 32 GB | Radxa ROCK 5B, Radxa ROCK 5ITX, Orange Pi 5 |
+| `rk3566` | 4× Cortex-A55 | 1 TOPS | 8 GB | Radxa ZERO 3W, Radxa CM3, ROCK 3C, Orange Pi 3B |
+| `rk3568` | 4× Cortex-A55 | 1 TOPS | 8 GB | ROCK 3A, Radxa E25, Banana Pi BPI-R2 Pro |
+| `rk3576` | 4× Cortex-A72 + 4× Cortex-A53 | 6 TOPS | 16 GB | Radxa ROCK 4D, Banana Pi BPI-M5 Pro, BPI-CM5 Pro |
+| `rk3588` | 4× Cortex-A76 + 4× Cortex-A55 | 6 TOPS | 32 GB | Radxa ROCK 5B, Radxa ROCK 5ITX, Orange Pi 5, 5B, 5 Pro, CM5 (RK3588S), Orange Pi 5 Plus, 5 Max, 5 Ultra, Banana Pi BPI-M7, BPI-W3, BPI-M7S (RK3588S) |
+
+A board with an RK3588S is an `rk3588`: its probe finds that board whether its kernel names the SoC `rk3588s`
+(mainline Linux) or `rk3588` (Orange Pi's own kernel).
 
 | Format (`--format`) | Runs on | Input | Boards | Quantizations | Default |
 |---|---|---|---|---|---|
@@ -89,23 +92,34 @@ nothing); its short names `Q3_K`, `Q4_K` and `Q5_K` are accepted for `Q3_K_M`, `
 - Common spellings are accepted and translated, for example `INT8` → `Q8_0` for GGUF or `int4` → `w4a16` for
   RKLLM. Board names are not case-sensitive.
 
-### Generic ARM64 CPU (Raspberry Pi 4 and 5)
+### Generic ARM64 CPU (Raspberry Pi, Orange Pi, Banana Pi)
 
 The target `ARM64` ([`targets/ARM64/target.yml`](targets/ARM64/target.yml)) builds GGUF models and llama.cpp's
 `llama-cli` and `llama-server` for 64-bit ARM boards that need no vendor SDK. A board id is the SoC that the board's
-hardware probe reports, so a probed Raspberry Pi finds its board by itself.
+hardware probe reports, so a probed board finds its board by itself.
 
 | Board (`--board`) | CPU | Build flags | RAM (max.) | Recommended, in this order | Example boards |
 |---|---|---|---|---|---|
 | `bcm2711` | 4× Cortex-A72 (Armv8-A) | `-march=armv8-a` | 8 GB | `Q4_K_M`, `Q4_0`, `IQ4_XS`, `Q5_K_M` | Raspberry Pi 4 Model B, Pi 400, Compute Module 4 |
 | `bcm2712` (default) | 4× Cortex-A76 (Armv8.2-A, dot product, FP16) | `-march=armv8.2-a+dotprod+fp16` | 16 GB | `Q4_K_M`, `Q4_0`, `IQ4_NL`, `Q5_K_M`, `Q6_K`, `Q8_0` | Raspberry Pi 5, Pi 500, Compute Module 5 |
+| `bcm2837` | 4× Cortex-A53 (Armv8-A) | `-march=armv8-a` | 512 MB (Pi 3: 1 GB) | `IQ4_XS`, `IQ3_M`, `IQ2_M`, `Q4_0` | Raspberry Pi Zero 2 W; Raspberry Pi 3 Model B, B+, Compute Module 3 |
+| `sm1` | 4× Cortex-A55 (Armv8.2-A, dot product, FP16) | `-march=armv8.2-a+dotprod+fp16` | 4 GB | `Q4_0`, `IQ4_NL`, `Q4_K_M` | Banana Pi BPI-M5, BPI-M2 Pro (Amlogic S905X3) |
+| `sun50i-h616` | 4× Cortex-A53 (Armv8-A) | `-march=armv8-a` | 4 GB | `Q4_K_M`, `IQ4_XS`, `Q4_0` | Orange Pi Zero 2; Orange Pi Zero 3 and Zero 2W on Orange Pi's own kernel |
+| `sun50i-h618` | 4× Cortex-A53 (Armv8-A) | `-march=armv8-a` | 4 GB | `Q4_K_M`, `IQ4_XS`, `Q4_0` | Orange Pi Zero 3, Zero 2W, Banana Pi BPI-M4 Berry, BPI-M4 Zero |
 
-- One format, `gguf`, with the same 35 types as Rockchip; `Q4_K_M` is the default on both boards.
-- On the Raspberry Pi 5 every recommended type is repacked by llama.cpp for its dot product kernels; the Cortex-A72
-  of the Raspberry Pi 4 has no dot product, so nothing is repacked there and quality per bit decides.
+- One format, `gguf`, with the same 35 types as Rockchip; the default is the first recommended type of the board
+  (`Q4_K_M`, `IQ4_XS` on the Zero 2 W, `Q4_0` on the S905X3).
+- On the Raspberry Pi 5 and the S905X3 every recommended type is repacked by llama.cpp for its dot product kernels;
+  the Cortex-A72 and Cortex-A53 have no dot product, so nothing is repacked there and quality per bit decides.
+- The Raspberry Pi Zero 2 W has 512 MB for the system and the model: the smallest types come first, a model of about
+  1B is at the board's limit even at 2 to 3 bits, and the board measurement (the board test's benchmark) decides
+  the context and refuses a model that does not fit.
+- Orange Pi and Banana Pi boards with a Rockchip SoC are boards of the Rockchip target (see above). Not served yet:
+  the Orange Pi 4A (its maker's kernel names no SoC the probe can tell apart), boards with an RK3399, Allwinner H6,
+  A64 or H5 or Amlogic G12B, and RISC-V boards.
 - Every build also makes the board package with `llama-cli` and `llama-server` cross-built for the board: from the
   board's stored probe when there is one, else from the CPU features every chip of the board has. Install the
-  64-bit Raspberry Pi OS: a 32-bit system is refused.
+  board's 64-bit system (the 64-bit Raspberry Pi OS on a Raspberry Pi): a 32-bit system is refused.
 - No vendor SDK: the pre-flight check before a build has nothing to ask of the board.
 
 ---

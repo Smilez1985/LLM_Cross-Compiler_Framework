@@ -2,9 +2,9 @@
 """
 The board a hardware probe points to, as a recommendation only (DESIGN round 8, N9, N9', N9'').
 
-The board comes from the probe: the probe's SoC named like one of the target's boards (source "probe"), or the
-probe's board name found in the target's list of known boards (`examples` in target.yml capabilities, or
-`typical_boards`; source "list"). Only an exact match is "sure". Anything weaker is "unsure": then nothing is
+The board comes from the probe: the probe's SoC named like one of the target's boards or a letter variant of it (an
+rk3588s is the board rk3588; source "probe"), or the probe's board name found in the target's list of known boards
+(`examples` in target.yml capabilities, or `typical_boards`; source "list"). Only an exact match is "sure". Anything weaker is "unsure": then nothing is
 preselected, the candidates are shown with why it is unsure, and the person picks. The person can always change the
 board (they know which board is in their hand), and a board the person chose is never overwritten by a later
 detection or by an AI (the builder checks that before it applies a recommendation).
@@ -88,6 +88,10 @@ def recommend_board(profile: Any, target_manager: Any, target: str) -> BoardReco
         return BoardRecommendation(target, None, "", NONE, reason="the target lists no boards", soc=soc,
                                    board_model=board_model)
     by_soc = [b for b in boards if soc and _canon(b) == _canon(soc)]
+    if not by_soc and soc:
+        # a letter variant of a board's SoC is that board (an rk3588s is the board rk3588), as for the build
+        from orchestrator.runtime.probe_service import soc_fits
+        by_soc = [b for b in boards if soc_fits(soc, b)]
     if len(by_soc) == 1:
         board = by_soc[0]
         return BoardRecommendation(target, board, "probe", SURE,

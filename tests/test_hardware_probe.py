@@ -170,18 +170,22 @@ def make_sysroot(base: Path, kind: str) -> Path:
         write(root, "/proc/rknpu/version", "RKNPU driver: v0.9.6\n")
         pci_device(root, "0000:01:00.0", "0x1e60", "0x2864", "0x120000")  # a Hailo-8 on the M.2 slot
         write(root, "/dev/hailo0", b"")
-    elif kind in ("rpi4", "rpi5"):
-        # A Raspberry Pi 4 (BCM2711, 4x Cortex-A72) and a Raspberry Pi 5 (BCM2712, 4x Cortex-A76) on the 64-bit
-        # Raspberry Pi OS, whose os-release is Debian's: the device tree's compatible and model as the Raspberry Pi
-        # kernel's bcm2711-rpi-4-b.dts and bcm2712-rpi-5-b.dts write them.
+    elif kind in ("rpi4", "rpi5", "rpizero2w"):
+        # A Raspberry Pi 4 (BCM2711, 4x Cortex-A72), a Raspberry Pi 5 (BCM2712, 4x Cortex-A76) and a Raspberry Pi
+        # Zero 2 W (RP3A0: BCM2837, 4x Cortex-A53, 512 MB) on the 64-bit Raspberry Pi OS, whose os-release is Debian's:
+        # the device tree's compatible and model as the Raspberry Pi kernel's bcm2711-rpi-4-b.dts, bcm2712-rpi-5-b.dts
+        # and bcm2710-rpi-zero-2-w.dts write them.
         soc, model, compatible, clock, kernel = {
             "rpi4": ("bcm2711", "Raspberry Pi 4 Model B Rev 1.4", "raspberrypi,4-model-b", "1800000", "rpi-v8"),
-            "rpi5": ("bcm2712", "Raspberry Pi 5 Model B Rev 1.0", "raspberrypi,5-model-b", "2400000", "rpi-2712")}[kind]
+            "rpi5": ("bcm2712", "Raspberry Pi 5 Model B Rev 1.0", "raspberrypi,5-model-b", "2400000", "rpi-2712"),
+            "rpizero2w": ("bcm2837", "Raspberry Pi Zero 2 W Rev 1.0", "raspberrypi,model-zero-2-w", "1000000",
+                          "rpi-v8")}[kind]
         write(root, "/proc/cpuinfo", (FIXTURES / f"cpuinfo_{soc}.txt").read_text())
         write(root, "/etc/os-release", (FIXTURES / "os-release_dietpi.txt").read_text())
         write(root, "/proc/sys/kernel/osrelease", f"6.6.51+rpt-{kernel}\n")
         write(root, "/proc/sys/kernel/arch", "aarch64\n")
-        write(root, "/proc/meminfo", meminfo(8139000, 7400000, 524284))
+        write(root, "/proc/meminfo", meminfo(426000, 326000, 102396) if kind == "rpizero2w" else
+              meminfo(8139000, 7400000, 524284))
         (root / "run/systemd/system").mkdir(parents=True)
         write(root, "/lib/aarch64-linux-gnu/libc.so.6", b"")
         for cpu in range(4):
@@ -439,7 +443,8 @@ class TestFixtureMachines:
 
     @pytest.mark.parametrize("kind, soc, cpu, part, features", [
         ("rpi4", "bcm2711", "Cortex-A72", "0xd08", {"SUPPORTS_DOTPROD": "OFF", "SUPPORTS_FP16_ARITH": "OFF"}),
-        ("rpi5", "bcm2712", "Cortex-A76", "0xd0b", {"SUPPORTS_DOTPROD": "ON", "SUPPORTS_FP16_ARITH": "ON"})])
+        ("rpi5", "bcm2712", "Cortex-A76", "0xd0b", {"SUPPORTS_DOTPROD": "ON", "SUPPORTS_FP16_ARITH": "ON"}),
+        ("rpizero2w", "bcm2837", "Cortex-A53", "0xd03", {"SUPPORTS_DOTPROD": "OFF", "SUPPORTS_FP16_ARITH": "OFF"})])
     def test_a_raspberry_pi_names_its_soc_and_its_cores(self, tmp_path, kind, soc, cpu, part, features):
         """The SoC of the device tree's last compatible entry is the board of the generic ARM64 target."""
         profile = parse_profile(probe.render_text(py_probe(make_sysroot(tmp_path, kind))))
@@ -471,7 +476,7 @@ class TestShellEquivalence:
     @pytest.mark.parametrize("shell", available_shells())
     @pytest.mark.parametrize("kind, fake_tools", [("intel", False), ("intel", True), ("amd", False),
                                                   ("rk3566", False), ("rk3588", False), ("rpi4", False),
-                                                  ("rpi5", False)])
+                                                  ("rpi5", False), ("rpizero2w", False)])
     def test_sh_and_py_agree(self, tmp_path, shell, kind, fake_tools):
         root = make_sysroot(tmp_path, kind)
         bindir = tool_dir(tmp_path, fake_gpu_tools=fake_tools)

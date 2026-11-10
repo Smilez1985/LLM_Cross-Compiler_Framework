@@ -1,11 +1,13 @@
 # LLM Cross-Compiler Framework - the generic ARM64 CPU target
 # GGUF models and llama.cpp's programs for 64-bit ARM boards that need no vendor SDK, with board defaults for the
-# Raspberry Pi 4 (BCM2711) and the Raspberry Pi 5 (BCM2712). The design: docs/DESIGN.md, "Targets, hardware and
-# templates", the row of the generic ARM64 CPU target.
+# Raspberry Pi 4 (BCM2711), the Raspberry Pi 5 (BCM2712), the Raspberry Pi Zero 2 W (BCM2837), the Allwinner H616 and
+# H618 boards (Orange Pi Zero 2, Zero 3, Zero 2W; Banana Pi BPI-M4 Berry, BPI-M4 Zero) and the Amlogic S905X3 boards
+# (Banana Pi BPI-M5, BPI-M2 Pro). The design: docs/DESIGN.md, "Targets, hardware and templates", the row of the
+# generic ARM64 CPU target, and "Build pipeline and target modules", the row of the further boards.
 
 metadata:
   name: "Generic ARM64 (CPU)"
-  description: "GGUF models and llama.cpp for 64-bit ARM boards without a vendor SDK: Raspberry Pi 4 (BCM2711) and Raspberry Pi 5 (BCM2712)"
+  description: "GGUF models and llama.cpp for 64-bit ARM boards without a vendor SDK: Raspberry Pi 4, 5 and Zero 2 W, Allwinner H616/H618 (Orange Pi, Banana Pi) and Amlogic S905X3 (Banana Pi)"
   maintainer: "LLM Framework Core Team"
   version: "1.0.0"
   created: "2026-11-10"
@@ -22,7 +24,10 @@ metadata:
 
 # Supported hardware boards (descriptive; the capabilities block below is what the framework reads). A board id is the
 # SoC of the board's device tree: the hardware probe reads it from the last entry of /proc/device-tree/compatible
-# (brcm,bcm2711 on a Raspberry Pi 4, brcm,bcm2712 on a Raspberry Pi 5), so a probe of the board finds its board here.
+# (brcm,bcm2711 on a Raspberry Pi 4, brcm,bcm2712 on a Raspberry Pi 5, brcm,bcm2837 on a Raspberry Pi Zero 2 W,
+# allwinner,sun50i-h618 on an Orange Pi Zero 3 with a mainline kernel, allwinner,sun50i-h616 on an Orange Pi Zero 2 and
+# on the H618 boards with Orange Pi's own kernel, amlogic,sm1 on a Banana Pi BPI-M5), so a probe of the board finds its
+# board here.
 supported_boards:
   - name: "bcm2711"
     description: "Raspberry Pi 4: quad-core Arm Cortex-A72 (Armv8-A), LPDDR4"
@@ -41,6 +46,42 @@ supported_boards:
       cpu_max_freq: "2.4GHz"
       memory_max: "16GB LPDDR4X"
       typical_boards: ["Raspberry Pi 5", "Raspberry Pi 500", "Compute Module 5"]
+
+  - name: "bcm2837"
+    description: "Raspberry Pi Zero 2 W (RP3A0: the BCM2710A1 die of the BCM2837 with 512 MB): quad-core Arm Cortex-A53 (Armv8-A)"
+    specifications:
+      cpu_cores: 4
+      cpu_arch: "cortex-a53"
+      cpu_max_freq: "1GHz"
+      memory_max: "512MB LPDDR2"
+      typical_boards: ["Raspberry Pi Zero 2 W", "Raspberry Pi 3 Model B", "Raspberry Pi 3 Model B+", "Compute Module 3"]
+
+  - name: "sm1"
+    description: "Amlogic S905X3 (SM1): quad-core Arm Cortex-A55 (Armv8.2-A), LPDDR4"
+    specifications:
+      cpu_cores: 4
+      cpu_arch: "cortex-a55"
+      cpu_max_freq: "2.0GHz"
+      memory_max: "4GB LPDDR4"
+      typical_boards: ["Banana Pi BPI-M5", "Banana Pi BPI-M2 Pro"]
+
+  - name: "sun50i-h616"
+    description: "Allwinner H616 (and the H618 boards on Orange Pi's own kernel): quad-core Arm Cortex-A53 (Armv8-A)"
+    specifications:
+      cpu_cores: 4
+      cpu_arch: "cortex-a53"
+      cpu_max_freq: "1.5GHz"
+      memory_max: "4GB LPDDR4"
+      typical_boards: ["Orange Pi Zero 2", "Orange Pi Zero 3", "Orange Pi Zero 2W"]
+
+  - name: "sun50i-h618"
+    description: "Allwinner H618: quad-core Arm Cortex-A53 (Armv8-A), LPDDR4"
+    specifications:
+      cpu_cores: 4
+      cpu_arch: "cortex-a53"
+      cpu_max_freq: "1.5GHz"
+      memory_max: "4GB LPDDR4"
+      typical_boards: ["Orange Pi Zero 3", "Orange Pi Zero 2W", "Banana Pi BPI-M4 Berry", "Banana Pi BPI-M4 Zero"]
 
 # Docker configuration
 docker:
@@ -128,8 +169,9 @@ modules:
 # - Source side (cmake_options, cpu_flags): what the build recipe (orchestrator/runtime/build/recipe.py) plans for a
 #   cross build for the SoC from its CPU features; tests/test_board_profiles.py, tests/test_arm64_target.py and
 #   `llm-cli targets validate` plan that build and refuse a profile that differs. The features per core: GCC's core
-#   table aarch64-cores.def (cortex-a72: Armv8-A with CRC; cortex-a76: Armv8.2-A with F16, RCpc and DOTPROD; neither
-#   has int8 matrix multiply or SVE). config_module.sh load_board_defaults plans the same features without a probe.
+#   table aarch64-cores.def (cortex-a53 and cortex-a72: Armv8-A with CRC; cortex-a55 and cortex-a76: Armv8.2-A with
+#   F16, RCpc and DOTPROD; none has int8 matrix multiply or SVE). config_module.sh load_board_defaults plans the same
+#   features without a probe.
 # - Target side (recommended_quantization, memory_profile, optimization): the Builder, `llm-cli build start` and
 #   start_build offer these quantizations first and start from this level when none is given. With the dot product,
 #   llama.cpp's ARM kernels at the pin repack Q4_0, IQ4_NL and Q8_0 (4x4) and Q4_K, Q5_K and Q6_K (8x4) when the model
@@ -157,6 +199,55 @@ optimization_profiles:
     recommended_quantization: [Q4_K_M, Q4_0, IQ4_NL, Q5_K_M, Q6_K, Q8_0]
     note: "Every recommended type is repacked for the dot product kernels; Q5_K_M to Q8_0 for the boards with more memory. Threads: the four cores (llama.cpp's default)."
 
+  # 512 MB for the graphics core's share, the system and the model. The weights of a 1B model take at least about
+  # 530 MB at IQ4_XS (4.25 bits per weight), 460 MB at IQ3_M (3.66) and 340 MB at IQ2_M (2.7;
+  # tools/quantize/quantize.cpp at the pin): about 1B is at the board's limit even at 2 to 3 bits, models of a few
+  # hundred million parameters fit. The context is no number here: the board measurement (runtime/device/measure.py,
+  # a reserve of at least 128 MiB) gives what fits next to the chosen model and refuses a model that does not fit.
+  bcm2837:
+    arch: arm64
+    cpu: cortex-a53
+    cpu_features: [neon]   # Armv8-A: no dot product, no FP16 arithmetic
+    cmake_options: {GGML_NATIVE: "OFF", GGML_CPU_ARM_ARCH: "armv8-a"}
+    cpu_flags: "-march=armv8-a"
+    memory_profile: low_memory
+    optimization: size
+    recommended_quantization: [IQ4_XS, IQ3_M, IQ2_M, Q4_0]
+    note: "512 MB: smallest types first, nothing is repacked on the Cortex-A53. IQ3_M and IQ2_M for models near 1B. The board measurement sets the context and refuses a model that does not fit. Threads: the four cores (llama.cpp's default)."
+
+  sm1:
+    arch: arm64
+    cpu: cortex-a55
+    cpu_features: [neon, dotprod, fp16]
+    cmake_options: {GGML_NATIVE: "OFF", GGML_CPU_ARM_ARCH: "armv8.2-a+dotprod+fp16"}
+    cpu_flags: "-march=armv8.2-a+dotprod+fp16"
+    memory_profile: low_memory
+    optimization: size
+    recommended_quantization: [Q4_0, IQ4_NL, Q4_K_M]
+    note: "The Cortex-A55 has the dot product: Q4_0, IQ4_NL and Q4_K_M are repacked, as on the RK3566 with the same core. Threads: the four cores (llama.cpp's default)."
+
+  sun50i-h616:
+    arch: arm64
+    cpu: cortex-a53
+    cpu_features: [neon]   # Armv8-A: no dot product, no FP16 arithmetic
+    cmake_options: {GGML_NATIVE: "OFF", GGML_CPU_ARM_ARCH: "armv8-a"}
+    cpu_flags: "-march=armv8-a"
+    memory_profile: low_memory
+    optimization: size
+    recommended_quantization: [Q4_K_M, IQ4_XS, Q4_0]
+    note: "Nothing is repacked on the Cortex-A53, so quality per bit decides; IQ4_XS for the boards with 1 GB or less. Threads: the four cores (llama.cpp's default)."
+
+  sun50i-h618:
+    arch: arm64
+    cpu: cortex-a53
+    cpu_features: [neon]   # Armv8-A: no dot product, no FP16 arithmetic
+    cmake_options: {GGML_NATIVE: "OFF", GGML_CPU_ARM_ARCH: "armv8-a"}
+    cpu_flags: "-march=armv8-a"
+    memory_profile: low_memory
+    optimization: size
+    recommended_quantization: [Q4_K_M, IQ4_XS, Q4_0]
+    note: "Nothing is repacked on the Cortex-A53, so quality per bit decides; IQ4_XS for the boards with 1 GB. Threads: the four cores (llama.cpp's default)."
+
 # Framework requirements
 requirements:
   framework:
@@ -171,7 +262,7 @@ requirements:
   target_system:
     architecture: "aarch64"
     kernel_version: ">=5.10"
-    memory_mb: ">=1024"
+    memory_mb: ">=512"   # the Raspberry Pi Zero 2 W; what fits is measured on the board
 
 # Machine-readable capabilities (schema: orchestrator/schemas/targets.py). GUI, CLI, the build service, Ditto and
 # the MCP server offer and validate exactly what is listed here. Keep in sync with modules/config_module.sh (GGUF types
@@ -191,6 +282,26 @@ capabilities:
       cpu: "4x Cortex-A76"
       ram_max_gb: 16
       examples: ["Raspberry Pi 5", "Raspberry Pi 500", "Compute Module 5"]
+    bcm2837:
+      label: "Raspberry Pi Zero 2 W (BCM2837, 4x Cortex-A53)"
+      cpu: "4x Cortex-A53"
+      ram_max_gb: 1
+      examples: ["Raspberry Pi Zero 2 W", "Raspberry Pi 3 Model B", "Raspberry Pi 3 Model B+", "Compute Module 3"]
+    sm1:
+      label: "Amlogic S905X3 (SM1, 4x Cortex-A55)"
+      cpu: "4x Cortex-A55"
+      ram_max_gb: 4
+      examples: ["Banana Pi BPI-M5", "Banana Pi BPI-M2 Pro"]
+    sun50i-h616:
+      label: "Allwinner H616 (4x Cortex-A53)"
+      cpu: "4x Cortex-A53"
+      ram_max_gb: 4
+      examples: ["Orange Pi Zero 2", "Orange Pi Zero 3 (Orange Pi's kernel)", "Orange Pi Zero 2W (Orange Pi's kernel)"]
+    sun50i-h618:
+      label: "Allwinner H618 (4x Cortex-A53)"
+      cpu: "4x Cortex-A53"
+      ram_max_gb: 4
+      examples: ["Orange Pi Zero 3", "Orange Pi Zero 2W", "Banana Pi BPI-M4 Berry", "Banana Pi BPI-M4 Zero"]
   formats:
     gguf:
       label: "GGUF (llama.cpp, CPU)"
@@ -199,13 +310,16 @@ capabilities:
                       Q3_K_S, Q3_K_M, Q3_K_L, Q4_K_S, Q5_K_S, IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ2_M,
                       IQ3_XXS, IQ3_XS, IQ3_S, IQ3_M, TQ1_0, TQ2_0, MXFP4_MOE, Q1_0, Q2_0, F16, BF16, F32]
       default_quantization: Q4_K_M
+      board_default_quantization:
+        bcm2837: IQ4_XS   # 512 MB: the smallest 4-bit type
+        sm1: Q4_0         # repacked for the Cortex-A55's dot product, as on Rockchip's RK3566
       imatrix: true
       needs_imatrix: [IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ2_M, IQ3_XXS, IQ3_XS, Q2_K_S]
       dataset: optional
       dataset_kind: text
       aliases: {FP16: F16, FP32: F32, INT8: Q8_0, Q8: Q8_0, INT4: Q4_K_M, Q4: Q4_K_M, Q5: Q5_K_M,
                 Q3_K: Q3_K_M, Q4_K: Q4_K_M, Q5_K: Q5_K_M}   # config_module.sh normalize_gguf_type
-      notes: "Runs on the CPU of the board with llama.cpp; no vendor SDK. On the Raspberry Pi 5 Q4_0, IQ4_NL, Q8_0 and the K types from Q4_K to Q6_K are repacked for the dot product kernels."
+      notes: "Runs on the CPU of the board with llama.cpp; no vendor SDK. On the Raspberry Pi 5 and the Amlogic S905X3 Q4_0, IQ4_NL, Q8_0 and the K types from Q4_K to Q6_K are repacked for the dot product kernels."
 
 # Benchmark rows (schema: BenchmarkEntry): none shipped, since no estimate is shown as a measurement. A board test of
 # a build of this target (llama-bench on the board, device_tests.json) shows up as a measured row by itself.
