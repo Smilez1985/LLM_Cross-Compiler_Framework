@@ -393,8 +393,9 @@ def continue_build(engine: Any, item: KeptBuild, actor: str, state_dir: Optional
     from orchestrator.Core.builder import ValidationError
     if service is not None:
         try:   # a BuildServiceError (the queue is full, ...) is a ValueError
+            override = {"ignore_preflight": True} if ignore_preflight else {}   # the person's, for this build
             started = service.continue_interrupted(configuration(item), description=f"Continued: {item.label}",
-                                                   ignore_preflight=ignore_preflight)
+                                                   **override)
         except (RuntimeError, ValidationError, ValueError) as e:
             raise InterruptedBuildError(f"{item.label} could not be continued now: {e}", "failed",
                                         preflight=getattr(e, "preflight", None)) from None

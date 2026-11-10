@@ -338,6 +338,10 @@ class EvalBuildService(BuildService):
     def host_hardware(self):
         return None
 
+    def host_profile(self):
+        """This machine is never probed for an evaluation: a GPU build's pre-flight check says "not checked"."""
+        return None
+
     @staticmethod
     def disk_usage(path: str):
         """A canned disk with room (nothing is built here; the evaluation must not depend on this machine's disk)."""
@@ -356,8 +360,12 @@ class EvalBuildService(BuildService):
             primary="model-Q4_K_M.gguf", sha256="0" * 64)])
 
     def start_build(self, request: BuildRequestIn, *, local_paths: bool = False, owner: str = "",
-                    optimization: str = "balanced", disk_reservation: str = "") -> BuildHandle:
+                    optimization: str = "balanced", disk_reservation: str = "",
+                    preflight_accepted: Optional[List[str]] = None) -> BuildHandle:
         req = self.validate(request, local_paths=local_paths)
+        # the real pre-flight check, as start_build runs it (a stop the person did not accept starts nothing)
+        self._preflight_gate(req.target, req.format, req.board, req.probe, req.use_gpu, local_paths=local_paths,
+                             accepted=preflight_accepted)
         request_id = f"eval-{len(self.started) + 1}"
         self.started.append(req.model_dump())
         self._requests[request_id] = BuildStatusOut(

@@ -116,8 +116,7 @@ class PreflightStopped(BuildServiceError):
         super().__init__(f"{preflight.summary()} {reasons}".strip(), code="needs_person",
                          next=("Tell the person why; only they can start this build anyway (in the GUI or CLI, or by "
                                "answering the start question)." if for_ai else
-                               "Fix what is named, or build anyway: llm-cli build start --ignore-preflight, or answer "
-                               "Build anyway in the Builder."))
+                               "Fix what is named, or build anyway: only you decide that, for this one build."))
         self.preflight = preflight
         self.problems = preflight.lines()
 

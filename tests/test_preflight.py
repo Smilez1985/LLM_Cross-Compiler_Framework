@@ -219,7 +219,7 @@ class TestEveryBuildStartRunsIt:
         with pytest.raises(PreflightStopped) as exc:
             service.start_build(rknn(service.bad), local_paths=True)
         assert exc.value.code == "needs_person" and exc.value.preflight.stop_codes() == ["npu_driver"]
-        assert "--ignore-preflight" in exc.value.next and exc.value.problems[0].startswith("Pre-flight check:")
+        assert "build anyway" in exc.value.next and exc.value.problems[0].startswith("Pre-flight check:")
         assert service.framework.orchestrator.requests == []
 
     def test_the_person_builds_anyway_and_the_build_keeps_it_in_its_warnings(self, service):

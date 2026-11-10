@@ -134,6 +134,8 @@ def test_the_start_panel_never_reads_the_format_as_markup(mixed, tmp_path, monke
         return checked.model_copy(update={"format": "[bold]rkllm[/bold]"})
     monkeypatch.setattr(BuildService, "validate", validate)
     monkeypatch.setattr(BuildService, "earlier_builds", lambda self, request, **kw: [])
+    from orchestrator.Core.consistency_manager import Preflight
+    monkeypatch.setattr(BuildService, "preflight_for", lambda self, *a, **kw: Preflight())   # nothing to compare
     monkeypatch.setattr(BuildService, "start_build", lambda self, request, **kw: SimpleNamespace(request_id="r1"))
     monkeypatch.setattr(BuildService, "request_state", lambda self, request_id: None)
     monkeypatch.setattr("orchestrator.cli._pause", lambda seconds: (_ for _ in ()).throw(KeyboardInterrupt()))

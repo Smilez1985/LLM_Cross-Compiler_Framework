@@ -201,7 +201,7 @@ def _host_findings(result: Preflight, host: Any, image: GpuImage) -> None:
         return
     if host is None:
         result.unchecked.append("this computer's GPUs could not be probed, so the driver was not compared with the "
-                                "target's CUDA version; run 'llm-cli scan' to see what the probe finds.")
+                                "target's CUDA version; probe this computer again to see what the probe finds.")
         return
     nvidia = _nvidia_gpus(host)
     if not nvidia:
@@ -218,7 +218,7 @@ def _host_findings(result: Preflight, host: Any, image: GpuImage) -> None:
     if driver_cuda is None:
         result.unchecked.append("the NVIDIA driver's CUDA version is not in this computer's probe, so it was not "
                                 "compared with the image's CUDA "
-                                f"{image.cuda}; probe again with the driver loaded ('llm-cli scan').")
+                                f"{image.cuda}; probe this computer again with the driver loaded.")
         return
     result.checked.append(f"the NVIDIA driver of this computer (CUDA {driver_cuda}) with the image's CUDA {image.cuda}")
     need, have = _major_minor(image.cuda), _major_minor(driver_cuda)
@@ -249,7 +249,7 @@ def _board_findings(result: Preflight, fmt: str, sdk: Any, board: Any, board_nam
         if what:
             result.unchecked.append(
                 f"no hardware probe of {board_name} is stored, so its NPU driver and runtime were not compared with "
-                f"what {label} needs; probe the board (Scan in the Builder, or 'llm-cli scan --device').")
+                f"what {label} needs; probe the board and store its probe.")
         return
     driver_key = getattr(sdk, "driver_key", None)
     if driver_key:

@@ -220,6 +220,9 @@ class TestGlobalQueue:
             def _validated(self, request, local_paths):
                 return request, None
 
+            def _preflight_gate(self, *args, **kwargs):   # no target registry in this stand-in: nothing compared
+                return []
+
         async def submit(_request):
             raise BuildQueueFull("The build queue is full (20 unfinished build requests); the request was not queued.")
 

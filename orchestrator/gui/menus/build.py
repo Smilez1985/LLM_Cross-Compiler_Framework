@@ -53,6 +53,14 @@ CLI_PATHS: Dict[str, str] = {
     # the question about the module's CMake options outside the allowlist opens when Start Build is pressed
     "build start --module-flags": "btn_builder_start",
     "build start --remember-flags": "btn_builder_start",
+    # the pre-flight check: the Builder's own button, and its question (Build anyway) when Start Build is pressed
+    "build start --ignore-preflight": "btn_builder_start",
+    "build preflight": "btn_builder_preflight",
+    "build preflight --target": "combo_builder_target",
+    "build preflight --format": "combo_builder_format",
+    "build preflight --board": "combo_builder_board",
+    "build preflight --probe": "btn_deploy_scan",
+    "build preflight --gpu": "chk_builder_gpu",
     "build save": "btn_deploy_save",                          # Deployment tab > Save...
     "build save --to": "btn_deploy_save",                     # its folder dialog chooses the folder
     # Build > Build Dependencies...: the dependency cache of module CMake options (runtime/build/deps.py)
@@ -65,6 +73,7 @@ CLI_PATHS: Dict[str, str] = {
     "build interrupted list": "act_build_history",
     "build interrupted continue": "btn_history_interrupted",
     "build interrupted delete": "btn_history_interrupted",
+    "build interrupted continue --ignore-preflight": "btn_history_interrupted",   # its Continue anyway question
     # the Builder's progress panel follows a build until its end record and says how it ended
     "build status --wait": "panel_builder_progress",
     "config show": "act_file_settings",
@@ -96,6 +105,7 @@ WINDOW_OBJECTS: Dict[str, str] = {"btn_build_deps_fetch": "act_build_deps", "btn
 MACHINE_ONLY: Dict[str, str] = {
     "targets list --format": "json or yaml output for scripts; Build > Targets... shows the same rows as a table",
     "config local-network --yes": "skips the question with the explanation, for scripts; the window always asks",
+    "build preflight --json": "machine-readable output for scripts; the Builder's Pre-flight check shows the same lines",
 }
 
 
