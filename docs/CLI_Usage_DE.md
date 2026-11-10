@@ -23,7 +23,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [update](#update): das Framework aktualisieren (Git-Vorspulen, dann erneut der Installer)
 - [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
-- [build](#build): `start`, `save`, `deps`, `status`
+- [build](#build): `start`, `preflight`, `save`, `deps`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`, `devices`, `ssh-config`
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
@@ -137,6 +137,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
 | `targets boards` | Jedes Board eines Targets mit seinem Optimierungsprofil und seinen Benchmark-Zeilen (gemessen, veröffentlicht oder ungemessen) |
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
+| `build preflight` | Die Prüfung vor dem Build, ohne ihn zu starten: die Hardware-Probes gegen das, was der Build und das SDK des Targets brauchen |
 | `build save` | Einen Build, der im Build-Ordner des Frameworks wartet, im Ausgabeordner oder einem anderen Ordner speichern |
 | `build image plan/sources/export/import` | Das Build-Container-Image eines Targets: Kann ein Offline-Build es bauen, die Build-Quellen in deinem Netz, auf einen anderen Offline-Rechner als geprüfte Datei bringen |
 | `build deps` | Die Abhängigkeiten von CMake-Optionen der Module, die vor einem Build geholt werden, listen, holen und löschen |
@@ -584,6 +585,7 @@ Target ohne Capabilities-Block wird ungeprüft gebaut.
 | `--no-dataset` | Kein eigener Datensatz, auch wenn `default_calibration_dataset` einen nennt: Die Importance Matrix nutzt den mitgelieferten Kalibrierungstext. |
 | `--module-flags [allow\|standard]` | Deine Entscheidung zu den CMake-Optionen des Moduls, die gültig sind, aber außerhalb der erlaubten Liste liegen (`-G`, `--trace`, ...; [Modul-Entwicklerhandbuch, Abschnitt 3.5](Module_Developer_Guide_DE.md#35-cmake-flags-eines-moduls)): erlauben oder mit den Standard-Flags weitermachen (die Optionen bleiben draußen). Im Terminal ohne die Option wirst du gefragt, nach dem, was jede Option tut, und einer Empfehlung für dieses Modell und diese Quantisierung; ohne Terminal und ohne die Option startet nichts (Exit 2). Eine für diese Modulversion und diese Flags gemerkte Entscheidung gilt ohne Frage. |
 | `--remember-flags` | Diese Entscheidung für diese Modulversion und diese Flags merken (ein von einer KI gestarteter Build des Moduls nutzt sie; eine neue Version oder andere Flags fragen wieder). |
+| `--ignore-preflight` | Auch dann bauen, wenn die [Prüfung vor dem Build](#build-preflight) sagt, dass dieser Build nicht gelingen kann. Deine Entscheidung für diesen einen Build, nie gemerkt und in den Warnungen des Builds vermerkt. Im Terminal ohne die Option wirst du gefragt „Build anyway?“ (Nein ist die Vorgabe); ohne Terminal und ohne die Option startet nichts (Exit 2). |
 
 Verhalten:
 
@@ -637,6 +639,13 @@ Verhalten:
   MCP-Clients können gar keinen Pfad nennen: Sie verwenden `<Label>:<relativer Pfad>` in den
   [Ordnern, die die KI nutzen darf](#tools-folders).
 - Der erste Build eines Targets baut zuerst sein Docker-Image und dauert deutlich länger.
+- Direkt nach den Prüfungen der Anfrage läuft die [Prüfung vor dem Build](#build-preflight) und gibt ihr Urteil aus:
+  eine Zeile, wenn sie bestanden ist, sonst jeden Befund, was sie verglichen hat und was sie nicht vergleichen
+  konnte. Ein Build, der so nicht gelingen kann (bei einem GPU-Build ist der NVIDIA-Treiber dieses Computers zu alt
+  für das CUDA des GPU-Images des Targets, der NPU-Treiber des Boards liegt unter dem, was das Format braucht),
+  startet nichts, wenn du ihn nicht übergehst; Warnungen (eine neuere CUDA-Nebenversion, keine NVIDIA-GPU, eine
+  Runtime auf dem Board, die älter als das Toolkit ist) werden ausgegeben und in den Warnungen des Builds behalten,
+  und der Build startet.
 
 In der GUI: der Tab **Builder**: Modell, Target (**Targets…** zeigt jedes Target), Format (genau die Formate, die das
 Target angibt, die Liste, die `--format` dafür nimmt; ein Target ohne Fähigkeiten bietet jedes Format, mit dem Hinweis,
@@ -663,6 +672,46 @@ llm-cli build start -m ./detector.onnx -t Rockchip -f rknn -b rk3588 -q i8 --dat
 # Ergebnisse in einen Ordner deiner Wahl
 llm-cli build start -m ./my-model -t Rockchip -o ./builds -F
 ```
+
+### build preflight
+
+```
+llm-cli build preflight -t TARGET [-f FORMAT] [-b BOARD] [--probe ID] [--gpu] [--json]
+```
+
+Die Prüfung vor einem Build, ohne etwas zu starten; `build start`, der Builder, der Build eines Rezepts, ein
+fortgesetzter Build und `start_build` der KI-Clients führen dieselbe Prüfung aus. Sie vergleicht zwei Probes, jede für
+das, was sie sagen kann:
+
+- Bei einem GPU-Build (`--gpu`) den NVIDIA-Treiber dieses Computers mit der CUDA-Version des GPU-Images des Targets
+  (`Dockerfile.gpu`: sein `CUDA_VERSION`, oder ein `CUDA_VERSION` in den `docker.build_args` der target.yml, oder ein
+  Basis-Image `nvidia/cuda`). Der Treiber meldet selbst, welches CUDA er kann (`nvidia-smi`, `NVIDIA_DRIVER_CUDA_MAX`
+  der Probe). Eine neuere CUDA-Hauptversion, als der Treiber kann, hält den Build an; eine neuere Nebenversion
+  derselben Hauptversion, keine NVIDIA-GPU mit funktionierendem Treiber und ein Target ohne GPU-Image sind Warnungen.
+- Bei einem NPU-Format den NPU-Treiber und die Runtime des Boards (seine gespeicherte Probe: `--probe`, sonst die
+  neueste Probe eines Boards dieses SoC) mit dem, was das Toolkit des Formats braucht (der `sdk:`-Eintrag des Formats
+  in den Fähigkeiten des Targets). Rockchip RKNN: ein Treiber unter 0.9.2 hält den Build an, unter 0.9.8 ist er eine
+  Warnung, ein `librknnrt`, der älter als RKNN-Toolkit2 2.3.2 ist, ist eine Warnung; RKLLM: ein `librkllmrt`, der
+  älter als RKLLM-Toolkit 1.3.1 ist, ist eine Warnung.
+
+Ein Wert, den eine Probe nicht hat (die Treiberversion braucht root auf dem Board: führe die Probe dort mit sudo aus;
+keine Probe des Boards; dieser Computer nicht geprüft), steht unter „Not checked“, nie geraten. Exit-Code 0, wenn sie
+bestanden ist oder nur Warnungen fand, 1, wenn der Build anhalten würde, 2 bei einer Anfrage, die der Build-Dienst
+ablehnt (ein unbekanntes Target, ein Format, das das Target nicht baut, die Probe eines anderen Boards). `--json` gibt
+das Urteil, die Befunde, was verglichen wurde und was nicht aus.
+
+```bash
+llm-cli build preflight -t Rockchip -f rknn -b rk3588
+llm-cli build preflight -t Rockchip -f gguf --gpu --json
+```
+
+Nur du kannst trotzdem bauen: `build start --ignore-preflight` oder dein Ja im Terminal. Ein KI-Client sieht einen Halt
+als Sicherheitswarnung seiner Start-Frage, die nur du beantwortest; keine dauerhafte Freigabe und keine Delegation
+deckt ihn.
+
+In der GUI: der Tab **Builder**, **Prüfung vor dem Build** neben dem Start-Knopf zeigt dieselben Zeilen und schreibt sie
+ins Builder-Protokoll; der Start-Knopf fragt vor einem Build, den die Prüfung anhält (**Trotzdem bauen**, Abbrechen ist
+die Vorgabe).
 
 ### build save
 
@@ -716,7 +765,7 @@ sich nichts noch einmal nutzen lässt, wird sofort gelöscht. Direkt nach dem En
 | Befehl | Was er tut |
 |--------|------------|
 | `list` | Jeden aufbewahrten Build: sein Target, seine fertigen Stufen, seine Größe, seinen Ordner und ob eine KI danach gefragt hat. |
-| `continue BUILD_ID` | Startet denselben Build erneut auf seinem aufbewahrten Arbeitsordner, als neuen Build-Auftrag, und verfolgt ihn wie `build start --follow`: eine Statuszeile mit seiner Stufe und dem Prozentwert, sobald sie sich ändert, Strg+C bricht ihn ab (sein Container wird gestoppt, Exit-Code 130), und am Ende, wie er geendet hat, mit dem Exit-Code dieses Endes (0 fertig, 1 gescheitert, 2 abgebrochen). Sein Auftrag erscheint in `build status` und in `get_build_status` wie jeder gestartete Build. |
+| `continue BUILD_ID` | Führt die [Prüfung vor dem Build](#build-preflight) erneut aus (ein Treiber kann sich geändert haben; `--ignore-preflight` oder dein Ja im Terminal setzt trotzdem fort), dann startet er denselben Build erneut auf seinem aufbewahrten Arbeitsordner, als neuen Build-Auftrag, und verfolgt ihn wie `build start --follow`: eine Statuszeile mit seiner Stufe und dem Prozentwert, sobald sie sich ändert, Strg+C bricht ihn ab (sein Container wird gestoppt, Exit-Code 130), und am Ende, wie er geendet hat, mit dem Exit-Code dieses Endes (0 fertig, 1 gescheitert, 2 abgebrochen). Sein Auftrag erscheint in `build status` und in `get_build_status` wie jeder gestartete Build. |
 | `delete BUILD_ID` | Zeigt den einen Eintrag (voller Pfad, Größe, was er ist) und löscht ihn nach deinem Ja im Terminal. Wenn ein Stufenmodul Dateien hinterlassen hat, die nur das Stufen-Konto ändern konnte, läuft vorher ein kurzer Aufräum-Container als dieses Konto (kein Netzwerk, keine Capability). Das Ergebnis sagt, was geblieben ist, mit den Pfaden. |
 
 Nur du entscheidest. Ein KI-Aufrufer (MCP, Ditto) liest den aufbewahrten Build in `get_build_status` mit seiner

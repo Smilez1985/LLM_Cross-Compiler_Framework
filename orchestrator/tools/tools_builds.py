@@ -441,9 +441,10 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
         ToolSpec("check_build_request", "Check a build request",
                  "Dry run of start_build: the normalized request, the commit and download size, weights type, "
                  "licence, gating and token access, the disk space per folder with the conversion margin, a "
-                 "hardware estimate for this computer and the board, mounts, target trust, image build, what "
-                 "your permissions would do, and finished builds with 100 % the same options (use one or build "
-                 "again). Never starts anything. Problems come with a reason code and a next step.",
+                 "hardware estimate for this computer and the board, the pre-flight check (the probes against "
+                 "what the build needs), mounts, target trust, image build, what your permissions would do, and "
+                 "finished builds with 100 % the same options (use one or build again). Never starts anything. "
+                 "Problems come with a reason code and a next step.",
                  ToolTier.READ, CheckBuildIn, CheckBuildOut, check_build_request, idempotent=True, open_world=True,
                  takes_context=True, arg_aliases=aliases, fields=build_fields, examples=(example,),
                  notes=lambda o: earlier_note(o) + [PREFLIGHT_NOTE], summary=check_summary),

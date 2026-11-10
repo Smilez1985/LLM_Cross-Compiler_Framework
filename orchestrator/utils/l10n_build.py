@@ -314,7 +314,7 @@ TEXTS = {
                              "dieses Computers bei einem GPU-Build, NPU-Treiber und Runtime des Boards bei einem "
                              "NPU-Format), ohne etwas zu starten (build preflight der CLI)",
         "bld.preflight.title": "Prüfung vor dem Build",
-        "bld.preflight.question": "{lines}\n\nDieser Build kann so nicht gelingen. Nur Sie können ihn trotzdem "
+        "bld.preflight.question": "{lines}\n\nDieser Build kann so nicht gelingen. Nur du kannst ihn trotzdem "
                                   "starten, für diesen einen Build; das wird in den Warnungen des Builds vermerkt.",
         "bld.preflight.anyway": "Trotzdem bauen",
         "bld.preflight.continue_anyway": "Trotzdem fortsetzen",

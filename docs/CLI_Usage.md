@@ -23,7 +23,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [update](#update): update the framework (git fast-forward, then the installer again)
 - [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
-- [build](#build): `start`, `save`, `deps`, `status`
+- [build](#build): `start`, `preflight`, `save`, `deps`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`, `devices`, `ssh-config`
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
@@ -136,6 +136,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
 | `targets boards` | Each board of a target with its optimization profile and its benchmark rows (measured, published or unmeasured) |
 | `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
+| `build preflight` | The pre-flight check of a build without starting it: the hardware probes against what the build and the target's SDK need |
 | `build save` | Save a build that waits in the framework's build folder to the output folder or another folder |
 | `build image plan/sources/export/import` | The build container image of a target: can an offline build make it, the build sources in your network, move it to another offline computer as a checked file |
 | `build deps` | List, fetch and delete the dependencies of module CMake options that are fetched before a build |
@@ -569,6 +570,7 @@ target's defaults. A target without a capabilities block is built unchecked.
 | `--no-dataset` | No dataset of your own, also when `default_calibration_dataset` names one: the importance matrix uses the shipped calibration text. |
 | `--module-flags [allow\|standard]` | Your decision on the module's CMake options that are valid but outside the allowed list (`-G`, `--trace`, ...; [Module Developer Guide, section 3.5](Module_Developer_Guide.md#35-cmake-flags-of-a-module)): allow them, or go on with the standard flags (they are left out). At a terminal without it you are asked, after what each option does and a recommendation for this model and quantization; without a terminal and without it nothing is started (exit 2). A decision remembered for this module version and flag set is used without a question. |
 | `--remember-flags` | Remember this decision for this module version and flag set (an AI-started build of the module uses it; a new version or other flags ask again). |
+| `--ignore-preflight` | Build even when the [pre-flight check](#build-preflight) says this build cannot succeed. Your decision for this one build, never remembered, and noted in the build's warnings. At a terminal without it you are asked "Build anyway?" (No is the default); without a terminal and without it nothing is started (exit 2). |
 
 Behaviour:
 
@@ -616,6 +618,12 @@ Behaviour:
   files next to it (for example ONNX external data) is given as its folder. Ditto and MCP clients cannot name a path
   at all: they use `<label>:<relative path>` inside the [folders the AI may use](#tools-folders).
 - The first build of a target builds its Docker image first and takes much longer.
+- Right after the request's checks the [pre-flight check](#build-preflight) runs and prints its verdict: one line
+  when it passed, else every finding, what it compared and what it could not compare. A build that cannot succeed
+  as asked (this computer's NVIDIA driver too old for the CUDA of the target's GPU image in a GPU build, the
+  board's NPU driver below what the format needs) starts nothing unless you override it; warnings (a newer CUDA
+  minor version, no NVIDIA GPU, a board runtime older than the toolkit) are printed and kept in the build's
+  warnings, and the build starts.
 
 In the GUI: the **Builder** tab: model, target (**Targets...** shows every target), format (exactly the formats the
 target declares, the list `--format` takes for it; a target without capabilities offers every format, with the note
@@ -642,6 +650,43 @@ llm-cli build start -m ./detector.onnx -t Rockchip -f rknn -b rk3588 -q i8 --dat
 # Results into a folder of your choice
 llm-cli build start -m ./my-model -t Rockchip -o ./builds -F
 ```
+
+### build preflight
+
+```
+llm-cli build preflight -t TARGET [-f FORMAT] [-b BOARD] [--probe ID] [--gpu] [--json]
+```
+
+The pre-flight check of a build, without starting anything; `build start`, the Builder, the build of a recipe, a
+continued build and the AI clients' `start_build` run the same check. It compares two probes, each for what it can
+tell:
+
+- For a GPU build (`--gpu`), this computer's NVIDIA driver with the CUDA version of the target's GPU image
+  (`Dockerfile.gpu`: its `CUDA_VERSION`, or a `CUDA_VERSION` in the target.yml `docker.build_args`, or an
+  `nvidia/cuda` base image). The driver reports which CUDA it supports (`nvidia-smi`, the probe's
+  `NVIDIA_DRIVER_CUDA_MAX`). A newer CUDA major version than the driver supports stops the build; a newer minor
+  version of the same major, no NVIDIA GPU with a working driver, and a target without a GPU image are warnings.
+- For an NPU format, the board's NPU driver and runtime (its stored probe: `--probe`, else the newest probe of a
+  board of that SoC) with what the format's toolkit needs (the `sdk:` entry of the format in the target's
+  capabilities). Rockchip RKNN: a driver below 0.9.2 stops the build, below 0.9.8 is a warning, a `librknnrt` older
+  than RKNN-Toolkit2 2.3.2 is a warning; RKLLM: a `librkllmrt` older than RKLLM-Toolkit 1.3.1 is a warning.
+
+A value a probe does not have (the driver version needs root on the board: run the probe there with sudo; no probe of
+the board; this computer not probed) is listed under "Not checked", never guessed. Exit code 0 when it passed or found
+warnings only, 1 when the build would stop, 2 for a request the build service refuses (an unknown target, a format
+the target does not build, a probe of another board). `--json` prints the verdict, the findings, what was compared
+and what was not.
+
+```bash
+llm-cli build preflight -t Rockchip -f rknn -b rk3588
+llm-cli build preflight -t Rockchip -f gguf --gpu --json
+```
+
+Only you can build anyway: `build start --ignore-preflight` or your yes at the terminal. An AI client sees a stop as a
+security warning of its start question, which only you answer; no standing approval or delegation covers it.
+
+In the GUI: the **Builder** tab, **Pre-flight check** beside the start button shows the same lines and writes them
+into the Builder log; the start button asks before a build the check stops (**Build anyway**, Cancel is the default).
 
 ### build save
 
@@ -692,7 +737,7 @@ not run a finished stage again. A build with nothing to use again is deleted at 
 | Command | What it does |
 |---------|--------------|
 | `list` | Every kept build: its target, its finished stages, its size, its folder, and whether an AI asked about it. |
-| `continue BUILD_ID` | Starts the same build again on its kept work folder, as a new build request, and follows it like `build start --follow`: a status line with its stage and percent whenever it changes, Ctrl+C cancels it (its container is stopped, exit code 130), and at the end how it ended, with that end's exit code (0 done, 1 failed, 2 cancelled). Its request shows in `build status` and in `get_build_status` like any started build. |
+| `continue BUILD_ID` | Runs the [pre-flight check](#build-preflight) again (a driver can have changed; `--ignore-preflight` or your yes at the terminal continues anyway), then starts the same build again on its kept work folder, as a new build request, and follows it like `build start --follow`: a status line with its stage and percent whenever it changes, Ctrl+C cancels it (its container is stopped, exit code 130), and at the end how it ended, with that end's exit code (0 done, 1 failed, 2 cancelled). Its request shows in `build status` and in `get_build_status` like any started build. |
 | `delete BUILD_ID` | Shows the one item (full path, size, what it is) and deletes it after your yes at the terminal. When a stage module left files only the stage account could change, a short clean-up container runs first as that account (no network, no capability). The result says what stayed, with its paths. |
 
 Only you decide. An AI caller (MCP, Ditto) reads the kept build in `get_build_status` with its label and its finished
