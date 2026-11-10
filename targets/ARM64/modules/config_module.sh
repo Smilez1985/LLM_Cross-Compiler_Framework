@@ -3,8 +3,9 @@
 # Part of LLM Cross-Compiler Framework
 #
 # Image:  targets/ARM64/Dockerfile: Debian bookworm for the build host's architecture.
-# Target: 64-bit ARM boards without a vendor SDK, aarch64 Linux, CPU only (GGUF): bcm2711 (Raspberry Pi 4, Pi 400,
-#         Compute Module 4: Cortex-A72) and bcm2712 (Raspberry Pi 5, Pi 500, Compute Module 5: Cortex-A76).
+# Target: 64-bit ARM boards without a vendor SDK, aarch64 Linux, CPU only (GGUF): the boards of target.yml, today
+#         bcm2711 (Raspberry Pi 4, Pi 400, Compute Module 4: Cortex-A72) and bcm2712 (Raspberry Pi 5, Pi 500, Compute
+#         Module 5: Cortex-A76); each has a row of BOARD_DEFAULTS below.
 # Stage:  reads the request from the environment, normalizes it (lower-case format and board, the GGUF type names
 #         and their aliases) and refuses what this target cannot build before anything slow runs. Then it writes the
 #         build plan, build_config.sh in the stage folder, which the convert and target stages read.
@@ -12,8 +13,8 @@
 #         the board's hardware profile when there is one (HARDWARE_CONFIG_FILE, or
 #         $BUILD_CACHE_DIR/target_hardware_config.txt: the file scripts/hardware_probe.sh writes on the board; the
 #         BuildEngine hands the board's stored probe to every build, read-only), else from the board defaults of its
-#         SoC (load_board_defaults: the CPU features every BCM2711 or BCM2712 has). The CMake toolchain and the
-#         compiler flags are the build recipe's plan of those features (plan_arm_cpu).
+#         SoC (load_board_defaults: the CPU features every chip of the board has, BOARD_DEFAULTS). The CMake
+#         toolchain and the compiler flags are the build recipe's plan of those features (plan_arm_cpu).
 #         The toolchain is the one this image has: the compilers are looked up where the shell finds them (the
 #         aarch64 cross compilers for a board, the image's own for an x86_64 profile), and a profile of a system this
 #         image has no compiler for (a 32-bit armv7 system) is refused with the reason.
@@ -216,7 +217,7 @@ check_profile_system() {
     case "$arch" in
         aarch64|x86_64) ;;
         armv7*|armv6*|armv8l|armhf|armel|arm)  # armv8l: `uname -m` of a 32-bit system on a 64-bit CPU (1.x probe)
-            die "$refused The board runs a 32-bit system: the Raspberry Pi 4 and 5 have 64-bit CPUs (Cortex-A72, A76), and this image has only the aarch64 cross compilers. Install the board's 64-bit (arm64) system, such as the 64-bit Raspberry Pi OS, probe the board again (scripts/hardware_probe.sh) and use the new file." ;;
+            die "$refused The board runs a 32-bit system: the boards of this target have 64-bit ARM CPUs, and this image has only the aarch64 cross compilers. Install the board's 64-bit (arm64) system, such as the 64-bit Raspberry Pi OS on a Raspberry Pi, probe the board again (scripts/hardware_probe.sh) and use the new file." ;;
         riscv64|loongarch64|ppc64le|s390x)
             # Known systems the build recipe has no plan for yet: the refusal names the CPU features the probe found,
             # so none of them is lost silently (orchestrator/runtime/build/ggml_cpu_options.py names each option).
@@ -226,32 +227,43 @@ check_profile_system() {
 }
 
 # Without a hardware profile, the board is planned from the board defaults of its SoC: the CPU features every chip of
-# it has, the facts of target.yml's optimization profile for the board (tests/test_target_stage.py and
-# tests/test_arm64_target.py check that the plan is the build recipe's plan of that profile). Sources: the Raspberry
-# Pi documentation (BCM2711: 4x Cortex-A72; BCM2712: 4x Cortex-A76) and GCC's core table aarch64-cores.def
-# (cortex-a72: Armv8-A with CRC; cortex-a76: Armv8.2-A with FP16, RCpc and the dot product). A board this target does
-# not know (a run by hand) gets the plain baseline every ARMv8-A core runs: generic ARMv8-A with NEON. The package's
-# manifest and model card name the defaults.
+# it has. They are data, one row per board of target.yml (tests/test_arm64_target.py checks every row against the
+# board's optimization profile, cpu and cpu_features, and every board of the capabilities against a row): the board
+# id, the cores as the probe names them (CPU_MODEL), the number of cores, and the ARM features the build recipe plans
+# (dotprod, fp16, i8mm, sve; NEON is every ARMv8-A core's, "-" for none). A new board of this target, such as a
+# Cortex-A53 board with little memory, is a new row here and a new profile in target.yml, nothing else.
+# Sources of the rows: the Raspberry Pi documentation (BCM2711: 4x Cortex-A72; BCM2712: 4x Cortex-A76) and GCC's core
+# table aarch64-cores.def (cortex-a72: Armv8-A with CRC; cortex-a76: Armv8.2-A with FP16, RCpc and the dot product).
+BOARD_DEFAULTS=(
+    "bcm2711 Cortex-A72 4 -"
+    "bcm2712 Cortex-A76 4 dotprod,fp16"
+)
+
+# A board without a row (a run by hand) gets the plain baseline every ARMv8-A core runs: generic ARMv8-A with NEON.
+# The package's manifest and model card name the defaults.
 load_board_defaults() {
+    local row board cpu cores features feature
     HW_CONFIG=([ARCHITECTURE_FULL]=aarch64 [CPU_MODEL_NAME]="" [SUPPORTS_NEON]=ON [SUPPORTS_DOTPROD]=OFF
                [SUPPORTS_FP16_ARITH]=OFF [SUPPORTS_SVE]=OFF [SUPPORTS_I8MM]=OFF [SUPPORTS_SVE2]=OFF [SUPPORTS_SME]=OFF
                [SUPPORTS_BF16_ARM]=OFF)
-    case "$BOARD" in
-        bcm2711)
-            HW_CONFIG[CPU_MODEL_NAME]="Cortex-A72"
-            HW_CONFIG[CPU_CORES]=4 ;;
-        bcm2712)
-            HW_CONFIG[CPU_MODEL_NAME]="Cortex-A76"
-            HW_CONFIG[CPU_CORES]=4
-            HW_CONFIG[SUPPORTS_DOTPROD]=ON
-            HW_CONFIG[SUPPORTS_FP16_ARITH]=ON ;;
-        *)
-            PROFILE_SOURCE="defaults"
-            log_info "No hardware profile and no board defaults for '$BOARD': the plain defaults of this target (aarch64, generic ARMv8-A, NEON)"
-            return 0 ;;
-    esac
     PROFILE_SOURCE="defaults"
-    log_info "No hardware profile: the board defaults of $BOARD (${HW_CONFIG[CPU_MODEL_NAME]}, the CPU features every $BOARD has)"
+    for row in "${BOARD_DEFAULTS[@]}"; do
+        read -r board cpu cores features <<< "$row"
+        [ "$board" = "$BOARD" ] || continue
+        HW_CONFIG[CPU_MODEL_NAME]="$cpu"
+        HW_CONFIG[CPU_CORES]="$cores"
+        for feature in ${features//,/ }; do
+            case "$feature" in
+                dotprod) HW_CONFIG[SUPPORTS_DOTPROD]=ON ;;
+                fp16) HW_CONFIG[SUPPORTS_FP16_ARITH]=ON ;;
+                i8mm) HW_CONFIG[SUPPORTS_I8MM]=ON ;;
+                sve) HW_CONFIG[SUPPORTS_SVE]=ON ;;
+            esac
+        done
+        log_info "No hardware profile: the board defaults of $BOARD ($cpu, the CPU features every $BOARD has)"
+        return 0
+    done
+    log_info "No hardware profile and no board defaults for '$BOARD': the plain defaults of this target (aarch64, generic ARMv8-A, NEON)"
 }
 
 # The stage functions shared with the other targets call it load_plain_defaults (plan_board defaults).

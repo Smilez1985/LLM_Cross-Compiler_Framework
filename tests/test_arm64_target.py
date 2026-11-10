@@ -77,6 +77,24 @@ def test_the_gguf_types_are_the_config_stage_s():
     assert set(rockchip["capabilities"]["formats"]["gguf"]["quantizations"]) == listed
 
 
+def test_the_config_stage_s_board_defaults_are_the_board_profiles():
+    """BOARD_DEFAULTS of config_module.sh (the plan without a probe) is data: one row per board, the same cores and
+    features as the board's optimization profile, so a new board is a row and a profile."""
+    import re
+    text = (ARM64 / "modules" / "config_module.sh").read_text(encoding="utf-8")
+    rows = re.search(r"^BOARD_DEFAULTS=\(\n(.*?)\n\)", text, re.S | re.M).group(1)
+    table = {}
+    for line in rows.splitlines():
+        board, cpu, cores, features = line.strip().strip('"').split()
+        table[board] = (cpu.lower(), int(cores), [] if features == "-" else features.split(","))
+    profiles = bp.board_data(meta()).optimization_profiles
+    assert set(table) == set(profiles) == set(caps().boards)
+    for board, (cpu, cores, features) in table.items():
+        prof = profiles[board]
+        assert (cpu, ["neon", *features]) == (prof.cpu, prof.cpu_features), board
+        assert f"{cores}x" in caps().boards[board].cpu, board
+
+
 def test_every_board_profile_passes_the_profile_rules_and_is_the_recipe_s_plan():
     data = bp.board_data(meta())
     assert set(data.optimization_profiles) == set(caps().boards)
@@ -183,7 +201,7 @@ def test_a_32_bit_system_on_the_board_is_refused_with_the_way_to_the_64_bit_one(
     result = arm64_build(image, TARGET_BOARD="bcm2711", HARDWARE_CONFIG_FILE=profile)
 
     assert result.returncode == 1
-    assert "the Raspberry Pi 4 and 5 have 64-bit CPUs" in result.stderr and "64-bit Raspberry Pi OS" in result.stderr
+    assert "the boards of this target have 64-bit ARM CPUs" in result.stderr and "64-bit Raspberry Pi OS" in result.stderr
     assert ("2/4", "config", "failed") in stage_lines(result)
 
 

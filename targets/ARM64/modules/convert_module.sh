@@ -4,8 +4,8 @@
 #
 # Image:  targets/ARM64/Dockerfile: Debian bookworm for the build host's architecture; the converter runs there, in
 #         the venv of the image (llama.cpp: /opt/venv).
-# Target: 64-bit ARM boards without a vendor SDK, aarch64 Linux, CPU only: bcm2711 (Raspberry Pi 4), bcm2712
-#         (Raspberry Pi 5).
+# Target: 64-bit ARM boards without a vendor SDK, aarch64 Linux, CPU only (GGUF): the boards of target.yml, today
+#         bcm2711 (Raspberry Pi 4) and bcm2712 (Raspberry Pi 5).
 # Stage:  converts the model to GGUF with llama.cpp's convert_hf_to_gguf.py. The types it writes itself (F16, BF16,
 #         F32, Q8_0) go straight into the output folder; for every other type it writes an F16 intermediate into the
 #         work folder and leaves the quantization to the target stage (after the rotate hook, when the target has

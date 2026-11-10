@@ -1,4 +1,5 @@
-# Dockerfile of the generic ARM64 CPU target (GGUF): Raspberry Pi 4 (BCM2711) and Raspberry Pi 5 (BCM2712)
+# Dockerfile of the generic ARM64 CPU target (GGUF): 64-bit ARM boards without a vendor SDK (target.yml; today the
+# Raspberry Pi 4, BCM2711, and the Raspberry Pi 5, BCM2712)
 # Build context: staged by orchestrator/utils/build_context.py (modules/, scripts/, docker/entrypoint.sh).
 #
 # One toolchain, no vendor SDK: /opt/venv holds llama.cpp's GGUF conversion (convert_hf_to_gguf.py, torch CPU), the

@@ -4,8 +4,8 @@
 #
 # Image:  targets/ARM64/Dockerfile: Debian bookworm for the build host's architecture; llama-quantize is the image's
 #         own (build/bin of the pinned llama.cpp, built for the build host).
-# Target: 64-bit ARM boards without a vendor SDK, aarch64 Linux, CPU only: bcm2711 (Raspberry Pi 4), bcm2712
-#         (Raspberry Pi 5).
+# Target: 64-bit ARM boards without a vendor SDK, aarch64 Linux, CPU only (GGUF): the boards of target.yml, today
+#         bcm2711 (Raspberry Pi 4) and bcm2712 (Raspberry Pi 5).
 # Stage:  quantizes what the convert stage left for it (quantize_jobs.sh: the F16 intermediate to the requested GGUF
 #         type, with the importance matrix when the build has one) and removes the intermediate (a GGUF input, the
 #         --input FILE.gguf of target_module.sh of version 1.x, and a file named with --output stay); writes
@@ -20,8 +20,8 @@
 #         image has it), the programs must be ELF programs for the board, and every file must match SHA256SUMS.
 #         It is made for every GGUF build of this target: the config stage plans the board from its hardware
 #         profile when the build has one, else from the board defaults of its SoC (config_module.sh
-#         load_board_defaults), which the manifest names; a Raspberry Pi needs no vendor runtime, so the package is the
-#         whole result. By hand (target_module.sh started on its own) it is made the same way.
+#         load_board_defaults), which the manifest names; a board of this target needs no vendor runtime, so the
+#         package is the whole result. By hand (target_module.sh started on its own) it is made the same way.
 
 set -euo pipefail
 

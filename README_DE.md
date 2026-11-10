@@ -45,9 +45,11 @@ RKLLM und RKNN installierst du selbst (siehe [Das Board](#das-board)).
 |---|---|---|---|
 | Rockchip | offiziell | RK3566, RK3568, RK3576, RK3588 | GGUF, RKLLM, RKNN |
 | NVIDIA-GPUs, AMD (Ryzen Z1 Extreme) | geplant ([Roadmap](docs/ROADMAP_DE.md)) | – | – |
-| Allgemeine ARM64-CPU (Raspberry Pi 4 und 5) | geplant ([Roadmap](docs/ROADMAP_DE.md)) | – | GGUF |
+| Allgemeine ARM64-CPU (`ARM64`) | offiziell | `bcm2711` (Raspberry Pi 4), `bcm2712` (Raspberry Pi 5) | GGUF |
 
 Andere Hardware kannst du selbst ergänzen: [docs/Module_Developer_Guide_DE.md](docs/Module_Developer_Guide_DE.md).
+
+### Rockchip
 
 Die Werte unten stammen aus dem Block `capabilities:` in [`targets/Rockchip/target.yml`](targets/Rockchip/target.yml).
 GUI, CLI, Ditto und der MCP-Server bieten genau diese Optionen an und lehnen alles andere ab.
@@ -88,6 +90,25 @@ quantisiert); die Kurznamen `Q3_K`, `Q4_K` und `Q5_K` werden für `Q3_K_M`, `Q4_
   relativ zur Listendatei).
 - Gängige Schreibweisen werden angenommen und übersetzt, zum Beispiel `INT8` → `Q8_0` für GGUF oder `int4` →
   `w4a16` für RKLLM. Bei Board-Namen spielt Groß- und Kleinschreibung keine Rolle.
+
+### Allgemeine ARM64-CPU (Raspberry Pi 4 und 5)
+
+Das Target `ARM64` ([`targets/ARM64/target.yml`](targets/ARM64/target.yml)) baut GGUF-Modelle und `llama-cli` und
+`llama-server` von llama.cpp für 64-Bit-ARM-Boards, die kein Hersteller-SDK brauchen. Eine Board-ID ist der SoC, den
+die Hardware-Probe des Boards meldet, also findet ein geprobter Raspberry Pi sein Board von selbst.
+
+| Board (`--board`) | CPU | Build-Flags | RAM (max.) | Empfohlen, in dieser Reihenfolge | Beispiel-Boards |
+|---|---|---|---|---|---|
+| `bcm2711` | 4× Cortex-A72 (Armv8-A) | `-march=armv8-a` | 8 GB | `Q4_K_M`, `Q4_0`, `IQ4_XS`, `Q5_K_M` | Raspberry Pi 4 Model B, Pi 400, Compute Module 4 |
+| `bcm2712` (Standard) | 4× Cortex-A76 (Armv8.2-A, Dot Product, FP16) | `-march=armv8.2-a+dotprod+fp16` | 16 GB | `Q4_K_M`, `Q4_0`, `IQ4_NL`, `Q5_K_M`, `Q6_K`, `Q8_0` | Raspberry Pi 5, Pi 500, Compute Module 5 |
+
+- Ein Format, `gguf`, mit denselben 35 Typen wie Rockchip; `Q4_K_M` ist auf beiden Boards der Standard.
+- Auf dem Raspberry Pi 5 packt llama.cpp jeden empfohlenen Typ für seine Dot-Product-Kernel um; der Cortex-A72 des
+  Raspberry Pi 4 hat kein Dot Product, dort wird also nichts umgepackt und die Qualität je Bit entscheidet.
+- Jeder Build macht auch das Board-Paket mit `llama-cli` und `llama-server`, für das Board cross-gebaut: aus der
+  gespeicherten Probe des Boards, wenn es eine gibt, sonst aus den CPU-Features, die jeder Chip des Boards hat.
+  Installiere das 64-Bit-Raspberry-Pi-OS: Ein 32-Bit-System wird abgelehnt.
+- Kein Hersteller-SDK: Die Vorabprüfung vor einem Build hat nichts vom Board zu verlangen.
 
 ---
 

@@ -43,9 +43,11 @@ runtimes stay yours to install (see [The board](#the-board)).
 |---|---|---|---|
 | Rockchip | official | RK3566, RK3568, RK3576, RK3588 | GGUF, RKLLM, RKNN |
 | NVIDIA GPUs, AMD (Ryzen Z1 Extreme) | planned ([roadmap](docs/ROADMAP.md)) | – | – |
-| Generic ARM64 CPU (Raspberry Pi 4 and 5) | planned ([roadmap](docs/ROADMAP.md)) | – | GGUF |
+| Generic ARM64 CPU (`ARM64`) | official | `bcm2711` (Raspberry Pi 4), `bcm2712` (Raspberry Pi 5) | GGUF |
 
 You can add other hardware yourself: [docs/Module_Developer_Guide.md](docs/Module_Developer_Guide.md).
+
+### Rockchip
 
 The values below come from the `capabilities:` block in [`targets/Rockchip/target.yml`](targets/Rockchip/target.yml).
 The GUI, the CLI, Ditto and the MCP server offer exactly these options and reject anything else.
@@ -86,6 +88,25 @@ nothing); its short names `Q3_K`, `Q4_K` and `Q5_K` are accepted for `Q3_K_M`, `
   the list file).
 - Common spellings are accepted and translated, for example `INT8` → `Q8_0` for GGUF or `int4` → `w4a16` for
   RKLLM. Board names are not case-sensitive.
+
+### Generic ARM64 CPU (Raspberry Pi 4 and 5)
+
+The target `ARM64` ([`targets/ARM64/target.yml`](targets/ARM64/target.yml)) builds GGUF models and llama.cpp's
+`llama-cli` and `llama-server` for 64-bit ARM boards that need no vendor SDK. A board id is the SoC that the board's
+hardware probe reports, so a probed Raspberry Pi finds its board by itself.
+
+| Board (`--board`) | CPU | Build flags | RAM (max.) | Recommended, in this order | Example boards |
+|---|---|---|---|---|---|
+| `bcm2711` | 4× Cortex-A72 (Armv8-A) | `-march=armv8-a` | 8 GB | `Q4_K_M`, `Q4_0`, `IQ4_XS`, `Q5_K_M` | Raspberry Pi 4 Model B, Pi 400, Compute Module 4 |
+| `bcm2712` (default) | 4× Cortex-A76 (Armv8.2-A, dot product, FP16) | `-march=armv8.2-a+dotprod+fp16` | 16 GB | `Q4_K_M`, `Q4_0`, `IQ4_NL`, `Q5_K_M`, `Q6_K`, `Q8_0` | Raspberry Pi 5, Pi 500, Compute Module 5 |
+
+- One format, `gguf`, with the same 35 types as Rockchip; `Q4_K_M` is the default on both boards.
+- On the Raspberry Pi 5 every recommended type is repacked by llama.cpp for its dot product kernels; the Cortex-A72
+  of the Raspberry Pi 4 has no dot product, so nothing is repacked there and quality per bit decides.
+- Every build also makes the board package with `llama-cli` and `llama-server` cross-built for the board: from the
+  board's stored probe when there is one, else from the CPU features every chip of the board has. Install the
+  64-bit Raspberry Pi OS: a 32-bit system is refused.
+- No vendor SDK: the pre-flight check before a build has nothing to ask of the board.
 
 ---
 

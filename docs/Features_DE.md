@@ -84,6 +84,18 @@ Das Schema steht in `orchestrator/schemas/targets.py`. GUI, CLI, Build-Dienst, D
 Block: Sie bieten genau diese Optionen an, ergänzen die Standardwerte und lehnen alles andere mit einem klaren Grund
 ab, bevor etwas läuft. Die Werte für Rockchip stehen in der [README](../README_DE.md#unterstützte-targets-und-formate).
 
+Das Framework liefert zwei Targets mit: **Rockchip** (RK3566, RK3568, RK3576, RK3588: GGUF auf der CPU, RKLLM und
+RKNN auf der NPU) und das **allgemeine ARM64-CPU-Target** `ARM64` (nur GGUF, kein Hersteller-SDK) mit den Boards
+`bcm2711` (Raspberry Pi 4, Pi 400, Compute Module 4: Cortex-A72) und `bcm2712` (Raspberry Pi 5, Pi 500, Compute
+Module 5: Cortex-A76). Eine Board-ID ist bei beiden der SoC, den die Hardware-Probe des Boards meldet, also wählen
+`llm-cli scan --import` und der Probe-Import des Builders Target und Board von selbst. Jedes `ARM64`-Board hat sein
+Optimierungsprofil: `-march=armv8-a` auf dem Raspberry Pi 4 und `-march=armv8.2-a+dotprod+fp16` auf dem Raspberry
+Pi 5 (der Plan des Build-Rezepts, `GGML_NATIVE` OFF), die zuerst angebotenen Quantisierungen in der Reihenfolge, die
+zum Speicher des Boards und zu den ARM-Kerneln von llama.cpp passt, und die Optimierungsstufe. Jeder `ARM64`-Build
+macht auch das Board-Paket mit `llama-cli` und `llama-server`, aus der gespeicherten Probe des Boards oder, ohne
+eine, aus den CPU-Features, die jeder Chip des Boards hat. `llm-cli targets boards ARM64` und **Build > Targets... >
+Boards...** zeigen die Profile.
+
 GUI: **Build > Targets…** listet jedes Target mit seiner ID (dem Wert für `--target`), Name, Architektur, Boards,
 Formaten und Unterstützungsgrad, oder „keine Fähigkeiten angegeben“ (oder dass sein Fähigkeiten-Block ungültig ist);
 **Targets…** neben der Target-Liste des Builders öffnet dasselbe Fenster. **Target prüfen** (in diesem Fenster und neben

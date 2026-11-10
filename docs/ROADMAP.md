@@ -32,8 +32,8 @@ decisions it comes from.
 3.3.0 is released (see the changelog); what it left open is carried on here, with LoRA and large models after it.
 This version comes in this order: Ditto's context first, the board bundle next to it, then the gateway, voice and MCP
 on the board. The first hardware sets the priorities for the device runtime: RK3566 boards, NVIDIA RTX GPUs and the
-AMD Ryzen Z1 Extreme, on Windows and Linux. The recipes as target templates are built; the rotation stage and the
-generic ARM64 target come next.
+AMD Ryzen Z1 Extreme, on Windows and Linux. The recipes as target templates and the generic ARM64 target are built;
+the rotation stage comes next.
 
 ### Carried over from 3.1.0
 
@@ -148,7 +148,7 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 | Item | Status |
 |---|---|
 | **Rotation stage before quantization** (SpinQuant, QuaRot), right after the recipes: rotations are baked into the weights before conversion and quantization, only where the target format supports them (a capability of the format, not a fixed step). Why: 4-bit models of the Llama family keep their quality on small boards. The slot is there: the stage runner runs a target's `modules/rotate_module.sh` between the convert and target stages; the algorithm is still to come. | planned |
-| **Generic ARM64 CPU target (GGUF)** with board defaults for the Raspberry Pi 4 and 5, right after the recipes. Why: Rockchip was only the start, and these boards need no vendor SDK. | planned |
+| **The generic ARM64 target on a real Raspberry Pi 4 and 5** (waits for hardware): a build for each board run on the board with its package (`test_model.sh`, `llama-server`), its tokens per second measured by the board test (`llama-bench`, shown as measured rows of the target's boards), and the recommended order of quantizations checked against those numbers. The target itself is built ([design](DESIGN.md#targets-hardware-and-templates)). | planned |
 | **A board profile for the Raspberry Pi Zero 2 W** (RP3A0, four Cortex-A53, 512 MB, no NPU) in the generic ARM64 CPU target: GGUF on the CPU for small tasks with a model of about 1B parameters, quantizations, context and memory profile chosen for 512 MB, the probe recognising the board ([design](DESIGN.md#build-pipeline-and-target-modules)). | planned |
 | **A board profile for the Raspberry Pi Zero 3 W, once released**: its device tree in Raspberry Pi's kernel fork names the BCM2711 (four Cortex-A72, as in the Raspberry Pi 4), not its RAM; the profile is written from Raspberry Pi's published specifications at release, not from reports ([design](DESIGN.md#build-pipeline-and-target-modules)). | planned |
 | **Board profiles for Orange Pi and Banana Pi**: each board in the target of its SoC, the Rockchip boards (for example RK3588, RK3566) in the Rockchip target with the NPU, other ARM64 SoCs (for example Allwinner, Amlogic) in the generic ARM64 CPU target, from the makers' published specifications, the probe recognising each board ([design](DESIGN.md#build-pipeline-and-target-modules)). | planned |
