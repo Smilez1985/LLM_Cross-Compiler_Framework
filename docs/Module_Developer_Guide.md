@@ -181,8 +181,10 @@ The generator writes `target.yml` (metadata, `supported_boards`, `docker`, `modu
 `requirements`, a `capabilities:` block and a `runtime:` block), a `Dockerfile` (from `Dockerfile.gpu` of the
 template if the SDK contains "cuda" or the base image contains "nvidia"), an empty `stages:` block (no stage runner: that is
 the framework's), the four stage modules `modules/source_module.sh`, `config_module.sh`, `convert_module.sh` and `target_module.sh` (with the
-module's name, its architecture and its base image in their headers), `modules/rkllm_module.sh`,
-`modules/rknn_module.sh`, `modules/benchmark_module.sh`, `generate_profile.sh` and the template's `scripts/`. The
+module's name, its architecture and its base image in their headers), `modules/benchmark_module.sh`,
+`generate_profile.sh` and the template's `scripts/` (`modules/rkllm_module.sh`, `modules/rknn_module.sh` and their
+converter scripts only when a declared format names them, [section 3.8](#38-the-general-template-formats-as-variables)),
+and the module's formats as `template_variables:` in `target.yml`. The
 fields of the wizard go into the stage they belong to: the setup commands into the source stage, the quantization
 logic into the convert stage and the packaging commands into the target stage.
 
@@ -414,7 +416,9 @@ the Builder's tooltip and the AI tools (`build_test`) show the state; the AI too
   diff. An AI app can propose one too, with `propose_healing_fix` and its field `module_diff` (it reads the files and
   the log with `get_target_capabilities` and `module_files`). A diff that does not fit the files or names a dangerous
   command is refused; one that fits waits in the record and is applied in the edit step, marked, with **Undo the
-  Proposal**. Only your Save writes it. While llmcf's CPU template records no variables of its own, a proposal is
+  Proposal**. Only your Save writes it. For a module made from the general template a proposal may be changed
+  variable values instead ([section 3.8](#38-the-general-template-formats-as-variables): `--variables`,
+  `module_variables`), which become the same diff; otherwise a proposal is
   always a diff of the files.
 - **After the repair.** The repair goes into the history and the module stays untested until a build passes; the
   failed build is offered again with its settings (the Builder's question, `--retry`, or the `llm-cli build start`
@@ -424,6 +428,58 @@ the Builder's tooltip and the AI tools (`build_test`) show the state; the AI too
 llm-cli targets list
 llm-cli module repair my_board --propose --retry
 ```
+
+### 3.8 The general template: formats as variables
+
+`targets/_template` is one template for any hardware. Its stages hold the pattern; what depends on the board or the
+SoC is the module's **template variables**: the toolchain (base image, packages, vendor apt sources, pinned pip
+packages and downloads), the flags, the setup commands, and for each **output format**:
+
+| Variable | Meaning |
+|---|---|
+| `id`, `label` | The format as builds name it (`hef`, `engine`, ...) and its label. |
+| `converter.command` | `llama.cpp` (GGUF, the template's own stages), a program of the build image by its absolute path or a plain name on its `PATH`, or a helper the template has (`modules/rknn_module.sh`, `modules/rkllm_module.sh`). |
+| `converter.args` | Its arguments, one word each (letters, digits and `. , : = + / @ % _ -`), with the placeholders `{input}`, `{output}`, `{output_dir}`, `{quant}`, `{model_name}`, `{work_dir}`. |
+| `input`, `output_extension` | The input formats it takes (`hf`, `onnx`, `gguf`) and its output's extension. |
+| `quantizations`, `default_quantization` | Its types, as the converter spells them. |
+| `runtime_libraries` | Each library the board needs: `name`, `version`, `image_path` (in the build image), `redistributable` (default no) and, when it may not be passed on, `source_url`, where the person fetches it under their own licence acceptance. |
+| `board_paths` | `install_dir`, `model_dir`, `lib_dir` on the board. |
+| `sdk` | The format's needs for the pre-flight check (as in [4.2](#42-capabilities)). |
+| `vendor_files` | Vendor files that may not be passed on (`name`, `url`, `licence_url`): only referenced, never copied. |
+
+The generator keeps them in `target.yml` under `template_variables:` and writes them into `config_module.sh` as data
+(single-quoted words between `# >>> template variables` and `# <<< template variables`); the capabilities come from
+them. The convert stage runs the declared converter with its arguments as one array (never `eval`) after checking the
+input against the declared input formats, and checks the file it wrote; the target stage quantizes nothing for such a
+format and packages the model, the libraries that may be passed on (copied from the image), `RUNTIME.txt` with every
+library and where the others are fetched, `MANIFEST.json` and `SHA256SUMS`. The Rockchip helpers are copied only when
+a format names them. Every value is checked like the other fields (the shell deny patterns, https addresses, plain
+words and paths without `..`), and the folder check refuses a block in `config_module.sh` that is not what
+`target.yml` declares: change the variables, never the block.
+
+Give them with `llm-cli module create --formats FILE`, the field `formats` of `create_target_module`, or the field
+**Output formats** on the wizard's flags page (Ditto may fill it through the GUI tools, marked, with its Undo). A
+module without formats builds GGUF. The edit step shows them first (above the files; `llm-cli module edit` opens them
+first, `--variables FILE`): a changed value makes the files that hold them anew, shown as their diff.
+
+```yaml
+- gguf
+- id: vnpu
+  label: "Vendor NPU"
+  converter:
+    command: /opt/vendor/vnpu/bin/vnpu-compile
+    args: [--model, "{input}", --output, "{output}", --dtype, "{quant}"]
+  input: [onnx]
+  output_extension: vnpu
+  quantizations: [int8, int16]
+  default_quantization: int8
+  runtime_libraries:
+    - {name: libvnpurt.so, version: 2.1.0, image_path: /opt/vendor/vnpu/lib/libvnpurt.so,
+       source_url: "https://vendor.example.com/vnpu/runtime"}
+```
+
+The values above are an illustration, not a tested target: a format is proved by its first build and a run on the
+board ([section 3.7](#37-tested-by-a-build-repaired-after-a-failed-one)).
 
 ## 4. target.yml and the capabilities block
 

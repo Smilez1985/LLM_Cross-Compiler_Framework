@@ -2235,7 +2235,7 @@ New hardware targets. The full guide: [Module_Developer_Guide.md](Module_Develop
 llm-cli module create [--name TEXT] [--arch aarch64|x86_64|armv7l|riscv64] [--sdk TEXT] [--probe FILE]
                       [--description TEXT] [--base-image IMAGE] [--packages TEXT] [--cpu-flags TEXT]
                       [--cmake-flags TEXT] [--setup-commands FILE] [--quantization-logic FILE]
-                      [--knowledge-root URL]... [--edit]
+                      [--knowledge-root URL]... [--formats FILE] [--edit]
 ```
 
 Creates a new target with the values of the module wizard, as options; what is not given is asked: name,
@@ -2259,6 +2259,7 @@ target is never overwritten. The target is marked untested until a run on its bo
 | `--setup-commands FILE` | Commands the source stage runs once before converting (as the unprivileged build user, without network). |
 | `--quantization-logic FILE` | The bash `case` branches of the convert stage (`modules/convert_module.sh`). |
 | `--knowledge-root URL` | Attach the knowledge base's pages crawled from this address (privacy scrub applied); repeatable. Only these pages are attached. |
+| `--formats FILE` | The module's output formats, the general template's variables ([Module Developer Guide](Module_Developer_Guide.md#38-the-general-template-formats-as-variables)): a YAML or JSON list whose entries are a preset name (`gguf`, `rknn`, `rkllm`) or a format's values (its vendor converter with its arguments, the input formats, the output extension, the quantization types, the runtime libraries with their versions and whether they may be passed on, the board paths, its `sdk:` needs, the vendor files that may not be passed on). Every value is checked like the other fields. Without it the module builds GGUF. |
 | `--edit` | The wizard's "edit all files" step: the module is made in a private scratch folder, its stage modules, `target.yml` and Dockerfile open in `$EDITOR` one after the other, the diff is shown and the checks run again ([`module edit`](#module-edit)); a failing check offers to open the files again, and the module goes into the targets folder only when every check passes and you say yes. Otherwise nothing is written. |
 
 The target is written to the configured targets folder (setting `targets_dir`; a relative path is relative to the
@@ -2311,7 +2312,7 @@ same refusals.
 ### module edit
 
 ```
-llm-cli module edit TARGET [--file FILE]... [--apply DIFF_FILE]
+llm-cli module edit TARGET [--file FILE]... [--apply DIFF_FILE] [--variables FILE]
 ```
 
 The "edit all files" step for a target of the targets folder (by id or folder name), the place where a module is
@@ -2328,6 +2329,7 @@ reasons; an edit may not drop the marks `untested` and `provenance` of `target.y
 |---|---|
 | `--file FILE` | Open only this file of the step (e.g. `modules/config_module.sh`, `target.yml`, `Dockerfile`); repeatable. Default: every file, unless `--apply` is given. |
 | `--apply DIFF_FILE` | Apply a unified diff first (an AI's proposal, or one written by hand), all or nothing; it is shown and checked like any edit and saved only on your yes. A diff that adds, deletes or renames a file, or touches the runner, is refused. |
+| `--variables FILE` | For a module made from the general template: change its template variables (its output formats, YAML or JSON) first; the files that hold them (`target.yml`'s `template_variables` and capabilities, the block of `config_module.sh`) are made anew from the template, shown as their diff and checked like any edit. A format that would need a file the module does not have is refused (make the module again). Without `--file`, `--apply` or `--variables`, the variables open first in `$EDITOR`, then the files. |
 
 ```bash
 llm-cli module edit my_board --file modules/config_module.sh
@@ -2342,7 +2344,7 @@ window, marked and listed with an Undo, and only your **Save** writes it.
 ### module repair
 
 ```
-llm-cli module repair TARGET [--propose] [--apply DIFF_FILE] [--file FILE]... [--retry]
+llm-cli module repair TARGET [--propose] [--apply DIFF_FILE] [--variables FILE] [--file FILE]... [--retry]
 ```
 
 Repairs a generated module after a failed build. A build of a module that is not shipped marks it: **tested** when its
@@ -2363,6 +2365,7 @@ command prints the `llm-cli build start` line that builds the failed build's set
 |---|---|
 | `--propose` | Ask the self-healing analysis for a repair from the error log first: the pattern library, then Ditto (the log cleaned, scrubbed and wrapped as untrusted text; the module's files as untrusted text). A known cause gives a step for you as text (nothing is run); Ditto's answer is a unified diff of the module's files, refused when it does not fit them or names a dangerous command. Needs the framework (and an AI provider for Ditto). |
 | `--apply DIFF_FILE` | Apply a unified diff first instead of the waiting proposal, as in `module edit --apply`. |
+| `--variables FILE` | Repair by changed template variables instead, as in `module edit --variables`. An AI app proposes the same with `propose_healing_fix` and its field `module_variables` (the changed formats as YAML), which becomes the waiting diff of the files. |
 | `--file FILE` | Open this file of the step in `$EDITOR`; repeatable. Without `--propose`, `--apply` or a waiting proposal every file opens. |
 | `--retry` | After the repair is saved, start the failed build again with its settings (model, format, quantization, board), after a yes. |
 

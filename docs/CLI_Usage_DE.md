@@ -2336,7 +2336,7 @@ Neue Hardware-Targets. Die vollständige Anleitung: [Module_Developer_Guide_DE.m
 llm-cli module create [--name TEXT] [--arch aarch64|x86_64|armv7l|riscv64] [--sdk TEXT] [--probe DATEI]
                       [--description TEXT] [--base-image IMAGE] [--packages TEXT] [--cpu-flags TEXT]
                       [--cmake-flags TEXT] [--setup-commands DATEI] [--quantization-logic DATEI]
-                      [--knowledge-root URL]... [--edit]
+                      [--knowledge-root URL]... [--formats DATEI] [--edit]
 ```
 
 Legt ein neues Target mit den Werten des Modul-Assistenten an, als Optionen; was fehlt, wird gefragt: Name,
@@ -2361,6 +2361,7 @@ Target wird nie überschrieben. Das Target ist als ungetestet markiert, bis ein 
 | `--setup-commands DATEI` | Befehle, die die Source-Stufe einmal vor dem Konvertieren ausführt (als Build-Benutzer ohne Rechte, ohne Netz). |
 | `--quantization-logic DATEI` | Die bash-`case`-Zweige der Convert-Stufe (`modules/convert_module.sh`). |
 | `--knowledge-root URL` | Die Seiten der Wissensbasis anhängen, die von dieser Adresse gecrawlt wurden (Datenschutz-Bereinigung angewendet); wiederholbar. Nur diese Seiten werden angehängt. |
+| `--formats DATEI` | Die Ausgabeformate des Moduls, die Variablen der allgemeinen Vorlage ([Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md#38-die-allgemeine-vorlage-formate-als-variablen)): eine YAML- oder JSON-Liste, deren Einträge der Name einer Vorgabe (`gguf`, `rknn`, `rkllm`) oder die Werte eines Formats sind (sein Konverter des Herstellers mit seinen Argumenten, die Eingabeformate, die Endung der Ausgabe, die Quantisierungstypen, die Runtime-Bibliotheken mit Version und der Angabe, ob sie weitergegeben werden dürfen, die Pfade auf dem Board, seine `sdk:`-Anforderungen, die Herstellerdateien, die nicht weitergegeben werden dürfen). Jeder Wert wird wie die übrigen Felder geprüft. Ohne die Option baut das Modul GGUF. |
 | `--edit` | Der Schritt „alle Dateien bearbeiten“ des Assistenten: Das Modul wird in einem privaten Arbeitsordner erzeugt, seine Stage-Module, die `target.yml` und das Dockerfile öffnen nacheinander in `$EDITOR`, der Diff wird gezeigt und die Prüfungen laufen erneut ([`module edit`](#module-edit)); bei einer gescheiterten Prüfung lassen sich die Dateien noch einmal öffnen, und das Modul kommt erst in den Targets-Ordner, wenn jede Prüfung besteht und du Ja sagst. Sonst wird nichts geschrieben. |
 
 Das Target wird in den eingestellten Targets-Ordner geschrieben (Einstellung `targets_dir`; ein relativer Pfad
@@ -2416,7 +2417,7 @@ Funktion wie bei diesem Befehl gespeichert, mit denselben Ablehnungen.
 ### module edit
 
 ```
-llm-cli module edit TARGET [--file DATEI]... [--apply DIFF_DATEI]
+llm-cli module edit TARGET [--file DATEI]... [--apply DIFF_DATEI] [--variables DATEI]
 ```
 
 Der Schritt „alle Dateien bearbeiten“ für ein Target des Targets-Ordners (nach ID oder Ordnername), der Ort, an dem
@@ -2434,6 +2435,7 @@ wird nichts gespeichert, mit den Gründen; eine Änderung darf die Markierungen 
 |---|---|
 | `--file DATEI` | Nur diese Datei des Schritts öffnen (z. B. `modules/config_module.sh`, `target.yml`, `Dockerfile`); wiederholbar. Standard: jede Datei, außer mit `--apply`. |
 | `--apply DIFF_DATEI` | Zuerst einen Unified Diff anwenden (den Vorschlag einer KI oder einen von Hand geschriebenen), ganz oder gar nicht; er wird gezeigt und geprüft wie jede Änderung und nur auf dein Ja gespeichert. Ein Diff, der eine Datei anlegt, löscht oder umbenennt oder den Runner berührt, wird abgelehnt. |
+| `--variables DATEI` | Für ein Modul aus der allgemeinen Vorlage: zuerst seine Variablen ändern (seine Ausgabeformate, YAML oder JSON); die Dateien, die sie enthalten (`template_variables` und Capabilities in `target.yml`, der Block in `config_module.sh`), werden aus der Vorlage neu erzeugt, als ihr Diff gezeigt und wie jede Änderung geprüft. Ein Format, das eine Datei bräuchte, die das Modul nicht hat, wird abgelehnt (dann das Modul neu erzeugen). Ohne `--file`, `--apply` oder `--variables` öffnen sich zuerst die Variablen in `$EDITOR`, dann die Dateien. |
 
 ```bash
 llm-cli module edit my_board --file modules/config_module.sh
@@ -2449,7 +2451,7 @@ Diff im Feld „Vorschlag“: Er wird im Fenster angewendet, markiert und mit ei
 ### module repair
 
 ```
-llm-cli module repair TARGET [--propose] [--apply DIFF_DATEI] [--file DATEI]... [--retry]
+llm-cli module repair TARGET [--propose] [--apply DIFF_DATEI] [--variables DATEI] [--file DATEI]... [--retry]
 ```
 
 Repariert ein erzeugtes Modul nach einem gescheiterten Build. Ein Build eines Moduls, das nicht mitgeliefert ist,
@@ -2473,6 +2475,7 @@ aus, die die Einstellungen des gescheiterten Builds erneut baut.
 |---|---|
 | `--propose` | Zuerst die Analyse der Selbstheilung um eine Reparatur aus dem Fehlerlog bitten: die Musterbibliothek, dann Ditto (das Log bereinigt, geschwärzt und als nicht vertrauenswürdiger Text eingepackt; die Dateien des Moduls als nicht vertrauenswürdiger Text). Eine bekannte Ursache gibt einen Schritt für dich als Text (nichts wird ausgeführt); Dittos Antwort ist ein Unified Diff der Dateien des Moduls, abgelehnt, wenn er nicht auf sie passt oder einen gefährlichen Befehl nennt. Braucht das Framework (und für Ditto einen KI-Anbieter). |
 | `--apply DIFF_DATEI` | Zuerst einen Unified Diff statt des wartenden Vorschlags anwenden, wie bei `module edit --apply`. |
+| `--variables DATEI` | Stattdessen durch geänderte Variablen der Vorlage reparieren, wie bei `module edit --variables`. Eine KI-App schlägt dasselbe mit `propose_healing_fix` und seinem Feld `module_variables` vor (die geänderten Formate als YAML), das zum wartenden Diff der Dateien wird. |
 | `--file DATEI` | Diese Datei des Schritts in `$EDITOR` öffnen; wiederholbar. Ohne `--propose`, `--apply` oder einen wartenden Vorschlag öffnet jede Datei. |
 | `--retry` | Nachdem die Reparatur gespeichert ist, den gescheiterten Build mit seinen Einstellungen (Modell, Format, Quantisierung, Board) erneut starten, nach einem Ja. |
 

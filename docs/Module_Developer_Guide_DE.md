@@ -185,8 +185,10 @@ Der Generator schreibt `target.yml` (Metadaten, `supported_boards`, `docker`, `m
 `requirements`, einen Block `capabilities:` und einen Block `runtime:`), ein `Dockerfile` (aus dem `Dockerfile.gpu` der Vorlage, wenn das
 SDK „cuda“ oder das Basis-Image „nvidia“ enthält), einen leeren Block `stages:` (keinen Stage-Runner: der ist der des Frameworks), die vier Stufenmodule
 `modules/source_module.sh`, `config_module.sh`, `convert_module.sh` und `target_module.sh` (mit dem Namen des Moduls,
-seiner Architektur und seinem Basis-Image in ihren Köpfen), `modules/rkllm_module.sh`, `modules/rknn_module.sh`,
-`modules/benchmark_module.sh`, `generate_profile.sh` und die `scripts/` der Vorlage. Die Felder des Assistenten
+seiner Architektur und seinem Basis-Image in ihren Köpfen), `modules/benchmark_module.sh`, `generate_profile.sh` und
+die `scripts/` der Vorlage (`modules/rkllm_module.sh`, `modules/rknn_module.sh` und ihre Konverterskripte nur, wenn
+ein angegebenes Format sie nennt, [Abschnitt 3.8](#38-die-allgemeine-vorlage-formate-als-variablen)), und die Formate
+des Moduls als `template_variables:` in `target.yml`. Die Felder des Assistenten
 landen in der Stufe, zu der sie gehören: die Einrichtungsbefehle in der Stufe source, die Quantisierungslogik in der
 Stufe convert und die Packbefehle in der Stufe target.
 
@@ -435,8 +437,9 @@ die KI-Tools (`build_test`) zeigen den Zustand; die KI-Tools ändern ihn nie.
   vorschlagen, mit `propose_healing_fix` und seinem Feld `module_diff` (sie liest Dateien und Log mit
   `get_target_capabilities` und `module_files`). Ein Diff, der nicht auf die Dateien passt oder einen gefährlichen
   Befehl nennt, wird abgelehnt; einer, der passt, wartet im Datensatz und wird im Bearbeitungsschritt angewendet,
-  markiert, mit **Vorschlag zurücknehmen**. Nur dein Speichern schreibt ihn. Solange die CPU-Vorlage von llmcf keine
-  eigenen Variablen festhält, ist ein Vorschlag immer ein Diff der Dateien.
+  markiert, mit **Vorschlag zurücknehmen**. Nur dein Speichern schreibt ihn. Für ein Modul aus der allgemeinen Vorlage
+  darf ein Vorschlag stattdessen geänderte Variablenwerte sein ([Abschnitt 3.8](#38-die-allgemeine-vorlage-formate-als-variablen):
+  `--variables`, `module_variables`), die zu demselben Diff werden; sonst ist ein Vorschlag ein Diff der Dateien.
 - **Nach der Reparatur.** Die Reparatur kommt in den Verlauf, und das Modul bleibt ungetestet, bis ein Build besteht;
   der gescheiterte Build wird mit seinen Einstellungen erneut angeboten (die Frage des Builders, `--retry` oder die
   Zeile `llm-cli build start`, die der Befehl ausgibt).
@@ -445,6 +448,60 @@ die KI-Tools (`build_test`) zeigen den Zustand; die KI-Tools ändern ihn nie.
 llm-cli targets list
 llm-cli module repair my_board --propose --retry
 ```
+
+### 3.8 Die allgemeine Vorlage: Formate als Variablen
+
+`targets/_template` ist eine Vorlage für jede Hardware. Ihre Stufen enthalten das Muster; was vom Board oder vom SoC
+abhängt, sind die **Variablen der Vorlage** im Modul: die Toolchain (Basis-Image, Pakete, apt-Quellen des Herstellers,
+gepinnte pip-Pakete und Downloads), die Flags, die Setup-Befehle und für jedes **Ausgabeformat**:
+
+| Variable | Bedeutung |
+|---|---|
+| `id`, `label` | Das Format, wie Builds es nennen (`hef`, `engine`, ...), und seine Bezeichnung. |
+| `converter.command` | `llama.cpp` (GGUF, die eigenen Stufen der Vorlage), ein Programm des Build-Images mit absolutem Pfad oder schlichtem Namen auf seinem `PATH`, oder ein Helfer, den die Vorlage hat (`modules/rknn_module.sh`, `modules/rkllm_module.sh`). |
+| `converter.args` | Seine Argumente, je ein Wort (Buchstaben, Ziffern und `. , : = + / @ % _ -`), mit den Platzhaltern `{input}`, `{output}`, `{output_dir}`, `{quant}`, `{model_name}`, `{work_dir}`. |
+| `input`, `output_extension` | Die Eingabeformate, die es nimmt (`hf`, `onnx`, `gguf`), und die Endung seiner Ausgabe. |
+| `quantizations`, `default_quantization` | Seine Typen, wie der Konverter sie schreibt. |
+| `runtime_libraries` | Jede Bibliothek, die das Board braucht: `name`, `version`, `image_path` (im Build-Image), `redistributable` (standardmäßig nein) und, wenn sie nicht weitergegeben werden darf, `source_url`, wo die Person sie mit ihrer eigenen Lizenzzustimmung holt. |
+| `board_paths` | `install_dir`, `model_dir`, `lib_dir` auf dem Board. |
+| `sdk` | Die Anforderungen des Formats für die Prüfung vor dem Build (wie in [4.2](#42-capabilities)). |
+| `vendor_files` | Herstellerdateien, die nicht weitergegeben werden dürfen (`name`, `url`, `licence_url`): nur referenziert, nie kopiert. |
+
+Der Generator hält sie in `target.yml` unter `template_variables:` fest und schreibt sie als Daten in
+`config_module.sh` (Wörter in einfachen Anführungszeichen zwischen `# >>> template variables` und
+`# <<< template variables`); die Capabilities entstehen aus ihnen. Die Convert-Stufe prüft die Eingabe gegen die
+angegebenen Eingabeformate, startet den angegebenen Konverter mit seinen Argumenten als ein Array (nie `eval`) und
+prüft die Datei, die er geschrieben hat; die Target-Stufe quantisiert für ein solches Format nichts und packt das
+Modell, die Bibliotheken, die weitergegeben werden dürfen (aus dem Image kopiert), `RUNTIME.txt` mit jeder Bibliothek
+und woher die übrigen kommen, `MANIFEST.json` und `SHA256SUMS`. Die Rockchip-Helfer werden nur kopiert, wenn ein Format
+sie nennt. Jeder Wert wird wie die übrigen Felder geprüft (die Shell-Sperrmuster, https-Adressen, schlichte Wörter und
+Pfade ohne `..`), und die Ordnerprüfung lehnt einen Block in `config_module.sh` ab, der nicht dem entspricht, was
+`target.yml` angibt: die Variablen ändern, nie den Block.
+
+Angegeben werden sie mit `llm-cli module create --formats DATEI`, dem Feld `formats` von `create_target_module` oder
+dem Feld **Ausgabeformate** auf der Flags-Seite des Assistenten (Ditto kann es über die GUI-Werkzeuge füllen, markiert,
+mit Rückgängig). Ein Modul ohne Formate baut GGUF. Der Bearbeitungsschritt zeigt sie zuerst (über den Dateien;
+`llm-cli module edit` öffnet sie zuerst, `--variables DATEI`): Ein geänderter Wert erzeugt die Dateien, die sie
+enthalten, neu und zeigt sie als ihren Diff.
+
+```yaml
+- gguf
+- id: vnpu
+  label: "Vendor NPU"
+  converter:
+    command: /opt/vendor/vnpu/bin/vnpu-compile
+    args: [--model, "{input}", --output, "{output}", --dtype, "{quant}"]
+  input: [onnx]
+  output_extension: vnpu
+  quantizations: [int8, int16]
+  default_quantization: int8
+  runtime_libraries:
+    - {name: libvnpurt.so, version: 2.1.0, image_path: /opt/vendor/vnpu/lib/libvnpurt.so,
+       source_url: "https://vendor.example.com/vnpu/runtime"}
+```
+
+Die Werte oben sind ein Beispiel, kein getestetes Target: Ein Format belegt erst sein erster Build und ein Lauf auf dem
+Board ([Abschnitt 3.7](#37-durch-einen-build-getestet-nach-einem-gescheiterten-repariert)).
 
 ## 4. target.yml und der Capabilities-Block
 
