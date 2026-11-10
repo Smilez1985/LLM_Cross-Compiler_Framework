@@ -148,7 +148,7 @@ def test_the_help_lists_what_the_installed_targets_build():
     from test_cli_builds import invoke_plain
     result = invoke_plain("build", "start", "--help")
     text = " ".join(result.out.split())
-    assert result.code == 0 and "The installed targets build: Rockchip: gguf, rkllm, rknn" in text
+    assert result.code == 0 and "The installed targets build: ARM64: gguf; Rockchip: gguf, rkllm, rknn" in text
     assert "tensorrt" not in text and "coreml" not in text
 
 

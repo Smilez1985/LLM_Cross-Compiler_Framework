@@ -708,12 +708,13 @@ class TestPin:
         kinds = {p.kind for p in places}
         assert {"derived", "reference"} <= kinds
         paths = {p.path for p in places}
-        assert {"targets/Rockchip/dockerfile", "targets/Rockchip/target.yml", "targets/_template/target.yml",
+        assert {"targets/Rockchip/dockerfile", "targets/Rockchip/target.yml", "targets/ARM64/Dockerfile",
+                "targets/ARM64/target.yml", "targets/_template/target.yml",
                 "targets/_template/Dockerfile", "targets/_template/Dockerfile.gpu",
                 "configs/project_sources.yml", "configs/detailed_project_sources.yml"} <= paths
         # Every Dockerfile that builds llama.cpp fetches the pinned commit, not only the tag.
         commits = {p.path for p in places if p.what == "ARG LLAMA_CPP_COMMIT"}
-        assert commits == {"targets/Rockchip/dockerfile", "targets/_template/Dockerfile",
+        assert commits == {"targets/Rockchip/dockerfile", "targets/ARM64/Dockerfile", "targets/_template/Dockerfile",
                            "targets/_template/Dockerfile.gpu"}
 
     def test_legacy_places_are_reported_not_failed(self, tmp_path):
