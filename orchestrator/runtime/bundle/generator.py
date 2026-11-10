@@ -61,8 +61,8 @@ PRESETS: Dict[str, Tuple[str, ...]] = {
 }
 MEMORY_RESERVE_MB = 384
 # What the person can do when the board's memory is short: their own yes, never an AI's (the AI's plan has no switch).
-MEMORY_RISK_NEXT = ("or accept the memory risk yourself (llm-cli bundle plan|build --accept-memory-risk, or the "
-                    "checkbox in the Board bundle window): the board then swaps and runs much slower")
+MEMORY_RISK_NEXT = ("or accept the memory risk yourself (your own yes, never an AI's): the board then swaps and runs "
+                    "much slower")
 # How the bundle's engines (llm, stt, vision) share the board's memory: the person's choice, never an AI's. "together":
 # they all run at once and must fit together; "in-turn": the gateway loads them one after another (llmcf-gateway
 # --engines in-turn), so only the largest one must fit next to the rest. The plan always shows both numbers.

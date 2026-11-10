@@ -66,6 +66,9 @@ BUNDLE_PATHS: Dict[str, str] = {
     "bundle build --accept-terms": "btn_bundle_build",
     "bundle plan --without-measurement": "chk_bundle_unmeasured",
     "bundle build --without-measurement": "chk_bundle_unmeasured",
+    # the person's yes to a bundle the board's memory does not hold (a warning then), never an AI's
+    "bundle plan --accept-memory-risk": "chk_bundle_memory_risk",
+    "bundle build --accept-memory-risk": "chk_bundle_memory_risk",
     # the engines all together or in turn: the person's choice (checked: in turn), never an AI's
     "bundle plan --engines": "chk_bundle_in_turn",
     "bundle build --engines": "chk_bundle_in_turn",
