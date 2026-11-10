@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -331,17 +332,23 @@ class TestTheKeyCheckRuns:
 
     @pytest.fixture
     def key(self, tmp_path):
-        home = tmp_path / "gnupg"
-        home.mkdir(mode=0o700)
-        env = dict(os.environ, GNUPGHOME=str(home))
-        subprocess.run(["gpg", "--batch", "--passphrase", "", "--quick-gen-key", "Vendor Test <v@example.com>",
-                        "ed25519", "sign", "never"], env=env, check=True, capture_output=True)
-        listing = subprocess.run(["gpg", "--batch", "--with-colons", "--fingerprint"], env=env, check=True,
-                                 capture_output=True, text=True).stdout
-        fpr = next(line.split(":")[9] for line in listing.splitlines() if line.startswith("fpr:"))
-        exported = tmp_path / "key.asc"
-        exported.write_bytes(subprocess.run(["gpg", "--batch", "--armor", "--export", fpr], env=env, check=True,
-                                            capture_output=True).stdout)
+        # A short home of its own: gpg's agent puts its socket there, and below a long tmp_path (pytest -n adds a
+        # segment per worker) the socket's path is too long and making the key fails.
+        with tempfile.TemporaryDirectory(prefix="g") as short:
+            home = Path(short) / "gnupg"
+            home.mkdir(mode=0o700)
+            env = dict(os.environ, GNUPGHOME=str(home))
+            try:
+                subprocess.run(["gpg", "--batch", "--passphrase", "", "--quick-gen-key", "Vendor Test <v@example.com>",
+                                "ed25519", "sign", "never"], env=env, check=True, capture_output=True)
+                listing = subprocess.run(["gpg", "--batch", "--with-colons", "--fingerprint"], env=env, check=True,
+                                         capture_output=True, text=True).stdout
+                fpr = next(line.split(":")[9] for line in listing.splitlines() if line.startswith("fpr:"))
+                exported = tmp_path / "key.asc"
+                exported.write_bytes(subprocess.run(["gpg", "--batch", "--armor", "--export", fpr], env=env,
+                                                    check=True, capture_output=True).stdout)
+            finally:
+                subprocess.run(["gpgconf", "--kill", "gpg-agent"], env=env, check=False, capture_output=True)
         return fpr, exported
 
     def run_step(self, tmp_path, key_file, fpr):
