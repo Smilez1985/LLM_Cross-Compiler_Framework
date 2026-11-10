@@ -392,11 +392,20 @@ In a development setup (see [CONTRIBUTING.md](CONTRIBUTING.md)) the command `llm
 |---|---|
 | Program and Python environment | Linux: `/opt/llm-cross-compiler-framework` · Windows: `C:\Program Files\LLM-Cross-Compiler-Framework` |
 | Finished models | The output folder `~/llmcf/output` (Windows: `%USERPROFILE%\llmcf\output`), set once with **File > Output Folder...** or `llm-cli config output-folder`; in the GUI a save dialog opens there for every finished build |
-| Builds not saved yet, cache, downloaded models | `output/` (the framework's build folder; earlier builds stay there and stay listed), `cache/` and `models/` in the installation folder if your user may write there (Linux), otherwise in the personal folder below (Windows: `%USERPROFILE%\.llm-framework\output` and so on); created when they are first needed. The settings `build_dir`, `cache_dir` and `models_dir` set other folders |
-| Settings (`config.yml`) | `configs/` in the installation folder if your user may write there, otherwise the personal folder below; `LLM_FRAMEWORK_CONFIG_DIR` sets another folder |
+| Builds not saved yet, cache, downloaded models, calibration datasets, logs | `output/` (the framework's build folder; earlier builds stay there and stay listed), `cache/`, `models/`, `datasets/` and `logs/` in the personal folder below (Windows: `%USERPROFILE%\.llm-framework\output` and so on); created when they are first needed. The settings `build_dir`, `cache_dir`, `models_dir`, `datasets_dir` and `logs_dir` set other folders |
+| Your own targets and installed community packs | `targets/` (module wizard, `llm-cli module create`, Ditto, AI apps, target packs; read after the targets the framework ships) and `community/` (recipe, knowledge and block packs, your own blocks) in the personal folder below; the setting `user_targets_dir` sets another targets folder |
+| Settings (`config.yml`) | The personal folder below; `LLM_FRAMEWORK_CONFIG_DIR` sets another folder |
 | Personal state: tool permissions, audit log, SSH key and known devices, MCP token, chat history, input history, knowledge base, local model server, community index cache | `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`); `LLM_FRAMEWORK_HOME` sets another folder |
 | API keys and tokens | encrypted in `~/.llm-framework/secrets.store`; the key for it is kept in your operating system's keyring, or as you choose with the setting `secret_storage` |
 | Models for Ditto's offline mode | `ditto/` in the models folder above (`LLM_FRAMEWORK_MODELS_DIR` sets another folder) |
+
+The installation folder is shared by everyone who uses llmcf on the computer, and the framework never writes into it
+while it runs: everything in the table except the program is yours alone. Only a git checkout your user can write to,
+started directly (a developer's working copy), keeps `configs/`, `output/`, `cache/`, `models/`, `logs/`, new targets
+and `community/` inside, as before. An earlier version kept them in the installation folder: at the first start after
+the update the GUI asks whether to move yours into your personal folder (items that may belong to another account in
+a question of their own), and the CLI names `llm-cli config take-over`, which does the same at any time. Nothing is
+overwritten or deleted.
 
 The installers create no data folders of their own.
 

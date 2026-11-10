@@ -413,11 +413,20 @@ Befehl `llm-cli`. Die Beispiele in dieser README verwenden `llm-cli`.
 |---|---|
 | Programm und Python-Umgebung | Linux: `/opt/llm-cross-compiler-framework` · Windows: `C:\Program Files\LLM-Cross-Compiler-Framework` |
 | Fertige Modelle | Der Ausgabeordner `~/llmcf/output` (Windows: `%USERPROFILE%\llmcf\output`), einmal festgelegt mit **File > Output Folder...** oder `llm-cli config output-folder`; in der GUI öffnet sich dort für jeden fertigen Build ein Speichern-Dialog |
-| Noch nicht gespeicherte Builds, Cache, heruntergeladene Modelle | `output/` (der Build-Ordner des Frameworks; frühere Builds bleiben dort und werden weiter aufgelistet), `cache/` und `models/` im Installationsordner, wenn dein Benutzer dort schreiben darf (Linux), sonst im persönlichen Ordner unten (Windows: `%USERPROFILE%\.llm-framework\output` und so weiter); sie entstehen, wenn sie zum ersten Mal gebraucht werden. Die Einstellungen `build_dir`, `cache_dir` und `models_dir` legen andere Ordner fest |
-| Einstellungen (`config.yml`) | `configs/` im Installationsordner, wenn dein Benutzer dort schreiben darf, sonst der persönliche Ordner unten; `LLM_FRAMEWORK_CONFIG_DIR` legt einen anderen Ordner fest |
+| Noch nicht gespeicherte Builds, Cache, heruntergeladene Modelle, Kalibrierungsdatensätze, Logs | `output/` (der Build-Ordner des Frameworks; frühere Builds bleiben dort und werden weiter aufgelistet), `cache/`, `models/`, `datasets/` und `logs/` im persönlichen Ordner unten (Windows: `%USERPROFILE%\.llm-framework\output` und so weiter); sie entstehen, wenn sie zum ersten Mal gebraucht werden. Die Einstellungen `build_dir`, `cache_dir`, `models_dir`, `datasets_dir` und `logs_dir` legen andere Ordner fest |
+| Deine eigenen Targets und installierten Community-Packs | `targets/` (Modul-Assistent, `llm-cli module create`, Ditto, KI-Apps, Target-Packs; gelesen nach den Targets, die das Framework mitliefert) und `community/` (Packs für Rezepte, Wissen und Bausteine, deine eigenen Bausteine) im persönlichen Ordner unten; die Einstellung `user_targets_dir` legt einen anderen Target-Ordner fest |
+| Einstellungen (`config.yml`) | Der persönliche Ordner unten; `LLM_FRAMEWORK_CONFIG_DIR` legt einen anderen Ordner fest |
 | Persönlicher Zustand: Tool-Berechtigungen, Audit-Log, SSH-Schlüssel und bekannte Geräte, MCP-Token, Chatverlauf, Eingabeverlauf, Wissensbasis, lokaler Modellserver, zwischengespeicherter Community-Index | `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`); `LLM_FRAMEWORK_HOME` legt einen anderen Ordner fest |
 | API-Schlüssel und Tokens | verschlüsselt in `~/.llm-framework/secrets.store`; der Schlüssel dafür liegt im Schlüsselbund deines Betriebssystems oder dort, wo du es mit der Einstellung `secret_storage` festlegst |
 | Modelle für Dittos Offline-Modus | `ditto/` im Modellordner oben (`LLM_FRAMEWORK_MODELS_DIR` legt einen anderen Ordner fest) |
+
+Den Installationsordner teilen sich alle, die llmcf auf dem Rechner nutzen, und das Framework schreibt im Betrieb nie
+hinein: Alles in der Tabelle außer dem Programm gehört dir allein. Nur ein Git-Checkout, in den dein Benutzer schreiben
+darf und der direkt gestartet wird (die Arbeitskopie einer Entwicklerin oder eines Entwicklers), behält `configs/`,
+`output/`, `cache/`, `models/`, `logs/`, neue Targets und `community/` wie bisher in sich. Eine frühere Version hat sie
+im Installationsordner abgelegt: Beim ersten Start nach dem Update fragt die GUI, ob deine in deinen persönlichen Ordner
+verschoben werden sollen (Dinge, die vielleicht einem anderen Konto gehören, in einer eigenen Frage), und die CLI nennt
+`llm-cli config take-over`, das jederzeit dasselbe tut. Nichts wird überschrieben oder gelöscht.
 
 Die Installer legen keine eigenen Datenordner an.
 

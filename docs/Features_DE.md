@@ -2754,7 +2754,7 @@ wurde.
   einen hinzugefügten Ordner: Zeigt eine Einstellung auf `/`, dein Home oder einen Ordner, der den persönlichen
   Ordner enthält, ist ihr Label nicht nutzbar. Die Datei muss in ihrem Ordner liegen (Links werden verfolgt und
   geprüft) und außerhalb jedes gesperrten Ordners: des persönlichen Ordners des Frameworks (außer den Datenordnern,
-  die eine schreibgeschützte Installation dort hält), `~/.ssh`, `~/.gnupg` (und `GNUPGHOME`), `~/.config` (und
+  die eine installierte Kopie dort hält), `~/.ssh`, `~/.gnupg` (und `GNUPGHOME`), `~/.config` (und
   `XDG_CONFIG_HOME`), Schlüsselbunde, `~/.password-store`, `~/.netrc`, `~/.git-credentials`, `~/.docker`, `~/.aws`,
   `~/.kube`, der eigenen Anmeldungen und Einstellungen der KI-Clients (`~/.claude`, `~/.claude.json`, `~/.codex`,
   `~/.gemini`, `~/.cursor`), des Hugging-Face-Ordners mit seinen Token-Dateien (sein Unterordner `hub` lässt sich

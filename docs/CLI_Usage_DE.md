@@ -169,6 +169,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `config set framework_mode` | Dein Framework-Modus: privat (Standard) oder enterprise (auf einem Board nur OpenSSH mit sudo) |
 | `config set default_enable_imatrix` | Build-Vorgaben: die Importance Matrix, die Kalibrier-Textdatei und die Sprachen des mitgelieferten Texts |
 | `config output-folder` | Den Ausgabeordner zeigen oder festlegen, in dem fertige Modelle gespeichert werden |
+| `config take-over` | Was eine frühere Version im Installationsordner abgelegt hat, in deine eigenen Ordner verschieben |
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
 | `zoo install` / `zoo verify` | Ein Community-Paket nach Prüfungen und deiner Bestätigung installieren / installierte Pakete oder eine Paketdatei prüfen |
 | `zoo uninstall` | Ein installiertes Paket nach der genauen Liste und deiner Bestätigung deinstallieren („Nein“ als Vorgabe) |
@@ -3090,6 +3091,25 @@ llm-cli config output-folder /mnt/models/llmcf
 
 In der GUI: **Datei > Output Folder...** (auch in **Datei > Einstellungen…** angeboten).
 
+### config take-over
+
+```
+llm-cli config take-over [--yes] [--others]
+```
+
+Den Installationsordner teilen sich alle, die llmcf auf dem Rechner nutzen, und das Framework schreibt im Betrieb nicht
+mehr hinein (nur ein Git-Checkout, in den dein Benutzer schreiben darf, behält seine Daten in sich). Eine frühere
+Version hat dort deine Einstellungen und den alten Tresor (`configs/`), `output/`, `cache/`, `models/`, `datasets/`,
+`logs/`, Targets, die du angelegt oder installiert hast, und `community/` abgelegt. Der Befehl listet jedes davon mit
+dem Ort, an den es in deinen eigenen Ordnern kommt (`~/.llm-framework` mit seinen `targets/` und `community/`, oder
+der Ordner, den eine Einstellung nennt), und verschiebt sie nach deinem Ja; `--yes` verschiebt sie ohne Frage. Dinge,
+die einem anderen Konto des Rechners gehören oder deren Besitzer das System nicht nennt (Windows), werden getrennt
+aufgelistet und nur mit `--others` verschoben (an einem Terminal noch einmal gefragt). Nichts wird überschrieben: Hast
+du einen Namen schon, kommt die Kopie aus der Installation nach `from-installation/` in deinem persönlichen Ordner.
+Nichts wird gelöscht: Jedes Ding wird zuerst kopiert, und das Original bleibt, wenn dein Konto die Installation nicht
+ändern darf (ein Administrator kann es entfernen). Der erste Befehl nach dem Update nennt diesen Befehl einmal; die
+GUI stellt dieselbe Frage bei ihrem ersten Start, und ein Nein dort wird nicht noch einmal gefragt.
+
 ### config repos
 
 ```
@@ -3357,7 +3377,7 @@ target my-board 1.0.0 by <author> (licence MIT)
 Trust: community
 Source: https://<address of the pack>
 Files: 14 (48213 bytes)
-Installs to: /opt/llm-cross-compiler-framework/targets/my-board
+Installs to: ~/.llm-framework/targets/my-board
 Note: signed by author key 0123456789abcdef (first pack seen from this author)
 ```
 

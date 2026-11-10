@@ -2485,7 +2485,7 @@ with the token's standing approvals, Back to read only). A token is shown once, 
   The models and datasets folders follow the same limits as an added folder: when a setting points at `/`, your
   home folder or a folder that holds the per-user folder, its label cannot be used. The file must lie inside its
   folder (links are followed and checked) and outside every denied folder: the framework's per-user folder (except
-  the data folders a read-only installation keeps there), `~/.ssh`, `~/.gnupg` (and `GNUPGHOME`), `~/.config` (and
+  the data folders an installed copy keeps there), `~/.ssh`, `~/.gnupg` (and `GNUPGHOME`), `~/.config` (and
   `XDG_CONFIG_HOME`), keyrings and keychains, `~/.password-store`, `~/.netrc`, `~/.git-credentials`, `~/.docker`,
   `~/.aws`, `~/.kube`, the AI clients' own sign-ins and settings (`~/.claude`, `~/.claude.json`, `~/.codex`,
   `~/.gemini`, `~/.cursor`), the Hugging Face home folder with its token files (its `hub` subfolder may be added

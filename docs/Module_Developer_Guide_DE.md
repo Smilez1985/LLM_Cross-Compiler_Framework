@@ -153,7 +153,8 @@ Jeder Wert landet in einem Dockerfile, in YAML oder in einem Shell-Skript; desha
 Vorlage ausgefüllt wird:
 
 - **Name:** 1 bis 64 Buchstaben, Ziffern, Leerzeichen, `_`, `.` oder `-`, beginnend mit Buchstabe oder Ziffer. Der
-  Ordnername ist der kleingeschriebene Name mit Unterstrichen (aus `My Board` wird `targets/my_board/`).
+  Ordnername ist der kleingeschriebene Name mit Unterstrichen (aus `My Board` wird `my_board/` in deinem Target-Ordner:
+  `~/.llm-framework/targets/` bei einem installierten Framework, `targets/` in einem Entwickler-Checkout).
 - **Architektur:** eine von `aarch64`, `x86_64`, `armv7l`, `riscv64`.
 - **Basis-Image:** muss per Digest festgelegt sein (`image@sha256:...`), außer es beginnt mit `debian:`, `ubuntu:`,
   `rocm/dev-ubuntu-`, `rocm/rocm-terminal:` oder `python:`. Die vorgebauten CUDA-Images von NVIDIA sind nicht

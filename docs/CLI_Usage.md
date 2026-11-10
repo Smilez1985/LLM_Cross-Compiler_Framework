@@ -166,6 +166,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `config local-network` | What offline mode counts as local, and what you count as local yourself (a VPN, a host, an address range) |
 | `config doorbell` | Your MQTT broker for the build doorbell, and a test doorbell |
 | `config output-folder` | Show or set the output folder finished models are saved to |
+| `config take-over` | Move what an earlier version kept in the installation folder into your own folders |
 | `config set framework_mode` | Your framework mode: private (the default) or enterprise (only OpenSSH with sudo on a board) |
 | `config set default_enable_imatrix` | Build defaults: the importance matrix, the calibration text file and the shipped text's languages |
 | `zoo list` / `zoo show` | List the community zoo and the installed packs / show one entry |
@@ -2949,6 +2950,24 @@ llm-cli config output-folder /mnt/models/llmcf
 
 In the GUI: **File > Output Folder...** (also offered in **File > Settings...**).
 
+### config take-over
+
+```
+llm-cli config take-over [--yes] [--others]
+```
+
+The installation folder is shared by everyone who uses llmcf on the computer, and the framework no longer writes into
+it while it runs (only a git checkout your user can write to keeps its data inside). An earlier version kept your
+settings and the old vault (`configs/`), `output/`, `cache/`, `models/`, `datasets/`, `logs/`, targets you made or
+installed and `community/` there. The command lists each with the place it goes to in your own folders
+(`~/.llm-framework` and its `targets/` and `community/`, or the folder a setting names) and moves them after your yes;
+`--yes` moves them without asking. Items owned by another account of the computer, or whose owner the system does not
+say (Windows), are listed apart and moved only with `--others` (asked again at a terminal). Nothing is overwritten: a
+name you already have gets the installation's copy in `from-installation/` in your personal folder. Nothing is deleted:
+each item is copied first, and the original stays when the installation cannot be changed by your account (an
+administrator may remove it). The first command after the update names this command once; the GUI asks the same
+question at its first start, and a no there is not asked again.
+
 ### config repos
 
 ```
@@ -3201,7 +3220,7 @@ target my-board 1.0.0 by <author> (licence MIT)
 Trust: community
 Source: https://<address of the pack>
 Files: 14 (48213 bytes)
-Installs to: /opt/llm-cross-compiler-framework/targets/my-board
+Installs to: ~/.llm-framework/targets/my-board
 Note: signed by author key 0123456789abcdef (first pack seen from this author)
 ```
 

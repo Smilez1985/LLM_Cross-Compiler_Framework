@@ -149,7 +149,8 @@ There are three ways; all of them end in the same module generator (`orchestrato
 Every value ends up in a Dockerfile, YAML or a shell script, so it is checked before any template is filled in:
 
 - **Name:** 1 to 64 letters, digits, spaces, `_`, `.` or `-`, starting with a letter or digit. The folder name is
-  the lower-case name with underscores (`My Board` becomes `targets/my_board/`).
+  the lower-case name with underscores (`My Board` becomes `my_board/` in your targets folder: `~/.llm-framework/targets/`
+  for an installed framework, `targets/` in a developer checkout).
 - **Architecture:** one of `aarch64`, `x86_64`, `armv7l`, `riscv64`.
 - **Base image:** must be pinned by digest (`image@sha256:...`) unless it starts with `debian:`, `ubuntu:`,
   `rocm/dev-ubuntu-`, `rocm/rocm-terminal:` or `python:`. NVIDIA's prebuilt CUDA images are not exempt: for the GPU
