@@ -127,6 +127,12 @@ class BuildRequest:
     # The memory estimate before the build (BuildService.memory_estimate, MemoryEstimate.as_dict): handed to the build
     # engine, which records it next to the real file size and counts its KV cache in the warning after the build
     memory_estimate: Optional[Dict[str, Any]] = None
+    # A tuning run (Core/tuning.py TuningPlan.as_dict, BuildService.start_tuning): its one job runs the tuning job
+    # instead of the build job and goes to <output>/<target>/<model>/tuning
+    tuning: Optional[Dict[str, Any]] = None
+    # A build of a tuning run's chosen type (BuildService.build_tuned): the run and its measured KLD, recorded in
+    # build_info.json ("tuning")
+    tuned: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if not self.request_id:
@@ -618,6 +624,8 @@ class LLMOrchestrator:
             module_flags=getattr(req, "flag_decision", None),
             recipe=dict(req.recipe) if getattr(req, "recipe", None) else None,
             memory_estimate=dict(req.memory_estimate) if getattr(req, "memory_estimate", None) else None,
+            tuning=dict(req.tuning) if getattr(req, "tuning", None) else None,
+            tuned=dict(req.tuned) if getattr(req, "tuned", None) else None,
         )
 
     @staticmethod
@@ -850,7 +858,10 @@ class LLMOrchestrator:
                             base = Path(self.build_engine.base_dir) / base
                         # the repo id's or the local folder's last part, at '/' and '\\' (a Windows path)
                         out_dir = base / target / last_part(model)
-                        if q: out_dir = out_dir / q
+                        if getattr(req, "tuning", None):
+                            out_dir = out_dir / "tuning"   # a tuning run: its report, no model
+                        elif q:
+                            out_dir = out_dir / q
                         
                         job = BuildJob(
                             job_id=job_id,

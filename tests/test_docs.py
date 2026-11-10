@@ -59,6 +59,7 @@ EXPECTED_PAIRS: List[Tuple[str, str]] = [
     ("docs/recherche/Rotation.md", "docs/recherche/Rotation_DE.md"),
     ("configs/SSOT_ARCHITECTURE.md", "configs/SSOT_ARCHITECTURE_DE.md"),
     ("data/calibration/README.md", "data/calibration/README_DE.md"),
+    ("data/evaluation/README.md", "data/evaluation/README_DE.md"),
 ]
 
 # Documents that were replaced by the pairs above. They must not come back next to their replacements.

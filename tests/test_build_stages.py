@@ -581,6 +581,9 @@ FOR_THE_TIME_RULE = {"STAGE_RESTART_LIMIT"}
 # the runner; STAGES is the runner's own list, which it extends in a run by hand (the rotate slot).
 FOR_THE_RUNTIME_LAYER = {"LLMCF_END_DIR", "LLMCF_MODULES_DIR", "LLMCF_STAGES", "LLMCF_TARGET_LABEL", "STAGE_ISOLATION",
                          "LLMCF_IMAGE_PATH", "LLMCF_LAYER", "STAGES"}
+# The tuning job's values (builder.py _execute_tuning, Core/tuning.py): the runner reads them as the inputs of the stage
+# tune (the layer's tune.sh, which reads them too); a build job has none of them
+FOR_THE_TUNING = {"TUNE_REFERENCE", "TUNE_CANDIDATES", "TUNE_CHUNKS", "TUNE_CTX", "TUNE_TEXT"}
 # What the runner hands its stages (the runtime layer's runner.sh): not read from the build container's environment. STAGE_LAST (the last
 # stage of this run), CONVERT_OUTPUT (the --output option) and PACKAGE_REQUESTED (the --package option) are set by
 # the runner itself, never from outside.
@@ -657,7 +660,7 @@ def stage_scripts(modules: Path):
 def test_the_build_reads_the_same_environment_variables():
     reads = environment_reads(stage_scripts(ROCKCHIP / "modules"))
     assert reads - NEW_FOR_THE_STAGE_RUNNER - ONLY_ON_REQUEST - FOR_THE_MODULE_FLAGS - FOR_THE_TIME_RULE \
-        - FOR_THE_RUNTIME_LAYER == READ_TODAY
+        - FOR_THE_RUNTIME_LAYER - FOR_THE_TUNING == READ_TODAY
 
 
 # ---------------------------------------------------------------------------------------------------------------

@@ -58,7 +58,7 @@ from orchestrator.utils.next_steps import WithSteps
 from orchestrator.utils.modes import READ_ONLY, READ_RUN_ONLY, SHARED_READ, SHARED_RUN
 
 SHIPPED_DIR = Path(__file__).resolve().parents[1] / "runtime_layer"
-SCRIPTS = ("tools.sh", "entrypoint.sh", "runner.sh", "stage_user.sh", "stage_env.sh", "cleanup.sh")
+SCRIPTS = ("tools.sh", "entrypoint.sh", "runner.sh", "stage_user.sh", "stage_env.sh", "cleanup.sh", "tune.sh")
 TOOLS = ("busybox", "setpriv")
 MANIFEST_NAME = "MANIFEST.sha256"
 TOOLBOX_RECORD = "toolbox.json"
@@ -201,7 +201,9 @@ MODULE_NAME = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 OWN_RUNNER_FILES = ("build.sh", "stage_user.sh")
 # Module names a slot may never take: benchmark_module.sh measures the build host's CPU, never a build's step (a model
 # for a board is measured on the board), and the runner's own words
-RESERVED_MODULES = ("benchmark",)
+RESERVED_MODULES = ("benchmark", "tune")
+# The last stage of the tuning job (Core/tuning.py): the runtime layer's tune.sh, never a target module
+TUNE_STAGE = "tune"
 
 
 class ToolboxMissing(RuntimeError):
@@ -849,7 +851,8 @@ def stage_order(target_dir: Path, job: str = "build") -> Tuple[List[str], List[s
     """(stages, problems) of a target: the four stages with the modules its target.yml declares in the fixed slots
     (stages: before_convert, between_convert_and_target, after_target), each a valid module name whose file
     modules/<name>_module.sh exists. A target without the block keeps the rotate slot as before (rotate_module.sh
-    when it is there). The imatrix job runs the stages up to convert."""
+    when it is there). The imatrix job runs the stages up to convert; the tune job those and then the stage tune (the
+    layer's tune.sh)."""
     import yaml
     target_dir = Path(target_dir)
     modules = target_dir / "modules"
@@ -876,6 +879,9 @@ def stage_order(target_dir: Path, job: str = "build") -> Tuple[List[str], List[s
                 if not MODULE_NAME.fullmatch(name) or name in FOUR_STAGES:
                     problems.append(f"target.yml: '{name}' in the slot {key} is not a valid module name (lower case "
                                     "letters, digits and _, not one of the four stages).")
+                elif name == TUNE_STAGE:
+                    problems.append(f"target.yml: '{name}' in the slot {key} is not allowed: the stage tune is the "
+                                    "framework's own (the tuning job's measurement, the runtime layer's tune.sh).")
                 elif name in RESERVED_MODULES:
                     problems.append(f"target.yml: '{name}' in the slot {key} is not allowed: benchmark_module.sh never "
                                     "runs in a build (it would measure this build computer; a model for a board is "
@@ -888,7 +894,9 @@ def stage_order(target_dir: Path, job: str = "build") -> Tuple[List[str], List[s
                 else:
                     slots[key].append(name)
     stages = ["source", "config", *slots["before_convert"], "convert"]
-    if job != "imatrix":
+    if job == TUNE_STAGE:
+        stages.append(TUNE_STAGE)   # the convert stage's F16 measured by the layer's tune.sh
+    elif job != "imatrix":
         stages += [*slots["between_convert_and_target"], "target", *slots["after_target"]]
     return stages, problems
 
@@ -914,7 +922,7 @@ def own_runner_note(target_dir: Path) -> Optional[str]:
 
 __all__ = ["BUILD_SOURCES", "BUILDER_BASE", "CLEANUP_ENTRYPOINT", "DEFAULT_TOOLBOX_WAY", "END_MOUNT",
            "END_PROTECTED", "END_UNPROTECTED", "ENTRYPOINT", "FOUR_STAGES", "LAYER_MOUNT", "LayerCheck",
-           "LayerRefused", "MODULES_IN_IMAGE", "OFFLINE_REFUSAL", "OWN_RUNNER_NOTE", "PREBUILT", "RESERVED_MODULES", "RESTORE_STEP", "RESTORE_WAY",
+           "LayerRefused", "MODULES_IN_IMAGE", "TUNE_STAGE", "OFFLINE_REFUSAL", "OWN_RUNNER_NOTE", "PREBUILT", "RESERVED_MODULES", "RESTORE_STEP", "RESTORE_WAY",
            "SCRIPTS", "SHIPPED_DIR", "SLOTS", "TOOLBOX_WAYS", "TOOLS", "ToolboxMissing", "VERDICTS", "VERDICT_TEXT",
            "assemble", "builder_context", "end_folder", "layer_status", "read_prebuilt", "set_toolbox_way", "cache_dir_of",
            "PREBUILT_TABLE", "TOOLBOX_SETTING", "ToolboxWayError", "end_folder_state", "ensure_toolbox", "extract_prebuilt",

@@ -662,6 +662,8 @@ class BuildService:
 
         items = []
         for aid, label, info in self._artifacts():
+            if info.get("kind") == "tuning":   # a tuning run's report, no model (tuning_reports lists them)
+                continue
             if target and str(info.get("target") or "").lower() != target.lower():
                 continue
             if format and str(info.get("format") or "").lower() != format.lower():
@@ -1812,7 +1814,8 @@ class BuildService:
                     remember_flags: bool = False, flag_channel: str = "", ignore_preflight: bool = False,
                     preflight_accepted: Optional[List[str]] = None,
                     recipe: Optional[Dict[str, Any]] = None,
-                    memory_estimate: Optional[Dict[str, Any]] = None) -> BuildHandle:
+                    memory_estimate: Optional[Dict[str, Any]] = None,
+                    tuned: Optional[Dict[str, Any]] = None) -> BuildHandle:
         """Validates and queues a build: the one build-submission path of the CLI, the GUI and AI callers. `owner` is
         the tool caller that starts it (ToolContext.owner; empty for the person's own CLI and GUI, whose builds the
         queue limit for tool callers never refuses); `disk_reservation` the reservation an AI caller's accepted build
@@ -1829,7 +1832,8 @@ class BuildService:
         the start question (`preflight_accepted`). `recipe`: start_recipe's recipe record (recipe_record), which the
         build engine compares the result with; a warning names a target whose files are not the recipe's.
         `memory_estimate`: the estimate the caller showed before the build (MemoryEstimate.as_dict); without one it is
-        made here from what is on this computer (no look-up). It is recorded with the build, never a refusal."""
+        made here from what is on this computer (no look-up). It is recorded with the build, never a refusal.
+        `tuned`: the tuning run this build's type comes from (build_tuned), recorded in build_info.json."""
         try:
             level = OptimizationLevel(str(optimization).lower()) if optimization else None
         except ValueError:
@@ -1877,6 +1881,7 @@ class BuildService:
             preflight_notes=notes,
             recipe=dict(recipe) if recipe else None,
             memory_estimate=dict(memory_estimate) if isinstance(memory_estimate, dict) else None,
+            tuned=dict(tuned) if tuned else None,
         )
         if disk_reservation:
             self._orchestrator.disk_ledger = self.disk_ledger()
@@ -1884,6 +1889,187 @@ class BuildService:
         self.logger.info(f"Build request {handle.request_id} submitted ({req.model} -> {req.target}/{req.format}/"
                          f"{req.quantization})")
         return handle
+
+    # --- Auto-Tuning (Core/tuning.py): a tuning run is one build of this service ------------------------------------
+
+    @staticmethod
+    def _host_ram_mib() -> Optional[float]:
+        try:
+            import psutil
+            return psutil.virtual_memory().total / (1024 * 1024)
+        except Exception:  # noqa: BLE001 - an unknown memory: the F16 reference
+            return None
+
+    def plan_tuning(self, request: BuildRequestIn, *, types: Optional[List[str]] = None, imatrix: str = "auto",
+                    chunks: int = 0, ctx: int = 0, local_paths: bool = False, look_up_hub: bool = True):
+        """(TuningPlan, the checked request) of a tuning run: the request checked like a build's (gguf; target,
+        board and probe resolved), the candidates (tuning.plan_candidates: the board profile's types that fit by the
+        memory estimate, plus `types`, the person's own, whatever their estimate), the reference (F16, or Q8_0 when
+        the F16 does not fit into this computer's memory) and the disk the run needs. TuningError or BuildServiceError
+        when it cannot be planned; nothing is started."""
+        from orchestrator.Core import memory_estimate as me
+        from orchestrator.Core import tuning
+        from orchestrator.Core.board_profiles import board_memory
+        from orchestrator.utils.evaluation_text import build_evaluation_text
+        chunks, ctx = int(chunks or tuning.CHUNKS_DEFAULT), int(ctx or tuning.CTX_DEFAULT)
+        tuning.check_limits(chunks, ctx)
+        if str(request.format or "gguf").strip().lower() != "gguf":
+            raise tuning.TuningError("Auto-Tuning measures GGUF models (llama.cpp's KL divergence); RKLLM and RKNN "
+                                     "are measured on the board.")
+        build_evaluation_text()   # the shipped text is whole, or the run is refused before anything is fetched
+        base = request.model_copy(update={"format": "gguf", "quantization": None, "use_imatrix": None})
+        req, inputs = self._validated(base, local_paths)
+        caps = self._targets().get_capabilities(req.target) if local_paths else self.capabilities(req.target)
+        cap = (getattr(caps, "formats", None) or {}).get("gguf") if caps is not None else None
+        offered = list((cap.board_quantizations.get(req.board) if cap is not None and req.board else None)
+                       or (cap.quantizations if cap is not None else tuning.DEFAULT_TYPES))
+        profile = self.board_profile(req.target, req.board) if req.board else None
+        recommended = list(getattr(profile, "recommended_quantization", None) or [])
+        pin = getattr(inputs, "model", None)
+        try:
+            shape = self.model_shape(req.model, req.revision, model_path=Path(pin.path) if pin is not None else None,
+                                     look_up_hub=look_up_hub)
+        except Exception:  # noqa: BLE001 - an unknown shape: unknown estimates, said as such
+            shape = None
+        try:
+            _pid, probe = self._board_probe(req.probe, req.board, caps, req.target)
+        except Exception:  # noqa: BLE001 - no probe: the board's most memory
+            probe = None
+        ram, source = board_memory(probe, caps, req.board)
+
+        def estimate_for(quant: str, with_matrix: bool):
+            if not req.board:
+                return None
+            return me.estimate(shape, quant, board=req.board, ram_mib=ram, ram_source=source,
+                               ctx=req.max_context_length, imatrix=with_matrix)
+
+        candidates, notes = tuning.plan_candidates(
+            offered=offered, recommended=recommended, yours=list(types or []), estimate_for=estimate_for,
+            reads_imatrix=lambda q: self._imatrix_of(None, "gguf", q, caps), imatrix=imatrix)
+        f16 = me.weights_bytes(shape, "F16")[0] if shape is not None else None
+        reference, why = tuning.reference_type(f16, self._host_ram_mib())
+        largest = max((int(c.estimate.get("weights_bytes") or 0) for c in candidates), default=0)
+        disk = tuning.disk_need(f16_bytes=int(f16 or 0), reference=reference, vocab=getattr(shape, "vocab", None),
+                                chunks=chunks, ctx=ctx, largest_candidate=largest or int((f16 or 0) * 0.6))
+        if f16 is None:
+            notes.append("The model's size is not known before the download, so the disk need counts only the "
+                         "evaluation's logits.")
+        plan = tuning.TuningPlan(candidates=candidates, reference=reference, reference_reason=why, chunks=chunks,
+                                 ctx=ctx, imatrix=imatrix, disk_bytes=disk, vocab=getattr(shape, "vocab", None),
+                                 notes=notes, model=req.model if pin is None else str(pin.ref), board=req.board or "",
+                                 target=req.target)
+        if plan.uses_imatrix:   # the calibration text of the importance matrix, as a build resolves it
+            req = self._validated(base.model_copy(update={"use_imatrix": True}), local_paths)[0]
+        else:
+            req = req.model_copy(update={"use_imatrix": False, "dataset_path": ""})
+        return plan, req
+
+    def tuning_disk_needs(self, plan) -> list:
+        """What a tuning run lands where (disk_plan.DiskNeed): its work in the build cache."""
+        from orchestrator.Core import disk_plan
+        from orchestrator.Core.build_plan import folder
+        return [disk_plan.DiskNeed("cache", folder(self.framework, "cache_dir", "cache"), int(plan.disk_bytes),
+                                   f"tuning: F16, reference, logits and one candidate {disk_plan.gb(plan.disk_bytes)}")]
+
+    def start_tuning(self, request: BuildRequestIn, *, types: Optional[List[str]] = None, imatrix: str = "auto",
+                     chunks: int = 0, ctx: int = 0, local_paths: bool = False, owner: str = "",
+                     plan: Any = None, priority: Any = "normal", ignore_preflight: bool = False,
+                     preflight_accepted: Optional[List[str]] = None) -> BuildHandle:
+        """Queues a tuning run: one build of this service (the queue, the disk reservation, Cancel, the build history
+        and the continuation of an interrupted build are the build's) whose job is the tuning job. `plan`: the plan
+        the person or the AI's question was shown (plan_tuning), else made now. The disk the run needs is checked by
+        the disk rule and reserved under `owner` (released when the request ends)."""
+        from orchestrator.Core import disk_plan
+        if plan is None:
+            plan, req = self.plan_tuning(request, types=types, imatrix=imatrix, chunks=chunks, ctx=ctx,
+                                         local_paths=local_paths, look_up_hub=True)
+        else:
+            req = self._validated(request.model_copy(update={"format": "gguf", "quantization": None,
+                                                             "use_imatrix": bool(plan.uses_imatrix)}),
+                                  local_paths)[0]
+        notes = self._preflight_gate(req.target, "gguf", req.board, req.probe, req.use_gpu, local_paths=local_paths,
+                                     ignore=ignore_preflight, accepted=preflight_accepted)
+        reservation = ""
+        ledger = self.disk_ledger()
+        needs = self.tuning_disk_needs(plan)
+        if ledger is not None:
+            reservation, _ = ledger.reserve(needs, owner or "person", f"tuning of {plan.model}",
+                                            disk_usage=self.disk_usage)
+        else:
+            disk_plan.require(disk_plan.check_disk(needs, disk_usage=self.disk_usage), "this tuning run")
+        _req, inputs = self._validated(req, local_paths)
+        build_request = BuildRequest(
+            request_id="", workflow_type=WorkflowType.SIMPLE_CONVERSION, priority=self._priority(priority),
+            models=[req.model], model_revision=req.revision, targets=[req.target],
+            target_formats=[ModelFormat.GGUF], optimization_level=OptimizationLevel(self.optimization_for(req)),
+            quantization_options=[], parallel_builds=False, output_base_dir=str(self._output_dir()),
+            description=f"Auto-Tuning of {plan.model}", use_gpu=False, use_imatrix=bool(plan.uses_imatrix),
+            dataset_path=req.dataset_path or None, target_board=req.board, hardware_probe=req.probe,
+            max_context_length=req.max_context_length, local_inputs=inputs, owner=owner,
+            disk_reservation=reservation, preflight_notes=notes, tuning=plan.as_dict())
+        if reservation:
+            self._orchestrator.disk_ledger = self.disk_ledger()
+        try:
+            handle = self._submit(build_request)
+        except BaseException:
+            if reservation and ledger is not None:
+                ledger.release(reservation)
+            raise
+        self.logger.info(f"Tuning request {handle.request_id} submitted ({plan.model} -> {req.target}/{req.board}: "
+                         f"{', '.join(c.label for c in plan.candidates)})")
+        return handle
+
+    def tuning_reports(self) -> List[Dict[str, Any]]:
+        """The finished tuning runs, newest first: {id, label, report} with the measured board speeds merged in
+        (tuning.with_speed over the board tests of their target's builds). A report that cannot be read is left out."""
+        from orchestrator.Core import tuning
+        out = []
+        for aid, label, info in self._artifacts():
+            if info.get("kind") != tuning.KIND:
+                continue
+            try:
+                report = tuning.load_report(Path(str(info.get("path"))) / tuning.REPORT_FILE)
+            except (OSError, ValueError, TypeError):
+                continue
+            out.append({"id": aid, "label": label, "report": report})
+        speeds: Dict[str, list] = {}
+        for item in out:
+            target = str(item["report"].get("target") or "")
+            if target not in speeds:
+                speeds[target] = self.measured_benchmarks(target) if target else []
+            item["report"] = tuning.with_speed(item["report"], speeds[target])
+        out.sort(key=lambda item: str(item["report"].get("created") or ""), reverse=True)
+        return out
+
+    def tuning_report(self, run: str) -> Dict[str, Any]:
+        """One finished tuning run by its id (a_...), its label or "latest". BuildServiceError (unknown_id)."""
+        reports = self.tuning_reports()
+        if run in ("", "latest") and reports:
+            return reports[0]
+        found = next((r for r in reports if run in (r["id"], r["label"], r["label"].split(":", 1)[-1])), None)
+        if found is None:
+            raise BuildServiceError(f"Unknown tuning run '{run}'.", code="unknown_id",
+                                    next="list the tuning runs ('llm-cli build tune list', get_tuning_report without "
+                                         "a run) and use one of their ids.")
+        return found
+
+    def build_tuned(self, run: str, label: Optional[str] = None, *, local_paths: bool = False, owner: str = "",
+                    **kwargs: Any) -> BuildHandle:
+        """Starts the normal build of a tuning run's recommended candidate (or `label`, any measured one): its type and
+        importance-matrix choice, the run's model, target and board; the build records the run in build_info.json."""
+        from orchestrator.Core import tuning
+        found = self.tuning_report(run)
+        report = found["report"]
+        quant, with_matrix = tuning.build_choice(report, label)
+        row = next(r for r in report.get("candidates") or [] if r.get("quantization") == quant
+                   and bool(r.get("imatrix")) == with_matrix)
+        request = BuildRequestIn(model=str(report.get("model")), target=str(report.get("target")), format="gguf",
+                                 board=report.get("board") or None, quantization=quant, use_imatrix=with_matrix)
+        return self.start_build(request, local_paths=local_paths, owner=owner,
+                                description=f"Build tuned by {found['id']}", tuned={
+                                    "run": found["id"], "label": row.get("label"), "kld": row.get("kld"),
+                                    "top1": row.get("top1"), "reference": (report.get("reference") or {}).get("type")},
+                                **kwargs)
 
     def _submit(self, build_request: BuildRequest) -> BuildHandle:
         """Queues a build request on the orchestrator: the one submission of start_build and continue_interrupted, so

@@ -11,7 +11,8 @@
 # LLMCF_STAGES, from target.yml (orchestrator/Core/runtime_layer.py stage_order): the four stages source, config,
 # convert and target, and the modules a target declares in the fixed slots before convert, between convert and target
 # (the rotate slot) and after target. JOB_TYPE=imatrix (the importance matrix of a GGUF build) runs the stages up to
-# convert. Each module runs as the stage account without any capability (stage_user.sh run_as_stage), with BASH_ENV
+# convert. JOB_TYPE=tune (Auto-Tuning, orchestrator/Core/tuning.py) runs the stages up to convert and then the stage tune,
+# which is this layer's tune.sh (run like a module, as the stage account), never a target module. Each module runs as the stage account without any capability (stage_user.sh run_as_stage), with BASH_ENV
 # set to stage_env.sh (stage_output and the cmake check). benchmark_module.sh never runs in a build.
 #
 # Resume. When a stage has really finished, a marker in $BUILD_SCRATCH_DIR/stages/<job>/ records a digest of its
@@ -37,7 +38,7 @@
 # Cancel. A person's or an AI's Cancel writes the note stages/<job>/cancelled before the framework stops the
 # container: the stage that was running then does not count as a restart of the loop protection.
 #
-# Usage: runner.sh [--job build|imatrix] [--to STAGE] [--fresh] [--input PATH] [--output FILE] [--model-name NAME]
+# Usage: runner.sh [--job build|imatrix|tune] [--to STAGE] [--fresh] [--input PATH] [--output FILE] [--model-name NAME]
 #                  [--quantization TYPE] [--hardware-config FILE] [--package]
 #   --to STAGE   run the stages up to STAGE and stop there
 #   --fresh      run every stage, also the ones a marker says have finished
@@ -75,7 +76,7 @@ TARGET_LABEL="${LLMCF_TARGET_LABEL:-this target}"
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 usage() {
-    echo "Usage: runner.sh [--job build|imatrix] [--to STAGE] [--fresh] [--input PATH] [--output FILE]"
+    echo "Usage: runner.sh [--job build|imatrix|tune] [--to STAGE] [--fresh] [--input PATH] [--output FILE]"
     echo "                 [--model-name NAME] [--quantization TYPE] [--hardware-config FILE] [--package]"
     echo "Runs the stage modules of this target in the order of its target.yml; see the header of runner.sh."
 }
@@ -116,9 +117,10 @@ done
 # --- The stages of this job ---------------------------------------------------------------------------------------
 
 JOB="build"
-if [ "${JOB_OPTION:-${JOB_TYPE:-build}}" = "imatrix" ]; then
-    JOB="imatrix"
-fi
+case "${JOB_OPTION:-${JOB_TYPE:-build}}" in
+    imatrix) JOB="imatrix" ;;
+    tune) JOB="tune" ;;
+esac
 JOB_TYPE="$JOB"
 export JOB_TYPE
 
@@ -139,13 +141,21 @@ else
             STAGES="$STAGES rotate"
         fi
         STAGES="$STAGES target"
+    elif [ "$JOB" = "tune" ]; then
+        STAGES="$STAGES tune"
     fi
 fi
 TOTAL=0
 for name in $STAGES; do
     valid_stage_name "$name" || die "'$name' is not a valid stage module name."
     [ "$name" != benchmark ] || die "benchmark_module.sh never runs in a build (it would measure this build computer)."
-    [ -f "$MODULES_DIR/${name}_module.sh" ] || die "The stage module ${name}_module.sh is missing in $MODULES_DIR."
+    if [ "$name" = tune ]; then
+        # the tuning job's own last stage: the layer's tune.sh, in no other job and never a module of the target
+        [ "$JOB" = tune ] || die "The stage tune runs only in the tuning job."
+        [ -f "$LLMCF_LAYER/tune.sh" ] || die "The runtime layer has no tune.sh."
+    else
+        [ -f "$MODULES_DIR/${name}_module.sh" ] || die "The stage module ${name}_module.sh is missing in $MODULES_DIR."
+    fi
     TOTAL=$((TOTAL + 1))
 done
 [ "$TOTAL" -gt 0 ] || die "This build has no stages."
@@ -284,9 +294,18 @@ inputs_digest() {
     } | sha256sum | cut -d' ' -f1
 }
 
+# The tuning's own values are inputs of the stage tune only: another candidate list measures again without converting
+# the model again (tune.sh keeps every candidate's result and the reference's logits by their own inputs)
+tune_inputs() {
+    printf 'tune=%s %s %s %s %s %s\n' "${TUNE_REFERENCE:-}" "${TUNE_CANDIDATES:-}" "${TUNE_CHUNKS:-}" "${TUNE_CTX:-}" \
+        "$(file_digest "${TUNE_TEXT:-}")" "$(file_digest "$LLMCF_LAYER/tune.sh")" | sha256sum | cut -d' ' -f1
+}
+
 stage_inputs() {  # STAGE: the digest of its inputs; --package is an input of the target stage only
     if [ "$1" = target ] && [ "$PACKAGE_REQUESTED" = 1 ]; then
         echo "$DIGEST+package"
+    elif [ "$1" = tune ] && [ "$JOB" = tune ]; then
+        echo "$DIGEST+$(tune_inputs)"
     else
         echo "$DIGEST"
     fi
@@ -364,6 +383,10 @@ forget_cancelled_start() {
 # host handed the runner alone (its ids, the end folder, the stage order, the target's label) does not reach a module
 HOST_ONLY="-u STAGE_RUNNER_IDS -u LLMCF_END_DIR -u LLMCF_STAGES -u LLMCF_TARGET_LABEL"
 run_module() {
+    if [ "$1" = tune ] && [ "$JOB" = tune ]; then
+        run_tune
+        return
+    fi
     # shellcheck disable=SC2086 # HOST_ONLY is a list of options
     if layer_has_tools; then
         run_as_stage "$BB" env $HOST_ONLY PATH="$LLMCF_IMAGE_PATH" BASH_ENV="$LLMCF_LAYER/stage_env.sh" \
@@ -371,6 +394,16 @@ run_module() {
     else
         run_as_stage env $HOST_ONLY PATH="$LLMCF_IMAGE_PATH" BASH_ENV="$LLMCF_LAYER/stage_env.sh" \
             bash "$MODULES_DIR/${1}_module.sh"
+    fi
+}
+
+# run_tune: the tuning job's stage tune, the layer's tune.sh, as the stage account like a module (the layer's own sh)
+run_tune() {
+    # shellcheck disable=SC2086 # HOST_ONLY is a list of options
+    if layer_has_tools; then
+        run_as_stage "$BB" env $HOST_ONLY PATH="$LLMCF_IMAGE_PATH" "$BB" sh "$LLMCF_LAYER/tune.sh"
+    else
+        run_as_stage env $HOST_ONLY PATH="$LLMCF_IMAGE_PATH" sh "$LLMCF_LAYER/tune.sh"
     fi
 }
 
@@ -458,6 +491,8 @@ if [ "$LAST" -lt "$TOTAL" ]; then
     echo "Stopped after the stage $(stage_at "$LAST") (--to)."
 elif [ "$JOB" = "imatrix" ]; then
     echo "Done (imatrix)."
+elif [ "$JOB" = "tune" ]; then
+    echo "Done (tune)."
 else
     echo "Done."
 fi

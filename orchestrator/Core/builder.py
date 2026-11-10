@@ -272,6 +272,11 @@ class BuildConfiguration:
     # Who started it through a tool (BuildRequest.owner: "mcp#<session>", "ditto"; empty for the GUI and the CLI):
     # an AI-started build stops at the soft cap (_step_limits)
     owner: str = ""
+    # A tuning run (Core/tuning.py TuningPlan.as_dict, made by BuildService.plan_tuning): the job tune runs instead of
+    # the build job, and the run's result is its tuning_report.json, no model (_execute_tuning)
+    tuning: Optional[Dict[str, Any]] = None
+    # A build of a tuning run's chosen type (BuildService.build_tuned): build_info.json "tuning"
+    tuned: Optional[Dict[str, Any]] = None
 
 @dataclass
 class BuildProgress:
@@ -1039,8 +1044,11 @@ class BuildEngine:
                 else:
                     prog.add_warning("IMatrix requested but no dataset found. Skipping IMatrix generation.")
             
-            # 6. Run Build Modules (Main Conversion/Quantization)
-            self._execute_build_modules(config, prog, image, target_path, staged)
+            # 6. Run Build Modules (Main Conversion/Quantization), or the tuning job of a tuning run
+            if config.tuning:
+                self._execute_tuning(config, prog, image, target_path, staged)
+            else:
+                self._execute_build_modules(config, prog, image, target_path, staged)
             
             # 7./8. Artifacts, manifest and golden ZIP are staged next to the output folder. They reach it
             # (and the deployment listings) only once the build can no longer be cancelled.
@@ -2582,6 +2590,71 @@ class BuildEngine:
         if exit_code != 0:
             raise RuntimeError(f"Build script failed with exit code {exit_code}\n{self._log_tail(progress, 'CONT: ')}")
 
+    def _execute_tuning(self, config: BuildConfiguration, progress: BuildProgress, image: Image, target_path: Path,
+                        staged: Tuple[str, Dict[str, Dict[str, str]]]):
+        """The tuning job of a tuning run (Core/tuning.py): the stages up to convert write the F16 into the job's own
+        folder (not the build's output: no model is published), then the runtime layer's tune.sh measures every
+        candidate against the reference's logits on the fixed evaluation text, in the same sandbox as the build job.
+        The results become tuning_report.json in the build's output, which is published like a build's files."""
+        from orchestrator.Core import tuning
+        from orchestrator.Core.build_end import END_RECORD
+        from orchestrator.Core.runtime_layer import end_folder
+        from orchestrator.utils.evaluation_text import text_sha256, write_evaluation_text
+        plan = tuning.TuningPlan.from_dict(config.tuning or {})
+        progress.current_stage = "Tuning"
+        self._enter_stage(progress, BuildStatus.BUILDING)
+        progress.progress_percent = 60
+        progress.add_log(f"Starting the tuning job: {len(plan.candidates)} candidates against the {plan.reference} "
+                         f"reference, {plan.chunks} chunks of {plan.ctx} tokens.")
+        build_temp = self.cache_dir / "builds" / config.build_id
+        tune_out = build_temp / "tune"
+        text_dir = build_temp / "tune-text"
+        ensure_directory(tune_out)
+        text = write_evaluation_text(text_dir / "evaluation.txt")
+        probe_vols, probe_env = self._hardware_probe_mount(config, progress, build_temp)
+        sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp, target_path=target_path, job="tune",
+                                                           progress=progress)
+        vols = {str(tune_out): {"bind": "/build-cache/output", "mode": "rw"},
+                str(text_dir): {"bind": "/build-cache/evaluation", "mode": "ro"}}
+        vols.update(staged[1])
+        vols.update(sandbox_vols)
+        vols.update(probe_vols)
+        env = self._container_env(config, staged[0])
+        env.update(sandbox_env)
+        env.update(probe_env)
+        env.update(plan.env())
+        env["JOB_TYPE"] = "tune"
+        env["TUNE_TEXT"] = "/build-cache/evaluation/evaluation.txt"
+        # The convert stage writes the F16 the candidates are quantized from; a GGUF input is that file already
+        # (the convert stage then only checks it, for a type it accepts)
+        env["QUANTIZATION"] = "Q8_0" if str(staged[0]).lower().endswith(".gguf") else "F16"
+        imatrix_file = build_temp / "imatrix" / "imatrix.dat"
+        if plan.uses_imatrix:
+            if not imatrix_file.exists():
+                raise RuntimeError("The tuning measures types with the importance matrix, but none was computed.")
+            vols[str(build_temp / "imatrix")] = {"bind": "/build-cache/imatrix", "mode": "ro"}
+            env["IMATRIX_PATH"] = "/build-cache/imatrix/imatrix.dat"
+        env.update(self._repo_overrides())
+        self._verify_local_inputs(config)
+        container = create_container(self.docker_client, image=image.id, volumes=vols, environment=env,
+                                     name=f"llm-tune-{config.build_id}", **sandbox)
+        exit_code = self._run_container(config, progress, container, "TUNE: ",
+                                        end_record=end_folder(build_temp, "tune") / END_RECORD,
+                                        decided=(sandbox, vols, env))
+        exit_code = self._ended_by_record(progress, exit_code, "TUNE: ", job="tune")
+        if exit_code != 0:
+            raise RuntimeError(f"The tuning job failed with exit code {exit_code}\n"
+                               f"{self._log_tail(progress, 'TUNE: ')}")
+        reference, rows = tuning.read_results(tune_out / tuning.RESULTS_FOLDER, plan)
+        tools = config.llama_cpp_tools or {}
+        report = tuning.make_report(plan, reference, rows, build_id=config.build_id,
+                                    text_sha256=text_sha256(),
+                                    llama_cpp=str(tools.get("tag") or tools.get("commit") or "") or None)
+        tuning.write_report(build_temp / "output", report)
+        for line in tuning.report_lines(report):
+            progress.add_log(line)
+        del text
+
     @staticmethod
     def _forget_end_record(path: Path) -> None:
         """Removes an end record left by an earlier run, never through a link (the container writes the work folder:
@@ -2890,6 +2963,12 @@ class BuildEngine:
         if estimate is not None:   # the estimate before the build next to the real size, for later calibration
             real = next((a["bytes"] for a in artifacts if a["file"] == primary), None)
             info["memory_estimate"] = {**estimate, "real_model_bytes": real}
+        if getattr(config, "tuned", None):   # a build of a tuning run's chosen type: the run and its measurement
+            info["tuning"] = dict(config.tuned)
+        if getattr(config, "tuning", None):   # a tuning run: its report, no model (Core/tuning.py)
+            from orchestrator.Core.tuning import KIND, REPORT_FILE
+            info["kind"] = KIND
+            info["tuning_report"] = REPORT_FILE
         if getattr(config, "recipe", None):   # a recipe build: what was changed and whether the result reproduced the recipe's reference
             info["recipe"] = self._recipe_outcome(config, next((a for a in artifacts if a["file"] == primary), None),
                                                   progress)
@@ -3070,7 +3149,9 @@ class BuildEngine:
         progress.add_log("Writing build manifest and Model Card...")
         # Only this build's files are staged, so every model file there is its own.
         manifest = self._write_build_manifest(config, staged, progress=progress)
-        if not manifest.get("primary"):
+        if config.tuning:
+            pass   # a tuning run's result is its report, no model
+        elif not manifest.get("primary"):
             progress.add_warning("The build produced no model file.")
         else:
             self._board_memory_warning(config, manifest, progress)

@@ -58,7 +58,7 @@ END_RECORD = "build.end"
 END_KEY = "end.key"             # deprecated: the old one-run key file (the runtime layer keeps no key in a container)
 # The last of the four stages of each job: a done record must name the job's last stage (this one, or the last module
 # of target.yml's slot after_target, which the builder hands to end_problem)
-LAST_STAGE = {"build": "target", "imatrix": "convert"}
+LAST_STAGE = {"build": "target", "imatrix": "convert", "tune": "tune"}
 CANCEL_NOTE = "cancelled"       # the framework's note to the stage runner: the running stage was a Cancel
 RUNNING_NOTE = "running"        # the stage runner's own note: the stage that runs now
 # A container that wrote "status done" exits by itself within this many seconds; then the framework stops it, and
