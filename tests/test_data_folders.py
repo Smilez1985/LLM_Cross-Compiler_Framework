@@ -28,9 +28,11 @@ FOLDER_OF = {"models_dir": "models", "build_dir": "output", "cache_dir": "cache"
 
 @pytest.fixture
 def installation(tmp_path, monkeypatch):
-    """Stands in for the installation folder (<install>/configs is where the config folder detection looks)."""
+    """Stands in for the installation folder (<install>/configs is where the config folder detection looks): a
+    developer checkout (it has .git), the only installation that keeps settings and data inside."""
     root = tmp_path / "install"
     (root / "configs").mkdir(parents=True)
+    (root / ".git").mkdir()
     monkeypatch.setattr(ConfigManager, "installation_config_dir", staticmethod(lambda: root / "configs"))
     return root
 
@@ -72,6 +74,22 @@ class TestReadOnlyInstallation:
         assert cfg.config_dir == installation / "configs"
         assert [cfg.get(k) for k in DATA_KEYS] == ["models", "output", "cache"]
         assert cfg.get("output_dir") == "~/llmcf/output"
+
+    def test_a_writable_installed_copy_still_keeps_everything_in_the_per_user_folder(self, installation, tmp_path,
+                                                                                    monkeypatch):
+        """An installed copy (no .git: install.sh and install.bat copy none) is shared by the people of this computer
+        and never written to at runtime, also when this account could write to it (an earlier installer gave it the
+        folder)."""
+        (installation / ".git").rmdir()
+        monkeypatch.delenv("LLM_FRAMEWORK_CONFIG_DIR")
+        monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "state"))
+        cfg = ConfigManager()
+        assert cfg.config_dir == tmp_path / "state"
+        for key in DATA_KEYS:
+            assert cfg.get(key) == str(tmp_path / "state" / FOLDER_OF[key]), key
+        assert cfg.get("logs_dir") == str(tmp_path / "state" / "logs")
+        assert cfg.get("user_targets_dir") == str(tmp_path / "state" / "targets")
+        assert not any((installation / "configs").iterdir()), "nothing is created in the installation"
 
     def test_configured_folders_win_over_the_default(self, installation, tmp_path, monkeypatch):
         read_only_like_program_files(monkeypatch, installation, installation / "configs")

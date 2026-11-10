@@ -412,6 +412,12 @@ class BuildEngine:
         # Paths initialization using centralized config getter
         # Relative to the installation; "~" means the user's home (same rule as FrameworkManager.resolve_path).
         self.targets_dir = self.base_dir / Path(str(self._get_conf("targets_dir", "targets"))).expanduser()
+        # The person's own targets and installed target packs (the per-user folder for an installed copy), read
+        # after the shipped ones; empty user_targets_dir: the same folder (a developer checkout)
+        own = str(self._get_conf("user_targets_dir", "") or "")
+        self.user_targets_dir = self.base_dir / Path(own).expanduser() if own else self.targets_dir
+        self.target_roots = [self.targets_dir] + ([self.user_targets_dir]
+                                                  if self.user_targets_dir != self.targets_dir else [])
         self.models_dir = self.base_dir / Path(str(self._get_conf("models_dir", "models"))).expanduser()
         self.output_dir = self.base_dir / Path(str(self._get_conf("output_dir", "output"))).expanduser()
         # The framework's build folder (GUI builds wait there to be saved; artifact_output): build_dir, else the same
@@ -460,16 +466,17 @@ class BuildEngine:
         if tm is not None and hasattr(tm, "folder_of"):
             folder = tm.folder_of(name)
         else:
-            from orchestrator.Core.target_manager import read_target_folders, resolve_target_name
-            folders = {tid: path for tid, (path, _) in read_target_folders(self.targets_dir, self.logger).items()}
+            from orchestrator.Core.target_manager import read_target_roots, resolve_target_name
+            folders = {tid: path for tid, (path, _) in read_target_roots(self.target_roots, self.logger).items()}
             tid = resolve_target_name(name, folders)
             folder = folders.get(tid) if tid else None
-        if folder is not None or not name or not self.targets_dir.is_dir():
+        if folder is not None or not name:
             return folder
         for exact in (True, False):
-            for path in self.targets_dir.iterdir():
-                if path.is_dir() and (path.name == name if exact else path.name.casefold() == name.casefold()):
-                    return path
+            for root in self.target_roots:
+                for path in (root.iterdir() if root.is_dir() else ()):
+                    if path.is_dir() and (path.name == name if exact else path.name.casefold() == name.casefold()):
+                        return path
         return None
 
     def build_model(self, config: BuildConfiguration) -> str:

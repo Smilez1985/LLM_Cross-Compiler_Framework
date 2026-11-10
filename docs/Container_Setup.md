@@ -141,17 +141,17 @@ Everything personal lives in the Docker volume `lcf-data`, mounted at `/data`:
 |---|---|---|
 | `/data/home` | Personal state: tool permissions, audit log, credential vault, SSH key and known devices, MCP tokens, chat history, knowledge base | `LLM_FRAMEWORK_HOME` |
 | `/data/config` | `config.yml` | `LLM_FRAMEWORK_CONFIG_DIR` |
+| `/data/targets`, and `community/` in `/data/home` | Targets you create (module wizard, `llm-cli module create`, Ditto, AI apps) and target packs you install; recipe, knowledge and block packs | `LLM_FRAMEWORK_USER_TARGETS_DIR`; the community folder follows `LLM_FRAMEWORK_HOME` |
 | `/data/output`, `/data/builds`, `/data/cache`, `/data/models` | Finished models (the output folder), builds not saved yet, cache, downloaded models | `LLM_FRAMEWORK_OUTPUT_DIR`, `..._BUILD_DIR`, `..._CACHE_DIR`, `..._MODELS_DIR` |
 | `/data/datasets`, `/data/logs` | Calibration datasets, log files | `LLM_FRAMEWORK_DATASETS_DIR`, `..._LOGS_DIR` |
 | `/data/huggingface`, `/data/xdg-cache` | Hugging Face downloads and other caches | `HF_HOME`, `XDG_CACHE_HOME` |
 
 Back the volume up like any Docker volume.
 
-The program folder `/opt/llm-cross-compiler-framework` belongs to `lcf`, as it belongs to your user on bare metal.
-Targets you create with the module wizard or `llm-cli module create` and community packs you install are written
-there, so they live in the container itself, not in the volume, and are lost when the container is removed or
-replaced. The make targets therefore never remove or replace a container that holds files of yours outside the
-volume:
+The program folder `/opt/llm-cross-compiler-framework` is an installed copy, which the framework never writes to:
+targets you create and community packs you install go to the volume as well. A container made from an earlier image
+wrote them into the program folder, where they are lost when the container is removed or replaced. The make targets
+therefore never remove or replace a container that holds files of yours outside the volume:
 
 - `make down` stops the containers and removes none.
 - `make up` and `make gui` start a container that holds files of yours as it is (a new image or changed settings
@@ -202,8 +202,8 @@ volume first (a target of your own as a pack:
   provider or a local server on your network for Ditto there, or install the framework directly on the computer that
   should run Ditto's model (`llm-cli ditto runtime ensure`, bare metal or in Docker).
 - **No keyring:** see step 1 of [Start it and set it up once](#3-start-it-and-set-it-up-once).
-- **Targets and community packs** live in the container's program folder, not in the volume: moving to a new image
-  needs an export first ([Updating](#7-updating)).
+- **Targets and community packs** of a container made from an earlier image live in its program folder, not in the
+  volume: moving to a new image needs an export first ([Updating](#7-updating)).
 - **Spoken announcements** are off (`LLM_FRAMEWORK_NO_AUDIO=1`).
 - The image is built and smoke-tested in CI (`.github/workflows/framework-container.yml`); it has not been tested
   on Proxmox or a NAS yet.

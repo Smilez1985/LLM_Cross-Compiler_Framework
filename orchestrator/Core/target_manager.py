@@ -7,10 +7,11 @@ Verwaltet Hardware-Zielprofile (Targets).
 Liest YAML-Definitionen und importiert Hardware-Probes.
 """
 
+import os
 import yaml
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from orchestrator.utils.logging import get_logger
 from orchestrator.schemas.targets import TargetCapabilities
@@ -40,6 +41,57 @@ def read_target_folders(targets_dir: Path, logger=None) -> Dict[str, Tuple[Path,
         data['metadata']['id'] = tid
         found[tid] = (item, data)
     return found
+
+
+def read_target_roots(roots: Iterable[Path], logger=None) -> Dict[str, Tuple[Path, Dict[str, Any]]]:
+    """read_target_folders over several targets folders (target_roots: the shipped targets first, then the person's
+    own): the first folder that declares an id keeps it, so a target of the person's folder never replaces a shipped
+    one of the same id (it is left out and named in the log)."""
+    found: Dict[str, Tuple[Path, Dict[str, Any]]] = {}
+    for root in roots:
+        for tid, entry in read_target_folders(Path(root), logger).items():
+            if tid in found:
+                if logger:
+                    logger.warning(f"Target {tid} in {entry[0]} is left out: {found[tid][0]} has the same id.")
+                continue
+            found[tid] = entry
+    return found
+
+
+def _resolver(resolve: Optional[Callable[[Any], Path]]) -> Callable[[Any], Path]:
+    if callable(resolve):
+        return resolve
+    from orchestrator.Core.framework import resolve_install_path
+    return resolve_install_path
+
+
+def own_targets_dir(config: Any, resolve: Optional[Callable[[Any], Path]] = None) -> Path:
+    """The folder new targets go to (the module wizard, `llm-cli module create`, Ditto, the AI tool
+    create_target_module, installed target packs): the setting user_targets_dir, in the per-user folder for an
+    installed copy; empty (a developer checkout) is targets_dir itself."""
+    get = getattr(config, "get", None)
+    own = str((get("user_targets_dir", "") if callable(get) else getattr(config, "user_targets_dir", "")) or "")
+    shipped = (get("targets_dir", "targets") if callable(get) else getattr(config, "targets_dir", None)) or "targets"
+    return Path(_resolver(resolve)(own or shipped))
+
+
+def target_roots(config: Any, resolve: Optional[Callable[[Any], Path]] = None) -> List[Path]:
+    """Every targets folder, in the order they are read: targets_dir (the targets the framework ships), then the
+    person's own (own_targets_dir) when it is another folder."""
+    get = getattr(config, "get", None)
+    shipped = (get("targets_dir", "targets") if callable(get) else getattr(config, "targets_dir", None)) or "targets"
+    roots = [Path(_resolver(resolve)(shipped))]
+    own = own_targets_dir(config, resolve)
+    if not any(_same_folder(own, r) for r in roots):
+        roots.append(own)
+    return roots
+
+
+def _same_folder(a: Path, b: Path) -> bool:
+    try:
+        return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+    except (TypeError, ValueError):
+        return False
 
 
 def _block(value: Any) -> Dict[str, Any]:
@@ -140,17 +192,46 @@ class TargetManager:
         
         # Pfade aus Config
         # Fallback für Tests: Wenn framework_manager nur ein Path ist (Legacy)
+        # targets_dir: the targets the framework ships (in a developer checkout also the person's own);
+        # user_targets_dir: where new targets and installed target packs go (the per-user folder for an installed
+        # copy, which is never written to); target_roots: both, in the order they are read.
         if hasattr(framework_manager, 'config'):
-            configured = getattr(framework_manager.config, 'targets_dir', None) or "targets"
+            config = framework_manager.config
             resolve = getattr(framework_manager, 'resolve_path', None)
-            self.targets_dir = resolve(configured) if callable(resolve) else Path(configured)
+            if not callable(resolve):
+                resolve = Path
+            configured = getattr(config, 'targets_dir', None) or "targets"
+            self.targets_dir = resolve(configured)
+            own = getattr(config, 'user_targets_dir', None) if not callable(getattr(config, "get", None)) \
+                else config.get("user_targets_dir", "")
+            self._own_targets: Optional[Path] = Path(resolve(own)) if own else None
         else:
             self.targets_dir = Path("targets") # Default/Fallback
+            self._own_targets = None
             
         self._targets: Dict[str, Any] = {}
         self._capabilities: Dict[str, TargetCapabilities] = {}
         self._folders: Dict[str, Path] = {}  # target id -> its folder (the id may differ from the folder name)
         self._initialized = False
+
+    @property
+    def user_targets_dir(self) -> Path:
+        """Where new targets and installed target packs go: the person's own targets folder (targets_dir itself in a
+        developer checkout)."""
+        return self._own_targets if self._own_targets is not None else Path(self.targets_dir)
+
+    @user_targets_dir.setter
+    def user_targets_dir(self, value) -> None:
+        self._own_targets = Path(value) if value else None
+
+    @property
+    def target_roots(self) -> List[Path]:
+        """The targets folders in reading order: the shipped targets, then the person's own when it is another
+        folder."""
+        roots = [Path(self.targets_dir)]
+        if self._own_targets is not None and not _same_folder(self._own_targets, roots[0]):
+            roots.append(self._own_targets)
+        return roots
 
     def initialize(self):
         """Lädt alle verfügbaren Targets aus dem targets/ Verzeichnis."""
@@ -159,15 +240,12 @@ class TargetManager:
         self._capabilities = {}
         self._folders = {}
         
+        # Nothing is created here: the shipped folder belongs to the installation, the person's own is made by the
+        # first target written into it.
         if not self.targets_dir.exists():
             self.logger.warning(f"Targets directory {self.targets_dir} does not exist.")
-            try:
-                self.targets_dir.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                self.logger.error(f"Could not create targets dir: {e}")
-                return
 
-        for tid, (folder, data) in read_target_folders(self.targets_dir, self.logger).items():
+        for tid, (folder, data) in read_target_roots(self.target_roots, self.logger).items():
             self._targets[tid] = data
             self._folders[tid] = folder
             if 'capabilities' in data:

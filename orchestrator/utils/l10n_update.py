@@ -20,6 +20,17 @@ TEXTS = {
         "update.no_terminal": "No terminal program was found to run the update in. Run this yourself at a command prompt:\n\n{command}",
         "update.started": "The update runs in its own window. Start the framework again when it has finished.",
         "update.failed": "The update could not start: {reason}",
+        # What an earlier version wrote into the installation folder (Core/install_migration.py), asked at start
+        "takeover.title": "Your data in the installation folder",
+        "takeover.ask_mine": "An earlier version kept these items of yours in the installation folder, which is now "
+                             "shared by everyone who uses llmcf on this computer and is no longer written to:\n\n"
+                             "{items}\n\nMove them into your own folders? Nothing is overwritten or deleted. If you "
+                             "say no, you are not asked again; 'llm-cli config take-over' moves them later.",
+        "takeover.ask_others": "These items in the installation folder may belong to another account of this "
+                               "computer (they are not yours, or the system does not say whose they are):\n\n"
+                               "{items}\n\nMove them into YOUR folders anyway? Say yes only if they are yours.",
+        "takeover.done": "Taken over from the installation folder:\n\n{lines}\n\nStart the framework again so "
+                         "that it reads your moved settings.",
     },
     "de": {
         "update.menu": "Framework aktualisieren...",
@@ -40,5 +51,16 @@ TEXTS = {
                               "selbst an einer Kommandozeile:\n\n{command}",
         "update.started": "Das Update läuft in einem eigenen Fenster. Starte das Framework neu, wenn es fertig ist.",
         "update.failed": "Das Update konnte nicht starten: {reason}",
+        "takeover.title": "Deine Daten im Installationsordner",
+        "takeover.ask_mine": "Eine frühere Version hat diese Dinge von dir im Installationsordner abgelegt. Er wird "
+                             "jetzt von allen geteilt, die llmcf auf diesem Computer nutzen, und nicht mehr "
+                             "beschrieben:\n\n{items}\n\nIn deine eigenen Ordner verschieben? Nichts wird "
+                             "überschrieben oder gelöscht. Sagst du nein, wirst du nicht erneut gefragt; 'llm-cli "
+                             "config take-over' verschiebt sie später.",
+        "takeover.ask_others": "Diese Dinge im Installationsordner gehören vielleicht einem anderen Konto dieses "
+                               "Computers (sie gehören nicht dir, oder das System sagt nicht, wem):\n\n{items}\n\n"
+                               "Trotzdem in DEINE Ordner verschieben? Sag nur ja, wenn sie dir gehören.",
+        "takeover.done": "Aus dem Installationsordner übernommen:\n\n{lines}\n\nStarte das Framework neu, damit "
+                         "es deine verschobenen Einstellungen liest.",
     },
 }

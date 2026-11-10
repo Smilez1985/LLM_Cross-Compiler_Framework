@@ -251,7 +251,8 @@ class LLMOrchestrator:
         
         # Sub-Engines (the framework passes its shared engine, which knows the secrets store)
         self.build_engine = build_engine or BuildEngine(config_manager)
-        self.module_generator = ModuleGenerator(Path(getattr(self.build_engine, "targets_dir", None)
+        self.module_generator = ModuleGenerator(Path(getattr(self.build_engine, "user_targets_dir", None)
+                                                     or getattr(self.build_engine, "targets_dir", None)
                                                      or config_manager.targets_dir))
         
         # State Management

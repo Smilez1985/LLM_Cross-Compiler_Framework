@@ -700,16 +700,28 @@ class CommunityManager:
         else:
             self.app_root = Path(".").resolve()
         self.config = getattr(framework_manager, 'config', None)
-        self.community_dir = self.app_root / "community"
+        resolve = getattr(framework_manager, "resolve_path", None)
+        # Installed packs and the person's own blocks and contributions: community/ in the per-user folder for an
+        # installed copy (which is never written to), in the installation for a developer checkout (as before).
+        # data_root holds it (the board bundle's block catalog reads <data_root>/community/blocks).
+        from orchestrator.Core.config_manager import ConfigManager
+        self.data_root = ConfigManager.default_data_root() or self.app_root
+        self.community_dir = self.data_root / "community"
         self.knowledge_dir = self.community_dir / "knowledge"
         self.recipes_dir = self.community_dir / "recipes"
         # board bundle building blocks (orchestrator/runtime/bundle/blocks.py community_dir: the same folder)
         self.blocks_dir = self.community_dir / "blocks"
         self.contributions_dir = self.community_dir / "contributions"
-        # The same folder the build engine and the target manager use.
-        resolve = getattr(framework_manager, "resolve_path", None)
+        # The same folders the build engine and the target manager use: target packs are installed into the
+        # person's own targets folder (targets_dir here); target_roots also holds the shipped targets, read for
+        # exports, name checks and packs installed before.
         targets = self._cfg("targets_dir", "targets")
-        self.targets_dir = resolve(targets) if callable(resolve) else self.app_root / str(targets)
+        shipped = resolve(targets) if callable(resolve) else self.app_root / str(targets)
+        own_targets = str(self._cfg("user_targets_dir", "") or "")
+        self.targets_dir = (resolve(own_targets) if callable(resolve) else self.app_root / own_targets) \
+            if own_targets else shipped
+        self.target_roots: List[Path] = [Path(shipped)] + ([Path(self.targets_dir)]
+                                                            if Path(self.targets_dir) != Path(shipped) else [])
         self._session = session
         self._keys = keys  # tests pass their own; otherwise configs/community_keys.yml
         # The last knowledge pack import (sync_knowledge_base): the snapshot taken first, or why nothing was imported;
@@ -825,14 +837,22 @@ class CommunityManager:
             if kind == "knowledge":   # in topic and target folders (_knowledge_layout)
                 found += self._knowledge_layout()[0]
                 continue
-            root = self._install_root(kind)
-            if not root.is_dir():
-                continue
-            for folder in sorted(root.iterdir()):
-                prov = None if folder.is_symlink() or not folder.is_dir() else read_provenance(folder)
-                if prov is not None and prov.kind == kind:
-                    found.append((folder, prov))
+            # target packs: the person's own targets folder, and packs an earlier version installed beside the
+            # shipped targets (until they are moved, install_migration)
+            roots = self._target_roots() if kind == "target" else [self._install_root(kind)]
+            for root in roots:
+                if not root.is_dir():
+                    continue
+                for folder in sorted(root.iterdir()):
+                    prov = None if folder.is_symlink() or not folder.is_dir() else read_provenance(folder)
+                    if prov is not None and prov.kind == kind:
+                        found.append((folder, prov))
         return found
+
+    def _target_roots(self) -> List[Path]:
+        """Every targets folder: the shipped targets, then the person's own (one folder in a developer checkout)."""
+        roots = [Path(r) for r in getattr(self, "target_roots", None) or [self.targets_dir]]
+        return roots if Path(self.targets_dir) in roots else [Path(self.targets_dir)]
 
     # --- the knowledge folder: topic and target folders, loose files ------------------------------------------------
     def _knowledge_layout(self) -> Tuple[List[Tuple[Path, Provenance]], List[Path]]:
@@ -1109,11 +1129,10 @@ class CommunityManager:
         """The target ids in the targets folder that `llm-cli zoo export target` can be asked for (a folder with a
         target.yml; the template and hidden folders left out), sorted. An installed community pack is listed too: the
         export refuses it with the reason (its author shares it already)."""
-        if not self.targets_dir.is_dir():
-            return []
-        return sorted((p.name for p in self.targets_dir.iterdir()
-                       if p.is_dir() and not p.is_symlink() and not p.name.startswith((".", "_"))
-                       and re.fullmatch(ID_PATTERN, p.name) and (p / "target.yml").is_file()), key=str.casefold)
+        names = {p.name for root in self._target_roots() if root.is_dir() for p in root.iterdir()
+                 if p.is_dir() and not p.is_symlink() and not p.name.startswith((".", "_"))
+                 and re.fullmatch(ID_PATTERN, p.name) and (p / "target.yml").is_file()}
+        return sorted(names, key=str.casefold)
 
     def exportable_blocks(self) -> List[str]:
         """The person's own board bundle blocks in community/blocks/ (a folder with block.yml and no provenance: an
@@ -1248,7 +1267,7 @@ class CommunityManager:
                     names.append(declared)
             except (OSError, yaml.YAMLError, AttributeError):
                 pass
-            taken = target_name_collision(root, *names)
+            taken = target_name_collision([root, *self._target_roots()], *names)
             if taken is not None:
                 raise PackError(f"The target pack {m.id} has the same name as the existing target {taken} (ignoring "
                                 "case and separators); it is not installed.")
@@ -1383,10 +1402,8 @@ class CommunityManager:
             notes.append(note)
 
     def _target_folder(self, target_id: str) -> Optional[Path]:
-        if not self.targets_dir.is_dir():
-            return None
-        return next((p for p in self.targets_dir.iterdir() if p.name.casefold() == target_id.casefold()
-                     and p.is_dir() and not p.is_symlink()), None)
+        return next((p for root in self._target_roots() if root.is_dir() for p in root.iterdir()
+                     if p.name.casefold() == target_id.casefold() and p.is_dir() and not p.is_symlink()), None)
 
     def _check_recipe(self, root: Path, manifest: PackManifest, notes: List[str]) -> List[str]:
         from orchestrator.Core.recipe_optimization import RecipeFormatError
@@ -2060,8 +2077,7 @@ class CommunityManager:
             items.append(_KnowledgeImport(f"knowledge pack {folder.name}", folder / KNOWLEDGE_FILE, folder,
                                           prov.content_sha256, self.knowledge_dir / f"{folder.name}.imported",
                                           folder.name, {scope: name}, legacy, prov))
-        root = self.targets_dir
-        for folder in sorted(root.iterdir()) if root.is_dir() else []:
+        for folder in [f for root in self._target_roots() if root.is_dir() for f in sorted(root.iterdir())]:
             prov = None if folder.is_symlink() or not folder.is_dir() else read_provenance(folder)
             snapshot = folder / KNOWLEDGE_SNAPSHOT
             if prov is None or prov.kind != "target" or not snapshot.is_file() or snapshot.is_symlink():

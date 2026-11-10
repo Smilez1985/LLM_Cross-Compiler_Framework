@@ -156,6 +156,10 @@ class MainOrchestrator(QMainWindow):
         self.update_timer.timeout.connect(self._update_system_state)
         self.update_timer.start(1000) # Every second
 
+        # What an earlier version wrote into the installation folder: offered for moving into the person's folders,
+        # once (Core/install_migration.py; an installed copy is shared and no longer written to).
+        QTimer.singleShot(0, lambda: menu_update.offer_take_over(self))
+
         # Ditto's first setup: ask for the tool permissions once, right after the window is shown.
         registry = getattr(self.framework, "tool_registry", None)
         if registry is not None and not registry.policy().configured:
@@ -785,8 +789,12 @@ class MainOrchestrator(QMainWindow):
         self.status.showMessage(t("history.cleared"), 5000)
 
     def _open_module_wizard(self, *_args, probe_path=None):
-        targets_dir = self.app_root / self.framework.config.get("targets_dir", "targets")
-        wizard = ModuleCreationWizard(targets_dir, self)
+        # The person's own targets folder (the per-user folder for an installed copy, which is never written to)
+        from orchestrator.Core.target_manager import own_targets_dir, target_roots
+        resolve = getattr(self.framework, "resolve_path", None)
+        targets_dir = own_targets_dir(self.framework.config, resolve)
+        others = [r for r in target_roots(self.framework.config, resolve) if r != targets_dir]
+        wizard = ModuleCreationWizard(targets_dir, self, other_roots=others)
         if probe_path:  # the Builder's offer when no target fits a probe: the wizard starts from that probe
             wizard.import_probe_file(str(probe_path))
         wizard.exec()

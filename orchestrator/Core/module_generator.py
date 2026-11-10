@@ -27,7 +27,7 @@ import subprocess
 import tempfile
 from datetime import date
 from pathlib import Path
-from typing import Dict, Iterable, List, Any, Optional
+from typing import Dict, Iterable, List, Any, Optional, Sequence, Union
 import yaml
 
 from orchestrator.utils.logging import get_logger
@@ -207,17 +207,21 @@ def canonical_target_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", str(name or "").lower())
 
 
-def target_name_collision(targets_dir: Path, *names: str) -> Optional[str]:
+def target_name_collision(targets_dir: Union[Path, Sequence[Path]], *names: str) -> Optional[str]:
     """The existing target id or folder name that a new target's names would equal ignoring case and separators
     (None when there is none): target names resolve to the first case-insensitive match (G43), so a new target
-    must never capture the name of another one."""
+    must never capture the name of another one. `targets_dir` is one targets folder or several (target_roots: the
+    shipped targets and the person's own folder, which a new target must not shadow either)."""
     wanted = {canonical_target_name(n) for n in names if canonical_target_name(n)}
-    root = Path(targets_dir)
-    if not wanted or not root.is_dir():
+    roots = [Path(targets_dir)] if isinstance(targets_dir, (str, Path)) else [Path(r) for r in targets_dir]
+    if not wanted:
         return None
     from orchestrator.Core.target_manager import read_target_folders
-    existing = [p.name for p in root.iterdir() if not p.name.startswith(".")]
-    existing += list(read_target_folders(root))
+    existing: List[str] = []
+    for root in roots:
+        if root.is_dir():
+            existing += [p.name for p in root.iterdir() if not p.name.startswith(".")]
+            existing += list(read_target_folders(root))
     return next((name for name in existing if canonical_target_name(name) in wanted), None)
 
 
@@ -918,7 +922,7 @@ def probe_board(profile: Any) -> Optional[Dict[str, Any]]:
     return {"board": soc, "info": info}
 
 
-def probe_module_name(profile: Any, targets_dir: Optional[Path] = None) -> str:
+def probe_module_name(profile: Any, targets_dir: Union[Path, Sequence[Path], None] = None) -> str:
     """The module name proposed for a probe (the module wizard's import and `llm-cli module create --probe`): the
     probe's board name, else its SoC, else its CPU model (current probe schema: BOARD_MODEL, SOC_MODEL, CPU_MODEL),
     made a name the generator accepts and unique among the targets in targets_dir (a "_2", "_3"... when one reads the
@@ -934,7 +938,7 @@ def probe_module_name(profile: Any, targets_dir: Optional[Path] = None) -> str:
     if targets_dir is None:
         return base
     name, n = base, 1
-    while target_name_collision(Path(targets_dir), module_slug(name), name):
+    while target_name_collision(targets_dir, module_slug(name), name):
         n += 1
         name = f"{base}_{n}"
     return name
@@ -965,19 +969,22 @@ class ModuleGenerator:
     Now capable of attaching Knowledge Snapshots (RAG Data).
     """
     
-    def __init__(self, targets_dir: Path):
+    def __init__(self, targets_dir: Path, other_roots: Iterable[Path] = ()):
         """
         Initialize the ModuleGenerator.
         
         Args:
-            targets_dir: Base directory where targets are stored (e.g. /app/targets)
+            targets_dir: The folder the module is written to (the person's own targets folder, own_targets_dir)
+            other_roots: The other targets folders whose names a new module must not capture (target_roots: the
+                targets the framework ships, when they are in another folder)
         """
         self.logger = get_logger(__name__)
         self.targets_dir = targets_dir
+        self.other_roots = [Path(r) for r in other_roots]
         
         # Template Verzeichnis liegt parallel zu den Targets
         # Wir suchen es relativ zum targets_dir oder via absolutem Fallback
-        self.template_dir = targets_dir / "_template"
+        self.template_dir = Path(targets_dir) / "_template"
 
         if not self.template_dir.exists():
              # Fallback für Development-Umgebung
@@ -1022,7 +1029,7 @@ class ModuleGenerator:
             raise ValueError(f"Module folder '{slug}' would be outside {targets_root}.")
         # Never overwrite or shadow an existing target: names are compared ignoring case and separators ('rockchip'
         # and 'Rock-Chip' must not capture 'Rockchip'), against folder names and target ids.
-        taken = target_name_collision(targets_root, slug, module_name)
+        taken = target_name_collision([targets_root, *self.other_roots], slug, module_name)
         if taken:
             raise ValueError(f"A target named '{taken}' already exists, and '{module_name}' would read the same "
                              "(names are compared ignoring case and separators); choose another module name.")

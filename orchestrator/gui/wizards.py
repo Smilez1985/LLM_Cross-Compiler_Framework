@@ -229,9 +229,12 @@ class ModuleCreationWizard(QWizard):
     The six pages of a new target module: import, hardware, Docker, flags, summary, edit all files.
     """
     
-    def __init__(self, targets_dir: Path, parent=None):
+    def __init__(self, targets_dir: Path, parent=None, other_roots=()):
         super().__init__(parent)
+        # targets_dir: where the new module goes (the person's own targets folder); other_roots: the other targets
+        # folders (the shipped targets) whose names it must not capture
         self.targets_dir = targets_dir
+        self.other_roots = [Path(r) for r in other_roots]
         self.framework_manager = None
         
         # Access assets & framework via parent app root if available
@@ -644,7 +647,7 @@ class ModuleCreationWizard(QWizard):
                 # Auto-fill
                 from orchestrator.Core.module_generator import probe_module_name
                 if any(data.get(k) for k in ("BOARD_MODEL", "SOC_MODEL", "CPU_MODEL")):
-                    self.name_edit.setText(probe_module_name(data, self.targets_dir))
+                    self.name_edit.setText(probe_module_name(data, [self.targets_dir, *self.other_roots]))
                 if "ARCH" in data:
                     # Probe files of schema 2 write arm64/armv7 (schema 1 wrote uname -m: aarch64/armv7l).
                     arch = {"arm64": "aarch64", "armv7": "armv7l"}.get(data["ARCH"], data["ARCH"])
@@ -1006,7 +1009,7 @@ class ModuleCreationWizard(QWizard):
             from orchestrator.Core.module_generator import probe_module_name, probe_sdk
             sdk = probe_sdk(config)
             self.sdk_edit.setText(sdk)
-            self.name_edit.setText(probe_module_name(config, self.targets_dir))
+            self.name_edit.setText(probe_module_name(config, [self.targets_dir, *self.other_roots]))
             
             # 3. Docker Base Image Logic. CUDA targets get the GPU template, which provisions CUDA from NVIDIA's
             # pinned redist archives; a prebuilt nvidia/cuda image is only an explicit opt-in pinned by digest.
@@ -1349,6 +1352,8 @@ class ModuleCreationWizard(QWizard):
     def _generator(self, targets_dir):
         """The module generator for `targets_dir`; in a scratch folder it renders the targets folder's template."""
         generator = ModuleGenerator(targets_dir)
+        if self.other_roots:
+            generator.other_roots = list(self.other_roots)
         if Path(targets_dir) != Path(self.targets_dir):
             try:
                 generator.template_dir = template_for(self.targets_dir)
@@ -1481,7 +1486,7 @@ class ModuleCreationWizard(QWizard):
         had_edits = bool(edit is not None and edit.changed())
         self._discard_staging()
         self._stage_error = ""
-        taken = name_taken(self.targets_dir, str(self.module_data.get("module_name") or ""))
+        taken = name_taken([self.targets_dir, *self.other_roots], str(self.module_data.get("module_name") or ""))
         try:
             if taken:
                 raise ValueError(f"A target named '{taken}' already exists, and "
@@ -1518,7 +1523,7 @@ class ModuleCreationWizard(QWizard):
         if self.edit_panel.save() is None:   # a check failed: refused with the reasons, nothing saved
             return
         try:
-            output_path = commit_staged(self._staged, self.targets_dir)
+            output_path = commit_staged(self._staged, self.targets_dir, self.other_roots)
         except Exception as e:  # noqa: BLE001 - e.g. a target of the same name appeared meanwhile
             QMessageBox.critical(self, ui_text("status.error"), ui_text("bld.wizard.create_failed", reason=e))
             return

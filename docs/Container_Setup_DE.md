@@ -145,17 +145,18 @@ Alles Persönliche liegt im Docker-Volume `lcf-data`, eingebunden unter `/data`:
 |---|---|---|
 | `/data/home` | Persönlicher Zustand: Tool-Berechtigungen, Audit-Log, Tresor für Zugangsdaten, SSH-Schlüssel und bekannte Geräte, MCP-Tokens, Chatverlauf, Wissensbasis | `LLM_FRAMEWORK_HOME` |
 | `/data/config` | `config.yml` | `LLM_FRAMEWORK_CONFIG_DIR` |
+| `/data/targets`, und `community/` in `/data/home` | Targets, die du anlegst (Modul-Assistent, `llm-cli module create`, Ditto, KI-Apps), und Target-Packs, die du installierst; Packs für Rezepte, Wissen und Bausteine | `LLM_FRAMEWORK_USER_TARGETS_DIR`; der Community-Ordner folgt `LLM_FRAMEWORK_HOME` |
 | `/data/output`, `/data/builds`, `/data/cache`, `/data/models` | Fertige Modelle (Ausgabeordner), Builds, die noch nicht gespeichert sind, Cache, heruntergeladene Modelle | `LLM_FRAMEWORK_OUTPUT_DIR`, `..._BUILD_DIR`, `..._CACHE_DIR`, `..._MODELS_DIR` |
 | `/data/datasets`, `/data/logs` | Kalibrierungsdatensätze, Logdateien | `LLM_FRAMEWORK_DATASETS_DIR`, `..._LOGS_DIR` |
 | `/data/huggingface`, `/data/xdg-cache` | Downloads von Hugging Face und andere Caches | `HF_HOME`, `XDG_CACHE_HOME` |
 
 Sichere das Volume wie jedes Docker-Volume.
 
-Der Programmordner `/opt/llm-cross-compiler-framework` gehört `lcf`, so wie er auf dem Rechner selbst deinem Benutzer
-gehört. Targets, die du mit dem Modul-Assistenten oder `llm-cli module create` anlegst, und Community-Packs, die du
-installierst, landen dort. Sie liegen damit im Container selbst, nicht im Volume, und gehen verloren, wenn der
-Container entfernt oder ersetzt wird. Die Make-Ziele entfernen oder ersetzen deshalb nie einen Container, der Dateien
-von dir außerhalb des Volumes enthält:
+Der Programmordner `/opt/llm-cross-compiler-framework` ist eine installierte Kopie, in die das Framework nie
+schreibt: Targets, die du anlegst, und Community-Packs, die du installierst, kommen ebenfalls ins Volume. Ein Container
+aus einem früheren Image hat sie in den Programmordner geschrieben; dort gehen sie verloren, wenn der Container
+entfernt oder ersetzt wird. Die Make-Ziele entfernen oder ersetzen deshalb nie einen Container, der Dateien von dir
+außerhalb des Volumes enthält:
 
 - `make down` stoppt die Container und entfernt keinen.
 - `make up` und `make gui` starten einen Container mit Dateien von dir so, wie er ist (ein neues Image oder geänderte
@@ -210,8 +211,8 @@ führe `make up` erneut aus und installiere die Packs wieder.
   Framework direkt auf dem Rechner, der Dittos Modell ausführen soll (`llm-cli ditto runtime ensure`, direkt oder in
   Docker).
 - **Kein Schlüsselbund:** siehe Schritt 1 unter [Starten und einmal einrichten](#3-starten-und-einmal-einrichten).
-- **Targets und Community-Packs** liegen im Programmordner des Containers, nicht im Volume: Der Wechsel zu einem
-  neuen Image braucht vorher einen Export ([Aktualisieren](#7-aktualisieren)).
+- **Targets und Community-Packs** eines Containers aus einem früheren Image liegen in seinem Programmordner, nicht im
+  Volume: Der Wechsel zu einem neuen Image braucht vorher einen Export ([Aktualisieren](#7-aktualisieren)).
 - **Gesprochene Ansagen** sind aus (`LLM_FRAMEWORK_NO_AUDIO=1`).
 - Das Image wird in der CI gebaut und mit Rauchtests geprüft (`.github/workflows/framework-container.yml`); auf
   Proxmox oder einem NAS ist es noch nicht getestet.

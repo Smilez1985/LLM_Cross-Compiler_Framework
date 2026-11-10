@@ -462,7 +462,8 @@ def catalog_sources(framework: Any) -> Tuple[Optional[Path], Any]:
         index = manager.cached_index(revocations=True)
     except Exception:  # noqa: BLE001 - an unreadable cache: no revocations known, as the Community Hub shows it
         index = None
-    root = getattr(manager, "app_root", None)
+    # the folder that holds community/ (CommunityManager.data_root: the per-user folder for an installed copy)
+    root = getattr(manager, "data_root", None) or getattr(manager, "app_root", None)
     return (Path(root) if root else None), index
 
 

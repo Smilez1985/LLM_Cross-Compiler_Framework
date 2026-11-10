@@ -99,12 +99,14 @@ RUN PYTHONPATH=/opt/llm-cross-compiler-framework /opt/llm-cross-compiler-framewo
         fi; \
     done
 
-# Everything personal lives in the volume /data. Only targets you create and packs you install go to the program
-# folder, as on bare metal: they stay in the container, and make never removes or replaces a container that holds
-# them (scripts/container_kept_files.sh). The credential vault needs a protection you choose (setting
-# secret_storage); there is no keyring in a container, and nothing is chosen for you.
+# Everything personal lives in the volume /data, also the targets you create and the packs you install (the program
+# folder is an installed copy, which the framework never writes to). make still never removes or replaces a container
+# that holds files of yours outside the volume, as one made from an earlier image may (scripts/container_kept_files.sh).
+# The credential vault needs a protection you choose (setting secret_storage); there is no keyring in a container, and
+# nothing is chosen for you.
 ENV LLM_FRAMEWORK_HOME=/data/home \
     LLM_FRAMEWORK_CONFIG_DIR=/data/config \
+    LLM_FRAMEWORK_USER_TARGETS_DIR=/data/targets \
     LLM_FRAMEWORK_OUTPUT_DIR=/data/output \
     LLM_FRAMEWORK_BUILD_DIR=/data/builds \
     LLM_FRAMEWORK_CACHE_DIR=/data/cache \

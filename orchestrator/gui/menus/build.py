@@ -133,6 +133,11 @@ MACHINE_ONLY: Dict[str, str] = {
     "targets list --format": "json or yaml output for scripts; Build > Targets... shows the same rows as a table",
     "config local-network --yes": "skips the question with the explanation, for scripts; the window always asks",
     "build preflight --json": "machine-readable output for scripts; the Builder's Pre-flight check shows the same lines",
+    # what an earlier version wrote into the installation folder (Core/install_migration.py)
+    "config take-over": "the GUI asks the same question once at its first start after the change; the command "
+                        "moves what was declined there",
+    "config take-over --yes": "moves your own items without asking, for scripts; the GUI always asks",
+    "config take-over --others": "the GUI asks about another account's items in a question of its own",
 }
 
 

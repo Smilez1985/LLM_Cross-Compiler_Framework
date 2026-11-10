@@ -256,6 +256,16 @@ class ConfigManager:
     def installation_config_dir() -> Path:
         return Path(__file__).resolve().parents[2] / "configs"
 
+    @classmethod
+    def developer_checkout(cls) -> bool:
+        """Whether the installation is a person's own working copy: a git checkout this user can write to. Only
+        then does the framework keep its settings and data inside it (configs/, output/, cache/, models/, logs/, new
+        targets in targets/, community/), as it always did there. An installed copy (install.sh and install.bat copy
+        no .git) is shared by everyone who uses llmcf on this computer and is never written to at runtime, also when
+        this user could write to it: everything personal goes to the per-user folder (user_state_path)."""
+        root = cls.installation_config_dir().parent
+        return (root / ".git").exists() and cls.writable_dir(root)
+
     @staticmethod
     def writable_dir(path: Path) -> bool:
         """Whether this user can create files in path. os.access alone is not enough on Windows: it ignores the
@@ -271,23 +281,25 @@ class ConfigManager:
             return False
 
     def _detect_config_directory(self) -> Path:
-        """LLM_FRAMEWORK_CONFIG_DIR, else the installation's configs/ folder, else the per-user folder.
-        Never the working directory: AI clients start the MCP server inside arbitrary projects, and a
-        project folder must not be able to change settings such as source repositories or images."""
+        """LLM_FRAMEWORK_CONFIG_DIR, else the configs/ folder of a developer checkout, else the per-user folder (an
+        installed copy, shared by the people of this computer, is never written to). Never the working directory: AI
+        clients start the MCP server inside arbitrary projects, and a project folder must not be able to change
+        settings such as source repositories or images."""
         override = os.environ.get("LLM_FRAMEWORK_CONFIG_DIR")
         if override:
             return Path(override).expanduser()
         install = self.installation_config_dir()
-        if self.writable_dir(install):
+        if self.developer_checkout() and self.writable_dir(install):
             return install
         return self.user_state_dir
 
     @classmethod
     def default_data_root(cls) -> Optional[Path]:
-        """Where the data folders (models_dir, output_dir, cache_dir) are by default: None for the installation
-        folder (relative paths resolve against it), or the per-user folder when this user cannot write to the
-        installation (e.g. C:\\Program Files). Nothing is created here; folders are made when they are used."""
-        if cls.writable_dir(cls.installation_config_dir().parent):
+        """Where the data folders (models, builds, cache, datasets, logs, the person's own targets and community
+        packs) are by default: None for a developer checkout (relative paths resolve against it), else the per-user
+        folder, also when this user could write to the installation (an installed copy is shared and read-only at
+        runtime). Nothing is created here; folders are made when they are used."""
+        if cls.developer_checkout():
             return None
         return cls.user_state_path()
 
@@ -356,7 +368,14 @@ class ConfigManager:
                          "The framework's build folder: GUI builds wait here until they are saved, and earlier builds "
                          "stay here"),
             ConfigSchema("cache_dir", str, True, data_dir("cache"), "Directory for cache files"),
-            ConfigSchema("logs_dir", str, True, "logs", "Directory for log files"),
+            ConfigSchema("logs_dir", str, True, data_dir("logs"), "Directory for log files"),
+            # The person's own targets (the module wizard, `llm-cli module create`, Ditto and AI tools) and the target
+            # packs they install: read besides targets_dir, which holds the targets the framework ships. Empty: the
+            # same folder as targets_dir (a developer checkout, as before).
+            ConfigSchema("user_targets_dir", str, False, "" if data_root is None else data_dir("targets"),
+                         "Folder for your own targets and installed target packs (read besides targets_dir); empty: "
+                         "targets_dir itself"),
+
             ConfigSchema("log_level", str, False, "INFO", "Logging level", ["regex:^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$"]),
             
             # Build Settings

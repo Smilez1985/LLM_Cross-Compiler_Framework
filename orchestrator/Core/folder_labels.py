@@ -41,6 +41,7 @@ def ai_folder_labels(framework) -> Dict[str, str]:
         except Exception:  # noqa: BLE001
             continue
     add(getattr(getattr(framework, "target_manager", None), "targets_dir", None), "targets")
+    add(getattr(getattr(framework, "target_manager", None), "user_targets_dir", None), "targets")
     add(getattr(getattr(framework, "community_manager", None), "community_dir", None), "community")
     add(getattr(getattr(framework, "info", None), "installation_path", None), "framework")
     add(getattr(framework, "app_root", None), "framework")

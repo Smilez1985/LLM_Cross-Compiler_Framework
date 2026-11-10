@@ -74,9 +74,12 @@ def plant_project(root: Path, extra=None) -> Path:
 
 @pytest.fixture
 def install_configs(tmp_path, monkeypatch):
-    """Stands in for <installation>/configs, so no test reads or writes the repository's configs/."""
+    """Stands in for <installation>/configs, so no test reads or writes the repository's configs/. The stand-in is a
+    developer checkout (it has .git): only a checkout keeps its settings in configs/; an installed copy is shared
+    and never written to (tests/test_shared_installation.py)."""
     path = tmp_path / "install" / "configs"
     path.mkdir(parents=True)
+    (path.parent / ".git").mkdir()
     monkeypatch.setattr(ConfigManager, "installation_config_dir", staticmethod(lambda: path))
     return path
 

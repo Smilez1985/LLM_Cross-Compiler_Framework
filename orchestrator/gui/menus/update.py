@@ -66,3 +66,36 @@ def run_update(window) -> bool:
         return False
     plain_box(window, "information", title, ui_text("update.started"))
     return True
+
+
+def offer_take_over(window) -> bool:
+    """At start: what an earlier version wrote into the installation folder (Core/install_migration.py) is offered
+    for moving into the person's own folders, the person's own items in one question and items that may belong to
+    another account in a second one ("No" is the default of both). A no is kept (not asked at start again). True when
+    something was moved."""
+    from orchestrator.Core import install_migration
+    from orchestrator.gui.plain import ask, plain_box
+    config = getattr(getattr(window, "framework", None), "config", None)
+    try:
+        left = install_migration.pending(config)
+    except Exception:  # noqa: BLE001 - the offer never stops the start
+        return False
+    if not left:
+        return False
+    title = ui_text("takeover.title")
+    mine = [i for i in left if i.mine]
+    theirs = [i for i in left if not i.mine]
+    chosen = []
+    for group, key in ((mine, "takeover.ask_mine"), (theirs, "takeover.ask_others")):
+        if not group:
+            continue
+        if ask(window, title, ui_text(key, items="\n".join(install_migration.summary(group)))):
+            chosen += group
+        else:
+            install_migration.decline(group)
+    if not chosen:
+        return False
+    report = install_migration.take_over(chosen)
+    plain_box(window, "warning" if report.failed else "information", title,
+              ui_text("takeover.done", lines="\n".join(report.lines())))
+    return True

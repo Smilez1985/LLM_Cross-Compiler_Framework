@@ -163,6 +163,7 @@ class FrameworkContext:
                 self.build_engine = self.orchestrator.build_engine
             
             self._initialized = True
+            _offer_installation_take_over(self.framework_manager.config)
             
         except Exception as e:
             self.init_error = e
@@ -197,6 +198,30 @@ def _settings(ctx: "FrameworkContext"):
         from orchestrator.Core.config_manager import ConfigManager
         ctx.settings = ConfigManager(ctx.config_path)
     return ctx.settings, resolve_install_path
+
+
+def _offer_installation_take_over(config: Any) -> None:
+    """Once per person (Core/install_migration.py): what an earlier version wrote into the installation folder is
+    named on stderr with the command that moves it; nothing is moved without being asked."""
+    try:
+        from orchestrator.Core import install_migration
+        left = install_migration.pending(config)
+        if left and install_migration.offered_once():
+            Console(stderr=True).print(
+                f"[yellow]An earlier version kept {len(left)} item(s) of yours in the installation folder "
+                f"({escape(', '.join(i.relative for i in left[:5]))}{', ...' if len(left) > 5 else ''}); the "
+                "installation is shared and no longer written to. 'llm-cli config take-over' moves them into your "
+                "own folders.[/yellow]")
+    except Exception as e:  # noqa: BLE001 - the offer never stops a command
+        get_logger(__name__).debug(f"Installation take-over not checked: {e}")
+
+
+def _target_folders(ctx: "FrameworkContext") -> Tuple[Path, List[Path]]:
+    """(the folder new targets go to, every targets folder in reading order): the person's own targets folder (the
+    per-user folder for an installed copy, which is never written to) and the shipped targets before it."""
+    from orchestrator.Core.target_manager import own_targets_dir, target_roots
+    config, resolve = _settings(ctx)
+    return Path(own_targets_dir(config, resolve)), [Path(r) for r in target_roots(config, resolve)]
 
 
 def _allow_sdk_env_headers(config_path: Optional[str]) -> Any:
@@ -477,9 +502,9 @@ def module_create(ctx: FrameworkContext, name: Optional[str], arch: Optional[str
                   quant_file: Optional[str], knowledge_roots: tuple, formats_file: Optional[str], edit_files: bool):
     """Create a new hardware target module (the module wizard's values as options; what is not given is asked)"""
     from orchestrator.Core.module_generator import probe_module_name, probe_sdk
-    config, resolve = _settings(ctx)
-    # The configured targets folder (relative paths: the installation), as builds and the GUI use it.
-    targets_dir = resolve(config.get("targets_dir", "targets"))
+    # The person's own targets folder, as builds and the GUI use it; names are checked against every targets folder.
+    targets_dir, roots_read = _target_folders(ctx)
+    others = [r for r in roots_read if r != targets_dir]
     profile = _target_profile(probe_file, strict=True) if probe_file else None
     if probe_file:   # into the probe store as the module wizard's import does (scan_steps.import_probe; prints its id)
         _scan_import(ctx, _probe_store(ctx), Path(probe_file), None)
@@ -488,7 +513,7 @@ def module_create(ctx: FrameworkContext, name: Optional[str], arch: Optional[str
                                                                    str(profile.get("ARCH") or "")) or None
         if arch not in ('aarch64', 'x86_64', 'armv7l', 'riscv64'):
             arch = None
-        name = name or probe_module_name(profile, targets_dir)
+        name = name or probe_module_name(profile, [targets_dir, *others])
         sdk = sdk or probe_sdk(profile)
     name = name or click.prompt("Module Name")
     arch = arch or click.prompt("Architecture", type=click.Choice(['aarch64', 'x86_64', 'armv7l', 'riscv64']))
@@ -528,6 +553,8 @@ def module_create(ctx: FrameworkContext, name: Optional[str], arch: Optional[str
     def generate(folder: Path) -> Path:
         from orchestrator.Core.module_edit import template_for
         generator = _lazy("ModuleGenerator")(folder)
+        if others:
+            generator.other_roots = list(others)
         if Path(folder) != Path(targets_dir):   # the edit step's scratch folder renders the targets folder's template
             generator.template_dir = template_for(targets_dir)
         if roots:   # the knowledge base is the framework's: booted only for the attachment
@@ -543,7 +570,7 @@ def module_create(ctx: FrameworkContext, name: Optional[str], arch: Optional[str
 
     try:
         if edit_files:
-            output_path = _create_with_edit_step(targets_dir, name, generate)
+            output_path = _create_with_edit_step(targets_dir, name, generate, others)
             if output_path is None:
                 console.print("[yellow]The module was not saved; nothing was written to the targets folder.[/yellow]")
                 sys.exit(1)
@@ -636,12 +663,13 @@ def _review_module_edit(session, files, question: str) -> bool:
     return click.confirm(question, default=False)
 
 
-def _create_with_edit_step(targets_dir: Path, name: str, generate) -> Optional[Path]:
+def _create_with_edit_step(targets_dir: Path, name: str, generate, others=()) -> Optional[Path]:
     """`module create --edit`: the module made in a scratch folder, its files opened in $EDITOR, the diff and the
-    checks, then saved into the targets folder on the person's yes (None: not saved)."""
+    checks, then saved into the targets folder on the person's yes (None: not saved). others: the other targets
+    folders whose names the module must not capture."""
     from orchestrator.Core.module_edit import ModuleEdit, commit_staged, discard_staged, name_taken, stage_folder
     from orchestrator.Core.module_edit import template_for
-    taken = name_taken(targets_dir, name)
+    taken = name_taken([targets_dir, *others], name)
     if taken:
         raise ValueError(f"A target named '{taken}' already exists, and '{name}' would read the same (names are "
                          "compared ignoring case and separators); choose another module name.")
@@ -655,20 +683,20 @@ def _create_with_edit_step(targets_dir: Path, name: str, generate) -> Optional[P
         if not _review_module_edit(session, session.files, "Save the module into the targets folder?"):
             return None
         session.save()   # the checks once more, then the edits are written
-        return commit_staged(session.folder, targets_dir)
+        return commit_staged(session.folder, targets_dir, others)
     finally:
         discard_staged(scratch)
 
 
-def _module_folder(targets_dir: Path, target: str) -> Path:
-    """The folder of a target of the targets folder by its id or folder name (any case, as builds resolve it); exits
-    when there is none."""
-    from orchestrator.Core.target_manager import read_target_folders, resolve_target_name
-    folders = {tid: folder for tid, (folder, _data) in read_target_folders(Path(targets_dir)).items()}
+def _module_folder(roots: List[Path], target: str) -> Path:
+    """The folder of a target of the targets folders (_target_folders) by its id or folder name (any case, as builds
+    resolve it); exits when there is none."""
+    from orchestrator.Core.target_manager import read_target_roots, resolve_target_name
+    folders = {tid: folder for tid, (folder, _data) in read_target_roots(roots).items()}
     tid = resolve_target_name(target, folders)
     if tid is None:
-        console.print(f"[red]No target '{escape(str(target))}' in {escape(str(targets_dir))} (llm-cli targets list "
-                      "shows the targets).[/red]")
+        console.print(f"[red]No target '{escape(str(target))}' in {escape(', '.join(str(r) for r in roots))} "
+                      "(llm-cli targets list shows the targets).[/red]")
         sys.exit(1)
     return folders[tid]
 
@@ -858,18 +886,18 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
         return
     console.print("[dim]cpu_flags and cmake_flags go into the config stage, which uses them for the board package's "
                   "cross build; the plan from the board's probe comes after them and wins where it decides.[/dim]")
-    fm = ctx.framework_manager
-    targets_dir = fm.resolve_path(fm.config.get("targets_dir", "targets"))
+    targets_dir, roots_read = _target_folders(ctx)
     module_name = definition.module_name.replace(" ", "_")
     profile = _target_profile(probe_file, strict=False)
     try:
-        path = ditto.save_module(definition, targets_dir, module_name=module_name, profile=profile)
+        path = ditto.save_module(definition, targets_dir, module_name=module_name, profile=profile,
+                                 other_roots=[r for r in roots_read if r != targets_dir])
     except (ValueError, OSError) as e:   # OSError: the targets folder cannot be written
         console.print(f"[bold red]The proposal was rejected:[/bold red] {escape(_printable(e))}")
         sys.exit(1)
     from orchestrator.Core.module_generator import generator_input
     from orchestrator.Core.module_generator import record_module_saved
-    record_module_saved(fm, "cli", generator_input(definition.model_dump(), module_name), path, "framework-cli")
+    record_module_saved(ctx.framework_manager, "cli", generator_input(definition.model_dump(), module_name), path, "framework-cli")
     console.print(f"[bold green]✅ Module '{escape(module_name)}' created in {escape(str(path))}[/bold green]")
 
 
@@ -896,9 +924,7 @@ def module_edit(ctx: FrameworkContext, target: str, files: tuple, patch_file: Op
     check passes and you say yes.
     """
     from orchestrator.Core.module_edit import EditRefused, ModuleEdit
-    config, resolve = _settings(ctx)
-    targets_dir = Path(resolve(config.get("targets_dir", "targets")))
-    folder = _module_folder(targets_dir, target)
+    folder = _module_folder(_target_folders(ctx)[1], target)
     try:
         session = ModuleEdit(folder)
     except (OSError, ValueError) as e:
@@ -964,9 +990,7 @@ def module_repair(click_ctx: click.Context, target: str, propose: bool, patch_fi
     from orchestrator.Core import module_test
     from orchestrator.Core.module_edit import EditRefused, ModuleEdit
     ctx = click_ctx.find_object(FrameworkContext)
-    config, resolve = _settings(ctx)
-    targets_dir = Path(resolve(config.get("targets_dir", "targets")))
-    folder = _module_folder(targets_dir, target)
+    folder = _module_folder(_target_folders(ctx)[1], target)
     test = module_test.state_of(folder)
     if test is None:
         console.print(f"[yellow]{escape(folder.name)} is a target the framework ships; only a generated module is "
@@ -1065,8 +1089,7 @@ def _installed_formats(click_ctx: Optional[click.Context]):
         tm = getattr(fctx.framework_manager, "target_manager", None)
         if tm is not None:
             return formats_of(tm)
-        config, resolve = _settings(fctx)
-        return formats_in(Path(resolve(config.get("targets_dir", "targets") or "targets")))
+        return formats_in(_target_folders(fctx)[1])
     except Exception:  # noqa: BLE001 - help and completion never fail on a target that cannot be read
         return []
 
@@ -9391,6 +9414,55 @@ def _config_set_build_default(config, resolve, key: str, value: str) -> None:
         if path is not None and not path.is_file():
             console.print(f"[yellow]{escape(str(path))} does not exist yet: a build that would use it is refused "
                           "until it does.[/yellow]")
+
+
+@config.command('take-over')
+@click.option('--yes', is_flag=True, help="Move your own items without asking (never those that may belong to "
+                                           "another account)")
+@click.option('--others', is_flag=True, help="Also move the items that may belong to another account (asked "
+                                             "separately at a terminal)")
+@pass_context
+def config_take_over(ctx: FrameworkContext, yes: bool, others: bool):
+    """Move what an earlier version wrote into the installation folder (settings, builds, caches, models, logs, your
+    own targets, community packs) into your own folders. The installation is shared by everyone who uses llmcf on
+    this computer and is no longer written to. Nothing is overwritten (a name you already have goes to
+    from-installation/ in your folder) or deleted (the original stays when the installation is read-only)."""
+    from orchestrator.Core import install_migration
+    config, _ = _settings(ctx)
+    left = install_migration.found(config)
+    if not left:
+        console.print("Nothing of yours is left in the installation folder.")
+        return
+    mine = [i for i in left if i.mine]
+    theirs = [i for i in left if not i.mine]
+    chosen = []
+    terminal = sys.stdin.isatty()
+    if mine:
+        console.print("Yours, in the installation folder:")
+        for line in install_migration.summary(mine):
+            console.print(f"  {escape(line)}")
+        if yes or (terminal and click.confirm("Move them into your own folders?", default=True)):
+            chosen += mine
+        elif terminal:   # asked and declined: not named at start again
+            install_migration.decline(mine)
+    if theirs:
+        console.print("These may belong to another account of this computer (they are not yours, or the system "
+                      "does not say whose they are):")
+        for line in install_migration.summary(theirs):
+            console.print(f"  {escape(line)}")
+        if others and (not terminal or click.confirm("Move them into YOUR folders?", default=False)):
+            chosen += theirs
+        elif not others:
+            console.print("Not moved; '--others' moves them too (after asking at a terminal).")
+    if not chosen:
+        if not terminal and not yes:
+            console.print("Nothing moved: no terminal to ask in ('--yes' moves your own items).")
+        return
+    report = install_migration.take_over(chosen)
+    for line in report.lines():
+        console.print(escape(line))
+    if report.failed:
+        sys.exit(1)
 
 
 @config.command('output-folder')

@@ -354,7 +354,8 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
     def label(cm, path: Path) -> str:
         """A folder of the installation as a label (targets/<name>, community/recipes/<name>, ...), never a path."""
         path = Path(path)
-        for root, name in ((cm.targets_dir, "targets"), (cm.recipes_dir, "community/recipes"),
+        roots = [(cm.targets_dir, "targets")] + [(r, "targets") for r in getattr(cm, "target_roots", None) or ()]
+        for root, name in (*roots, (cm.recipes_dir, "community/recipes"),
                            (cm.knowledge_dir, "community/knowledge"), (cm.contributions_dir, "community/contributions")):
             try:
                 return f"{name}/{path.resolve().relative_to(Path(root).resolve()).as_posix()}"

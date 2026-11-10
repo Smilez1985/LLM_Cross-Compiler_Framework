@@ -315,16 +315,18 @@ def stage_folder() -> Path:
     return Path(tempfile.mkdtemp(prefix=STAGING_PREFIX))
 
 
-def name_taken(targets_dir: Path, module_name: str) -> Optional[str]:
-    """The existing target a new module's name would capture (target_name_collision), None when it is free."""
-    return target_name_collision(Path(targets_dir), module_slug(module_name), module_name)
+def name_taken(targets_dir, module_name: str) -> Optional[str]:
+    """The existing target a new module's name would capture (target_name_collision; one targets folder or several),
+    None when it is free."""
+    return target_name_collision(targets_dir, module_slug(module_name), module_name)
 
 
-def commit_staged(folder: Path, targets_dir: Path) -> Path:
-    """Moves a module made in a scratch folder into the targets folder (never over an existing target) and removes
-    the scratch folder. Returns the module's folder in the targets folder."""
+def commit_staged(folder: Path, targets_dir: Path, others: Iterable[Path] = ()) -> Path:
+    """Moves a module made in a scratch folder into the targets folder (never over an existing target, also not one
+    of the other targets folders `others`) and removes the scratch folder. Returns the module's folder in the targets
+    folder."""
     folder, targets_dir = Path(folder), Path(targets_dir)
-    taken = target_name_collision(targets_dir, folder.name)
+    taken = target_name_collision([targets_dir, *others], folder.name)
     if taken:
         raise ValueError(f"A target named '{taken}' exists now; the module was not saved over it.")
     targets_dir.mkdir(parents=True, exist_ok=True)

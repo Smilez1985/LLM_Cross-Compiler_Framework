@@ -522,7 +522,15 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
     # --- create_target_module ---
 
     def targets_dir() -> Path:
-        return Path(targets_manager().targets_dir)
+        """Where a new module goes: the person's own targets folder (the per-user folder for an installed copy)."""
+        tm = targets_manager()
+        return Path(getattr(tm, "user_targets_dir", None) or tm.targets_dir)
+
+    def all_target_roots() -> List[Path]:
+        """Every targets folder (the shipped targets and the person's own): a new module captures none of their
+        names."""
+        tm = targets_manager()
+        return [Path(r) for r in (getattr(tm, "target_roots", None) or [tm.targets_dir])]
 
     def refuse(message: str, next: str, code: str = "invalid_value", field: str = "") -> ToolError:
         return ToolError(message, code=code, next=next, field=field)
@@ -536,7 +544,7 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
         from orchestrator.utils.prebuilt_llama import is_prebuilt_llama_image
         from orchestrator.utils.validation import validate_public_url
         data = generator_input(inp.model_dump(mode="json"), inp.module_name, inp.supported_boards or None)
-        taken = target_name_collision(targets_dir(), module_slug(inp.module_name), inp.module_name)
+        taken = target_name_collision(all_target_roots(), module_slug(inp.module_name), inp.module_name)
         if taken:
             raise refuse(f"A target named '{taken}' exists, and '{inp.module_name}' reads the same (names are compared "
                          "ignoring case and separators).", "Choose another module_name; list_targets shows the names "
@@ -656,7 +664,9 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
                                 next="Call create_target_module again, so the person sees the current probe.")
         root = targets_dir()
         try:
-            folder = ModuleGenerator(root).generate_module(data, None, profile=profile)
+            generator = ModuleGenerator(root)
+            generator.other_roots = [r for r in all_target_roots() if r != root]
+            folder = generator.generate_module(data, None, profile=profile)
         except ValueError as e:
             raise ToolError(str(e).replace(str(root.resolve()), "targets").replace(str(root), "targets"),
                             code="invalid_value", next="Fix the fields listed and call create_target_module again; "

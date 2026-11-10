@@ -56,7 +56,7 @@ READ_ONLY = ("max_concurrent_builds", "auto_cleanup", "log_level", "rag_embeddin
              "image_base_debian", "image_inference_runtime", "gui_auto_refresh",
              "gui_refresh_interval", "api_enabled") + OVERSIGHT
 URL_KEYS = ("qdrant_url", "community_index_url", "community_repo", "docker_registry", "source_repositories")
-FOLDER_KEYS = {"targets_dir": "targets", "models_dir": "models", "datasets_dir": "datasets", "output_dir": "output",
+FOLDER_KEYS = {"targets_dir": "targets", "user_targets_dir": "targets", "models_dir": "models", "datasets_dir": "datasets", "output_dir": "output",
                "build_dir": "builds", "cache_dir": "cache", "logs_dir": "logs", "default_calibration_dataset": "datasets"}
 # Settings only the person changes (llm/settings_change.PERSON_DECIDES): an AI reads them, and a change is refused
 # with its own plain text before any question (settings_facts).
