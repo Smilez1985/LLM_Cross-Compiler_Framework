@@ -1013,6 +1013,11 @@ class _BoardSession:
         refusal = tier_refusal(self.manager._state_dir(), device_id, mode, session)
         if refusal:
             return self.result(False, device_state="ok", reason=refusal)
+        # the board's clock, read over this login (set only with the person's standing yes; never fails the deploy)
+        from orchestrator.runtime.device import board_clock
+        clock = board_clock.on_contact(session, self.manager._state_dir(), device_id, via="deploy")
+        if clock is not None and clock.warning:
+            self.lines.append(clock.warning)
         target_dir = session.private_dir()
         if self.cancel.cancelled:
             raise remote_session.Stopped()

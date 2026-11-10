@@ -771,7 +771,7 @@ and service for a harness are a later step, only as your opt-in. The records com
 parts of at most 4 MiB, after a check of this computer's free space, read on after a dropped connection, every file's
 sha256 checked before the report is made. Start, stop and report are rows of the audit log.
 
-When a harness step finds the board's root readiness missing (or an older sudo rule without the harness actions),
+When a harness step finds the board's root readiness missing (or an older sudo rule without the harness or clock actions),
 the CLI and the window list what its setup does and ask you first ("No" is the default); on yes they carry out the
 one root-readiness setup (only what is missing; a second time changes nothing and says so) and go on with the step.
 Your answer and its result are rows of the audit log; an AI never sets it up. An AI never starts a run and never answers

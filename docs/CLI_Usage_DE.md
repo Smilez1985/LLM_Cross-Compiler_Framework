@@ -2603,7 +2603,8 @@ sie) und einen unprivilegierten Benutzer.
 ```
 llm-cli device list [--json]
 llm-cli device settings GERÄT [--install user|systemd] [--user NAME] [--port N] [--model PFAD] [--confirm-sudo]
-                              [--kv-cache auto|f16|q8_0|q4_0]
+                              [--kv-cache auto|f16|q8_0|q4_0] [--clock-from-pc yes|no]
+llm-cli device clock GERÄT [--set [--yes]]
 llm-cli device runtime plan GERÄT [--json]
 llm-cli device runtime build GERÄT [--jobs N] [--mirror URL] [--yes]
 llm-cli device runtime deploy GERÄT [--user NAME] [--password [WERT] | --password-stdin] [--bench-model PFAD]
@@ -2634,6 +2635,7 @@ ein Deployment fragt nie.
 | `--model PFAD` | Die Modelldatei auf dem Board, die die systemd-Unit bereitstellt (relative Pfade liegen im Home des Benutzers). |
 | `--confirm-sudo` | Mit `--install systemd`: ohne Nachfrage bestätigen. |
 | `--kv-cache auto\|f16\|q8_0\|q4_0` | Der KV-Cache des Servers auf dem Board (`-ctk`/`-ctv`): `q8_0` braucht etwa halb so viel Speicher wie `f16`, `q4_0` etwa ein Viertel, mit etwas Qualitätsverlust. `auto` (die Vorgabe) wählt `q8_0`, wenn neben dem Modell auf dem Board wenig Speicher frei bleibt (aus seiner Probe), sonst `f16`. Wähle `f16`, um den quantisierten Cache auszuschalten. Die systemd-Unit startet den Server damit; für das Startskript gibt das Deployment den Startbefehl damit aus. |
+| `--clock-from-pc yes\|no` | Deine dauerhafte Antwort für die Uhr des Boards: `yes` lässt llmcf sie von der Zeit dieses Rechners stellen, wann immer sie bei einem Kontakt (ein Deploy, eine Bundle-Installation, eine Prüfung) um mehr als eine Minute abweicht, als root über die Uhr-Aktion von llmcf-install (sie braucht die Root-Bereitschaft des Boards, `bundle prepare-root`); `no` belässt es bei einer Warnung, die die Abweichung nennt. Wird mit der Zeit der Antwort ins Audit-Log geschrieben. Einmal gefragt, nachdem du ein Board gepairt hast (`deploy devices pair-code`, ein Pairing mit dem Board-Passwort); siehe [device clock](#device-clock). |
 
 Exit-Code 1, wenn das Board kein systemd hat oder die Bestätigung fehlt (dann wird nichts geändert), 2 bei einem
 falschen Wert.
@@ -2645,7 +2647,37 @@ erst überschrieben, wenn die neuen Einstellungen gespeichert werden.
 
 In der GUI: **Boards > Boards und Geräte...** **> Einstellungen...** (die aktuellen Einstellungen vollständig; Installation, Benutzer, Port,
 Modell und KV-Cache; dieselbe sudo-Frage mit "Nein" als Vorgabe, zuerst ins Audit-Log geschrieben; bei beschädigten
-Einstellungen dieselbe Frage, bevor das Formular mit den Vorgaben öffnet).
+Einstellungen dieselbe Frage, bevor das Formular mit den Vorgaben öffnet). Das Feld "Uhr von diesem Rechner" nimmt
+die Antwort für die Uhr des Boards.
+
+### device clock
+
+Ein Board ohne batteriegepufferte Uhr, das offline ist, kann die Zeit nicht kennen; seine Logs und Dateien trügen ein
+falsches Datum (llmcf selbst prüft nur Hashes und Signaturen ohne Gültigkeitsdatum, die keine Zeit brauchen). Bei
+jedem Kontakt mit einem Board (ein Deploy, eine Bundle-Installation, eine Prüfung, eine Probe) liest llmcf die Zeit
+des Boards über den Login, den es schon hat, und vergleicht sie mit der dieses Rechners. Weicht sie um mehr als eine
+Minute ab, stellt es sie mit deinem dauerhaften Ja für dieses Board (`device settings --clock-from-pc yes`), sonst
+gibt es eine Warnung aus, die die Abweichung nennt.
+
+`device clock GERÄT` zeigt den Stand des letzten Kontakts: die Abweichung, ob das Board eine eigene funktionierende
+Uhr hat (eine RTC, die eine Zeit ab 2025 hält), was seine Zeit über einen Neustart behält (fake-hwclock oder die
+Uhrdatei von systemd-timesyncd), wann sie zuletzt gelesen und gestellt wurde, und deine Antwort. `--set` liest die Uhr
+jetzt und stellt sie nach deinem Ja einmal auf die Zeit dieses Rechners (`--yes`: ohne Frage); ohne Terminal und ohne
+`--yes` wird nichts gestellt (Exit-Code 1).
+
+Die Zeit wird nur als root über die Uhr-Aktion von llmcf-install gestellt (`llmcf-install clock
+YYYY-MM-DDTHH:MM:SSZ`, eine UTC-Zeit von 2025 bis 2099, auf dem Board erneut geprüft, nie eine Shell-Zeile), aus
+seinem root-eigenen Ort über seine sudo-Regel mit `sudo -n`, nie mit einem Passwort: Die Root-Bereitschaft des Boards
+muss eingerichtet sein (`bundle prepare-root`; eine sudo-Regel von vor der Uhr-Aktion wird dort ersetzt).
+llmcf-install schreibt die Zeit in eine funktionierende RTC (`hwclock -w -u`) und sichert sie für den nächsten Start
+(`fake-hwclock save force` oder die Uhrdatei von systemd-timesyncd). Jedes Stellen, auch ein gescheitertes, kommt ins
+Audit-Log. Nach dem Root-Apply eines Bundles auf einem Board ohne funktionierende Uhr richtet dasselbe Ja auch ein,
+dass es seine Zeit über einen Neustart behält (`llmcf-install clock keep`: fake-hwclock, wo es installiert ist, sonst
+systemd-timesyncd; llmcf-install installiert kein Paket).
+
+In der GUI: **Boards > Boards und Geräte...** **> Uhr des Boards...** (derselbe Stand, dann die Frage, ob sie jetzt
+gestellt werden soll; "Nein" ist die Vorgabe). Nach dem Pairing eines Boards per Code fragt das Fenster einmal nach
+der dauerhaften Antwort.
 
 ### device runtime plan
 
@@ -2978,7 +3010,7 @@ Bericht fertig, fertig mit Befunden oder fehlgeschlagen (nach den Rückgabewerte
 und was markiert ist; `report BUNDLE` listet die Läufe, `report BUNDLE RUN` zeigt einen (`--json` für Skripte).
 `--assume-yes` nutzt den eigenen Schalter des Harness, nur wenn das Bündel ihn trägt. Die Läufe brauchen die
 Root-Bereitschaft des Boards (`bundle prepare-root`): Ein Harness-Lauf nimmt kein Passwort. Findet ein Harness-Schritt
-sie fehlend (oder ist die sudo-Regel des Boards eine ältere ohne die Harness-Aktionen), listet der Befehl, was ihre
+sie fehlend (oder ist die sudo-Regel des Boards eine ältere ohne die Harness- oder Uhr-Aktionen), listet der Befehl, was ihre
 Einrichtung tun wird, fragt „Die Root-Bereitschaft von Board ... jetzt einrichten?“ („Nein“ ist die Vorgabe; ohne
 Terminal wird nichts eingerichtet), fragt nach dem Passwort des Board-Kontos, wenn sudo eines braucht (einmal, nie
 gespeichert), führt die eine Einrichtung der Root-Bereitschaft von `bundle prepare-root` aus (nur was fehlt: eine

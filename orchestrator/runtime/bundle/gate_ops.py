@@ -96,10 +96,10 @@ define("bundle-kept", ("word", "word"),
 FIXED_HELPER = gate.LIBEXEC_DIR + "/" + ROOT
 FIXED_DIR = gate.LIBEXEC_DIR
 DROPIN = gate.SUDOERS_DIR + "/llmcf-install"
-# the sudo rule names every action of llmcf-install: the bundle's root actions and the person's harness run
-_HELPER_ACTIONS = inst.ROOT_ACTIONS + inst.HARNESS_ACTIONS
-# a drop-in written before the harness actions lacks them: the readiness reads it as missing and sets it up again
-_DROPIN_CHECK = "harness-read"
+# the sudo rule names every action of llmcf-install: the bundle's root actions, the person's harness run and the clock
+_HELPER_ACTIONS = inst.ROOT_ACTIONS + inst.HARNESS_ACTIONS + (inst.CLOCK_ACTION,)
+# a drop-in written before the newest action (the clock) lacks it: the readiness reads it as old and sets it up again
+_DROPIN_CHECK = inst.CLOCK_ACTION
 
 
 def places_sh(helper: str = FIXED_HELPER, dropin: str = DROPIN) -> str:
@@ -437,6 +437,39 @@ define("bundle-harness", ("word", "word", "word", "word", "word", "sha256"),
        refuse=_harness_refusal,
        doc="llmcf-install's harness actions (start, read, answer, stop, records) for the person's harness run, at "
            "its fixed root-owned place, through its sudoers drop-in only (sudo -n); an answer only on stdin")
+
+
+def _clock_body(arg: str) -> str:
+    """clock-root with its value in place: llmcf-install's clock action (`clock STAMP` sets the board's time to the
+    PC's, `clock keep` sets up keeping it across a restart; rust/llmcf-install/src/clock.rs) from its fixed root-owned
+    place, through its sudoers drop-in only (sudo -n: the clock never takes a password). Any llmcf-install the board's
+    root readiness put there will do (it was checked against the framework's signature then); one too old for the
+    clock, or a sudo rule written before it, answers not-ready."""
+    refuse = 'echo "llmcf-bundle: result={0} changed=0 {1}"; exit 3'
+    return "\n".join([
+        gate.signed_sh(),
+        places_sh(),
+        _FIXED_FNS,
+        f'case {arg} in keep|20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;; *) '
+        + refuse.format("refused", "not a time stamp or keep") + " ;; esac",
+        "command -v sudo >/dev/null 2>&1 || { " + refuse.format(
+            "not-ready", "the board has no sudo (set up the board's root readiness; nothing was changed)") + "; }",
+        "llmcf_fixed_ok || { " + refuse.format(
+            "not-ready", f"{ROOT} is not at its root-owned place on the board (set up the board's root readiness; "
+                         "nothing was changed)") + "; }",
+        f"llmcf_dropin_ok {inst.CLOCK_ACTION} {arg} || {{ " + refuse.format(
+            "not-ready", "the board's sudo rule for llmcf-install does not take the clock action (set up the board's "
+                         "root readiness again; nothing was changed)") + "; }",
+        f'sudo -n "$llmcf_fx" {inst.CLOCK_ACTION} {arg} </dev/null 2>&1',
+    ])
+
+
+# The board's clock (runtime/device/board_clock.py): llmcf-install's clock action as root, through the sudoers drop-in
+# of the board's root readiness only. Sent at a contact only with the person's standing yes for the board, by hand
+# from the person's channels, and after a bundle's root apply within the person's yes for it; no tool of an AI names it.
+define("clock-root", ("clock",), lambda arg, rest="": _clock_body(arg),
+       doc="llmcf-install's clock action (set the board's time to a checked UTC time stamp, or keep the time across "
+           "a restart) at its fixed root-owned place, through its sudoers drop-in only (sudo -n)")
 
 
 GATEWAY_MODES = ("health", "complete", "bench")

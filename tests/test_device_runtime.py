@@ -1589,7 +1589,9 @@ def test_gui_ssh_probe_sends_the_probe_on_stdin_and_stores_the_profile(qapp, tmp
     worker.run()
     ok, msg, path = emitted[0]
     assert ok, msg
-    assert board.commands == [rp.PYTHON_CHECK, rp.PYTHON_COMMAND]
+    # the probe, then the board's clock read over the same login (runtime/device/board_clock.py: reads only)
+    assert board.commands[:2] == [rp.PYTHON_CHECK, rp.PYTHON_COMMAND]
+    assert len(board.commands) == 3 and 'printf "now=%s' in board.commands[2]
     assert not any("/tmp" in c or "chmod" in c or "mktemp" in c for c in board.commands)
     device_id = device_id_for_host_key(ssh_trust.fingerprint(FakeHostKey()))
     assert device_id in msg

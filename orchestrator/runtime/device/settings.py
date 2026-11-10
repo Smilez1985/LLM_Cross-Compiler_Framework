@@ -15,6 +15,9 @@ Deploy settings of a device (decision D7): chosen before a deployment, kept next
 - kv_cache: the KV-cache type of the board's server (f16, q8_0, q4_0; eighth round N7). Unset means automatic:
   q8_0 when the board has little RAM left next to the model (runtime/hardware.py kv_cache_default, from the board's
   probe), f16 otherwise. The person can always choose a type, also f16 to switch the quantized cache off.
+- clock_from_pc: the person's standing yes ("yes") or no ("no") that the framework sets the board's clock from this
+  computer's time when it is off by more than a minute (runtime/device/board_clock.py), with the time of the answer
+  (clock_answered_at). Unset means never asked: the person's channels ask once after a pairing; no AI sets it.
 
 The settings are data from a file: every field is checked when they are read, and a value that does not pass is an
 error, never a guess.
@@ -31,7 +34,9 @@ INSTALL_MODES = ("user", "systemd")
 PORT_RANGE = (1024, 65535)
 _RE_MODEL = re.compile(r"^[A-Za-z0-9._+/-]{1,255}$", re.ASCII)
 _RE_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", re.ASCII)
-_FIELDS = ("install", "ssh_user", "port", "model", "sudo_confirmed_at", "kv_cache")
+_FIELDS = ("install", "ssh_user", "port", "model", "sudo_confirmed_at", "kv_cache", "clock_from_pc",
+           "clock_answered_at")
+CLOCK_ANSWERS = ("yes", "no")
 
 
 class SettingsError(ValueError):
@@ -90,6 +95,8 @@ class DeploySettings:
     model: Optional[str] = None
     sudo_confirmed_at: Optional[str] = None
     kv_cache: Optional[str] = None
+    clock_from_pc: Optional[str] = None
+    clock_answered_at: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.install not in INSTALL_MODES:
@@ -106,6 +113,16 @@ class DeploySettings:
             raise SettingsError("sudo_confirmed_at must be a UTC time stamp")
         if self.kv_cache is not None and self.kv_cache not in KV_CACHE_TYPES:
             raise SettingsError(f"the KV cache must be one of {', '.join(KV_CACHE_TYPES)} (or automatic)")
+        if self.clock_from_pc is not None and self.clock_from_pc not in CLOCK_ANSWERS:
+            raise SettingsError("clock_from_pc must be yes or no")
+        if self.clock_answered_at is not None and (not isinstance(self.clock_answered_at, str)
+                                                   or not _RE_TIMESTAMP.fullmatch(self.clock_answered_at)):
+            raise SettingsError("clock_answered_at must be a UTC time stamp")
+
+    @property
+    def clock_yes(self) -> bool:
+        """Whether the person's standing yes lets the framework set this board's clock from the PC's time."""
+        return self.clock_from_pc == "yes"
 
     @classmethod
     def from_dict(cls, data: Optional[Mapping[str, Any]]) -> "DeploySettings":
@@ -184,5 +201,5 @@ def remember_ssh_user(store: Any, device_id: str, user: str) -> bool:
         return False  # root, an unusual name or damaged settings: `llm-cli device settings` sets it
 
 
-__all__ = ["DeploySettings", "INSTALL_MODES", "KvChoice", "SettingsError", "check_model_path", "check_ssh_user",
-           "remember_ssh_user"]
+__all__ = ["CLOCK_ANSWERS", "DeploySettings", "INSTALL_MODES", "KvChoice", "SettingsError", "check_model_path",
+           "check_ssh_user", "remember_ssh_user"]

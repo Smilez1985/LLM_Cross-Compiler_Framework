@@ -6771,6 +6771,7 @@ def deploy_devices_pair_code(ctx: FrameworkContext, wait: float):
         sys.exit(1)
     for line in person_steps.paired_by_code_lines(paired, _config_language(ctx)):
         console.print(escape(line))
+    _ask_clock_once(ctx, state_dir, paired.done.device_id, board.label)
 
 
 @deploy_devices.command('edit')
@@ -7109,6 +7110,9 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
     for line in _profile_summary(scan.profile):
         console.print(line)
     console.print(f"Stored as device {scan.device_id}: {escape(str(scan.stored))}")
+    _clock_warning(state_dir, scan.device_id)
+    if password:   # a pairing with the board password: the clock question, once per board
+        _ask_clock_once(ctx, state_dir, scan.device_id, label or "")
 
 
 @cli.command('scan')
@@ -7270,6 +7274,34 @@ def _scan_kit(ctx: FrameworkContext, state_dir: Path, folder: Path, *, pair: boo
 def _utc_stamp() -> str:
     from datetime import timezone
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _ask_clock_once(ctx: Optional[FrameworkContext], state_dir: Path, device_id: str, label: str = "",
+                    session=None) -> None:
+    """After the person paired a board in the CLI: the question whether llmcf may set its clock from this computer's
+    time (board_clock.CLOCK_QUESTION), asked once per board at a terminal ("No" is the default), its answer written
+    to the audit log and the board's deploy settings. With a yes and the open `session`, a clock that is off is set
+    at once."""
+    if ctx is None or not device_id or not _interactive():
+        return
+    from orchestrator.runtime.device import board_clock, person_steps
+    from orchestrator.runtime.profile import ProfileStore
+    answer = person_steps.ask_clock_once(
+        ProfileStore(state_dir), device_id,
+        lambda: click.confirm(board_clock.CLOCK_QUESTION.format(board=label or device_id), default=False),
+        audit=_device_audit(ctx, state_dir), via="cli")
+    if answer is None:
+        return
+    console.print("The board's clock is set from this computer's time when it is off by more than a minute."
+                  if answer else "The board's clock is not set by llmcf; a clock that is off is named as a warning.")
+    if answer and session is not None:
+        state = board_clock.on_contact(session, state_dir, device_id, via="cli", label=label or device_id,
+                                       audit=lambda: _device_audit(ctx, state_dir))
+        if state is not None and state.set_ok:
+            console.print(f"The board's clock was off by {board_clock.offset_text(state.reading.offset)}; it is set "
+                          "now.")
+        elif state is not None and state.warning:
+            console.print(f"[yellow]{escape(state.warning)}[/yellow]")
 
 
 def _state_dir(ctx: FrameworkContext) -> Path:
@@ -7434,7 +7466,7 @@ def _open_device(state_dir: Path, device_id: str, host: str, port: int, user: st
     """(board session, host key) of the stored device, as _connect_device logs in (it exits with the reason when the
     board cannot be reached or logged in to); the board's trust record is the caller's to write."""
     from orchestrator.remote.text import wait_lines
-    from orchestrator.runtime.device import person_steps, reasons
+    from orchestrator.runtime.device import person_steps
     # the key that ends a wait, as `deploy run` names it (Ctrl+C ends the command; a wait never runs on to 300 s)
     lines = wait_lines(lambda text: console.print(escape(text)), host, _config_language(ctx), hint=" (Ctrl+C)")
     try:   # the shared step records the board's contacts for Mojo in `state_dir`
@@ -7452,24 +7484,41 @@ def _open_device(state_dir: Path, device_id: str, host: str, port: int, user: st
         client, key = person_steps.connect_stored(state_dir, device_id, host, port, user, password, step=step,
                                                   on_event=lines, signer=_board_signer(ctx), **tiers)
     except person_steps.BoardStepError as e:
-        if e.kind == "switched":   # the switch to OpenSSH ended the step: the person runs it again
-            console.print(f"[yellow]{escape(str(e))}[/yellow]")
-            sys.exit(1)
-        if e.kind in ("unreachable", "host_key_changed") and e.reason:
-            _print_reason(ctx, e.reason, host, port)
-            if e.kind == "host_key_changed":
-                console.print(f"[bold red]{escape(str(e))}[/bold red]")
-        elif e.kind == "login_failed":
-            if e.reason == reasons.AUTH_FAILED:
-                _print_reason(ctx, reasons.AUTH_FAILED, host, port)
-            else:  # none of the four reasons: shown as it is, never relabelled as a refused login
-                console.print(f"[red]{escape(str(e))}[/red]")
-            console.print("[red]Pair the device once with llm-cli scan --device (it asks for the password one time) "
-                          "or pass --password.[/red]")
-        else:
-            console.print(f"[red]{escape(str(e))}[/red]")
-        sys.exit(1)
+        _open_failed(ctx, e, host, port)
+    _clock_warning(state_dir, device_id)
+    if password:   # a pairing with the board password: the clock question, once per board
+        _ask_clock_once(ctx, state_dir, device_id, session=client)
     return client, key
+
+
+def _clock_warning(state_dir: Path, device_id: str) -> None:
+    """The warning of this contact's clock reading, when the board's clock is off and was not set."""
+    from orchestrator.runtime.device import board_clock
+    warning = board_clock.clock_state(state_dir, device_id)["warning"]
+    if warning:
+        console.print(f"[yellow]{escape(warning)}[/yellow]")
+
+
+def _open_failed(ctx: Optional[FrameworkContext], e, host: str, port: int) -> None:
+    """Exits with the reason _open_device's login failed."""
+    from orchestrator.runtime.device import reasons
+    if e.kind == "switched":   # the switch to OpenSSH ended the step: the person runs it again
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        sys.exit(1)
+    if e.kind in ("unreachable", "host_key_changed") and e.reason:
+        _print_reason(ctx, e.reason, host, port)
+        if e.kind == "host_key_changed":
+            console.print(f"[bold red]{escape(str(e))}[/bold red]")
+    elif e.kind == "login_failed":
+        if e.reason == reasons.AUTH_FAILED:
+            _print_reason(ctx, reasons.AUTH_FAILED, host, port)
+        else:  # none of the four reasons: shown as it is, never relabelled as a refused login
+            console.print(f"[red]{escape(str(e))}[/red]")
+        console.print("[red]Pair the device once with llm-cli scan --device (it asks for the password one time) "
+                      "or pass --password.[/red]")
+    else:
+        console.print(f"[red]{escape(str(e))}[/red]")
+    sys.exit(1)
 
 
 def _board_step_failed(ctx: Optional[FrameworkContext], error, host: str, port: int) -> None:
@@ -7617,9 +7666,14 @@ def device_list(ctx: FrameworkContext, as_json: bool):
 @click.option('--kv-cache', type=click.Choice(['auto', 'f16', 'q8_0', 'q4_0']),
               help='KV cache of the server: q8_0 about half the memory, q4_0 about a quarter (some quality loss), '
                    'f16 full precision; auto (the default) chooses q8_0 for a board with little RAM, else f16')
+@click.option('--clock-from-pc', type=click.Choice(['yes', 'no']),
+              help="yes: llmcf sets the board's clock from this computer's time whenever it is off by more than a "
+                   "minute (as root through llmcf-install's clock action; written to the audit log); no: only a "
+                   "warning")
 @pass_context
 def device_settings(ctx: FrameworkContext, device_name: str, install: Optional[str], ssh_user: Optional[str],
-                    port: Optional[int], model: Optional[str], confirm_sudo: bool, kv_cache: Optional[str]):
+                    port: Optional[int], model: Optional[str], confirm_sudo: bool, kv_cache: Optional[str],
+                    clock_from_pc: Optional[str]):
     """Show or change how the runtime is installed on a device. Decided here, before a deployment: a deployment
     never asks."""
     from orchestrator.runtime.device import person_steps
@@ -7629,6 +7683,8 @@ def device_settings(ctx: FrameworkContext, device_name: str, install: Optional[s
                if v is not None}
     if kv_cache is not None:
         changes["kv_cache"] = None if kv_cache == "auto" else kv_cache
+    if clock_from_pc is not None:
+        changes["clock_from_pc"] = clock_from_pc
     if not changes:
         current = _deploy_settings(store, device_id)   # damaged settings are named, never shown as the defaults
     else:
@@ -7648,7 +7704,10 @@ def device_settings(ctx: FrameworkContext, device_name: str, install: Optional[s
                 may_use_sudo=lambda: confirm_sudo or (_interactive() and click.confirm(person_steps.SUDO_QUESTION,
                                                                                          default=False)),
                 record_sudo_consent=lambda: _record_consent(ctx, tool, {"device": device_id}, detail),
-                stamp=_utc_stamp)
+                stamp=_utc_stamp,
+                record_clock_answer=lambda answer: _record_consent(
+                    ctx, person_steps.CLOCK_CONSENT[0], {"device": device_id, "answer": answer},
+                    person_steps.CLOCK_CONSENT[1]))
         except SettingsError as e:
             raise click.UsageError(str(e))
         except person_steps.BoardStepError as e:
@@ -7663,8 +7722,71 @@ def device_settings(ctx: FrameworkContext, device_name: str, install: Optional[s
     console.print(f"Model for the systemd unit: {escape(current.model or 'not set')}")
     from orchestrator.runtime.device.steps import kv_choice_of
     console.print(f"KV cache: {escape(_kv_text(ctx, kv_choice_of(current, profile, _state, device_id)))}")
+    clock = {"yes": "yes (when it is off by more than a minute)", "no": "no (only a warning)"}.get(
+        current.clock_from_pc or "", "not asked yet")
+    console.print(f"Clock from this computer: {clock}"
+                  + (f" (answered {current.clock_answered_at})" if current.clock_answered_at else ""))
     for problem in current.problems(profile):
         console.print(f"[yellow]{escape(problem)}[/yellow]")
+
+
+@device.command('clock')
+@click.argument('device_name', metavar='DEVICE')
+@click.option('--set', 'set_now', is_flag=True,
+              help="Set the board's clock to this computer's time now, once (asks first; as root through "
+                   "llmcf-install's clock action, which needs the board's root readiness)")
+@click.option('--yes', 'assume_yes', is_flag=True, help="With --set: no question")
+@pass_context
+def device_clock(ctx: FrameworkContext, device_name: str, set_now: bool, assume_yes: bool):
+    """Show the board's clock: its offset against this computer at the last contact, whether it has a working clock
+    of its own (RTC), what keeps its time across a restart, when it was last set and whether llmcf may set it.
+    --set reads it now and sets it once."""
+    from orchestrator.runtime.device import board_clock, person_steps
+    state_dir, _store, device_id, _profile = _device_context(ctx, device_name)
+    if set_now:
+        settings = _deploy_settings(_store, device_id)
+        try:
+            host, port = person_steps.board_address(_store, device_id)
+        except ValueError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
+        if not settings.ssh_user:
+            console.print(f"[red]No SSH user is set for {device_id}: llm-cli device settings {device_id} --user NAME."
+                          "[/red]")
+            sys.exit(1)
+        session, _key = _open_device(state_dir, device_id, host, port, settings.ssh_user, None, ctx=ctx,
+                                     step="clock")
+        try:
+            reading = board_clock.read(session.run)
+            offset = board_clock.offset_text(reading.offset) if reading is not None else "unknown"
+            question = board_clock.SET_QUESTION.format(board=device_id, stamp=board_clock.stamp(time.time()),
+                                                       offset=offset)
+            if not assume_yes and not (_interactive() and click.confirm(question, default=False)):
+                console.print("The board's clock was not changed" + ("" if _interactive() else
+                                                                     " (it needs your answer at a terminal, or --yes)")
+                              + ".")
+                sys.exit(1)
+            state = person_steps.set_clock_by_hand(session, state_dir, device_id, via="cli",
+                                                   audit=_device_audit(ctx, state_dir))
+        finally:
+            session.close()
+        done = state.set_run
+        if state.set_ok:
+            console.print(f"[green]The board's clock was set to {escape(done.values.get('set', ''))} UTC "
+                          f"(saved for the next start: {escape(done.values.get('saved', 'none'))}).[/green]")
+        elif done.result == "not-ready":
+            console.print("[red]The board's clock was not set: the board's root readiness for llmcf-install is not "
+                          "set up, or its sudo rule is an older one (llm-cli bundle prepare-root BUNDLE).[/red]")
+            sys.exit(1)
+        else:
+            console.print(f"[red]The board's clock was not set: {escape(done.result or 'no answer')} "
+                          f"{escape(done.detail)}[/red]")
+            sys.exit(1)
+    for line in board_clock.state_lines(state_dir, device_id):
+        console.print(escape(line))
+    warning = board_clock.clock_state(state_dir, device_id)["warning"]
+    if warning and not set_now:
+        console.print(f"[yellow]{escape(warning)}[/yellow]")
 
 
 @device.group('runtime')
@@ -8398,11 +8520,14 @@ def _bundle_root(ctx: FrameworkContext, built, action: str, opener=None, *, ask:
     from orchestrator.runtime.device.remote import RemoteError
     open_session, host, port, label, _device_id = opener or _bundle_opener(ctx, built)
     password = {"text": ""}
+    state_dir = _state_dir(ctx)
 
     def run(what: str):
         try:
             return service.run_root_on_board(open_session, built, what, password=password["text"],
-                                             say=lambda msg: console.print(escape(msg)))
+                                             say=lambda msg: console.print(escape(msg)), state_dir=state_dir,
+                                             via="cli", audit=_device_audit(ctx, state_dir) if what == "apply"
+                                             else None)
         except BundleError as e:
             console.print(f"[red]{escape(str(e))}[/red]")
             sys.exit(1)
@@ -8462,7 +8587,8 @@ def _bundle_root(ctx: FrameworkContext, built, action: str, opener=None, *, ask:
         sys.exit(1)
     if action != "apply" and first.report.result == "absent":
         return first   # llmcf-install made nothing of this bundle on the board: nothing to undo
-    if not (_interactive() and click.confirm(service.root_question(action, built, label, service.root_count(first)),
+    if not (_interactive() and click.confirm(service.root_question(action, built, label, service.root_count(first),
+                                                                   state_dir),
                                              default=False)):
         console.print("Nothing was changed on the board by llmcf-install"
                       + ("" if _interactive() else " (it needs your answer at a terminal)") + ".")

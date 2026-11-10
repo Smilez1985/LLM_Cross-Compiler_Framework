@@ -14,6 +14,7 @@ questions stay with the caller (a terminal prompt, a GUI question with "No" as t
 with the words kept here (SUDO_QUESTION).
 """
 
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -26,6 +27,9 @@ SUDO_QUESTION = ("The systemd unit is written to /etc/systemd/system and enabled
                  "must work without a password, the deployment never asks). Allow deployments to this device to run "
                  "these sudo commands? Your answer is written to the audit log.")
 SYSTEMD_CONSENT = ("device_runtime_systemd", "deployments may run sudo -n on the device to install the systemd unit")
+# The person's standing answer for the board's clock (runtime/device/board_clock.py): its audit record.
+CLOCK_CONSENT = ("board_clock_from_pc", "the person's standing answer: set the board's clock from this computer's "
+                 "time when it is off by more than a minute")
 # The question before a model that is not a catalog model runs in the short benchmark on the board, asked only after
 # its sha256 was read there ({path} on the board, {user} the SSH user; CLI and GUI ask exactly this, "No" default).
 UNTRUSTED_QUESTION = ("{path} is not a catalog model, so it is untrusted. llama-bench loads it natively on the device "
@@ -428,13 +432,21 @@ def settings_to_change(store: Any, device_id: str, *, may_replace: Callable[[str
 
 def change_settings(store: Any, device_id: str, profile: Any, current: Any, changes: Dict[str, Any], *,
                     may_use_sudo: Callable[[], bool], record_sudo_consent: Callable[[], None],
-                    stamp: Callable[[], str]):
+                    stamp: Callable[[], str], record_clock_answer: Optional[Callable[[str], None]] = None):
     """`llmcf device settings DEVICE --install/--user/--port/--model/--kv-cache`: applies `changes` (field -> value;
     kv_cache None means automatic) to `current` and saves them. Choosing the systemd unit needs a board whose probe
     reports systemd and the person's yes to SUDO_QUESTION (`may_use_sudo()`), written to the audit log first
     (`record_sudo_consent()`, which raises when it cannot: nothing is changed then). SettingsError for a value that
-    does not pass; BoardStepError (no_systemd, sudo_declined, not_saved) otherwise. Returns the saved settings."""
+    does not pass; BoardStepError (no_systemd, sudo_declined, not_saved) otherwise. A changed answer for the board's
+    clock (clock_from_pc yes or no) is written to the audit log first (`record_clock_answer(answer)`, which raises
+    when it cannot: nothing is changed then) and gets the time of the answer. Returns the saved settings."""
     new = current.changed(**changes)   # SettingsError for a value that does not pass
+    if new.clock_from_pc != current.clock_from_pc and new.clock_from_pc is not None:
+        if record_clock_answer is None:
+            raise BoardStepError("The answer for the board's clock is the person's; it was not changed.",
+                                 "clock_unrecorded")
+        record_clock_answer(new.clock_from_pc)
+        new = replace(new, clock_answered_at=stamp())
     if new.install == "systemd" and new.sudo_confirmed_at is None:
         init = profile.get("INIT_SYSTEM") if profile is not None else None
         if init != "systemd":
@@ -554,6 +566,10 @@ def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: 
         session.close()
         raise BoardStepError(refusal, "weaker_tier")
     _note(state_dir, device_id, step, "")   # reached and logged in: a recorded problem ends
+    # the board's clock, read over this login (set with the person's standing yes for it; never fails the step)
+    from orchestrator.runtime.device import board_clock
+    board_clock.on_contact(session, state_dir, str(device_id or ""), via=via or "cli",
+                           audit=audit if audit is not None else (lambda: device_audit(None, state_dir)))
     return session, session.key
 
 
@@ -1016,7 +1032,69 @@ def import_ssh_block(host: str, home_config: Optional[Path] = None) -> List[str]
     return lines
 
 
-__all__ = ["BoardPrune", "BoardStepError", "DAMAGED_QUESTION", "SUDO_QUESTION", "SYSTEMD_CONSENT",
+
+# --- the board's clock: the person's standing answer and the set by hand (runtime/device/board_clock.py) -------------
+
+def ask_clock_once(store: Any, device_id: str, ask: Callable[[], Optional[bool]], *, audit: Any, via: str,
+                   stamp_now: Optional[Callable[[], str]] = None) -> Optional[bool]:
+    """After a pairing in the person's channel: asks board_clock.CLOCK_QUESTION once (`ask()`: True yes, False no,
+    None not answered: asked again after the next pairing) when the board's deploy settings hold no answer yet, and
+    writes the answer to the audit log and the settings. Returns the answer stored (None: nothing stored). Never
+    raises."""
+    from orchestrator.runtime.device.settings import DeploySettings, SettingsError
+    try:
+        current = DeploySettings.from_dict(store.load_deploy_settings(device_id))
+    except (SettingsError, ValueError, OSError):
+        return None   # damaged settings are set again in the board's settings first
+    if current.clock_from_pc is not None:
+        return None
+    try:
+        answer = ask()
+    except Exception:  # noqa: BLE001 - no answer is no answer
+        answer = None
+    if answer is None:
+        return None
+    return change_clock_answer(store, device_id, bool(answer), audit=audit, via=via, stamp_now=stamp_now)
+
+
+def change_clock_answer(store: Any, device_id: str, yes: bool, *, audit: Any, via: str,
+                        stamp_now: Optional[Callable[[], str]] = None) -> Optional[bool]:
+    """The person's standing answer for this board's clock (`llmcf device settings --clock-from-pc`, the Boards
+    window, the question after a pairing), written to the audit log first and then to its deploy settings. None
+    when it could not be saved."""
+    from orchestrator.runtime.device import board_clock
+    from orchestrator.runtime.device.settings import DeploySettings, SettingsError
+    try:
+        current = DeploySettings.from_dict(store.load_deploy_settings(device_id))
+        new = replace(current, clock_from_pc="yes" if yes else "no",
+                      clock_answered_at=(stamp_now or (lambda: board_clock.stamp(time.time())))())
+        # without its record in the audit log there is no answer (record_consent raises: nothing is saved)
+        record_consent(audit, CLOCK_CONSENT[0], {"device": device_id, "answer": new.clock_from_pc},
+                       CLOCK_CONSENT[1], channel=f"framework-{via}")
+        store.save_deploy_settings(device_id, new.as_dict())
+    except (SettingsError, ValueError, OSError, RuntimeError):
+        return None
+    return yes
+
+
+def set_clock_by_hand(session: Any, state_dir: Path, device_id: str, *, via: str, audit: Any):
+    """The person's one set by hand (their channel asked board_clock.SET_QUESTION first): reads the clock, sets it
+    whatever the offset, writes the set to the audit log and the board's clock record. board_clock.ClockState with
+    set_run (its result says whether it worked)."""
+    from orchestrator.runtime.device import board_clock
+    reading = board_clock.read(session.run)
+    if reading is not None:
+        board_clock.save_record(Path(state_dir), device_id, board_clock.reading_record(reading))
+    when = time.time()
+    done = board_clock.set_clock(session.run, when)
+    board_clock.record_set(Path(state_dir), device_id, reading, done, via=via, audit=audit, actor="user", when=when,
+                           reason="by-hand")
+    if done.ok:
+        board_clock.save_record(Path(state_dir), device_id, {"warning": ""})
+    return board_clock.ClockState(reading, done)
+
+__all__ = ["BoardPrune", "CLOCK_CONSENT", "ask_clock_once", "change_clock_answer", "set_clock_by_hand",
+           "BoardStepError", "DAMAGED_QUESTION", "SUDO_QUESTION", "SYSTEMD_CONSENT",
            "UNTRUSTED_CONSENT", "UNTRUSTED_QUESTION", "add_trusted_board", "board_address", "boards_overview",
            "change_settings", "check_board_entry", "connect_stored", "device_rows", "list_board_builds",
            "load_settings", "not_known_error", "previous_build", "read_host_key", "record_consent", "remember_board",

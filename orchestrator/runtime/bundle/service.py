@@ -378,14 +378,26 @@ def build_for(plan: gen.BundlePlan, store: gen.BundleStore, signer: Any, *, fram
 
 
 def run_root_on_board(open_session: Callable[[], Any], built: gen.BuiltBundle, action: str, *, password: str = "",
-                      say: Callable[[str], None] = lambda _m: None):
+                      say: Callable[[str], None] = lambda _m: None, state_dir: Optional[Path] = None,
+                      via: str = "cli", audit: Any = None):
     """llmcf-install `action` on the board through the caller's login (board.run_root), the session closed in every
-    case. Only the person's channels call this, after the person's yes."""
+    case. Only the person's channels call this, after the person's yes. After a successful apply, on a board whose
+    last clock reading (in `state_dir`) shows no working RTC, `clock keep` within the same yes (root_question says
+    so): its line goes into the run's notes."""
     from orchestrator.runtime.bundle.board import run_root
     from orchestrator.runtime.device.remote import RemoteShell
     session = open_session()
     try:
-        return run_root(RemoteShell(session), built, action, password=password, say=say)
+        shell = RemoteShell(session)
+        done = run_root(shell, built, action, password=password, say=say)
+        if action == "apply" and done.ok and state_dir is not None:
+            from orchestrator.runtime.device import board_clock
+            kept = board_clock.keep_after_apply(
+                lambda script, timeout=None: shell.run(script, timeout=timeout or 60.0, step="bundle"),
+                Path(state_dir), built.manifest.board.device_id, via=via, audit=audit)
+            if kept is not None:
+                done.notes.append(board_clock.keep_line(kept))
+        return done
     finally:
         close = getattr(session, "close", None)
         if callable(close):
@@ -434,10 +446,17 @@ def ready_remove_on_board(open_session: Callable[[], Any], found: Any, *, mode: 
         password=password))
 
 
-def root_question(action: str, built: gen.BuiltBundle, board: str, count: int) -> str:
-    """The person's question before llmcf-install's `action` (apply, uninstall, rollback) changes the board."""
+def root_question(action: str, built: gen.BuiltBundle, board: str, count: int,
+                  state_dir: Optional[Path] = None) -> str:
+    """The person's question before llmcf-install's `action` (apply, uninstall, rollback) changes the board; an apply
+    on a board without a working clock (its last clock reading in `state_dir`) also names keeping its time."""
     text = {"apply": ROOT_QUESTION, "uninstall": ROOT_UNINSTALL_QUESTION, "rollback": ROOT_ROLLBACK_QUESTION}[action]
-    return text.format(bundle=built.bundle_id, board=board, count=count)
+    question = text.format(bundle=built.bundle_id, board=board, count=count)
+    if action == "apply" and state_dir is not None:
+        from orchestrator.runtime.device import board_clock
+        if board_clock.needs_keep(Path(state_dir), built.manifest.board.device_id):
+            question += " " + board_clock.KEEP_NOTE
+    return question
 
 
 def root_count(run: Any) -> int:

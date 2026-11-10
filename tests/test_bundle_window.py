@@ -264,7 +264,7 @@ def test_the_root_actions_follow_the_apply_after_their_own_question_and_the_pass
                        "llmcf-bundle: result=plan changed=0 pending=1\n",
                "apply": "llmcf-bundle: done create_user stt user=llmcf\nllmcf-bundle: result=ok changed=1\n"}
 
-    def run_root_on_board(open_session, built, action, *, password="", say=None):
+    def run_root_on_board(open_session, built, action, *, password="", say=None, **_clock):
         runs.append((action, password, threading.current_thread() is threading.main_thread()))
         if not password:
             return BoardRun("root-" + action, 3, inst.report("llmcf-bundle: result=needs-password changed=0 x\n"))
@@ -328,7 +328,7 @@ def test_a_not_ready_board_sets_the_readiness_up_once_and_the_status_never_asks_
     built = _built_with_root(qapp, dialog, board, monkeypatch)
     runs, checks = [], []
 
-    def run_root_on_board(open_session, built, action, *, password="", say=None):
+    def run_root_on_board(open_session, built, action, *, password="", say=None, **_clock):
         runs.append(action)
         if len(runs) > 6:
             raise AssertionError("the window runs llmcf-install again and again")

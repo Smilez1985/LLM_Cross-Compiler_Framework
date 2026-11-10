@@ -653,7 +653,9 @@ class BundleWindow(BoardSteps, QDialog):
 
         def run_step(what: str, pw: str, after, prepared: bool = False) -> None:
             def work():
-                return service.run_root_on_board(open_session, built, what, password=pw, say=self._progress)
+                return service.run_root_on_board(open_session, built, what, password=pw, say=self._progress,
+                                                 state_dir=self.state_dir, via="gui",
+                                                 audit=self.audit if what == "apply" else None)
 
             def done(run: Any) -> None:
                 if run.report.result == "not-ready":
@@ -697,8 +699,13 @@ class BundleWindow(BoardSteps, QDialog):
                 if then is not None:
                     then()
                 return
-            if not ask(self, self._t("bundle.title"), self._t(ROOT_ASK_KEYS[action], bundle=built.bundle_id,
-                                                              board=label, count=service.root_count(first))):
+            question = self._t(ROOT_ASK_KEYS[action], bundle=built.bundle_id, board=label,
+                               count=service.root_count(first))
+            if action == "apply":
+                from orchestrator.runtime.device import board_clock
+                if board_clock.needs_keep(self.state_dir, device_id):
+                    question += " " + self._t("bundle.ask.root_keep_clock")
+            if not ask(self, self._t("bundle.title"), question):
                 self._say(self._t("bundle.root.unchanged"))
                 return
 

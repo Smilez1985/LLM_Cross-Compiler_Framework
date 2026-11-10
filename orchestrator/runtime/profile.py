@@ -1352,6 +1352,32 @@ class ProfileStore:
         write_private(path, text)
         return path
 
+    # --- the board's clock record (runtime/device/board_clock.py: its last reading, its last set) ---
+
+    def _clock_path(self, device_id: str) -> Path:
+        return self.devices_dir / f"{_check_device_id(device_id)}.clock.json"
+
+    def load_clock(self, device_id: str) -> Dict[str, Any]:
+        """The board's clock record ({} when there is none, or when it cannot be read: it is a record of what was
+        seen, never a decision, so a damaged one counts as none)."""
+        try:
+            with open(self._clock_path(device_id), "rb") as f:
+                raw = f.read(_META_MAX_BYTES + 1)
+            data = json.loads(raw) if len(raw) <= _META_MAX_BYTES else None
+        except (OSError, ValueError, RecursionError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def save_clock(self, device_id: str, record: Mapping[str, Any]) -> Path:
+        """Stores the board's clock record (a private file next to its profile)."""
+        path = self._clock_path(device_id)
+        text = json.dumps(dict(record), indent=2, sort_keys=True, ensure_ascii=True) + "\n"
+        if len(text.encode("ascii")) > _META_MAX_BYTES:
+            raise ValueError("the clock record is too large")
+        self._prepare(path.parent)
+        write_private(path, text)
+        return path
+
     def _limits_path(self, device_id: str) -> Path:
         return self.devices_dir / f"{_check_device_id(device_id)}.limits.json"
 

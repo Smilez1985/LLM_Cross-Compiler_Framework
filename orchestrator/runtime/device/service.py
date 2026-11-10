@@ -186,6 +186,9 @@ def connect(device: TrustedDevice, state_dir: Path, user: str, expect_fingerprin
                                  next="Tell the person: enterprise mode refuses this board's weaker key tier. Only "
                                       "the person pairs it again (the switch to OpenSSH or password login) or "
                                       "changes the framework mode; no tool can.")
+    # the board's clock, read over this login (set only with the person's standing yes for it; never fails the step)
+    from orchestrator.runtime.device import board_clock
+    board_clock.on_contact(session, Path(state_dir), device.device_id, via="tool", label=device.label)
     if on_client is not None:
         on_client(session)
     return session

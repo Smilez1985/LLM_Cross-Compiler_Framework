@@ -847,7 +847,7 @@ abgebrochenen Verbindung weitergelesen, die sha256 jeder Datei geprüft, bevor d
 Bericht sind Zeilen im Audit-Protokoll.
 
 Findet ein Harness-Schritt die Root-Bereitschaft des Boards fehlend (oder eine ältere sudo-Regel ohne die
-Harness-Aktionen), listen CLI und Fenster, was ihre Einrichtung tut, und fragen dich zuerst („Nein“ ist die Vorgabe);
+Harness- oder Uhr-Aktionen), listen CLI und Fenster, was ihre Einrichtung tut, und fragen dich zuerst („Nein“ ist die Vorgabe);
 bei Ja führen sie die eine Einrichtung der Root-Bereitschaft aus (nur was fehlt; ein zweites Mal ändert nichts und
 sagt das) und setzen den Schritt fort. Deine Antwort und ihr Ergebnis sind Zeilen im Audit-Protokoll; eine KI richtet
 sie nie ein.

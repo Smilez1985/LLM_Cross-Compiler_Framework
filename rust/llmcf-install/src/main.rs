@@ -14,10 +14,15 @@
 //! [MODE|OFFSET|PART]` runs the person's harness of a harness component (manifest root action run_harness) through the
 //! framework's harness watch, detached, and reads it back (harness.rs).
 //!
+//! `sudo llmcf-install clock STAMP|keep` sets the board's time to the PC's (a checked UTC time stamp) and saves it
+//! for the next start, or sets up keeping the last known time across a restart on a board without a working RTC
+//! (clock.rs).
+//!
 //! Exit status: 0 done (also plan, status, absent), 2 not a call it takes, 3 refused (nothing changed), 5 a step
 //! failed (the journal says what was done: roll back or run it again).
 #![forbid(unsafe_code)]
 
+mod clock;
 mod harness;
 mod install;
 mod manifest;
@@ -59,7 +64,15 @@ fn main() -> ExitCode {
         sys::Env::real()
     };
     let harness_action = args.first().map(|a| harness::ACTIONS.contains(&a.as_str())).unwrap_or(false);
-    if harness_action {
+    let clock_action = args.first().map(String::as_str) == Some(clock::ACTION);
+    if clock_action {
+        if args.len() != 2 || !clock::is_arg(&args[1]) {
+            return refuse(
+                install::EXIT_USAGE,
+                "usage: llmcf-install clock YYYY-MM-DDTHH:MM:SSZ (a UTC time from 2025 to 2099) or llmcf-install clock keep",
+            );
+        }
+    } else if harness_action {
         let want = if ["harness-start", "harness-read", "harness-records"].contains(&args[0].as_str()) { 5 } else { 4 };
         let ok = args.len() == want
             && manifest::is_id(&args[2])
@@ -87,7 +100,7 @@ fn main() -> ExitCode {
         );
     }
     let (action, bid) = (args[0].as_str(), args[1].as_str());
-    if !manifest::is_id(bid) {
+    if !clock_action && !manifest::is_id(bid) {
         return refuse(install::EXIT_USAGE, "not a bundle id");
     }
     println!("llmcf-bundle: helper llmcf-install {VERSION}");
@@ -109,6 +122,9 @@ fn main() -> ExitCode {
         Some(a) if (a.uid != 0 || env.test) && sys::plain_abs(&a.home) => a,
         _ => return refuse(install::EXIT_REFUSED, "the board account has no plain home folder in the password file"),
     };
+    if clock_action {
+        return ExitCode::from(clock::run(&env, bid) as u8);
+    }
     if harness_action {
         return ExitCode::from(harness::run(&env, action, bid, &account, &args[2..]) as u8);
     }

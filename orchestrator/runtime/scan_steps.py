@@ -444,6 +444,11 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
                                   chooser=chooser, mode=mode, audit=audit if audit is not None else audit_factory,
                                   via=via, host=host, port=port, user=user, access=access)
         result = probe_over_ssh(session)
+        if getattr(paired, "endpoint", None) is None:
+            # the board's clock and its RTC, read over this login (set only with the person's standing yes)
+            from orchestrator.runtime.device import board_clock
+            board_clock.on_contact(session, state_dir, device_id_for_host_key(ssh_trust.fingerprint(key)),
+                                   via=via or "cli", audit=audit if audit is not None else audit_factory)
     except (RemoteProbeError, ssh_trust.HostKeyError) as e:
         if session.cancel.cancelled:   # the Cancel closed the session under the running probe
             raise DeviceScanError(f"The scan of {host} was cancelled.", "cancelled", error=e) from None

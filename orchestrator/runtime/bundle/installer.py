@@ -59,6 +59,10 @@ ROOT_ACTIONS = ("plan", "apply", "status", "rollback", "uninstall", "plan-uninst
 # BUNDLE COMPONENT RUN, start with dry|run|run-yes and read with a byte offset after them.
 HARNESS_ACTIONS = ("harness-start", "harness-read", "harness-answer", "harness-stop", "harness-records")
 HARNESS_MODES = ("dry", "run", "run-yes")
+# llmcf-install's clock action (rust/llmcf-install/src/clock.rs; gate operation clock-root): `clock STAMP` sets the
+# board's time to a checked UTC time stamp and saves it for the next start, `clock keep` sets up keeping the time
+# across a restart on a board without a working RTC.
+CLOCK_ACTION = "clock"
 SEP = "--"   # a staged file of the bundle is <component>--<file name> in the upload folder
 
 
@@ -494,7 +498,7 @@ def report(text: str) -> Report:
     return out
 
 
-__all__ = ["ACTIONS", "BUNDLE_REL", "EXIT_OK", "EXIT_REFUSED", "EXIT_ROOT", "EXIT_ROOT_FAILED", "HARNESS_ACTIONS",
-           "HARNESS_MODES", "INSTALLER_SH",
+__all__ = ["ACTIONS", "BUNDLE_REL", "CLOCK_ACTION", "EXIT_OK", "EXIT_REFUSED", "EXIT_ROOT", "EXIT_ROOT_FAILED",
+           "HARNESS_ACTIONS", "HARNESS_MODES", "INSTALLER_SH",
            "KEPT_ACTIONS", "REPORT_PREFIX", "ROOT_ACTIONS", "ROOT_HELPER_FILE", "Report", "SIGNED_FILES", "STEPS_MAGIC",
            "installer_sh", "render_steps", "report", "staged_name"]

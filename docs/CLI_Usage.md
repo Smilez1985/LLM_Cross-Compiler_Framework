@@ -2488,7 +2488,8 @@ the board needs SSH, `tar`, `gzip` and `sha256sum` (BusyBox has them), and an un
 ```
 llm-cli device list [--json]
 llm-cli device settings DEVICE [--install user|systemd] [--user NAME] [--port N] [--model PATH] [--confirm-sudo]
-                               [--kv-cache auto|f16|q8_0|q4_0]
+                               [--kv-cache auto|f16|q8_0|q4_0] [--clock-from-pc yes|no]
+llm-cli device clock DEVICE [--set [--yes]]
 llm-cli device runtime plan DEVICE [--json]
 llm-cli device runtime build DEVICE [--jobs N] [--mirror URL] [--yes]
 llm-cli device runtime deploy DEVICE [--user NAME] [--password [VALUE] | --password-stdin] [--bench-model PATH]
@@ -2519,6 +2520,7 @@ never asks.
 | `--model PATH` | The model file on the board that the systemd unit serves (relative paths are in the user's home). |
 | `--confirm-sudo` | With `--install systemd`: confirm without a question. |
 | `--kv-cache auto\|f16\|q8_0\|q4_0` | The KV cache of the board's server (`-ctk`/`-ctv`): `q8_0` needs about half the memory of `f16`, `q4_0` about a quarter with some loss of quality. `auto` (the default) chooses `q8_0` when little memory is left next to the model on the board (from its probe), otherwise `f16`. Choose `f16` to switch the quantized cache off. The systemd unit starts the server with it; for the start script, the deployment prints the start command with it. |
+| `--clock-from-pc yes\|no` | Your standing answer for the board's clock: `yes` lets llmcf set it from this computer's time whenever it is off by more than a minute at a contact (a deploy, a bundle install, a check), as root through llmcf-install's clock action (it needs the board's root readiness, `bundle prepare-root`); `no` leaves it with a warning that names the offset. Written to the audit log with the time of the answer. Asked once after you pair a board (`deploy devices pair-code`, a pairing with the board password); see [device clock](#device-clock). |
 
 Exit code 1 when the board does not run systemd or the confirmation is missing (nothing is changed), 2 for a bad
 value.
@@ -2530,7 +2532,34 @@ only when the new settings are saved.
 
 In the GUI: **Boards > Boards and Devices...** **> Settings...** (the current settings in full; install, user, port, model and KV cache; the
 same sudo question with "No" as the default, written to the audit log first; for damaged settings the same question
-before the form opens with the defaults).
+before the form opens with the defaults). The field "Clock from this computer" takes the answer for the board's clock.
+
+### device clock
+
+A board without a battery-backed clock that is offline cannot know the time; its logs and files would carry a wrong
+date (llmcf itself checks only hashes and signatures without validity dates, which need no time). At every contact
+with a board (a deploy, a bundle install, a check, a probe) llmcf reads the board's time over the login it already
+has and compares it with this computer's. Off by more than a minute, it sets it with your standing yes for that
+board (`device settings --clock-from-pc yes`), else it prints a warning that names the offset.
+
+`device clock DEVICE` shows the state of the last contact: the offset, whether the board has a working clock of its
+own (an RTC that holds a time from 2025 on), what keeps its time across a restart (fake-hwclock or systemd-timesyncd's
+clock file), when it was read and set last, and your answer. `--set` reads the clock now and sets it once to this
+computer's time after your yes (`--yes`: no question); without a terminal and without `--yes` nothing is set (exit
+code 1).
+
+The time is set only as root through llmcf-install's clock action (`llmcf-install clock YYYY-MM-DDTHH:MM:SSZ`, a UTC
+time from 2025 to 2099 checked again on the board, never a shell line), run from its root-owned place through its
+sudo rule with `sudo -n`, never with a password: the board's root readiness must be set up (`bundle prepare-root`;
+a sudo rule written before the clock action is replaced there). llmcf-install writes the time into a working RTC
+(`hwclock -w -u`) and saves it for the next start (`fake-hwclock save force`, or systemd-timesyncd's clock file).
+Every set, also one that failed, is written to the audit log. After a bundle's root apply on a board without a working
+clock, the same yes also sets up keeping its time across a restart (`llmcf-install clock keep`: fake-hwclock where it
+is installed, else systemd-timesyncd; llmcf-install installs no package).
+
+In the GUI: **Boards > Boards and Devices...** **> Board clock...** (the same state, then the question whether to
+set it now; "No" is the default). After pairing a board by code the window asks the question for the standing
+answer once.
 
 ### device runtime plan
 
@@ -2844,7 +2873,7 @@ ends the installer after its question. Once it ended, the report says done, done
 harness's exit codes), what changed and what is flagged; `report BUNDLE` lists the runs, `report BUNDLE RUN` shows one
 (`--json` for scripts). `--assume-yes` uses the harness's own switch, only when the bundle carries it. The runs need
 the board's root readiness (`bundle prepare-root`): a harness run takes no password. When a harness step finds it
-missing (or the board's sudo rule is an older one without the harness actions), the command lists what its setup will
+missing (or the board's sudo rule is an older one without the harness or clock actions), the command lists what its setup will
 do, asks "Set up the root readiness of board ... now?" ("No" is the default; without a terminal nothing is set up),
 asks for the board account's password when sudo needs one (once, never kept), carries out the one root-readiness setup
 of `bundle prepare-root` (only what is missing: an older sudo rule is replaced, a current one left) and runs the step

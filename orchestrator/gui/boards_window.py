@@ -66,11 +66,12 @@ BUTTONS = (
     ("btn_boards_verify", "boards.btn.verify", "_on_verify", "stored"),
     ("btn_boards_prune", "boards.btn.prune", "_on_prune", "stored"),
     ("btn_boards_prune_board", "boards.btn.prune_board", "_on_prune_board", "stored"),
+    ("btn_boards_clock", "boards.btn.clock", "_on_clock", "stored"),
 )
 ROWS = (("btn_boards_add", "btn_boards_pair_code", "btn_boards_edit", "btn_boards_remove_trust", "btn_boards_settings", "btn_boards_ssh",
          "btn_boards_check", "btn_boards_refresh"),
         ("btn_boards_plan", "btn_boards_status", "btn_boards_build", "btn_boards_deploy", "btn_boards_verify"),
-        ("btn_boards_prune", "btn_boards_prune_board"))
+        ("btn_boards_prune", "btn_boards_prune_board", "btn_boards_clock"))
 
 
 # The refusals of Edit address or key... with their own text (boards.edit.err.<kind>); a pasted key: key_<detail>.
@@ -645,6 +646,7 @@ class BoardsWindow(BoardSteps, QDialog):
             text = "\n".join(person_steps.paired_by_code_lines(paired, self.lang))
             self._say(text)
             self._info(text)
+            self.ask_clock_once(paired.done.device_id, board.label)
             self.reload()
 
         def failed(error: BaseException) -> bool:
@@ -658,6 +660,18 @@ class BoardsWindow(BoardSteps, QDialog):
             return True
 
         self._start(self._t("boards.pair.pairing", board=board.label), pair, done, failed=failed)
+
+    def ask_clock_once(self, device_id: str, label: str) -> None:
+        """After the person paired a board here: whether llmcf may set its clock from this computer's time, asked once
+        per board ("No" is the default), the answer written to the audit log and the board's deploy settings."""
+        from orchestrator.runtime.device import person_steps
+        if not device_id:
+            return
+        person_steps.ask_clock_once(
+            self._store(), device_id,
+            lambda: ask(self, self._t("boards.clock.title", label=label or device_id),
+                        self._t("boards.clock.question", board=label or device_id)),
+            audit=self.audit, via="gui")
 
     def _on_add(self) -> None:
         """deploy devices add: host, user, port, label; the fingerprint is shown and asked ("No" by default)."""
@@ -1094,17 +1108,27 @@ class BoardsWindow(BoardSteps, QDialog):
                 ui_text(f"device.kv.{kind}", self.lang)
             kv.addItem(text, kind)
         kv.setCurrentIndex(max(0, kv.findData(current.kv_cache or "auto")))
+        clock = QComboBox(dialog)
+        clock.setObjectName("cmb_boards_clock")
+        if current.clock_from_pc is None:
+            clock.addItem(self._t("boards.settings.clock_unasked"), "")
+        clock.addItem(self._t("boards.settings.clock_yes"), "yes")
+        clock.addItem(self._t("boards.settings.clock_no"), "no")
+        clock.setCurrentIndex(max(0, clock.findData(current.clock_from_pc or "")))
         form.addRow(self._t("boards.settings.install"), install)
         form.addRow(self._t("boards.settings.user"), user)
         form.addRow(self._t("boards.settings.port"), port)
         form.addRow(self._t("boards.settings.model"), model)
         form.addRow(self._t("boards.settings.kv"), kv)
+        form.addRow(self._t("boards.settings.clock"), clock)
         if not _exec(dialog):
             dialog.deleteLater()
             return
         wanted = {"install": install.currentData(), "ssh_user": user.text().strip() or None,
                   "port": int(port.value()), "model": model.text().strip() or None,
                   "kv_cache": None if kv.currentData() == "auto" else kv.currentData()}
+        if clock.currentData():
+            wanted["clock_from_pc"] = clock.currentData()
         dialog.deleteLater()
         self.change_settings(entry, profile, current, wanted, replace=replaced)
 
@@ -1159,7 +1183,10 @@ class BoardsWindow(BoardSteps, QDialog):
                                          self._t("boards.settings.sudo_question")),
                 record_sudo_consent=lambda: person_steps.record_consent(audit, tool, {"device": device_id}, detail,
                                                                        channel="framework-gui"),
-                stamp=utc_stamp)
+                stamp=utc_stamp,
+                record_clock_answer=lambda answer: person_steps.record_consent(
+                    audit, person_steps.CLOCK_CONSENT[0], {"device": device_id, "answer": answer},
+                    person_steps.CLOCK_CONSENT[1], channel="framework-gui"))
         except SettingsError as e:
             self._info(self._t("boards.settings.bad_value", reason=one_line(str(e))), "warning")
             return False
@@ -1488,6 +1515,78 @@ class BoardsWindow(BoardSteps, QDialog):
 
         self._start(self._t("boards.prune_board.removing"), remove,
                     lambda result: self._deletion_result(result, accepted.mode, title), failed=failed)
+
+    # --- the board's clock (runtime/device/board_clock.py) ----------------------------------------------------------
+
+    def clock_text(self, device_id: str) -> str:
+        """The board's clock state in the window's language: offset, RTC, time keeper, last read, last set, the
+        standing answer."""
+        from orchestrator.runtime.device import board_clock
+        state = board_clock.clock_state(self.state_dir, device_id)
+        t = self._t
+        offset = state["offset_s"]
+        if offset is None:
+            offset_text = t("boards.clock.not_read")
+        else:
+            offset_text = t("boards.clock.ahead" if offset >= 0 else "boards.clock.behind",
+                            span=board_clock.span_text(offset))
+        rtc = t(f"boards.clock.rtc_{state['rtc']}") if state["rtc"] in ("yes", "reset", "none", "unreadable") else \
+            t("boards.clock.not_read")
+        keeper = t(f"boards.clock.keeper_{state['keeper']}") if state["keeper"] in (
+            "fake-hwclock", "timesyncd", "none") else t("boards.clock.not_read")
+        from_pc = t({True: "boards.clock.from_pc_yes", False: "boards.clock.from_pc_no"}.get(
+            state["from_pc"], "boards.clock.from_pc_unasked"))
+        set_at = f"{state['set_at']} ({state['set_by']})" if state["set_at"] else t("boards.clock.never")
+        return t("boards.clock.state", offset=offset_text, rtc=rtc, keeper=keeper,
+                 read_at=state["read_at"] or t("boards.clock.never"), set_at=set_at, from_pc=from_pc)
+
+    def _on_clock(self) -> None:
+        """The board's clock: its state, and the person's one set by hand (person_steps.set_clock_by_hand, after
+        the question; "No" is the default)."""
+        entry = self._need("stored")
+        contact = self._board_contact(entry) if entry is not None else None
+        if contact is None:
+            return
+        label = entry["label"]
+        text = self.clock_text(entry["device_id"])
+        self._say(text)
+        if not ask(self, self._t("boards.clock.title", label=label),
+                   text + "\n\n" + self._t("boards.clock.set_question", label=label)):
+            return
+        self.set_clock(entry, contact)
+
+    def set_clock(self, entry: Dict[str, Any], contact: tuple) -> None:
+        """Sets the board's clock to this computer's time once (the person said yes)."""
+        from orchestrator.runtime.device import person_steps
+        host, port, _settings, user = contact
+        state, device_id, audit, label = self.state_dir, entry["device_id"], self.audit, entry["label"]
+
+        def work():
+            client, _key = person_steps.connect_stored(state, device_id, host, port, user, None,
+                                                       on_client=self._keep_client, cancel=self._cancel,
+                                                       on_event=self._board_lines(host), signer=self._signer(),
+                                                       mode=self._mode(), via="gui", audit=audit)
+            try:
+                self._check_cancel()
+                return person_steps.set_clock_by_hand(client, state, device_id, via="gui", audit=audit)
+            finally:
+                client.close()
+
+        def done(result: Any) -> None:
+            run = result.set_run
+            if result.set_ok:
+                text = self._t("boards.clock.set_done", label=label, stamp=run.values.get("set", ""))
+            elif run.result == "not-ready":
+                text = self._t("boards.clock.not_ready", label=label)
+            else:
+                text = self._t("boards.clock.set_failed", label=label,
+                               reason=one_line(f"{run.result or '-'} {run.detail}"))
+            self._say(text + "\n" + self.clock_text(device_id))
+            self._info(text, "information" if result.set_ok else "warning")
+
+        self._start(self._t("boards.clock.setting", label=label), work, done,
+                    failed=lambda e: self._show_error(e, address=host, port=port, user=user,
+                                                      device_id=device_id) or True)
 
     # --- deploy and verify -----------------------------------------------------------------------------------------
 

@@ -1434,7 +1434,12 @@ def test_pair_by_code_looks_off_the_gui_thread_and_pairs_with_the_typed_code(qap
     wait(qapp, window)
     assert paired == [("169.254.20.30", "12345678", "gui", window.framework.tool_registry.audit)]
     assert threads and gui_thread not in threads, "browsing and pairing run off the GUI thread"
-    assert "proved 2 SSH host key(s)" in boxes.asked[-1].text
+    assert "proved 2 SSH host key(s)" in boxes.asked[-2].text
+    # then, once per board, the question whether llmcf may set its clock ("No" is the default; answered no here)
+    clock = boxes.asked[-1]
+    assert clock.question and clock.default_is_no and "set the clock of board" in clock.text
+    from orchestrator.runtime.profile import ProfileStore
+    assert ProfileStore(window.state_dir).load_deploy_settings("fedcba9876543210")["clock_from_pc"] == "no"
     assert "169.254.1.2 (cable)" in window.output.toPlainText()
 
 

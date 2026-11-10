@@ -877,3 +877,126 @@ fn a_fresh_unit_on_demand_is_never_enabled_and_only_an_engine_of_the_control_may
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("is on demand but no engine unit"), "{out}");
 }
+
+// --- the board's clock (clock.rs) ------------------------------------------------------------------------------------
+
+const FAKE_LOGGED: &str = r#"#!/bin/sh
+echo "$(basename "$0") $*" >> "$LLMCF_TEST_ROOT/calls.log"
+exit 0
+"#;
+
+impl Board {
+    fn clock(&self, arg: &str) -> (i32, String) {
+        let out = Command::new(env!("CARGO_BIN_EXE_llmcf-install"))
+            .args(["--root", self.root.to_str().unwrap(), "clock", arg])
+            .env_clear()
+            .env("SUDO_USER", "board")
+            .output()
+            .unwrap();
+        (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    fn calls(&self) -> String {
+        fs::read_to_string(self.p("calls.log")).unwrap_or_default()
+    }
+
+    fn rtc(&self, since_epoch: &str) {
+        write_mode(&self.p("sys/class/rtc/rtc0/since_epoch"), format!("{since_epoch}\n").as_bytes(), 0o444);
+    }
+}
+
+#[test]
+fn the_clock_is_set_from_a_checked_stamp_written_into_the_rtc_and_saved() {
+    let b = Board::new();
+    for name in ["usr/bin/date", "usr/sbin/hwclock", "usr/sbin/fake-hwclock"] {
+        write_mode(&b.p(name), FAKE_LOGGED.as_bytes(), 0o755);
+    }
+    b.rtc("0");
+    let (code, out) = b.clock("2026-11-10T12:30:05Z");
+    assert_eq!(code, 0, "{out}");
+    assert!(last(&out).starts_with("llmcf-bundle: result=ok changed=1 set=2026-11-10T12:30:05Z"), "{out}");
+    assert!(last(&out).contains("rtc_written=yes saved=fake-hwclock"), "{out}");
+    let calls = b.calls();
+    assert!(calls.contains("date -u -s 2026-11-10 12:30:05\n"), "{calls}");
+    assert!(calls.contains("hwclock -w -u\n") && calls.contains("fake-hwclock save force\n"), "{calls}");
+}
+
+#[test]
+fn without_fake_hwclock_the_timesyncd_clock_file_keeps_the_time() {
+    let b = Board::new();
+    write_mode(&b.p("usr/bin/date"), FAKE_LOGGED.as_bytes(), 0o755);
+    fs::create_dir_all(b.p("var/lib/systemd/timesync")).unwrap();
+    let (code, out) = b.clock("2026-11-10T12:30:05Z");
+    assert_eq!(code, 0, "{out}");
+    assert!(last(&out).contains("rtc_written=no saved=timesyncd"), "{out}");
+    assert!(b.p("var/lib/systemd/timesync/clock").is_file());
+    // a link in the clock file's place is never followed
+    let b = Board::new();
+    write_mode(&b.p("usr/bin/date"), FAKE_LOGGED.as_bytes(), 0o755);
+    fs::create_dir_all(b.p("var/lib/systemd/timesync")).unwrap();
+    write_mode(&b.p("elsewhere"), b"x", 0o644);
+    symlink(b.p("elsewhere"), b.p("var/lib/systemd/timesync/clock")).unwrap();
+    let (_code, out) = b.clock("2026-11-10T12:30:05Z");
+    assert!(last(&out).contains("saved=none"), "{out}");
+}
+
+#[test]
+fn a_stamp_out_of_range_or_any_other_argument_is_refused_before_anything_runs() {
+    let b = Board::new();
+    write_mode(&b.p("usr/bin/date"), FAKE_LOGGED.as_bytes(), 0o755);
+    for bad in ["2024-06-01T00:00:00Z", "2100-01-01T00:00:00Z", "2026-02-30T00:00:00Z", "now", "@1794313805"] {
+        let (code, out) = b.clock(bad);
+        assert_eq!(code, 2, "{bad}: {out}");
+        assert!(last(&out).contains("result=refused changed=0"), "{out}");
+    }
+    assert_eq!(b.calls(), "");
+    let out = Command::new(env!("CARGO_BIN_EXE_llmcf-install"))
+        .args(["--root", b.root.to_str().unwrap(), "clock", "2026-11-10T12:30:05Z", "extra"])
+        .env_clear()
+        .env("SUDO_USER", "board")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    // root itself (no board account through sudo) is refused
+    let out = Command::new(env!("CARGO_BIN_EXE_llmcf-install"))
+        .args(["--root", b.root.to_str().unwrap(), "clock", "keep"])
+        .env_clear()
+        .env("SUDO_USER", "root")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(3));
+}
+
+#[test]
+fn keeping_the_time_takes_fake_hwclock_then_timesyncd_and_nothing_with_a_working_rtc() {
+    // a working RTC: nothing to set up
+    let b = Board::new();
+    b.rtc("1794313805");
+    write_mode(&b.p("usr/sbin/fake-hwclock"), FAKE_LOGGED.as_bytes(), 0o755);
+    let (code, out) = b.clock("keep");
+    assert_eq!(code, 0, "{out}");
+    assert!(last(&out).contains("changed=0 keep=rtc"), "{out}");
+    assert_eq!(b.calls(), "");
+    // an RTC that was reset (no battery) and fake-hwclock: its unit enabled, the time saved
+    let b = Board::new();
+    b.rtc("946684800");
+    fs::create_dir_all(b.p("run/systemd/system")).unwrap();
+    write_mode(&b.p("usr/sbin/fake-hwclock"), FAKE_LOGGED.as_bytes(), 0o755);
+    let (code, out) = b.clock("keep");
+    assert_eq!(code, 0, "{out}");
+    assert!(last(&out).contains("changed=1 keep=fake-hwclock"), "{out}");
+    assert!(b.calls().contains("systemctl enable fake-hwclock.service\nfake-hwclock save\n"), "{}", b.calls());
+    // no RTC, systemd-timesyncd: enabled and started
+    let b = Board::new();
+    fs::create_dir_all(b.p("run/systemd/system")).unwrap();
+    write_mode(&b.p("usr/lib/systemd/systemd-timesyncd"), b"#!/bin/sh\n", 0o755);
+    let (code, out) = b.clock("keep");
+    assert_eq!(code, 0, "{out}");
+    assert!(last(&out).contains("changed=1 keep=timesyncd"), "{out}");
+    assert!(b.calls().contains("systemctl enable --now systemd-timesyncd.service"), "{}", b.calls());
+    // neither: said plainly, nothing installed
+    let b = Board::new();
+    let (code, out) = b.clock("keep");
+    assert_eq!(code, 0, "{out}");
+    assert!(last(&out).starts_with("llmcf-bundle: result=unavailable changed=0 keep=none"), "{out}");
+}

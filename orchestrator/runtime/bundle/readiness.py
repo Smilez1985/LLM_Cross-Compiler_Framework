@@ -51,8 +51,8 @@ MISSING_TEXTS = {
     "helper": "llmcf-install is not at its root-owned place " + FIXED_HELPER,
     "helper-update": "llmcf-install at " + FIXED_HELPER + " is not this bundle's (it is updated with the same yes)",
     "dropin": "no sudo rule lets the board account run llmcf-install without a password (" + DROPIN + ")",
-    "dropin-update": "the sudo rule " + DROPIN + " is an older one without the harness actions (it is replaced with "
-                     "the same yes)",
+    "dropin-update": "the sudo rule " + DROPIN + " is an older one without the harness or clock actions (it is "
+                     "replaced with the same yes)",
 }
 SIGNERS_HOW = ("pair the board again with its password (a scan of the board with its password, in the CLI or the "
                "GUI) and take the root-owned key line; it puts the framework's signing key in root-owned files")

@@ -392,9 +392,10 @@ def test_the_sudo_rule_names_the_harness_actions_and_an_older_rule_is_set_up_aga
     body = gate_ops._setup_body("sudo", "apt", "voice-test", "a" * 64)
     for action in ("harness-start", "harness-read", "harness-answer", "harness-stop", "harness-records"):
         assert f"$llmcf_fx {action} *" in body
-    assert "llmcf_dropin_ok harness-read voice-test" in body
+    # the check reads the newest action of the rule (the clock): a rule without it is an older one
+    assert "$llmcf_fx clock *" in body and "llmcf_dropin_ok clock voice-test" in body
     ready = gate_ops._ready_body("a" * 64)
-    assert "llmcf_dropin_ok harness-read llmcf-check" in ready and "echo dropin=old" in ready
+    assert "llmcf_dropin_ok clock llmcf-check" in ready and "echo dropin=old" in ready
     from orchestrator.runtime.bundle import readiness
     old = readiness.Readiness.parse("sudo=yes\nrootway=nopass\nsigners=root\nhelper=same\ndropin=old\n")
     assert old.missing() == ["dropin-update"] and not old.ready

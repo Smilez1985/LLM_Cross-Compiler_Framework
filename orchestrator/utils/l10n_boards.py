@@ -498,6 +498,49 @@ TEXTS = {
                                             "its runtime stay as they are.",
         "boards.settings.saved": "Deploy settings of {label} saved.",
         "boards.settings.unchanged": "Nothing was changed.",
+        # the board's clock (runtime/device/board_clock.py; `llmcf device clock`, `device settings --clock-from-pc`)
+        "boards.settings.clock": "Clock from this computer:",
+        "boards.settings.clock_unasked": "not asked yet",
+        "boards.settings.clock_yes": "yes: set it when it is off by more than a minute",
+        "boards.settings.clock_no": "no: only a warning",
+        "boards.settings.clock_failed": "The answer for the board's clock could not be written to the audit log "
+                                        "({reason}); nothing was changed.",
+        "boards.btn.clock": "Board clock...",
+        "boards.clock.title": "Clock of {label}",
+        "boards.clock.state": "Offset against this computer: {offset}\nWorking clock of its own (RTC): {rtc}\nKeeps "
+                              "its time across a restart with: {keeper}\nLast read: {read_at}\nLast set: {set_at}\n"
+                              "Set from this computer's time: {from_pc}",
+        "boards.clock.ahead": "{span} ahead",
+        "boards.clock.behind": "{span} behind",
+        "boards.clock.not_read": "not read yet",
+        "boards.clock.never": "never",
+        "boards.clock.rtc_yes": "yes",
+        "boards.clock.rtc_reset": "no (it holds a time before 2025: reset, no battery)",
+        "boards.clock.rtc_none": "no",
+        "boards.clock.rtc_unreadable": "present, but it does not read",
+        "boards.clock.keeper_fake-hwclock": "fake-hwclock",
+        "boards.clock.keeper_timesyncd": "systemd-timesyncd's clock file",
+        "boards.clock.keeper_none": "nothing",
+        "boards.clock.from_pc_yes": "yes (when it is off by more than a minute)",
+        "boards.clock.from_pc_no": "no (only a warning)",
+        "boards.clock.from_pc_unasked": "not asked yet",
+        "boards.clock.set_question": "Set the clock of {label} to this computer's time now, as root through "
+                                     "llmcf-install's clock action (it needs the board's root readiness)? Every set "
+                                     "is written to the audit log.",
+        "boards.clock.setting": "Setting the clock of {label} ...",
+        "boards.clock.set_done": "The clock of {label} was set to this computer's time ({stamp} UTC).",
+        "boards.clock.not_ready": "The clock of {label} was not set: the board's root readiness for llmcf-install is "
+                                  "not set up, or its sudo rule is an older one. Set it up with Prepare root in "
+                                  "{path:act_boards_bundle}.",
+        "boards.clock.set_failed": "The clock of {label} was not set: {reason}",
+        "boards.clock.question": "May llmcf set the clock of board {board} from this computer's time whenever it is "
+                                 "off by more than a minute? A board without a battery-backed clock that is offline "
+                                 "cannot know the time; llmcf sets it as root through llmcf-install's clock action "
+                                 "only (it needs the board's root readiness), and writes every set to the audit log. "
+                                 "You can change this in the board's settings.",
+        "bundle.ask.root_keep_clock": "This board has no working clock of its own: llmcf-install also sets up keeping "
+                                      "its time across a restart (fake-hwclock where it is installed, else "
+                                      "systemd-timesyncd's clock file).",
         # runtime plan and status (device runtime plan|status)
         "boards.plan.title": "Runtime plan of {label}",
         "boards.plan.text": "Board: {os}/{arch}, {libc} {libc_version}\nBuilder: container {base} ({blibc} "
@@ -1133,6 +1176,49 @@ TEXTS = {
                                             "sind.",
         "boards.settings.saved": "Deploy-Einstellungen von {label} gespeichert.",
         "boards.settings.unchanged": "Es wurde nichts geändert.",
+        "boards.settings.clock": "Uhr von diesem Rechner:",
+        "boards.settings.clock_unasked": "noch nicht gefragt",
+        "boards.settings.clock_yes": "ja: stellen, wenn sie um mehr als eine Minute abweicht",
+        "boards.settings.clock_no": "nein: nur eine Warnung",
+        "boards.settings.clock_failed": "Die Antwort für die Uhr des Boards konnte nicht ins Audit-Log geschrieben "
+                                        "werden ({reason}); es wurde nichts geändert.",
+        "boards.btn.clock": "Uhr des Boards...",
+        "boards.clock.title": "Uhr von {label}",
+        "boards.clock.state": "Abweichung gegen diesen Rechner: {offset}\nEigene funktionierende Uhr (RTC): {rtc}\n"
+                              "Behält ihre Zeit über einen Neustart mit: {keeper}\nZuletzt gelesen: {read_at}\n"
+                              "Zuletzt gestellt: {set_at}\nVon der Zeit dieses Rechners stellen: {from_pc}",
+        "boards.clock.ahead": "{span} vor",
+        "boards.clock.behind": "{span} nach",
+        "boards.clock.not_read": "noch nicht gelesen",
+        "boards.clock.never": "nie",
+        "boards.clock.rtc_yes": "ja",
+        "boards.clock.rtc_reset": "nein (sie hält eine Zeit vor 2025: zurückgesetzt, keine Batterie)",
+        "boards.clock.rtc_none": "nein",
+        "boards.clock.rtc_unreadable": "vorhanden, aber sie lässt sich nicht lesen",
+        "boards.clock.keeper_fake-hwclock": "fake-hwclock",
+        "boards.clock.keeper_timesyncd": "die Uhrdatei von systemd-timesyncd",
+        "boards.clock.keeper_none": "nichts",
+        "boards.clock.from_pc_yes": "ja (wenn sie um mehr als eine Minute abweicht)",
+        "boards.clock.from_pc_no": "nein (nur eine Warnung)",
+        "boards.clock.from_pc_unasked": "noch nicht gefragt",
+        "boards.clock.set_question": "Die Uhr von {label} jetzt auf die Zeit dieses Rechners stellen, als root über die "
+                                     "Uhr-Aktion von llmcf-install (sie braucht die Root-Bereitschaft des Boards)? "
+                                     "Jedes Stellen wird ins Audit-Log geschrieben.",
+        "boards.clock.setting": "Die Uhr von {label} wird gestellt ...",
+        "boards.clock.set_done": "Die Uhr von {label} wurde auf die Zeit dieses Rechners gestellt ({stamp} UTC).",
+        "boards.clock.not_ready": "Die Uhr von {label} wurde nicht gestellt: Die Root-Bereitschaft des Boards für "
+                                  "llmcf-install ist nicht eingerichtet, oder ihre sudo-Regel ist eine ältere. Richte "
+                                  "sie mit Root vorbereiten in {path:act_boards_bundle} ein.",
+        "boards.clock.set_failed": "Die Uhr von {label} wurde nicht gestellt: {reason}",
+        "boards.clock.question": "Darf llmcf die Uhr von Board {board} von der Zeit dieses Rechners stellen, wann "
+                                 "immer sie um mehr als eine Minute abweicht? Ein Board ohne batteriegepufferte Uhr, "
+                                 "das offline ist, kann die Zeit nicht kennen; llmcf stellt sie als root nur über die "
+                                 "Uhr-Aktion von llmcf-install (sie braucht die Root-Bereitschaft des Boards) und "
+                                 "schreibt jedes Stellen ins Audit-Log. Du kannst das in den Einstellungen des Boards "
+                                 "ändern.",
+        "bundle.ask.root_keep_clock": "Dieses Board hat keine eigene funktionierende Uhr: llmcf-install richtet "
+                                      "außerdem ein, dass es seine Zeit über einen Neustart behält (fake-hwclock, wo es "
+                                      "installiert ist, sonst die Uhrdatei von systemd-timesyncd).",
         "boards.plan.title": "Laufzeit-Plan von {label}",
         "boards.plan.text": "Board: {os}/{arch}, {libc} {libc_version}\nBuilder: Container {base} ({blibc} "
                             "{blibc_version}, GCC {gcc}), ohne Netzwerk\nCPU: {cpu}, OpenMP {openmp}, C++-Laufzeit "
