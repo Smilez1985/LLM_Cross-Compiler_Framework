@@ -462,6 +462,12 @@ def test_the_gui_action_asks_with_no_as_default_and_plain_text(qapp, tmp_path, m
     while not started and time.monotonic() < deadline:
         time.sleep(0.01)
     assert started == [{"include_code": True}]
+    # The worker reports to the window through the event loop: take its report here, while plain_box is still the
+    # stand-in, or a later test's event loop would show its "finished" box.
+    while action._token is not None and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert action._token is None, "the index's result reached the window"
     window.deleteLater()
 
 
