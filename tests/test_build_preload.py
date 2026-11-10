@@ -423,7 +423,7 @@ def packed(tmp_path, monkeypatch):
         shutil.rmtree(spec, ignore_errors=True)
         spec.mkdir()
         recipe = json.dumps(basic_recipe(**changes), indent=1, sort_keys=True) + "\n"
-        (spec / "sources.json").write_text(recipe)
+        (spec / "sources.json").write_bytes(recipe.encode("utf-8"))   # the exact bytes: no CRLF on Windows
         (spec / "manifest.base").write_text(f"format=1\nkind=build\nversion=9.9.9\ntarget=Vendor\n"
                                             f"platform={image_files.host_platform()}\n"
                                             f"recipe_sha256={written.recipe_sha256}\n")
@@ -747,3 +747,20 @@ class TestTheWaysIn:
 def accepted_code():
     from PySide6.QtWidgets import QDialog
     return QDialog.DialogCode.Accepted
+
+
+def test_the_powershell_script_writes_every_part_back_byte_for_byte(tmp_path):
+    """preload.ps1 carries each file in a here-string, which leaves out the last line break: Write-Part writes it
+    back, so sources.json has the bytes whose sha256 the manifest names (without it a build's preload made on
+    Windows was refused every time)."""
+    import re
+    spec = tmp_path / "spec"
+    spec.mkdir()
+    body = (json.dumps({"a": 1}, indent=1, sort_keys=True) + "\n").encode("utf-8")
+    (spec / "sources.json").write_bytes(body)
+    (spec / "manifest.base").write_bytes(b"format=1\nkind=build\n")
+    sh, ps = preload_lock.write_build_scripts(spec, tmp_path / "out", "a test")
+    text = Path(ps).read_text(encoding="utf-8")
+    assert '+ "`n", $Utf8' in text
+    part = re.search(r'Write-Part \(Join-Path \$Spec "sources.json"\) @\'\r?\n(.*?)\r?\n\'@', text, re.S).group(1)
+    assert (part.replace("\r\n", "\n") + "\n").encode("utf-8") == body

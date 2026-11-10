@@ -535,7 +535,8 @@ def write_scripts(spec: Path, out: Path):
           '$Spec = Join-Path $Work "spec"',
           "New-Item -ItemType Directory -Path $Spec -Force | Out-Null",
           "$Utf8 = New-Object System.Text.UTF8Encoding $false",
-          "function Write-Part ($Path, $Text) { [IO.File]::WriteAllText($Path, $Text.Replace(\"`r`n\", \"`n\"), $Utf8) }"]
+          # a here-string leaves out its last line break: it is written back, so the file is the same bytes as on the PC
+          "function Write-Part ($Path, $Text) { [IO.File]::WriteAllText($Path, $Text.Replace(\"`r`n\", \"`n\") + \"`n\", $Utf8) }"]
     for name, text in [*files.items(), ("../preload_lock.py", program)]:
         target = f'(Join-Path $Spec "{name}")' if not name.startswith("..") else '(Join-Path $Work "preload_lock.py")'
         ps += [f"Write-Part {target} @'", text.rstrip("\n"), "'@"]
@@ -833,7 +834,8 @@ def write_build_scripts(spec: Path, out: Path, what: str):
           '$Spec = Join-Path $Work "spec"',
           "New-Item -ItemType Directory -Path $Spec -Force | Out-Null",
           "$Utf8 = New-Object System.Text.UTF8Encoding $false",
-          "function Write-Part ($Path, $Text) { [IO.File]::WriteAllText($Path, $Text.Replace(\"`r`n\", \"`n\"), $Utf8) }"]
+          # a here-string leaves out its last line break: it is written back, so the file is the same bytes as on the PC
+          "function Write-Part ($Path, $Text) { [IO.File]::WriteAllText($Path, $Text.Replace(\"`r`n\", \"`n\") + \"`n\", $Utf8) }"]
     for name, text in files.items():
         ps += [f'Write-Part (Join-Path $Spec "{name}") @\'', text.rstrip("\n"), "'@"]
     for name, text in programs.items():
