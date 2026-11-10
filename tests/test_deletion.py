@@ -37,6 +37,9 @@ MOVED = ("a move the person chose (save dialog, Save..., llm-cli build save): th
 SORTED = ("a move the person chose (Sort loose knowledge..., llm-cli knowledge sort): the summary names the loose file "
           "and its new folder, No is the default; the file goes only after its checked copy is installed in the pack "
           "folder, and only while both still match the checked file's sha256 (round 23, 1)")
+TAKEN_OVER = ("a move the person chose (the GUI's take-over question, llm-cli config take-over): an item an earlier "
+              "version wrote into the installation goes only after its complete copy is in the person's folder, and "
+              "stays when it cannot be removed; also the partial copy of an interrupted take-over")
 BOARD_MOVED = ("a move the person confirmed (Q5/P6, a board's new host key): the old device ID's data goes only after "
                "its copy under the new ID was checked and the change was made; the undo takes back only the copies "
                "the move itself made")
@@ -89,6 +92,7 @@ DELETION_SITES = {
     # (the chat: FeedStore.clear_conversation and ChatHistory.clear delete rows and messages, not files; see below)
     ("orchestrator/Core/builder.py", "BuildEngine._keep_as_last_build"): NAME_ONLY,
     ("orchestrator/Core/artifact_output.py", "_remove_moved_source"): MOVED,
+    ("orchestrator/Core/install_migration.py", "_remove"): TAKEN_OVER,
     ("orchestrator/Core/community_manager.py", "CommunityManager._remove_sorted"): SORTED,
     # an installed pack's folder and import notes: only the person's accepted plan (tests/test_pack_uninstall.py
     # covers no plan, another actor and a changed list)

@@ -99,14 +99,15 @@ def formats_of(target_manager: Any) -> List[TargetFormats]:
     return found
 
 
-def formats_in(targets_dir: Path) -> List[TargetFormats]:
-    """What each target in `targets_dir` builds, read from the target.yml files without booting the framework (the
-    CLI's help text and completion); a capabilities block that fails the schema counts as none, as on the build
-    path."""
-    from orchestrator.Core.target_manager import read_target_folders
+def formats_in(targets_dir) -> List[TargetFormats]:
+    """What each target in `targets_dir` (one targets folder or several: the shipped targets and the person's own)
+    builds, read from the target.yml files without booting the framework (the CLI's help text and completion); a
+    capabilities block that fails the schema counts as none, as on the build path."""
+    from orchestrator.Core.target_manager import read_target_roots
     from orchestrator.schemas.targets import TargetCapabilities
+    roots = [Path(targets_dir)] if isinstance(targets_dir, (str, Path)) else [Path(r) for r in targets_dir]
     found = []
-    for tid, (_folder, data) in read_target_folders(Path(targets_dir)).items():
+    for tid, (_folder, data) in read_target_roots(roots).items():
         caps = None
         if isinstance(data.get("capabilities"), dict):
             try:

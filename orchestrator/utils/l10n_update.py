@@ -23,9 +23,9 @@ TEXTS = {
         # What an earlier version wrote into the installation folder (Core/install_migration.py), asked at start
         "takeover.title": "Your data in the installation folder",
         "takeover.ask_mine": "An earlier version kept these items of yours in the installation folder, which is now "
-                             "shared by everyone who uses llmcf on this computer and is no longer written to:\n\n"
+                             "shared by everyone who uses the framework on this computer and is no longer written to:\n\n"
                              "{items}\n\nMove them into your own folders? Nothing is overwritten or deleted. If you "
-                             "say no, you are not asked again; 'llm-cli config take-over' moves them later.",
+                             "say no, you are not asked again at start.",
         "takeover.ask_others": "These items in the installation folder may belong to another account of this "
                                "computer (they are not yours, or the system does not say whose they are):\n\n"
                                "{items}\n\nMove them into YOUR folders anyway? Say yes only if they are yours.",
@@ -53,10 +53,10 @@ TEXTS = {
         "update.failed": "Das Update konnte nicht starten: {reason}",
         "takeover.title": "Deine Daten im Installationsordner",
         "takeover.ask_mine": "Eine frühere Version hat diese Dinge von dir im Installationsordner abgelegt. Er wird "
-                             "jetzt von allen geteilt, die llmcf auf diesem Computer nutzen, und nicht mehr "
+                             "jetzt von allen geteilt, die das Framework auf diesem Computer nutzen, und nicht mehr "
                              "beschrieben:\n\n{items}\n\nIn deine eigenen Ordner verschieben? Nichts wird "
-                             "überschrieben oder gelöscht. Sagst du nein, wirst du nicht erneut gefragt; 'llm-cli "
-                             "config take-over' verschiebt sie später.",
+                             "überschrieben oder gelöscht. Sagst du nein, wirst du beim Start "
+                             "nicht erneut gefragt.",
         "takeover.ask_others": "Diese Dinge im Installationsordner gehören vielleicht einem anderen Konto dieses "
                                "Computers (sie gehören nicht dir, oder das System sagt nicht, wem):\n\n{items}\n\n"
                                "Trotzdem in DEINE Ordner verschieben? Sag nur ja, wenn sie dir gehören.",

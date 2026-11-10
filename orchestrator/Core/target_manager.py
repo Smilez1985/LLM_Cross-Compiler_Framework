@@ -59,10 +59,17 @@ def read_target_roots(roots: Iterable[Path], logger=None) -> Dict[str, Tuple[Pat
 
 
 def _resolver(resolve: Optional[Callable[[Any], Path]]) -> Callable[[Any], Path]:
+    """`resolve`, else the framework's path rule (Core/framework.resolve_install_path: "~" is the home folder,
+    relative paths are relative to the installation), without importing the kernel."""
     if callable(resolve):
         return resolve
-    from orchestrator.Core.framework import resolve_install_path
-    return resolve_install_path
+    from orchestrator.Core.config_manager import ConfigManager
+    root = ConfigManager.installation_config_dir().parent
+
+    def install_path(value: Any) -> Path:
+        path = Path(str(value)).expanduser()
+        return path if path.is_absolute() else root / path
+    return install_path
 
 
 def own_targets_dir(config: Any, resolve: Optional[Callable[[Any], Path]] = None) -> Path:
