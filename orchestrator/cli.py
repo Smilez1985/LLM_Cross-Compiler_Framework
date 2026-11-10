@@ -2204,6 +2204,148 @@ def build_preflight(ctx: FrameworkContext, target: str, format: str, board: Opti
     sys.exit(1 if result.stopped else 0)
 
 
+@build.group('tune')
+def build_tune():
+    """Auto-Tuning: measure which quantization of a model gives the best quality that fits a board"""
+    pass
+
+
+def _tune_lines(lines) -> None:
+    for line in lines:
+        console.print(escape(str(line)))
+
+
+@build_tune.command('start')
+@click.option('--model', '-m', required=True, help='Model name (HuggingFace) or local path')
+@click.option('--target', '-t', required=True, help="Target id or folder name in targets/ (llm-cli targets list)")
+@click.option('--board', '-b', help="Board within the target family; its profile's recommended types are the "
+                                    "candidates, and its memory decides which fit")
+@click.option('--probe', 'probe', default=None, metavar='ID',
+              help="The board's hardware probe by its id ('llm-cli device list'): its memory instead of the most "
+                   "memory the board comes with")
+@click.option('--type', 'types', multiple=True, metavar='TYPE',
+              help="A type to measure as well (repeatable), whatever the memory estimate says; nothing is refused")
+@click.option('--imatrix', 'imatrix', type=click.Choice(['auto', 'both']), default='auto', show_default=True,
+              help="auto: types below 5 bits per weight with the importance matrix (as a build makes them); both: "
+                   "those types with and without it")
+@click.option('--chunks', type=click.IntRange(4, 48), default=16, show_default=True,
+              help='Chunks of the evaluation text (more: a smaller uncertainty, a longer run, a larger logits file)')
+@click.option('--ctx', 'ctx_size', type=click.Choice(['256', '512', '1024']), default='512', show_default=True,
+              help='Tokens per chunk')
+@click.option('--yes', '-y', is_flag=True, help='Start without asking (at a terminal you are asked after the plan)')
+@click.option('--follow', '-F', is_flag=True, help='Show the progress while it runs')
+@pass_context
+def tune_start(ctx: FrameworkContext, model: str, target: str, board: Optional[str], probe: Optional[str],
+               types: Tuple[str, ...], imatrix: str, chunks: int, ctx_size: str, yes: bool, follow: bool):
+    """Measure the candidate types of MODEL for a board: each is quantized as a build makes it and compared with the
+    original model (F16, or Q8_0 when the F16 does not fit this computer's memory) by the KL divergence and the top-1
+    agreement on a fixed evaluation text, in the build image, without network. The run is one build (Cancel with
+    Ctrl+C, it continues like an interrupted build); its report recommends the best type that fits the board."""
+    from orchestrator.Core.build_service import BuildService, BuildServiceError, PreflightStopped
+    from orchestrator.Core.disk_plan import InsufficientSpace
+    from orchestrator.Core.tuning import TuningError, report_lines
+    ctx.require_framework()
+    service = _build_service(ctx)
+    try:
+        request = BuildService.request_in(model=model, target=target, format="gguf", board=board, probe=probe)
+        plan, _req = service.plan_tuning(request, types=list(types), imatrix=imatrix, chunks=chunks,
+                                         ctx=int(ctx_size), local_paths=True)
+    except (TuningError, BuildServiceError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        nxt = getattr(e, "next", "")
+        if nxt:
+            console.print(escape(nxt))
+        sys.exit(2)
+    console.print(f"[bold]Auto-Tuning of {escape(plan.model)} for {escape(plan.board or plan.target)}[/bold]")
+    _tune_lines(plan.lines())
+    if not yes and _interactive() and not click.confirm("Start the tuning run?", default=True):
+        console.print("Nothing was started.")
+        return
+    try:
+        handle = service.start_tuning(request, plan=plan, local_paths=True)
+    except PreflightStopped as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    except (InsufficientSpace, BuildServiceError, TuningError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"Tuning request {handle.request_id} queued.")
+    _follow_build(ctx, service, handle.request_id, follow=follow)
+    try:
+        _tune_lines(report_lines(service.tuning_report("latest")["report"]))
+    except BuildServiceError:
+        pass
+
+
+@build_tune.command('list')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def tune_list(ctx: FrameworkContext, as_json: bool):
+    """The finished tuning runs, newest first, with their recommendation."""
+    ctx.require_framework()
+    reports = _build_service(ctx).tuning_reports()
+    if as_json:
+        click.echo(json.dumps([{"id": r["id"], "label": r["label"], "model": r["report"].get("model"),
+                                "board": r["report"].get("board"), "created": r["report"].get("created"),
+                                "recommendation": (r["report"].get("recommendation") or {}).get("label")}
+                               for r in reports], indent=2))
+        return
+    if not reports:
+        console.print("No tuning run yet: llm-cli build tune start --model MODEL --target TARGET --board BOARD")
+        return
+    for r in reports:
+        rec = (r["report"].get("recommendation") or {}).get("label") or "no recommendation"
+        console.print(f"{r['id']}  {escape(str(r['report'].get('model')))} for "
+                      f"{escape(str(r['report'].get('board') or r['report'].get('target')))}: {escape(rec)} "
+                      f"({escape(str(r['report'].get('created') or ''))})")
+
+
+@build_tune.command('show')
+@click.argument('run', default='latest')
+@click.option('--json', 'as_json', is_flag=True, help='The report as JSON (with the measured board speeds)')
+@pass_context
+def tune_show(ctx: FrameworkContext, run: str, as_json: bool):
+    """A tuning run's report (RUN: its id from 'llm-cli build tune list', default the latest): per type the size, the
+    memory estimate, the KL divergence, the top-1 agreement and the tokens/s measured on the board, and the
+    recommendation."""
+    from orchestrator.Core.build_service import BuildServiceError
+    from orchestrator.Core.tuning import report_lines
+    ctx.require_framework()
+    try:
+        found = _build_service(ctx).tuning_report(run)
+    except BuildServiceError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+    if as_json:
+        click.echo(json.dumps(found["report"], indent=2, ensure_ascii=False))
+        return
+    _tune_lines(report_lines(found["report"]))
+
+
+@build_tune.command('build')
+@click.argument('run', default='latest')
+@click.option('--type', 'label', default=None, metavar='LABEL',
+              help="A measured candidate other than the recommended one, as the report names it (e.g. Q5_K_M or "
+                   "Q4_K_M-imatrix)")
+@click.option('--follow', '-F', is_flag=True, help='Show the progress while it runs')
+@pass_context
+def tune_build(ctx: FrameworkContext, run: str, label: Optional[str], follow: bool):
+    """Build a tuning run's recommended type (or --type): the normal build of that type and importance-matrix
+    choice; its build_info.json names the tuning run, and 'llm-cli zoo export recipe BUILD_FOLDER' makes it a
+    recipe."""
+    from orchestrator.Core.build_service import BuildServiceError, PreflightStopped
+    from orchestrator.Core.tuning import TuningError
+    ctx.require_framework()
+    service = _build_service(ctx)
+    try:
+        handle = service.build_tuned(run, label, local_paths=True)
+    except (TuningError, BuildServiceError, PreflightStopped) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+    console.print(f"Build request {handle.request_id} queued.")
+    _follow_build(ctx, service, handle.request_id, follow=follow)
+
+
 @build.command('status')
 @click.argument('request_id', required=False)
 @click.option('--all', '-a', is_flag=True, help=f'Show every kept build (default: the {STATUS_ROWS} newest)')

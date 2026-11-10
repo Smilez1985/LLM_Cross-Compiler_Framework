@@ -183,6 +183,7 @@ KNOWN_TOOLS = frozenset({
     "delete_artifact", "restore_knowledge_snapshot", "build_local_runtime", "start_local_runtime",
     "stop_local_runtime", "run_benchmark", "deploy_device_runtime", "list_trash", "restore_from_trash",
     "remove_pack", "bundle_plan", "bundle_deploy", "harness_report", "propose_bundle_block",
+    "start_tuning", "get_tuning_report",
     # later
     "probe_remote_device", "run_device_benchmark",
 })
@@ -546,6 +547,11 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
             running=lambda ctx: len(service.active_requests(ctx.owner)), **BUILD_QUOTA), BuildHandleOut):
         registry.register(spec)
     register_packs_index_resource(registry)
+    # Auto-Tuning (Core/tuning.py): a tuning run is a build of the build service, asked every time
+    from orchestrator.tools.tools_tuning import tuning_tool_specs
+    for spec in tuning_tool_specs(registry, service, fields, ToolLimits(
+            running=lambda ctx: len(service.active_requests(ctx.owner)), **BUILD_QUOTA), BuildHandleOut):
+        registry.register(spec)
     # Devices and deploy (design 2.7, T8): trusted devices by id, packages as jobs, deploys always asked.
     from orchestrator.tools.tools_deploy import register_deploy_tools
     register_deploy_tools(registry, framework, service=service, jobs=jobs, target_field=target_field)

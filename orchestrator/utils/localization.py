@@ -565,6 +565,7 @@ TEXT_MODULES += ("orchestrator.utils.l10n_network",)   # offline mode's locality
 TEXT_MODULES += ("orchestrator.utils.l10n_build_image",)   # Build > Build Container Images..., the build sources
 TEXT_MODULES += ("orchestrator.utils.l10n_acp",)   # Ditto in editors (ACP agent) and Ditto > Agents... (ACP client)
 TEXT_MODULES += ("orchestrator.utils.l10n_pairing",)   # the pairing during the hardware probe (both ways)
+TEXT_MODULES += ("orchestrator.utils.l10n_tuning",)   # the Auto-Tuning tab
 
 
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,

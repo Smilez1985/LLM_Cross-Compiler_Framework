@@ -405,3 +405,243 @@ def test_the_thresholds_are_the_ditto_rows():
     assert (tuning.KLD_GOOD, tuning.KLD_FLOOR, tuning.SPEED_FLOOR) == (0.05, 0.10, 8.0)
     assert re.search(r"at least 8 tokens per second and a KL divergence of at most 0\.05 \(0\.10 as the outer "
                      r"bound\)", (REPO_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8"))
+
+
+# --- the build service: a tuning run is one build ---------------------------------------------------------------------
+
+from test_arm64_target import service as arm64_service  # noqa: E402,F401 - the build service with stored probes
+
+SMOL = json.loads((REPO_ROOT / "tests" / "fixtures" / "memory_estimate" / "published_gguf.json")
+                  .read_text(encoding="utf-8"))
+
+
+def _local_model(tmp_path, name):
+    model = next(m for m in SMOL["models"] if m["name"] == name)
+    folder = tmp_path / "local-model"
+    folder.mkdir()
+    (folder / "config.json").write_text(json.dumps(model["config"]), encoding="utf-8")
+    (folder / "model.safetensors").write_bytes(b"\0" * 16)
+    return folder
+
+
+def test_a_tuning_run_is_planned_from_the_board_profile_and_queued_as_one_build(arm64_service, tmp_path):  # noqa: F811
+    from orchestrator.Core.build_service import BuildService
+    folder = _local_model(tmp_path, "Llama 3.2 1B Instruct")
+    request = BuildService.request_in(model=str(folder), target="ARM64", format="gguf", board="bcm2837",
+                                      probe=arm64_service.zero2w)
+    # the Zero 2 W (416 MB measured): none of the profile's types of a 1B model fits, so without the person's own
+    # types there is nothing to measure, and the refusal says how to measure them anyway
+    with pytest.raises(tuning.TuningError, match="Name the types to measure"):
+        arm64_service.plan_tuning(request, local_paths=True, look_up_hub=False)
+    plan, req = arm64_service.plan_tuning(request.model_copy(update={"board": "bcm2712", "probe": arm64_service.pi5}),
+                                          local_paths=True, look_up_hub=False)
+    labels = [c.label for c in plan.candidates]
+    assert labels == ["Q4_K_M-imatrix", "Q4_0-imatrix", "IQ4_NL-imatrix", "Q5_K_M", "Q6_K", "Q8_0"]
+    assert all(c.estimate["state"] == "fits" for c in plan.candidates)
+    assert plan.reference in ("F16", "Q8_0") and plan.disk_bytes > tuning.logits_bytes(128256, 16, 512)
+    assert req.use_imatrix is True
+    handle = arm64_service.start_tuning(request.model_copy(update={"board": "bcm2712", "probe": arm64_service.pi5}),
+                                        local_paths=True, plan=plan)
+    (sent,) = arm64_service.framework.orchestrator.requests
+    assert handle.request_id and sent.tuning["candidates"][0]["quantization"] == "Q4_K_M"
+    assert sent.quantization_options == [] and sent.use_imatrix is True and sent.target_board == "bcm2712"
+    assert sent.description.startswith("Auto-Tuning of")
+
+
+def test_the_persons_types_are_measured_on_a_board_they_do_not_fit(arm64_service, tmp_path):  # noqa: F811
+    from orchestrator.Core.build_service import BuildService
+    folder = _local_model(tmp_path, "Llama 3.2 1B Instruct")
+    request = BuildService.request_in(model=str(folder), target="ARM64", format="gguf", board="bcm2837",
+                                      probe=arm64_service.zero2w)
+    plan, _ = arm64_service.plan_tuning(request, types=["Q4_0", "Q2_K"], local_paths=True, look_up_hub=False)
+    assert [c.label for c in plan.candidates][:2] == ["Q4_0-imatrix", "Q2_K-imatrix"]
+    assert plan.candidates[0].origin == "yours" and plan.candidates[0].estimate["state"] == "does_not_fit"
+
+
+def test_only_gguf_is_tuned(arm64_service, tmp_path):  # noqa: F811
+    from orchestrator.Core.build_service import BuildService
+    request = BuildService.request_in(model=str(_local_model(tmp_path, "Llama 3.2 1B Instruct")), target="ARM64",
+                                      format="rkllm", board="bcm2712")
+    with pytest.raises(tuning.TuningError, match="measures GGUF models"):
+        arm64_service.plan_tuning(request, local_paths=True, look_up_hub=False)
+
+
+# --- the build engine: the tuning job's results become the report -----------------------------------------------------
+
+def test_the_engine_writes_the_report_and_a_manifest_without_a_model(tmp_path, monkeypatch):
+    from test_pipeline import make_config
+
+    from orchestrator.Core import builder
+    from orchestrator.Core.builder import BuildEngine, BuildProgress, BuildStatus
+    from orchestrator.Core.config_manager import ConfigManager
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("orchestrator.Core.builder.docker.from_env",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no docker")))
+    engine = BuildEngine(ConfigManager(tmp_path / "configs"))
+    plan = tuning.TuningPlan(candidates=[tuning.Candidate("Q6_K", False, "board", {"state": "fits"}),
+                                         tuning.Candidate("Q4_K_M", True, "board", {"state": "fits"})],
+                             model="org/model", board="rk3588", target="Rockchip", chunks=8)
+    config = make_config(build_id="t1", quantization=None, tuning=plan.as_dict(), use_imatrix=True)
+    build_temp = engine.cache_dir / "builds" / "t1"
+    (build_temp / "imatrix").mkdir(parents=True)
+    (build_temp / "imatrix" / "imatrix.dat").write_bytes(b"m")
+    seen = {}
+
+    def fake_sandbox(cfg, temp, target_path=None, job="build", progress=None):
+        seen["job"] = job
+        return {}, {}, {}
+
+    def fake_run(cfg, progress, container, prefix, end_record=None, decided=None):
+        _sandbox, vols, variables = decided
+        seen["env"], seen["vols"] = variables, vols
+        results = build_temp / "tune" / "tuning"
+        results.mkdir(parents=True)
+        (results / "reference.info").write_text("type F16\nbytes 10\nseconds 1\nlogits_bytes 5\n")
+        (results / "reference.log").write_text("Final estimate: PPL = 9.5 +/- 0.1\n")
+        for label, kld in (("Q6_K", 0.0055), ("Q4_K_M-imatrix", 0.027)):
+            (results / f"{label}.info").write_text(f"type {label.split('-')[0]}\nbytes 100\nseconds 2\nstatus done\n")
+            (results / f"{label}.log").write_text(f"Mean    KLD:   {kld} ±   0.0001\nSame top p: 95.0 ± 0.1 %\n")
+        return 0
+
+    monkeypatch.setattr(engine, "_sandbox", fake_sandbox)
+    monkeypatch.setattr(engine, "_run_container", fake_run)
+    monkeypatch.setattr(engine, "_ended_by_record", lambda progress, code, prefix, job="build": code)
+    monkeypatch.setattr(engine, "_hardware_probe_mount", lambda cfg, progress, temp: ({}, {}))
+    monkeypatch.setattr(builder, "create_container", lambda client, **kw: SimpleNamespace(kw=kw))
+    progress = BuildProgress("t1", BuildStatus.BUILDING, "x")
+    engine._execute_tuning(config, progress, SimpleNamespace(id="sha256:" + "0" * 64), REPO_ROOT / "targets" /
+                           "Rockchip", ("/build-cache/input-model", {}))
+    assert seen["job"] == "tune"
+    sent = seen["env"]
+    assert sent["JOB_TYPE"] == "tune" and sent["QUANTIZATION"] == "F16"
+    assert sent["TUNE_CANDIDATES"] == "Q6_K:- Q4_K_M:i" and sent["TUNE_CHUNKS"] == "8"
+    assert sent["IMATRIX_PATH"] == "/build-cache/imatrix/imatrix.dat"
+    assert seen["vols"][str(build_temp / "tune")]["bind"] == "/build-cache/output"
+    text = build_temp / "tune-text" / "evaluation.txt"
+    assert text.read_bytes() == evaluation_text.build_evaluation_text().encode("utf-8")
+    report = tuning.load_report(build_temp / "output" / tuning.REPORT_FILE)
+    assert report["recommendation"]["label"] == "Q6_K" and report["evaluation"]["chunks"] == 8
+    assert report["evaluation"]["text_sha256"] == evaluation_text.text_sha256()
+    out = tmp_path / "staged"
+    out.mkdir()
+    info = engine._write_build_manifest(config, out)
+    assert info["kind"] == "tuning" and info["tuning_report"] == tuning.REPORT_FILE and info["primary"] is None
+
+
+# --- the Auto-Tuning tab ----------------------------------------------------------------------------------------------
+
+class _TabService:
+    def __init__(self):
+        self.started, self.built = [], []
+        report = _report()
+        self.reports = [{"id": "a_0123456789abcdef", "label": "output:ARM64/model/tuning", "report": report}]
+
+    def list_targets(self):
+        fmt = SimpleNamespace(format="gguf")
+        return SimpleNamespace(targets=[SimpleNamespace(id="ARM64", boards=["bcm2711", "bcm2712"], formats=[fmt])])
+
+    def plan_tuning(self, request, **kw):
+        self.planned = (request, kw)
+        return tuning.TuningPlan(candidates=[tuning.Candidate("Q4_K_M", True, "board", {"state": "fits"})],
+                                 model=request.model, board=request.board, target=request.target,
+                                 reference_reason="the F16 model", disk_bytes=3 * 1024 ** 3), request
+
+    def start_tuning(self, request, **kw):
+        self.started.append((request, kw))
+        return SimpleNamespace(request_id="req_tune0001")
+
+    def tuning_reports(self):
+        return self.reports
+
+    def build_tuned(self, run, label=None, **kw):
+        self.built.append(run)
+        return SimpleNamespace(request_id="req_build001")
+
+
+@pytest.mark.usefixtures("qapp")
+def test_the_tab_plans_starts_and_builds_the_recommended(qapp):
+    import time
+
+    from orchestrator.gui.tuning_tab import TuningTab
+    service = _TabService()
+    tab = TuningTab(SimpleNamespace(build_service=service))
+    assert tab.cmb_tuning_target.currentText() == "ARM64" and tab.cmb_tuning_board.count() == 2
+    assert tab.lst_tuning_runs.count() == 1 and "Recommended: Q6_K" in tab.txt_tuning_report.toPlainText()
+    assert tab.btn_tuning_build.isEnabled() and not tab.btn_tuning_start.isEnabled()
+    tab.plan()
+    assert "model" in tab.txt_tuning_plan.toPlainText().lower()   # no model: said, nothing planned
+    tab.txt_tuning_model.setText("HuggingFaceTB/SmolLM2-135M-Instruct")
+    tab.cmb_tuning_board.setCurrentIndex(1)
+    tab.txt_tuning_types.setText("Q8_0, q6_k")
+    tab.plan()
+    deadline = time.monotonic() + 10
+    while not tab.btn_tuning_start.isEnabled() and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.02)
+    assert tab.btn_tuning_start.isEnabled(), tab.txt_tuning_plan.toPlainText()
+    request, kw = service.planned
+    assert request.board == "bcm2712" and kw["types"] == ["Q8_0", "q6_k"] and kw["local_paths"] is True
+    assert "Q4_K_M-imatrix" in tab.txt_tuning_plan.toPlainText()
+    tab.start()
+    assert service.started and "req_tune0001" in tab.txt_tuning_plan.toPlainText()
+    tab.build_recommended()
+    assert service.built == ["a_0123456789abcdef"] and "req_build001" in tab.txt_tuning_report.toPlainText()
+    tab.deleteLater()
+
+
+# --- the AI tools: a tuning run only with the person's yes, every time ------------------------------------------------
+
+from test_build_tools import ask, env  # noqa: E402,F401 - the build tools' environment (no network, no probe)
+
+
+def _allow(env, *tools):  # noqa: F811
+    from orchestrator.tools.policy import Decision, ToolPolicy
+    current = env.registry.policy_store.load()
+    env.registry.policy_store.replace(ToolPolicy(configured=True, reviewed=current.reviewed,
+                                                 overrides={t: Decision.ALLOW for t in tools}))
+
+
+def test_start_tuning_is_off_until_enabled_and_then_asks_the_person_every_time(env, monkeypatch):  # noqa: F811
+    from orchestrator.Core import hf_lookup
+    from orchestrator.tools.registry import ToolError
+    monkeypatch.setattr(hf_lookup, "model_config", lambda facts, token, fetcher=None: None)
+    from test_build_tools import facts
+    env.service.hub = facts(size=1024 ** 3)
+    arguments = {"model": "Qwen/Qwen2.5-0.5B-Instruct", "target": "Rockchip", "board": "rk3588"}
+    with pytest.raises(ToolError):
+        ask(env, arguments, name="start_tuning")
+    assert env.orch.requests == []
+    _allow(env, "start_tuning", "get_tuning_report")   # "allow" is capped at ask: the person still answers
+    with pytest.raises(ToolError, match="needs your confirmation"):
+        ask(env, {**arguments, "chunks": 8}, answer=False, name="start_tuning")
+    assert env.orch.requests == [], "a no starts nothing"
+    out, shown = ask(env, arguments, name="start_tuning")
+    assert len(shown) == 1 and "Measures" in shown[0] and "Candidates:" in shown[0]
+    (sent,) = env.orch.requests
+    assert out.request_id == sent.request_id and sent.tuning and sent.owner
+    assert sent.target_formats[0].value == "gguf" and sent.quantization_options == []
+    report = env.registry.call("get_tuning_report", {}, __import__(
+        "orchestrator.tools.registry", fromlist=["ToolContext"]).ToolContext("ditto"))
+    assert report.runs == [] and report.report is None
+
+
+# --- the command line -------------------------------------------------------------------------------------------------
+
+def test_the_cli_plans_starts_lists_and_shows(booted_framework, tmp_path, monkeypatch):
+    from test_review_capabilities_paths import make_cli
+    cli = make_cli(booted_framework, tmp_path, monkeypatch)
+    folder = _local_model(tmp_path, "SmolLM2 135M Instruct")
+    empty = cli.invoke("build", "tune", "list")
+    assert empty.code == 0 and "No tuning run yet" in empty.out
+    result = cli.invoke("build", "tune", "start", "-m", str(folder), "-t", "arm64", "-b", "bcm2712", "--type", "Q2_K",
+                        "--chunks", "8", "--yes")
+    assert result.code == 0, result.out
+    flat = " ".join(result.out.split())
+    assert "Candidates: Q2_K-imatrix" in flat and "Q4_K_M-imatrix" in flat and "8 chunks of 512 tokens" in flat
+    sent = cli.submitted[-1]
+    assert sent.tuning["chunks"] == 8 and sent.tuning["candidates"][0]["origin"] == "yours"
+    refused = cli.invoke("build", "tune", "start", "-m", str(folder), "-t", "arm64", "-b", "bcm2712", "--type",
+                         "Q9_X", "--yes")
+    assert refused.code == 2 and "not a GGUF type this target builds" in " ".join(refused.out.split())
+    missing = cli.invoke("build", "tune", "show", "a_0123456789abcdef")
+    assert missing.code == 2 and "Unknown tuning run" in missing.out

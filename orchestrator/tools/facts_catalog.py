@@ -245,6 +245,7 @@ _BUILD_NUMBERS = (frozenset({"size_class", "host_fit", "target_fit", "parameters
 NUMBER_KEYS: Dict[str, Tuple[FrozenSet[str], FrozenSet[str]]] = {
     "start_build": _BUILD_NUMBERS,
     "start_recipe_build": _BUILD_NUMBERS,
+    "start_tuning": _BUILD_NUMBERS,
     "download_hf_file": (frozenset({"size_class"}), frozenset({"size_bytes", "free_after_bytes", "reserve_bytes"})),
     "crawl_docs_site": (frozenset({"start_urls", "max_pages", "max_depth"}), frozenset()),
     "add_pack_from_index": (frozenset({"size_class"}), frozenset({"size_bytes", "free_after_bytes", "reserve_bytes"})),
@@ -289,6 +290,10 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
                              "running: stop the build; done: move the result to the trash"),
     "start_recipe_build": ToolFacts(_BUILD_BLOCKERS, _BUILD_SITUATION, _BUILD_SECURITY, "builds",
                                     "as start_build"),
+    # a tuning run is a build (its look-up is start_build's plan) and the person's alone: never under a delegation
+    "start_tuning": ToolFacts(_BUILD_BLOCKERS, _BUILD_SITUATION, _BUILD_SECURITY, "never",
+                              "running: stop the run; done: move its report to the trash"),
+    "get_tuning_report": ToolFacts(delegable="not_needed", undo="nothing to undo"),
     "download_hf_file": ToolFacts(
         _FS({"gated_no_access", "file_not_in_repo", "unsafe_filename", "size_unknown", "disk_full", "offline_mode",
              "commit_required", "unknown_repository"}),

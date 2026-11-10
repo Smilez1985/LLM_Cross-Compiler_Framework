@@ -43,6 +43,7 @@ TOOL_WINDOWS: Dict[str, str] = {
     # builds
     "start_build": "builder",
     "start_recipe_build": "builder",
+    "start_tuning": "builder",              # the run is a build; its report shows in the Auto-Tuning tab
     "cancel_build": "builder",
     "resolve_healing": "builder",            # the build goes on with the fix, or ends
     "propose_healing_fix": "proposals",      # Fix Proposals from AI Clients...: manual steps, never run

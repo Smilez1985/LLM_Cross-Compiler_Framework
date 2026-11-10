@@ -7,12 +7,11 @@ Features:
 - Visual AI Avatar (Ditto) reacting to system state.
 - Live Status Polling from Orchestrator.
 - Integrated Self-Healing notifications.
-- New Tabs: Auto-Tuning & Quality Regression.
+- The Auto-Tuning tab (orchestrator/gui/tuning_tab.py).
 
 Updates v2.4.0:
 - Added Ditto Sprites integration.
 - Added QTimer for Orchestrator state polling.
-- Added Hyperparameter Tuning Tab placeholder.
 """
 
 import os
@@ -319,9 +318,9 @@ class MainOrchestrator(QMainWindow):
         self.deployment_window = DeploymentWindow(self.framework)
         self.tabs.addTab(self.deployment_window, "")
 
-        # 3. NEW: Hyperparameter Tuning (Roadmap)
-        self.tuning_tab = QLabel("\n\n🚧 Hyperparameter Auto-Tuning Module\n\nComing soon: Automated quantization matrix benchmarking.")
-        self.tuning_tab.setAlignment(Qt.AlignCenter)
+        # 3. Auto-Tuning: the best quantization for a model and a board, measured (Core/tuning.py)
+        from orchestrator.gui.tuning_tab import TuningTab
+        self.tuning_tab = TuningTab(self.framework)
         self.tabs.addTab(self.tuning_tab, "")
 
         # 4. Model Manager Placeholder
