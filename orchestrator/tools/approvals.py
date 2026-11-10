@@ -112,6 +112,10 @@ class ApprovalRecord(BaseModel):
     args_sha256: str = Field(pattern=_SHA256)
     question: str = Field(max_length=MAX_FRAMEWORK + 2000)
     question_sha256: str = Field(pattern=_SHA256)
+    # A new random value each time the holding process puts the question to the person (also when it asks the same
+    # text again): a yes counts only for the asking the holder knows now, never for an earlier one brought back by an
+    # older copy of the file. "" for a request to stop asking and for records of earlier versions (never run).
+    asking: str = Field(default="", pattern=r"^([0-9a-f]{16})?$")
     created: str
     expires: str
     state: Literal["pending", "approved", "declined", "running", "done", "failed", "expired", "withdrawn"]
@@ -242,6 +246,31 @@ class ApprovalStore:
             result = change(records)
             self._write(records)
             return result
+
+    def swap(self, approval_id: str, expect: Callable[[ApprovalRecord], bool], then: Callable[[], bool],
+             after: Optional[Callable[[], None]] = None, **fields: Any) -> Optional[ApprovalRecord]:
+        """Changes one record only while it is as the caller expects it now: under the lock, read from the file as it
+        is at this moment, `expect(record)` must hold and then `then()` (the caller's own step under the same lock,
+        such as marking its call as running) must agree; `after()` runs once the new file is in place, still under
+        the lock. None, and nothing written, otherwise or when the file cannot be used. Only writers take the lock:
+        readers never wait for it (see _read_settled)."""
+        from orchestrator.utils.file_lock import file_lock
+        with self._lock, file_lock(self.lock_path, timeout=10):
+            records = self._read()
+            if self.problem:
+                return None
+            for i, record in enumerate(records):
+                if record.id != approval_id:
+                    continue
+                if not expect(record) or not then():
+                    return None
+                records[i] = record.model_copy(update=fields)
+                ApprovalRecord.model_validate(records[i].model_dump())
+                self._write(records)
+                if after is not None:
+                    after()
+                return records[i]
+            return None
 
     # --- reading -----------------------------------------------------------------------------------------------
 
@@ -403,6 +432,7 @@ class _Waiting:
     question_sha256: str
     expires: datetime
     running: bool = False
+    asking: str = ""         # the asking of the question the person is shown now (ApprovalRecord.asking)
     facts: Any = None        # what the tool looked up for the question shown (CallFacts), None for a tool without
     facts_sha256: str = ""   # the facts' decision digest when the question was shown ("" without facts)
     stable_sha256: str = ""  # the question with its volatile values left out, when it was shown
@@ -480,9 +510,10 @@ class ApprovalService:
                                  question_sha256=digest)
             now = _now()
             expires = now + timedelta(seconds=self.ttl)
+            asking = secrets.token_hex(8)
             self.store.add(ApprovalRecord(id=approval_id, caller=ctx.actor, client=str(ctx.client or "")[:400],
                                           tool=spec.name, title=spec.title[:200], args_sha256=key[2],
-                                          question=question, question_sha256=digest, created=_iso(now),
+                                          question=question, question_sha256=digest, asking=asking, created=_iso(now),
                                           expires=_iso(expires), state="pending", job_id=job.job_id,
                                           pid=os.getpid(), owner=str(ctx.owner)[:120], grant=offer))
             self.registry.asked(ctx)  # a pending approval counts toward the questions per hour
@@ -493,8 +524,8 @@ class ApprovalService:
         self.jobs.update(job.job_id, note=f"Waiting for the person to approve '{spec.title}' in the framework.")
         with self._lock:
             self._waiting[approval_id] = _Waiting(approval_id, spec.name, dict(arguments), ctx, job.job_id, key,
-                                                  digest, expires, facts=facts, facts_sha256=decision_digest,
-                                                  stable_sha256=stable)
+                                                  digest, expires, asking=asking, facts=facts,
+                                                  facts_sha256=decision_digest, stable_sha256=stable)
         self._emit("approval", approval_id, spec.name, ctx, "pending", job.job_id)
         self._start()
         return job
@@ -514,7 +545,7 @@ class ApprovalService:
         """Whether only volatile values changed since the person was shown the question (free space, exact byte
         counts): the same decision digest and the same question once those values are left out, for the question
         this process put into the store. Then the person is not asked again (F3)."""
-        if not item.facts_sha256 or record.question_sha256 != item.question_sha256:
+        if not item.facts_sha256 or record.question_sha256 != item.question_sha256 or record.asking != item.asking:
             return False
         digest, stable = self._decision_of(spec, inp, item.ctx, facts)
         return bool(digest) and digest == item.facts_sha256 and stable == item.stable_sha256
@@ -620,16 +651,16 @@ class ApprovalService:
     def poll_once(self, now: Optional[datetime] = None) -> None:
         """One look at the store: runs what the person approved, ends what they declined and what expired."""
         now = now or _now()
-        with self._lock:
-            waiting = [w for w in self._waiting.values() if not w.running]
+        with self._lock:  # each with the asking it had before this look read the store
+            waiting = [(w, w.asking) for w in self._waiting.values() if not w.running]
         if not waiting:
             return
         records = {r.id: r for r in self.store.list()}
-        for item in waiting:
+        for item, asking in waiting:
             record = records.get(item.approval_id)
             if record is not None and record.state == "approved" and record.args_sha256 == item.key[2] \
                     and record.caller == item.ctx.actor and record.tool == item.tool:
-                self._approved(item, record)
+                self._approved(item, record, asking)
             elif record is not None and record.state == "declined":
                 self._end(item, "declined")
             elif now >= item.expires:
@@ -671,10 +702,16 @@ class ApprovalService:
         except Exception as e:
             logger.warning(f"Could not audit the end of approval {item.approval_id}: {redact_secrets(str(e))}")
 
-    def _approved(self, item: _Waiting, record: ApprovalRecord) -> None:
+    def _approved(self, item: _Waiting, record: ApprovalRecord, asking: str) -> None:
         """Runs the approved call, unless its question would read differently now (the tool's prepare runs again, so a
         changed fact changes the question): then the new question is put to the person instead (nothing runs).
-        Otherwise the handler gets exactly the facts of the question the person saw, which it must use or refuse."""
+        Otherwise the handler gets exactly the facts of the question the person saw, which it must use or refuse.
+
+        `record` is this look's view of the store and `asking` the asking the holder had before it was read. Another
+        look (the watch thread and a poll at once) or another window may have changed both since: the call starts
+        and the question is asked again only while the file still holds the record as read and the holder still asks
+        what it asked then (both checked under the store's lock, ApprovalStore.swap); otherwise this look does
+        nothing, so a stale view never starts a call, also when a copy put back over the file looks like the view."""
         spec = self.registry.get(item.tool)
         try:
             inp = self.registry.validate_input(spec, item.arguments)
@@ -686,15 +723,27 @@ class ApprovalService:
                        f"The approved call can no longer be checked ({redact_secrets(str(e))}).", error=e)
             return
         digest = question_sha256(question)
-        changed = digest != record.question_sha256 or digest != item.question_sha256
+        # A yes counts only for the asking this process puts to the person now: one from an earlier asking (an older
+        # copy of the file put back, even with the same text) asks again.
+        changed = digest != record.question_sha256 or digest != item.question_sha256 or record.asking != item.asking
+
+        def as_read(now: ApprovalRecord) -> bool:
+            """The record is still the one this look decided on (another look or window may have changed it since
+            it was read; then that look's view stands and this one does nothing)."""
+            return (now.state == record.state == "approved" and now.asking == record.asking
+                    and now.question_sha256 == record.question_sha256)
+
         if changed and self._same_decision(item, record, spec, inp, facts):
             # only free space or byte counts moved: the person's yes stands, and the handler gets the current facts
             # (its disk reservation is taken for what is true now)
             changed = False
             with self._lock:
-                if self._waiting.get(item.approval_id) is item:
+                if self._waiting.get(item.approval_id) is item and item.asking == asking:
                     item.facts = facts
         if changed:
+            current = self.store.get(item.approval_id)
+            if current is None or not as_read(current) or item.asking != asking:
+                return  # another look asked again or the record changed meanwhile: its question stands
             try:
                 self.registry._audit(item.ctx, spec, self.registry.decide(spec, inp, item.ctx),
                                      "confirmation_requested", item.arguments, required=spec.tier.value != "read",
@@ -706,23 +755,46 @@ class ApprovalService:
             # What "do not ask again" may cover is computed again from the facts behind the new question.
             offer = self.registry.grant_offer(spec, inp, item.ctx) if spec.grant is not None else None
             decision_digest, stable = self._decision_of(spec, inp, item.ctx, facts)
-            with self._lock:
-                if self._waiting.get(item.approval_id) is not item:  # withdrawn meanwhile: nothing is asked
-                    return
-                item.question_sha256, item.expires, item.facts = digest, expires, facts
-                item.facts_sha256, item.stable_sha256 = decision_digest, stable
-            self.store.update(item.approval_id, state="pending", question=question, question_sha256=digest,
-                              decided_by=None, decided_at=None, expires=_iso(expires), grant=offer, choice=None,
-                              note="The question changed after it was approved; it is asked again.")
-            self.jobs.update(item.job_id, note="The facts behind the question changed; the person is asked again.")
+            new_asking = secrets.token_hex(8)
+
+            def may_ask() -> bool:  # under the store's lock, with the record still as this look read it
+                with self._lock:
+                    if self._waiting.get(item.approval_id) is not item or item.running:  # withdrawn: nothing asked
+                        return False
+                    return item.asking == asking  # else another look asked again since this one read the store
+
+            def asked_now() -> None:
+                # Only once the new question is in the file: a look that sees the new asking in this process reads
+                # that file or a later one, never the one before (whose yes a copy put back could bring back).
+                with self._lock:
+                    item.question_sha256, item.expires, item.facts, item.asking = digest, expires, facts, new_asking
+                    item.facts_sha256, item.stable_sha256 = decision_digest, stable
+            asked = self.store.swap(item.approval_id, as_read, may_ask, asked_now, state="pending", question=question,
+                                    question_sha256=digest, asking=new_asking, decided_by=None, decided_at=None,
+                                    expires=_iso(expires), grant=offer, choice=None,
+                                    note="The question changed after it was approved; it is asked again.")
+            if asked is not None:
+                self.jobs.update(item.job_id, note="The facts behind the question changed; the person is asked "
+                                                   "again.")
             return
-        with self._lock:
-            if self._waiting.get(item.approval_id) is not item:  # withdrawn while it was checked: nothing runs
-                return
-            if item.running:  # another look at the store saw the same yes at the same time and started it
-                return
-            item.running = True
-        self.store.update(item.approval_id, state="running")
+
+        def claim() -> bool:  # under the store's lock, with the yes still in the file as this look read it
+            with self._lock:
+                if self._waiting.get(item.approval_id) is not item:  # withdrawn while it was checked: nothing runs
+                    return False
+                if item.running or item.asking != record.asking:  # another look started it or asked again
+                    return False
+                item.running = True
+                return True
+        try:
+            started = self.store.swap(item.approval_id, as_read, claim, state="running")
+        except BaseException:
+            with self._lock:  # the running state could not be stored: nothing started, the next look tries again
+                if self._waiting.get(item.approval_id) is item:
+                    item.running = False
+            raise
+        if started is None:
+            return
         threading.Thread(target=self._run, args=(item, record), name=f"approval-{item.approval_id}",
                          daemon=True).start()
 

@@ -54,15 +54,20 @@ def env(make_framework):
     registry = fm.tool_registry
     registry.approvals.poll = 0.05
     # together: a barrier the next look-ups wait at; gate: an event the handler waits for once it has run
-    state = SimpleNamespace(commit="c1", looked_up=0, seen=[], running=0, together=None, gate=None)
+    # hold: called once by the next look-up (and then cleared), to stop that look between reading and deciding
+    state = SimpleNamespace(commit="c1", looked_up=0, seen=[], running=0, together=None, gate=None, hold=None)
 
     def prepare(inp, ctx):
         state.looked_up += 1
+        commit = state.commit  # what this look-up finds, also when it is held before it returns
+        hold, state.hold = state.hold, None
+        if hold is not None:
+            hold()
         together = state.together
         if together is not None:
             together.wait(10)
-        return CallFacts(consequence=f"Changes item {inp.item_id} to upstream commit {state.commit}.",
-                         facts=(Fact("Upstream commit", state.commit),), bound={"commit": state.commit})
+        return CallFacts(consequence=f"Changes item {inp.item_id} to upstream commit {commit}.",
+                         facts=(Fact("Upstream commit", commit),), bound={"commit": commit})
 
     def handler(inp, ctx):
         state.seen.append(ctx.facts.bound["commit"] if ctx.facts is not None else None)
@@ -171,6 +176,135 @@ class TestThePendingQuestionIsTheTwoPhaseQuestion:
         again = env.store.get(record.id)
         assert again.state == "pending" and "Upstream commit: c1" in again.question
         assert env.state.seen == [], "nothing ran on the yes that was put back"
+        decide(env, again)
+        assert wait_job(env, job_id).state == "done" and env.state.seen == ["c1"]
+
+    def test_a_look_that_read_the_put_back_yes_before_another_look_asked_again_runs_nothing(self, env):
+        """The interleaving behind a rare failure of the test above: the watch thread reads the put-back file (the yes
+        to the c1 question) and stops before it decides; meanwhile another look asks the c1 question again (pending).
+        The first look then finds the question it would ask (c1) the same as the one in its old view and the one this
+        process asks now: before, it started the call on the yes that was put back. A decision is taken on the record
+        as it is now: the record is pending again, so nothing runs."""
+        env.registry.approvals.poll = 60  # the watch thread stays asleep: the test makes both looks itself
+        job_id, record = ask_pending(env)
+        env.state.commit = "c2"
+        result = cli(env.registry, "tools", "approvals", "approve", record.id, input="y\n")
+        assert result.exit_code == 0, result.output
+        older = env.store.path.read_bytes()  # the yes to the c1 question
+        env.registry.approvals.poll_once()   # the question changed: asked again
+        env.state.commit = "c1"
+        env.store.path.write_bytes(older)    # the earlier yes put back
+        stopped, go_on = threading.Event(), threading.Event()
+        env.state.hold = lambda: (stopped.set(), go_on.wait(10))
+        first = threading.Thread(target=env.registry.approvals.poll_once)
+        first.start()                        # reads the put-back yes, then stops in its look-up
+        assert stopped.wait(10)
+        env.registry.approvals.poll_once()   # the other look: the c1 question is asked again
+        assert env.store.get(record.id).state == "pending"
+        go_on.set()
+        first.join(10)
+        assert not first.is_alive()
+        again = env.store.get(record.id)
+        assert again.state == "pending" and "Upstream commit: c1" in again.question, again.state
+        assert env.jobs.get(job_id).state == "waiting_for_approval"
+        assert env.state.seen == [], "nothing ran on the yes that was put back"
+        decide(env, again)
+        assert wait_job(env, job_id).state == "done" and env.state.seen == ["c1"]
+
+    def test_a_look_whose_view_a_put_back_copy_brings_back_asks_nothing_stale(self, env):
+        """The other order: the watch thread reads the person's yes and looks up the facts (c2) while another look
+        asks the c2 question again; then the facts go back to c1 and the older copy (that same yes) is put back. The
+        file now looks exactly as the first look read it, yet it asks nothing with its old facts (and runs nothing):
+        the holder asks another question since that look began. The next look asks the c1 question."""
+        env.registry.approvals.poll = 60  # the watch thread stays asleep: the test makes both looks itself
+        job_id, record = ask_pending(env)
+        result = cli(env.registry, "tools", "approvals", "approve", record.id, input="y\n")
+        assert result.exit_code == 0, result.output
+        older = env.store.path.read_bytes()  # the yes to the c1 question
+        env.state.commit = "c2"
+        stopped, go_on = threading.Event(), threading.Event()
+        env.state.hold = lambda: (stopped.set(), go_on.wait(10))
+        first = threading.Thread(target=env.registry.approvals.poll_once)
+        first.start()                        # reads the yes, finds c2, then stops
+        assert stopped.wait(10)
+        env.registry.approvals.poll_once()   # the other look: the c2 question is asked
+        env.state.commit = "c1"
+        env.store.path.write_bytes(older)    # the yes put back: the file is as the first look read it
+        go_on.set()
+        first.join(10)
+        assert not first.is_alive()
+        assert env.state.seen == [] and env.jobs.get(job_id).state == "waiting_for_approval"
+        env.registry.approvals.poll_once()
+        again = env.store.get(record.id)
+        assert again.state == "pending" and "Upstream commit: c1" in again.question, again.question
+        assert env.state.seen == []
+        decide(env, again)
+        assert wait_job(env, job_id).state == "done" and env.state.seen == ["c1"]
+
+    def test_a_look_that_read_the_file_while_the_question_was_asked_again_asks_nothing_stale(self, env):
+        """A look reads the store while another look is asking the question again: the new question is not yet in
+        the file. The holder takes the new asking as its own only once the file holds it, so this look decides on its
+        old view and cannot mistake it for the current one, even when the older copy is put back after it."""
+        env.registry.approvals.poll = 60  # the watch thread stays asleep: the test makes both looks itself
+        job_id, record = ask_pending(env)
+        env.state.commit = "c2"
+        result = cli(env.registry, "tools", "approvals", "approve", record.id, input="y\n")
+        assert result.exit_code == 0, result.output
+        older = env.store.path.read_bytes()  # the yes to the c1 question
+        writing, write_on = threading.Event(), threading.Event()
+        write = env.store._write
+
+        def held_write(records):  # the asking look stops right before its new question reaches the file
+            writing.set()
+            write_on.wait(10)
+            write(records)
+        env.store._write = held_write
+        asking = threading.Thread(target=env.registry.approvals.poll_once)
+        asking.start()                       # finds c2: asks again, held before the write
+        assert writing.wait(10)
+        env.store._write = write
+        stopped, go_on = threading.Event(), threading.Event()
+        env.state.hold = lambda: (stopped.set(), go_on.wait(10))
+        first = threading.Thread(target=env.registry.approvals.poll_once)
+        first.start()                        # reads the yes still in the file, finds c2, then stops
+        assert stopped.wait(10)
+        write_on.set()
+        asking.join(10)
+        assert env.store.get(record.id).state == "pending"
+        env.state.commit = "c1"
+        env.store.path.write_bytes(older)    # the yes put back: the file is as the first look read it
+        go_on.set()
+        first.join(10)
+        assert not first.is_alive() and not asking.is_alive()
+        assert env.state.seen == [] and env.jobs.get(job_id).state == "waiting_for_approval"
+        env.registry.approvals.poll_once()
+        again = env.store.get(record.id)
+        assert again.state == "pending" and "Upstream commit: c1" in again.question, again.question
+        decide(env, again)
+        assert wait_job(env, job_id).state == "done" and env.state.seen == ["c1"]
+
+    def test_an_earlier_yes_to_the_same_text_put_back_after_it_was_asked_again_runs_nothing(self, env):
+        """The question is asked again with the very text the person once approved (the facts went back to it): the
+        older copy with that yes, put back now, still runs nothing, since that yes belongs to an earlier asking."""
+        env.registry.approvals.poll = 60  # the watch thread stays asleep: the test makes every look itself
+        job_id, record = ask_pending(env)
+
+        def approve():
+            result = cli(env.registry, "tools", "approvals", "approve", record.id, input="y\n")
+            assert result.exit_code == 0, result.output
+        approve()
+        older = env.store.path.read_bytes()  # the yes to the c1 question
+        env.state.commit = "c2"
+        env.registry.approvals.poll_once()   # the question changed: asked again (c2)
+        approve()
+        env.state.commit = "c1"
+        env.registry.approvals.poll_once()   # changed back: the c1 text is asked again
+        assert env.store.get(record.id).state == "pending" and env.state.seen == []
+        env.store.path.write_bytes(older)    # the yes to the earlier asking of that same text put back
+        env.registry.approvals.poll_once()
+        again = env.store.get(record.id)
+        assert again.state == "pending" and "Upstream commit: c1" in again.question, again.state
+        assert env.state.seen == [] and env.jobs.get(job_id).state == "waiting_for_approval"
         decide(env, again)
         assert wait_job(env, job_id).state == "done" and env.state.seen == ["c1"]
 
