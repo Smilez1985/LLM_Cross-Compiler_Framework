@@ -536,7 +536,8 @@ def write_scripts(spec: Path, out: Path):
         raise PreloadError("a recipe line would end a PowerShell here-string")
     (out / "preload.sh").write_text("\n".join(sh), encoding="utf-8", newline="\n")
     (out / "preload.sh").chmod(0o755)
-    (out / "preload.ps1").write_text("\r\n".join(ps), encoding="utf-8-sig", newline="")
+    (out / "preload.ps1").write_text("\n".join(ps).replace("\r\n", "\n").replace("\n", "\r\n"),
+                                     encoding="utf-8-sig", newline="")
     return out / "preload.sh", out / "preload.ps1", what
 
 
