@@ -648,7 +648,7 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
     path instead of a local-file reference) raise like start_build does; problems that stop this build otherwise are
     collected in `problems`."""
     framework = service.framework
-    base = request.model_dump(exclude={"optimization", "include_download_size"})
+    base = request.model_dump(exclude={"optimization", "include_download_size", "preload"})
     from orchestrator.schemas.build import BuildRequestIn
     req, inputs = service._validated(BuildRequestIn(**base), False, check_here=False)
     # the level asked for, else the board profile's (the one start_build will use), else balanced

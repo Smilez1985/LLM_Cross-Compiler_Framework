@@ -1175,13 +1175,17 @@ class _FormatOption(click.Option):
               help="Build even when the pre-flight check says the build cannot succeed (a driver too old for what the "
                    "build or the board needs). Your decision for this one build; at a terminal without it you are "
                    "asked, with No as the default")
+@click.option('--preload', 'preload', default=None, type=click.Path(exists=True, dir_okay=False),
+              help="Offline: the archive of the build's preload (written by the preload scripts llmcf wrote for this "
+                   "build's missing sources), checked and taken in before the build. Without it, at a terminal the "
+                   "scripts are written and you are asked for the archive's path")
 @pass_context
 def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[str], format: Optional[str],
                 board: Optional[str], probe: Optional[str], quantization: Optional[str], output_dir: Optional[str],
                 optimization: Optional[str], priority: str, parallel: bool, follow: bool, gpu: bool,
                 imatrix: Optional[bool], dataset: Optional[str], no_dataset: bool = False,
                 module_flags: Optional[str] = None, remember_flags: bool = False, ignore_preflight: bool = False,
-                recipe_id: Optional[str] = None):
+                recipe_id: Optional[str] = None, preload: Optional[str] = None):
     """Start a new build job. Ctrl+C cancels it (its container is stopped) and exits with code 130.
 
     When a finished build with exactly the same options exists, you are asked first, as in the Builder tab: use it
@@ -1191,6 +1195,11 @@ def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[st
     In offline mode nothing is downloaded: a Hugging Face model is used from its copy on this computer; without one the
     models already here are listed, and --model takes one of their labels or a local path (at a terminal you are
     asked).
+
+    In offline mode, when the build container image of the target is not on this computer and an offline build lacks
+    sources (base images, llama.cpp, the image's Python packages, pinned downloads, files of source images), the
+    build's preload scripts are written for exactly those and you are asked for the archive they make on a computer
+    with a network (--preload FILE gives it up front; without a terminal the run stops with the steps).
 
     Before anything starts, the pre-flight check compares the hardware probes with what the build needs (the NVIDIA
     driver of this computer for a GPU build, the board's NPU driver and runtime for an NPU format) and prints what it
@@ -1351,6 +1360,8 @@ def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[st
         except DependencyMissing as e:
             console.print(f"[red]{escape(str(e))}[/red]")
             sys.exit(2)
+        # Offline: the build's preload for what its build container image lacks (Core/build_preload.py)
+        _offline_preload(ctx, request.target, bool(request.use_gpu), preload)
 
         # The orchestrator runs on the framework's background loop (as for the GUI and the build service), so the
         # build service can cancel the build from here on Ctrl+C.
@@ -2445,6 +2456,107 @@ def build_image_import(ctx: FrameworkContext, file: Path, digest: Optional[str],
     console.print(f"[green]Loaded the build container image of {escape(result.target)}[/green] "
                   f"({escape(', '.join(result.images) or 'no tag')}); sha256 {result.sha256[:12]}... checked. "
                   "Offline builds of this target with these settings use it.")
+
+
+# --- build preload: the build's preload for a computer without a network (Core/build_preload.py) ---------------
+
+@build.group('preload')
+def build_preload_group():
+    """The build's preload for a computer without any network: preload scripts for exactly the sources an offline
+    build of a target lacks (base images, llama.cpp, the build image's Python packages, pinned downloads, files taken
+    from source images), run on a computer with a network, and the archive they write taken in as local sources."""
+    pass
+
+
+def _print_written(written) -> None:
+    console.print(f"[green]Wrote {escape(written.scripts[0].name)} and {escape(written.scripts[1].name)}[/green] into "
+                  f"{escape(str(written.folder))}.")
+    console.print(f"They fetch: {escape(written.what)}.")
+    for item in written.not_covered:
+        console.print(f"[yellow]Not in the preload (provide it otherwise):[/yellow] {escape(item)}")
+
+
+def _take_preload(fm, target: str, archive: str, sha256: str = "") -> None:
+    """Checks and takes in the build's preload `archive` for `target`; exit 1 with the reason when it is refused."""
+    from orchestrator.Core.build_preload import PreloadProblem, take_in
+    try:
+        taken = take_in(fm, target, Path(archive), actor="cli", sha256=sha256,
+                        log=lambda text: console.print(escape(text)))
+    except PreloadProblem as e:
+        console.print(f"[red]{escape(str(e))}[/red] {escape(e.next)}")
+        sys.exit(1)
+    for line in taken.lines():
+        console.print(escape(line))
+
+
+@build_preload_group.command('write')
+@click.argument('target')
+@click.option('--gpu', is_flag=True, help='The GPU variant of the target (its Dockerfile.gpu)')
+@pass_context
+def build_preload_write(ctx: FrameworkContext, target: str, gpu: bool):
+    """Writes preload.sh and preload.ps1 for what an offline build of TARGET's build container image lacks (the
+    offline plan's missing sources), into llmcf-preload-scripts/build-TARGET of your state folder. Run one on a
+    computer with a network; it writes an archive to bring back (llm-cli build preload take FILE)."""
+    from orchestrator.Core import build_image
+    from orchestrator.Core.build_preload import PreloadProblem, write
+    fm = _image_framework(ctx)
+    try:
+        plan = build_image.target_plan(fm, target, gpu=gpu)
+        if plan.ready:
+            console.print("Nothing is missing: an offline build can make this image from local sources.")
+            return
+        _print_written(write(fm, target, gpu=gpu, plan=plan))
+    except (PreloadProblem, build_image.ImageTransferError) as e:
+        console.print(f"[red]{escape(str(e))}[/red] {escape(getattr(e, 'next', ''))}")
+        sys.exit(2)
+
+
+@build_preload_group.command('take')
+@click.argument('archive', type=click.Path(exists=True, dir_okay=False))
+@click.option('--target', '-t', required=True, help='The target the preload was written for')
+@click.option('--sha256', 'digest', default='', help="The archive's sha256 the preload script printed (checked)")
+@pass_context
+def build_preload_take(ctx: FrameworkContext, archive: str, target: str, digest: str):
+    """Checks the build's preload ARCHIVE (paths inside its folder, no links, SHA256SUMS, a recipe written on this
+    computer, the image names and pins) and takes it in: base images loaded into the container engine, llama.cpp into
+    the source store, the build image's Python packages, downloads and taken files kept for offline builds."""
+    _take_preload(_image_framework(ctx), target, archive, digest)
+
+
+def _offline_preload(ctx: FrameworkContext, target: str, gpu: bool, preload: Optional[str]) -> None:
+    """Before an offline build: when its build container image is not here and sources are missing, the build's
+    preload. --preload FILE is taken in; at a terminal the scripts are written and the path of the archive is asked
+    (empty: nothing starts); without a terminal the scripts are written and the run stops with the steps (exit 2)."""
+    from orchestrator.Core import build_preload
+    fm = ctx.framework_manager
+    if preload:
+        _take_preload(fm, target, preload)
+        return
+    try:
+        plan = build_preload.needed(fm, target, gpu=gpu)
+    except Exception:  # noqa: BLE001 - not to be told here: the build checks again itself
+        return
+    if plan is None:
+        return
+    try:
+        written = build_preload.write(fm, target, gpu=gpu, plan=plan)
+    except build_preload.PreloadProblem as e:   # nothing a preload brings: the build's own stop names the rest
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        return
+    console.print("[yellow]Offline mode: the build container image of this target is not on this computer, and an "
+                  "offline build lacks sources.[/yellow]")
+    _print_written(written)
+    if sys.stdin is None or not sys.stdin.isatty():
+        for number, step in enumerate(build_preload.steps(written), 1):
+            console.print(f"{number}. {escape(step)}")
+        console.print("Nothing was started.")
+        sys.exit(2)
+    console.print("Run one of them on a computer with a network and bring the archive here.")
+    answer = click.prompt("Path of the archive (Enter without a path: stop)", default="", show_default=False)
+    if not answer.strip():
+        console.print("Nothing was started.")
+        sys.exit(2)
+    _take_preload(fm, target, answer.strip())
 
 
 def _print_build_record(r: dict) -> None:

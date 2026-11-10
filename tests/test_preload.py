@@ -289,6 +289,15 @@ class TestInstallShWithAPreload:
         assert result.returncode == 1 and "außerhalb" in result.stdout
         assert not (self.repo["tmp"] / "escaped").exists()
 
+    def test_a_builds_preload_is_not_the_installers(self):
+        def as_build(top):
+            manifest = top / "manifest.txt"
+            manifest.write_text(manifest.read_text() + "kind=build\n")
+            sums = [line for line in (top / "SHA256SUMS").read_text().splitlines() if not line.endswith(" manifest.txt")]
+            (top / "SHA256SUMS").write_text("\n".join(sums + [f"{sha256(manifest)}  manifest.txt"]) + "\n")
+        result = open_preload(self.repo, rebuild(self.repo, as_build))
+        assert result.returncode == 1 and "Preload eines Builds" in result.stdout and "OPENED" not in result.stdout
+
     def test_another_platform_glibc_or_lock_is_named_with_the_command_that_fits(self):
         archive = archive_of(self.repo)
         arm = open_preload(self.repo, archive, machine="aarch64")

@@ -56,6 +56,12 @@ class StartBuildIn(BuildRequestIn):
         default=None, description="Optimization level of the conversion: fast, balanced, size, speed or aggressive; "
                                   "omitted: the level of the board's optimization profile "
                                   "(get_target_capabilities), else balanced")
+    preload: Optional[str] = Field(default=None, max_length=1024,
+                                   description="Offline mode only: the archive of the build's preload the person made "
+                                               "with the preload scripts llmcf wrote for this build, as a local file "
+                                               "reference (<label>:<relative path> or its file id); checked and taken "
+                                               "in before the build. Never a path, never an archive of another "
+                                               "recipe")
 
 
 class CheckBuildIn(StartBuildIn):

@@ -60,6 +60,21 @@ TEXTS = {
         "bimg.working": "Working...",
         "bimg.error.key": "{setting} is not a build source; the build sources are {keys}.",
         "bimg.error.url": "{setting} is not saved: {problem}.",
+        "bimg.preload.write": "Write preload scripts...",
+        "bimg.preload.take": "Take in a preload...",
+        "bimg.preload.take.title": "Take in the build's preload",
+        "bimg.preload.dialog.title": "Offline: the build's preload",
+        "bimg.preload.checking": "Checking what an offline build of {target} lacks...",
+        "bimg.preload.not_needed": "Nothing a preload can bring is missing for an offline build of {target}.",
+        "bimg.preload.written": "Wrote preload.sh and preload.ps1 into {folder}. They fetch: {what}. Run one of them on "
+                                "a computer with a network (Python 3 with pip; git for llama.cpp), carry the archive it "
+                                "writes to this computer and give its path here.",
+        "bimg.preload.not_covered": "Not in the preload (provide it otherwise): {items}",
+        "bimg.preload.path": "Path of the archive:",
+        "bimg.preload.browse": "Browse...",
+        "bimg.preload.go": "Take in and build",
+        "bimg.preload.taking": "Checking the archive and taking it in...",
+        "bimg.preload.cancelled": "Nothing was started: the build's preload was not given.",
     },
     "de": {
         "bimg.menu": "Build-Container-Images...",
@@ -113,6 +128,21 @@ TEXTS = {
         "bimg.working": "Läuft...",
         "bimg.error.key": "{setting} ist keine Build-Quelle; die Build-Quellen sind {keys}.",
         "bimg.error.url": "{setting} ist nicht gespeichert: {problem}.",
+        "bimg.preload.write": "Preload-Skripte schreiben...",
+        "bimg.preload.take": "Ein Preload aufnehmen...",
+        "bimg.preload.take.title": "Das Preload des Builds aufnehmen",
+        "bimg.preload.dialog.title": "Offline: das Preload des Builds",
+        "bimg.preload.checking": "Prüfe, was einem Offline-Build von {target} fehlt...",
+        "bimg.preload.not_needed": "Einem Offline-Build von {target} fehlt nichts, was ein Preload bringen kann.",
+        "bimg.preload.written": "preload.sh und preload.ps1 liegen in {folder}. Sie holen: {what}. Führ eins davon auf "
+                                "einem Rechner mit Netz aus (Python 3 mit pip; git für llama.cpp), trag das Archiv, das "
+                                "es schreibt, auf diesen Rechner und gib hier seinen Pfad an.",
+        "bimg.preload.not_covered": "Nicht im Preload (anders bereitstellen): {items}",
+        "bimg.preload.path": "Pfad des Archivs:",
+        "bimg.preload.browse": "Durchsuchen...",
+        "bimg.preload.go": "Aufnehmen und bauen",
+        "bimg.preload.taking": "Prüfe das Archiv und nehme es auf...",
+        "bimg.preload.cancelled": "Nichts wurde gestartet: Das Preload des Builds wurde nicht angegeben.",
     },
 }
 
@@ -128,5 +158,8 @@ FORMAL = {
                         "Mal)",
         "bimg.layer": "Laufzeit-Schicht (der Stufen-Runner des Frameworks in jedem Build-Container; nur Sie wählen, "
                       "wie ihre Werkzeuge entstehen)",
+        "bimg.preload.written": "preload.sh und preload.ps1 liegen in {folder}. Sie holen: {what}. Führen Sie eines "
+                                "davon auf einem Rechner mit Netz aus (Python 3 mit pip; git für llama.cpp), tragen Sie "
+                                "das Archiv, das es schreibt, auf diesen Rechner und geben Sie hier seinen Pfad an.",
     },
 }

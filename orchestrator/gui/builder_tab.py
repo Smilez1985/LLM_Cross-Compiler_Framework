@@ -1653,6 +1653,11 @@ class BuilderTab(QWidget):
                 self._log(ui_text("bld.preflight.cancelled"))
                 return
             options["ignore_preflight"] = True
+        # Offline: the build's preload for what an offline build of the target lacks (written, then its archive
+        # taken in; Core/build_preload.py); Cancel starts nothing
+        if not self._preload_ready(values):
+            self._log(ui_text("bimg.preload.cancelled"))
+            return
         try:
             try:
                 rid = self._submit(service, values, recipe, options)
@@ -1690,6 +1695,11 @@ class BuilderTab(QWidget):
         except Exception as e:
             self._set_state("fail")
             self._log(f"Submission Error: {e}")
+
+    def _preload_ready(self, values) -> bool:
+        """Offline mode: the dialog of the build's preload (gui/build_image_window.PreloadDialog). True: go on."""
+        from orchestrator.gui.build_image_window import preload_before_build
+        return preload_before_build(self, self.framework, values["target"], bool(values.get("use_gpu")))
 
     def _ask_preflight(self, result, anyway_key: str = "bld.preflight.anyway") -> bool:
         """The pre-flight check stopped the build: its findings and Build anyway / Cancel (Cancel is the default).

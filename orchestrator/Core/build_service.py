@@ -1689,6 +1689,29 @@ class BuildService:
             raise BuildServiceError(f"Unknown priority '{priority}'.", code="invalid_value", field="priority",
                                     next="Use one of: low, normal, high, urgent, critical.") from None
 
+    def take_preload(self, target: str, archive: str, *, local_paths: bool = False, sha256: str = "") -> Any:
+        """Takes in the build's preload `archive` for `target` (Core/build_preload.take_in) before a build. An AI
+        caller names it only as a local file reference (<label>:<relative path> or its file id), never a path, and
+        only an archive made from a recipe llmcf wrote here for the person is taken (else needs_person)."""
+        from orchestrator.Core.build_preload import PreloadProblem, take_in
+        path = archive
+        if not local_paths:
+            try:
+                pin = LocalFiles.for_framework(self.framework).resolve(archive) \
+                    if looks_like_reference(archive) else None
+            except LocalFileError as e:
+                raise BuildServiceError(str(e), code="invalid_value", field="preload",
+                                        next=getattr(e, "next_step", "") or "") from None
+            if pin is None or pin.is_dir:
+                raise BuildServiceError("The preload is named as a local file reference (<label>:<relative path> "
+                                        "or its file id), never a path.", code="invalid_value", field="preload",
+                                        next="Ask the person where the archive is; they may take it in themselves.")
+            path = pin.path
+        try:
+            return take_in(self.framework, target, Path(path), actor="cli" if local_paths else "ai", sha256=sha256)
+        except PreloadProblem as e:
+            raise BuildServiceError(str(e), code=e.code, next=e.next, field="preload") from None
+
     def start_build(self, request: BuildRequestIn, *, local_paths: bool = False, owner: str = "",
                     optimization: Optional[str] = None, disk_reservation: str = "",
                     dataset_sha256: Optional[str] = None, priority: Any = "normal",

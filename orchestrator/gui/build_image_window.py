@@ -9,7 +9,9 @@ this computer (build_image.target_images), checks whether an offline build could
 the one plan the build and the CLI use; in a worker thread, because the locality rule resolves names and never does so
 on the GUI thread), lets the person set the build sources in the own network (Core/local_network.set_build_source,
 person-only) and moves an image to or from a file with its sha256 (build_image.export_image / import_image, actor
-"gui"). Every text is plain text; nothing is deleted here.
+"gui"). It writes the build's preload scripts for what an offline build lacks and takes an archive in
+(Core/build_preload.py); PreloadDialog asks the same before the Builder starts an offline build. Every text is plain
+text; nothing is deleted here.
 """
 
 import threading
@@ -86,6 +88,12 @@ class BuildImageDialog(QDialog):
         for button in (self.btn_plan, self.btn_export, self.btn_import):
             buttons.addWidget(button)
         layout.addLayout(buttons)
+        preload_row = QHBoxLayout()
+        self.btn_preload_write = self._button("btn_bimg_preload_write", "bimg.preload.write", self.write_preload)
+        self.btn_preload_take = self._button("btn_bimg_preload_take", "bimg.preload.take", self.take_preload)
+        preload_row.addWidget(self.btn_preload_write)
+        preload_row.addWidget(self.btn_preload_take)
+        layout.addLayout(preload_row)
         form_import = QFormLayout()
         self.txt_sha256 = QLineEdit(self)
         self.txt_sha256.setObjectName("txt_bimg_sha256")
@@ -187,7 +195,7 @@ class BuildImageDialog(QDialog):
         self._requests.pop(kind, None)
         try:
             self.txt_result.setPlainText(str(result[1]))
-            if kind in ("import", "export"):
+            if kind in ("import", "export", "preload-take"):
                 self.refresh_images()
         except RuntimeError:   # the window was closed meanwhile
             pass
@@ -285,6 +293,165 @@ class BuildImageDialog(QDialog):
         self._in_worker("import", work)
 
 
+    def write_preload(self) -> None:
+        """Writes the build's preload scripts for what an offline build of the target lacks (Core/build_preload)."""
+        framework, target, gpu, lang = self.framework, self.target(), self.chk_gpu.isChecked(), self.lang
+        self._in_worker("preload-write", lambda: written_text(framework, target, gpu, lang))
+
+    def take_preload(self, path: Optional[str] = None) -> None:
+        """Takes in an archive the preload scripts wrote: checked first, then images loaded and sources kept."""
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, self._t("bimg.preload.take.title"), str(Path.home()),
+                                                  "llmcf preload (*.tar.gz)")
+        if not path:
+            return
+        framework, target = self.framework, self.target()
+        sha256 = self.txt_sha256.text().strip()
+
+        def work() -> str:
+            from orchestrator.Core.build_preload import take_in
+            return "\n".join(take_in(framework, target, Path(path), actor="gui", sha256=sha256).lines())
+        self._in_worker("preload-take", work)
+
+
+def written_text(framework: Any, target: str, gpu: bool, lang: Optional[str] = None) -> str:
+    """Writes the preload scripts when an offline build of `target` lacks sources; the person's text either way."""
+    from orchestrator.Core import build_preload
+    plan = build_preload.needed(framework, target, gpu=gpu)
+    if plan is None:
+        from orchestrator.Core.build_image import target_plan
+        plan = target_plan(framework, target, gpu=gpu)
+        if plan.ready:
+            return ui_text("bimg.preload.not_needed", lang, target=target)
+    written = build_preload.write(framework, target, gpu=gpu, plan=plan)
+    lines = [ui_text("bimg.preload.written", lang, folder=str(written.folder), what=written.what)]
+    if written.not_covered:
+        lines.append(ui_text("bimg.preload.not_covered", lang, items="; ".join(written.not_covered)))
+    return "\n".join(lines)
+
+
+class PreloadDialog(QDialog):
+    """Before an offline build starts in the Builder: when its build container image is not here and sources are
+    missing, the build's preload scripts are written, the dialog says where and what they fetch and waits for the
+    archive's path; Take in and build checks and takes it in, Cancel starts nothing. The checks run in workers."""
+
+    def __init__(self, framework: Any, target: str, gpu: bool = False, parent: Optional[QWidget] = None,
+                 lang: Optional[str] = None):
+        super().__init__(parent)
+        self.framework, self.target, self.gpu = framework, target, gpu
+        self.lang = lang or current_language()
+        self.setObjectName("dlg_build_preload")
+        self.setWindowTitle(ui_text("bimg.preload.dialog.title", self.lang))
+        self.resize(640, 360)
+        self.needed = None   # None: not known yet; False: nothing to do
+        self._token = None
+        self._relay = worker_relay()
+        self._relay.done.connect(self._on_result, Qt.QueuedConnection)
+        layout = QVBoxLayout(self)
+        self.txt_info = QPlainTextEdit(self)
+        self.txt_info.setObjectName("txt_preload_info")
+        self.txt_info.setReadOnly(True)
+        layout.addWidget(self.txt_info, 1)
+        row = QHBoxLayout()
+        row.addWidget(plain_label(ui_text("bimg.preload.path", self.lang), self, wrap=False))
+        self.txt_path = QLineEdit(self)
+        self.txt_path.setObjectName("txt_preload_path")
+        row.addWidget(self.txt_path, 1)
+        browse = QPushButton(button_text(ui_text("bimg.preload.browse", self.lang)), self)
+        browse.setObjectName("btn_preload_browse")
+        browse.clicked.connect(self.browse)
+        row.addWidget(browse)
+        layout.addLayout(row)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Cancel, self)
+        self.btn_go = self.buttons.addButton(button_text(ui_text("bimg.preload.go", self.lang)),
+                                             QDialogButtonBox.AcceptRole)
+        self.btn_go.setObjectName("btn_preload_go")
+        self.btn_go.setEnabled(False)
+        self.buttons.rejected.connect(self.reject)
+        self.btn_go.clicked.connect(self.take)
+        layout.addWidget(self.buttons)
+        self.txt_info.setPlainText(ui_text("bimg.preload.checking", self.lang, target=target))
+        self._run("check", self._check)
+
+    def _check(self) -> str:
+        from orchestrator.Core import build_preload
+        try:
+            plan = build_preload.needed(self.framework, self.target, gpu=self.gpu)
+        except Exception:  # noqa: BLE001 - cannot be told here (no build engine): the build checks again itself
+            return ""
+        if plan is None:
+            return ""
+        try:
+            return written_text(self.framework, self.target, self.gpu, self.lang)
+        except build_preload.PreloadProblem as e:   # nothing a preload brings: the build's own stop says the rest
+            return f"\x00{e} {e.next}".strip()
+
+    def _run(self, kind: str, work: Callable[[], str]) -> None:
+        token = (kind, object())
+        self._token = token
+        relay = self._relay
+
+        def run():
+            try:
+                result = ("ok", work())
+            except Exception as e:  # noqa: BLE001 - shown as plain text
+                result = ("error", f"{e} {getattr(e, 'next', '')}".strip())
+            relay.done.emit(token, result)
+
+        threading.Thread(target=run, name=f"build-preload-{kind}", daemon=True).start()
+
+    def _on_result(self, token: object, result) -> None:
+        if token is not self._token or not isinstance(result, tuple):
+            return
+        kind, (state, text) = token[0], result
+        try:
+            if kind == "check":
+                if state == "ok" and (not text or text.startswith("\x00")):
+                    self.needed = False
+                    self.accept()   # nothing a preload brings: the build goes on (and stops itself if it must)
+                    return
+                self.needed = True
+                self.txt_info.setPlainText(text)
+                self.btn_go.setEnabled(state == "ok")
+            elif state == "ok":
+                self.txt_info.setPlainText(text)
+                self.accept()
+            else:
+                self.txt_info.appendPlainText("\n" + text)
+                self.btn_go.setEnabled(True)
+        except RuntimeError:   # closed meanwhile
+            pass
+
+    def browse(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, ui_text("bimg.preload.take.title", self.lang), str(Path.home()),
+                                              "llmcf preload (*.tar.gz)")
+        if path:
+            self.txt_path.setText(path)
+
+    def take(self) -> None:
+        path = self.txt_path.text().strip()
+        if not path:
+            return
+        self.btn_go.setEnabled(False)
+        self.txt_info.appendPlainText("\n" + ui_text("bimg.preload.taking", self.lang))
+        framework, target = self.framework, self.target
+
+        def work() -> str:
+            from orchestrator.Core.build_preload import take_in
+            return "\n".join(take_in(framework, target, Path(path), actor="gui").lines())
+        self._run("take", work)
+
+
+def preload_before_build(parent: QWidget, framework: Any, target: str, gpu: bool = False) -> bool:
+    """The Builder's Start Build in offline mode: True when the build may go on (nothing missing, or a preload was
+    taken in), False when the person cancelled."""
+    from orchestrator.utils.locality import offline_mode
+    if not offline_mode(getattr(framework, "config", None)):
+        return True
+    dialog = PreloadDialog(framework, target, gpu, parent)
+    return dialog.exec() == QDialog.DialogCode.Accepted
+
+
 def open_build_images(window, select: Optional[str] = None) -> BuildImageDialog:
     """Build > Build Container Images...: opens the window for the Builder tab's target."""
     builder = getattr(window, "builder_tab", None)
@@ -295,4 +462,5 @@ def open_build_images(window, select: Optional[str] = None) -> BuildImageDialog:
     return dialog
 
 
-__all__ = ["BuildImageDialog", "SOURCE_FIELDS", "open_build_images", "plan_text"]
+__all__ = ["BuildImageDialog", "PreloadDialog", "SOURCE_FIELDS", "open_build_images", "plan_text",
+           "preload_before_build", "written_text"]

@@ -278,7 +278,7 @@ def problem_error(problems) -> ToolError:
 def start_request(inp: StartBuildIn, bound: Dict[str, Any]) -> BuildRequestIn:
     """The request the handler queues: exactly the commit the question showed (or the default branch when it said
     'commit unknown')."""
-    data = inp.model_dump(exclude={"optimization", "include_download_size"})
+    data = inp.model_dump(exclude={"optimization", "include_download_size", "preload"})
     data["revision"] = bound.get("revision") or inp.revision
     if data.get("use_imatrix") is None and "use_imatrix" in bound:  # the default the question showed
         data["use_imatrix"] = bool(bound["use_imatrix"])
@@ -354,7 +354,7 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
         if not callable(finder):
             return []
         try:
-            request = BuildRequestIn(**inp.model_dump(exclude={"optimization", "include_download_size"}))
+            request = BuildRequestIn(**inp.model_dump(exclude={"optimization", "include_download_size", "preload"}))
             return finder(request, revision=plan.commit, optimization=inp.optimization)
         except Exception as e:  # noqa: BLE001 - a look-up that fails never stops the check or the build
             registry.logger.debug(f"Earlier builds not looked up: {e}")
@@ -382,6 +382,8 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
         if "download" not in bound:
             raise ToolError("The build is not bound to the facts the person was shown; nothing was started.",
                             code="failed", next="Call start_build again through the framework's tool registry.")
+        if inp.preload:   # the build's preload the person made (Core/build_preload.py), taken in before the build
+            service.take_preload(inp.target, inp.preload)
         return start_accepted(service, bound, ctx, lambda reservation: service.start_build(
             start_request(inp, bound), owner=ctx.owner, optimization=bound.get("optimization") or inp.optimization,
             disk_reservation=reservation, preflight_accepted=list(bound.get("preflight") or [])))
