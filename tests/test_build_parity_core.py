@@ -733,8 +733,9 @@ class TestOnePath:
         assert cli.model_format_from_string("no-such-format") is ModelFormat.GGUF, "unknown names fall back to GGUF"
 
     def test_recipe_yml_has_one_reader(self):
-        """community_manager.read_recipe is the only parser of recipe.yml (the install check, the listings and
-        BuildService.installed_recipe, which the Community Hub's Build button and start_recipe_build use)."""
+        """community_manager.read_recipe is the only reader of recipe.yml (the install check, the listings and
+        BuildService.installed_recipe, which the Community Hub's Build button and start_recipe_build use), and the one
+        parser behind it is recipe_optimization.read, which checks the recipe format before the schema."""
         import ast
         parsers = []
         for path in sorted((REPO_ROOT / "orchestrator").rglob("*.py")):
@@ -743,7 +744,7 @@ class TestOnePath:
                         and node.func.attr == "model_validate" and isinstance(node.func.value, ast.Name)
                         and node.func.value.id == "Recipe"):
                     parsers.append(path.relative_to(REPO_ROOT).as_posix())
-        assert parsers == ["orchestrator/Core/community_manager.py"]
+        assert parsers == ["orchestrator/Core/recipe_optimization.py"]
 
     def test_the_cli_starts_through_the_service(self, cli_harness, monkeypatch):
         from orchestrator.Core.build_service import BuildService

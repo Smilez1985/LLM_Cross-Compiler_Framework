@@ -3488,8 +3488,9 @@ and leave this computer only as a local file you publish yourself.
   checked again under its lock when the import starts.
 - **`start_recipe_build`** (local write): builds with an installed recipe as a target template: its target, and for
   every value the client leaves out the recipe's (its Hugging Face model at the recipe's commit, format, board,
-  quantization, importance matrix; the context length is always the recipe's). `model`, `revision`, `format`,
-  `board`, `quantization`, `use_imatrix` and `own_dataset_path` change a value; the question lists what changed
+  quantization, importance matrix, optimization level, else the board profile's level; the context length is always
+  the recipe's). `model`, `revision`, `format`, `board`, `quantization`, `use_imatrix`, `own_dataset_path` and
+  `optimization` change a value; the question names the level and whether it is the recipe's, lists what changed
   ("nothing" for the recipe as pinned, whose result is compared with its reference) and the recipe's reference
   results. It takes the
   same two-phase path as `start_build` (the question shows the recipe, whether the installed target is the one the

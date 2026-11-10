@@ -3874,8 +3874,9 @@ signierten Index und verlassen diesen Rechner nur als lokale Datei, die du selbs
   im gemeinsamen Reservierungsbuch, die beim Start des Imports unter dessen Sperre erneut geprüft wird.
 - **`start_recipe_build`** (lokal schreiben): baut mit einem installierten Rezept als Target-Vorlage: sein Target und
   für jeden Wert, den der Client weglässt, den des Rezepts (sein Hugging-Face-Modell beim Commit des Rezepts, Format,
-  Board, Quantisierung, Importance-Matrix; die Kontextlänge ist immer die des Rezepts). `model`, `revision`,
-  `format`, `board`, `quantization`, `use_imatrix` und `own_dataset_path` ändern einen Wert; die Frage listet, was
+  Board, Quantisierung, Importance-Matrix, Optimierungsstufe, sonst die Stufe des Board-Profils; die Kontextlänge ist
+  immer die des Rezepts). `model`, `revision`, `format`, `board`, `quantization`, `use_imatrix`, `own_dataset_path`
+  und `optimization` ändern einen Wert; die Frage nennt die Stufe und ob sie die des Rezepts ist, listet, was
   geändert ist („nichts“ für das Rezept wie festgelegt, dessen Ergebnis mit seiner Referenz verglichen wird), und die
   Referenzergebnisse des Rezepts. Es geht denselben zweistufigen Weg wie `start_build` (die Frage zeigt das Rezept, ob das
   installierte Target das ist, mit dem das Rezept entstand, seine Importance-Matrix und Kontextlänge, den Commit,

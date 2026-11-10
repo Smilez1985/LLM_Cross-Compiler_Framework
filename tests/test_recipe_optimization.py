@@ -48,7 +48,8 @@ def test_a_recipe_without_a_level_stays_format_1_byte_for_byte():
     assert recipe.to_yaml() == V1_YAML and BuildService.recipe_digest(recipe) == V1_DIGEST
     again = Recipe.model_validate(yaml.safe_load(recipe.to_yaml()))
     assert again.to_yaml() == V1_YAML, "round trip"
-    made = Recipe.from_build_info(build_info(), author="alice", now=NOW)
+    from orchestrator.Core import recipe_optimization
+    made = recipe_optimization.from_build_info(build_info(), author="alice", now=NOW)
     assert made.schema_version == 1 and made.options.optimization is None
     assert BuildService.recipe_digest(made) == V1_FROM_BUILD_DIGEST and "optimization" not in made.to_yaml()
 
@@ -62,20 +63,21 @@ def test_a_recipe_with_a_level_is_written_as_format_2_and_read_back():
     assert text.startswith("schema_version: 2\n") and "  optimization: speed\n" in text
     assert text.replace("schema_version: 2", "schema_version: 1").replace("  optimization: speed\n", "") == V1_YAML, \
         "only the version and the field differ from format 1"
-    again = Recipe.model_validate(yaml.safe_load(text))
+    from orchestrator.Core import recipe_optimization
+    again = recipe_optimization.read(yaml.safe_load(text))
     assert again.options.optimization == "speed" and again.to_yaml() == text
     assert BuildService.recipe_digest(again) != V1_DIGEST, "the level is part of what the person is asked about"
 
 
 def test_the_level_and_the_format_must_fit():
     from pydantic import ValidationError
-    from orchestrator.schemas.recipes import Recipe
-    with pytest.raises(ValidationError) as e:
-        Recipe.model_validate(v2_data(schema_version=1))
+    from orchestrator.Core.recipe_optimization import RecipeFormatError, read
+    with pytest.raises(RecipeFormatError) as e:
+        read(v2_data(schema_version=1))
     assert "format 2" in str(e.value), "an older version would refuse the field: no format-1 recipe names a level"
     with pytest.raises(ValidationError):
-        Recipe.model_validate(v2_data(level="turbo"))
-    assert Recipe.model_validate(recipe_data(schema_version=2)).options.optimization is None, "format 2 is read"
+        read(v2_data(level="turbo"))
+    assert read(recipe_data(schema_version=2)).options.optimization is None, "format 2 is read"
 
 
 @pytest.mark.parametrize("version", [3, 17])
@@ -85,8 +87,8 @@ def test_a_later_format_is_refused_naming_the_version_it_needs(tmp_path, version
     (tmp_path / "recipe.yml").write_text(json.dumps(v2_data(schema_version=version, new_field=1)), encoding="utf-8")
     with pytest.raises(RecipeFormatError) as e:
         read_recipe(tmp_path)
-    assert f"format {version}" in str(e.value) and "an llmcf version newer than" in str(e.value)
-    assert "llm-cli update" in str(e.value) and "formats 1, 2" in str(e.value)
+    assert f"format {version}" in str(e.value) and "a framework version newer than llmcf" in str(e.value)
+    assert "Update the framework" in str(e.value) and "formats 1, 2" in str(e.value)
     assert FORMAT_NEEDS[2] == "llmcf 3.4.0 or later"
     (tmp_path / "recipe.yml").write_text(json.dumps(recipe_data(schema_version="x")), encoding="utf-8")
     with pytest.raises(RecipeFormatError) as e:
@@ -95,12 +97,12 @@ def test_a_later_format_is_refused_naming_the_version_it_needs(tmp_path, version
 
 
 def test_a_recipe_from_a_build_takes_the_level_from_build_info():
-    from orchestrator.schemas.recipes import Recipe
+    from orchestrator.Core.recipe_optimization import from_build_info
     info = build_info(build_options={"optimization": "size", "format": "rkllm"})
-    recipe = Recipe.from_build_info(info, author="alice", now=NOW)
+    recipe = from_build_info(info, author="alice", now=NOW)
     assert recipe.schema_version == 2 and recipe.options.optimization == "size"
     assert recipe.to_yaml().startswith("schema_version: 2\n")
-    unknown = Recipe.from_build_info(build_info(build_options={"optimization": "warp"}), author="alice", now=NOW)
+    unknown = from_build_info(build_info(build_options={"optimization": "warp"}), author="alice", now=NOW)
     assert unknown.schema_version == 1 and unknown.options.optimization is None
 
 
@@ -117,7 +119,7 @@ def test_the_precedence_rule():
     assert "yours; the recipe's: speed" in ro.describe(with_level, "size", ro.YOURS, "balanced")
 
 
-# --- the community pack checks -----------------------------------------------------------------------------------------
+# --- the community pack checks ------------------------------------------------------------------------------------
 
 def test_the_pack_check_accepts_a_format_2_recipe_and_names_a_later_format(tmp_path):
     from orchestrator.Core.community_manager import CommunityManager, RECIPE_FILE
@@ -134,7 +136,8 @@ def test_the_pack_check_accepts_a_format_2_recipe_and_names_a_later_format(tmp_p
     assert cm._check_recipe(root, manifest, notes) == [] and "not installed" in notes[0]
     (root / RECIPE_FILE).write_text(json.dumps({**data, "schema_version": 3}), encoding="utf-8")
     (problem,) = cm._check_recipe(root, manifest, [])
-    assert problem.startswith(f"{RECIPE_FILE}: The recipe is written in format 3, which needs an llmcf version newer")
+    assert problem.startswith(f"{RECIPE_FILE}: The recipe is written in format 3, which needs a framework version "
+                              "newer")
 
 
 # --- one path: the build service --------------------------------------------------------------------------------------
@@ -211,7 +214,7 @@ def test_a_later_format_installed_is_refused_with_the_version(service, tmp_path,
     monkeypatch.setattr(cmod, "read_recipe", lambda folder: (_ for _ in ()).throw(RecipeFormatError("needs X")))
     with pytest.raises(BuildServiceError) as e:
         BuildService.installed_recipe(service, "r")
-    assert "needs X" in str(e.value) and "llm-cli update" in e.value.next
+    assert "cannot be built here: needs X" in str(e.value) and e.value.code == "not_supported"
 
 
 # --- the CLI ---------------------------------------------------------------------------------------------------------

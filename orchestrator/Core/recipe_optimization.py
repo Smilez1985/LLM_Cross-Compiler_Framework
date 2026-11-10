@@ -15,7 +15,9 @@ start_recipe_build share it instead of each knowing it.
   a build that leaves it takes (the recipe's level, else the board profile's), so a level that differs from it is a
   changed variable and the result is not compared with the recipe's reference.
 
-This module imports no other part of the recipe code (schemas/recipes.py imports it).
+The recipe schema (schemas/recipes.py) is the bottom layer and cannot call this module: it declares the field and the
+format number, and every recipe is read (read: community_manager.read_recipe) and made from a build (from_build_info:
+the export) through here, so the rule is applied wherever a recipe enters or leaves the framework.
 """
 
 from typing import Any, Dict, Mapping, Optional, Tuple
@@ -28,7 +30,7 @@ VARIABLE = "optimization"
 # Each recipe format and the llmcf version that first reads it, in words. A later format adds its row here when it is
 # made, so a recipe in it tells the person exactly which llmcf version to get.
 FORMAT_NEEDS: Dict[int, str] = {
-    1: "any llmcf version that builds recipes",
+    1: "any framework version that builds recipes",
     2: "llmcf 3.4.0 or later",   # options.optimization
 }
 FORMAT_WITHOUT_LEVEL = 1
@@ -49,12 +51,12 @@ def format_sentence(version: Any) -> str:
     known = ", ".join(str(v) for v in READS)
     needs = FORMAT_NEEDS.get(version) if isinstance(version, int) else None
     if needs is None and isinstance(version, int) and not isinstance(version, bool) and version > max(READS):
-        needs = f"an llmcf version newer than {__version__}"
+        needs = f"a framework version newer than llmcf {__version__}"
     if needs is None:
         return (f"The recipe names format {version!r}, which is no recipe format; llmcf {__version__} reads formats "
                 f"{known}.")
     return (f"The recipe is written in format {version}, which needs {needs}; this llmcf {__version__} reads recipe "
-            f"formats {known}. Update llmcf (llm-cli update) to build it.")
+            f"formats {known}. Update the framework to build it.")
 
 
 def check_format(version: Any) -> int:
@@ -79,7 +81,7 @@ def format_for(level: Optional[str]) -> int:
 def check_level_format(version: int, level: Optional[str]) -> None:
     """A format-1 recipe cannot name a level: older versions refuse the field, so such a file is no valid recipe."""
     if level and version < FORMAT_WITH_LEVEL:
-        raise ValueError(f"a recipe that names an optimization level is format {FORMAT_WITH_LEVEL} "
+        raise RecipeFormatError(f"A recipe that names an optimization level is format {FORMAT_WITH_LEVEL} "
                          f"(schema_version: {FORMAT_WITH_LEVEL}), not format {version}")
 
 
@@ -137,6 +139,31 @@ def describe(recipe: Any, level: str, source: str, board_level: str) -> str:
     return f"{level} (the board profile's; the recipe names none)"
 
 
+def read(data: Any):
+    """The Recipe of a recipe.yml as loaded: its format checked first (check_raw: a later format names the llmcf version
+    it needs), then its schema, then that its level fits its format. Raises RecipeFormatError or pydantic's
+    ValidationError."""
+    from orchestrator.schemas.recipes import Recipe
+    check_raw(data)
+    recipe = Recipe.model_validate(data)
+    check_level_format(recipe.schema_version, recipe.options.optimization)
+    return recipe
+
+
+def from_build_info(info: Mapping[str, Any], **kwargs: Any):
+    """A recipe from a finished build's build_info.json (Recipe.from_build_info) with the build's level: format 2 when
+    the build recorded one, else format 1 exactly as before the field."""
+    from orchestrator.schemas.recipes import Recipe
+    recipe = Recipe.from_build_info(dict(info), **kwargs)
+    level = level_from_build_info(info)
+    if not level:
+        return recipe
+    data = recipe.model_dump(mode="json", exclude_none=True)
+    data["schema_version"] = format_for(level)
+    data["options"] = {**data.get("options", {}), VARIABLE: level}
+    return read(data)
+
+
 def canonical(data: Dict[str, Any]) -> Dict[str, Any]:
     """A recipe's JSON dump without the format-2 field when it is empty, so the digest of a format-1 recipe stays what
     it was before the field existed (BuildService.recipe_digest)."""
@@ -148,5 +175,5 @@ def canonical(data: Dict[str, Any]) -> Dict[str, Any]:
 
 __all__ = ["BOARDS", "FORMAT_NEEDS", "FORMAT_WITHOUT_LEVEL", "FORMAT_WITH_LEVEL", "READS", "RECIPES",
            "RecipeFormatError", "VARIABLE", "YOURS", "canonical", "changed", "check_format", "check_level_format",
-           "check_raw", "describe", "format_for", "format_sentence", "level_from_build_info", "level_of", "normalize",
-           "recipe_default", "resolve"]
+           "check_raw", "describe", "format_for", "format_sentence", "from_build_info", "level_from_build_info",
+           "level_of", "normalize", "read", "recipe_default", "resolve"]

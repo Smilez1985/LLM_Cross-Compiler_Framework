@@ -557,11 +557,8 @@ def read_recipe(folder: Path):
     version does not read, naming the llmcf version it needs: Core/recipe_optimization.py) or
     pydantic.ValidationError; each caller says what that means for it (the install check names it, the listings show
     no values, BuildService.installed_recipe refuses the build)."""
-    from orchestrator.Core.recipe_optimization import check_raw
-    from orchestrator.schemas.recipes import Recipe
-    data = yaml.safe_load((Path(folder) / RECIPE_FILE).read_text(encoding="utf-8"))
-    check_raw(data)
-    return Recipe.model_validate(data)
+    from orchestrator.Core import recipe_optimization
+    return recipe_optimization.read(yaml.safe_load((Path(folder) / RECIPE_FILE).read_text(encoding="utf-8")))
 
 
 def trust_of_folder(folder: Path, index: Optional[CommunityIndex]) -> Tuple[Optional[TrustLevel], str]:
@@ -1850,10 +1847,11 @@ class CommunityManager:
 
     def _stage_recipe(self, build_info: Path, root: Path, author: str, model_license: str,
                       notes: List[str]) -> str:
-        from orchestrator.schemas.recipes import Recipe
+        from orchestrator.Core import recipe_optimization
         try:
             info = json.loads(build_info.read_text(encoding="utf-8"))
-            recipe = Recipe.from_build_info(info, author=author, license=model_license)
+            # with the build's optimization level (format 2), else format 1 as before
+            recipe = recipe_optimization.from_build_info(info, author=author, license=model_license)
         except (OSError, ValueError, ValidationError) as e:
             raise PackError(f"No recipe from {build_info}: {e}") from None
         folder = self._target_folder(recipe.target.id)

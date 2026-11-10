@@ -1107,7 +1107,7 @@ class BuildService:
             recipe = read_recipe(folder)
         except RecipeFormatError as e:   # a later recipe format: the sentence names the llmcf version it needs
             raise BuildServiceError(f"The installed recipe {prov.id} cannot be built here: {e}", code="not_supported",
-                                    next="Tell the person; a newer llmcf version builds it (llm-cli update).") from None
+                                    next="Tell the person what the sentence says.") from None
         except Exception:  # noqa: BLE001 - details of a broken pack are not shown
             raise BuildServiceError(f"The installed recipe {prov.id} cannot be read.", code="not_supported",
                                     next="Tell the person; list_packs with verify true checks the installed "

@@ -4,7 +4,8 @@ Recipes, the "model templates" of the community zoo: which model (at a pinned co
 target, board, format and quantization, with which options, and what came out (artifact hashes, toolchain
 image, device tests). A recipe carries no weights and no binaries; it is rebuilt, never downloaded as a model.
 Recipes are written from a successful build's build_info.json (Recipe.from_build_info), never typed by hand.
-The optimization level and the recipe format it needs are the rule of Core/recipe_optimization.py.
+The optimization level and the recipe format it needs are the rule of Core/recipe_optimization.py, which reads and
+makes recipes (read, from_build_info); this bottom-layer schema only declares the field and the format number.
 """
 
 import re
@@ -13,10 +14,9 @@ from pathlib import PurePath
 from typing import Any, Dict, List, Literal, Optional
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from orchestrator import __version__
-from orchestrator.Core import recipe_optimization
 from orchestrator.schemas.targets import OPTIMIZATION_LEVELS, TargetCapabilities
 
 _SHA256 = r"^[0-9a-f]{64}$"
@@ -94,8 +94,7 @@ class RecipeResult(_Strict):
 # The variables of a recipe build (DESIGN "Community, recipes and packs"): what the person may pick in the build menu
 # instead of the recipe's value. The target is not one of them: it is the template itself, and neither is the context
 # length, which the recipe tuned to the board's memory like the target's build code.
-RECIPE_VARIABLES = ("model", "format", "board", "quantization", "use_imatrix", "dataset",
-                    recipe_optimization.VARIABLE)
+RECIPE_VARIABLES = ("model", "format", "board", "quantization", "use_imatrix", "dataset", "optimization")
 
 
 class RecipeChoices(_Strict):
@@ -110,19 +109,14 @@ class RecipeChoices(_Strict):
     use_imatrix: Optional[bool] = None
     own_dataset_path: Optional[str] = Field(default=None, max_length=1024)
     # The optimization level: the person's choice wins over the recipe's and the board profile's
-    # (recipe_optimization.resolve).
+    # (Core/recipe_optimization.py resolve).
     optimization: Optional[Literal[OPTIMIZATION_LEVELS]] = None
-
-    @field_validator("optimization", mode="before")
-    @classmethod
-    def _level(cls, value: Any) -> Any:
-        return recipe_optimization.normalize(value) or value if value is not None else None
 
 
 class Recipe(_Strict):
-    # 1, or 2 when options.optimization is set (recipe_optimization.format_for); a later format is refused with the
-    # llmcf version it needs (recipe_optimization.check_format).
-    schema_version: int = recipe_optimization.FORMAT_WITHOUT_LEVEL
+    # The recipe format: 1, or 2 when options.optimization is set. Which formats this version reads, and the llmcf
+    # version a later one needs, is checked where a recipe is read (Core/recipe_optimization.py read).
+    schema_version: int = Field(default=1, ge=1)
     id: str = Field(pattern=_RECIPE_ID)
     model: RecipeModel
     target: RecipeTarget
@@ -141,27 +135,13 @@ class Recipe(_Strict):
             raise ValueError("created needs a time zone (UTC)")
         return value.astimezone(timezone.utc)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _readable_format(cls, data: Any) -> Any:
-        recipe_optimization.check_raw(data)
-        return data
-
-    @model_validator(mode="after")
-    def _format_fits(self) -> "Recipe":
-        recipe_optimization.check_level_format(self.schema_version, self.options.optimization)
-        return self
-
     def check_target(self, capabilities: TargetCapabilities) -> List[str]:
         """Problems of this recipe on the named target (empty: it can be built there)."""
         return capabilities.check_request(self.format, self.board, self.quantization,
                                           dataset=self.options.dataset is not None, imatrix=self.options.use_imatrix)
 
     def to_yaml(self) -> str:
-        """recipe.yml as written: format 2 when it names a level, else format 1, byte for byte as before the field."""
-        data = self.model_dump(mode="json", exclude_none=True)
-        data["schema_version"] = recipe_optimization.format_for(self.options.optimization)
-        return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+        return yaml.safe_dump(self.model_dump(mode="json", exclude_none=True), sort_keys=False, allow_unicode=True)
 
     @classmethod
     def from_build_info(cls, info: Dict[str, Any], *, author: str, license: str = "unknown",
@@ -182,12 +162,10 @@ class Recipe(_Strict):
         board, fmt, quant = info.get("board"), str(info.get("format") or ""), info.get("quantization")
         dataset = info.get("dataset")
         pack_version = str(info.get("target_version") or "")
-        level = recipe_optimization.level_from_build_info(info)
         if not recipe_id:
             parts = [repo.split("/")[-1], board or info.get("target"), fmt, quant]
             recipe_id = re.sub(r"[^a-z0-9._-]+", "-", "-".join(str(p) for p in parts if p).lower()).strip("-.")[:100]
         return cls(
-            schema_version=recipe_optimization.format_for(level),
             id=recipe_id,
             model=RecipeModel(repo=repo, revision=revision, license=license),
             target=RecipeTarget(id=info.get("target"), pack_sha256=info["target_pack_sha256"],
@@ -196,7 +174,7 @@ class Recipe(_Strict):
             options=RecipeOptions(
                 use_imatrix=bool(info.get("imatrix")), max_context_length=info.get("max_context_length"),
                 dataset=DatasetRef(name=scrub(PurePath(str(dataset["name"])).name), sha256=dataset["sha256"])
-                if dataset else None, optimization=level),
+                if dataset else None),
             results=[RecipeResult(artifact=ArtifactRef(file=artifact["file"], size=artifact["bytes"],
                                                        sha256=artifact["sha256"]),
                                   lcf_version=info.get("lcf_version") or __version__,
