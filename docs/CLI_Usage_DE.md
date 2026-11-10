@@ -1476,6 +1476,12 @@ wird gebaut oder geändert: Chat-Fälle laufen gegen einen Ersatz-Build-Dienst. 
 | `--json FILE` | Den vollständigen Bericht (Einrichtung, Bestehensquoten, jede Antwort) als JSON schreiben. |
 | `--min-pass FLOAT RANGE` | Exit-Code 1, wenn ein Lauf weniger Fälle besteht als dieser Anteil (0 bis 1, z. B. `0.8`). |
 | `--effort [low\|medium\|high]` | Aufwand für diesen Lauf (lokale Modelle: `low` = ohne Nachdenken). Standard: KI-Einstellungen. |
+| `--measure` | Mit `--tier`: jede Stufe zuerst [auf diesem Rechner messen](#messung-auf-diesem-rechner) (Tokens pro Sekunde, KL-Divergenz von ihrer Referenz). Ohne `--tier`: Exit-Code 2. |
+| `--measure-only` | `--measure` ohne die Fälle; Exit-Code 1, wenn eine Stufe nicht bestand. |
+| `--chunks INTEGER RANGE` | `--measure`: Abschnitte des Bewertungstextes, 4 bis 48 (Standard 16). |
+| `--ctx [256\|512\|1024]` | `--measure`: Tokens je Abschnitt (Standard 512). |
+| `--again` | `--measure`: eine Stufe erneut messen, obwohl ihre Messung auf diesem Rechner noch gilt. |
+| `--download-reference` | `--measure`: eine fehlende Referenz ohne Frage laden (sonst fragt die CLI am Terminal; ohne eines stoppt sie mit Exit-Code 2). |
 
 Mit `--tier` muss die lokale Laufzeit installiert und das Modell der Stufe heruntergeladen sein. Die CLI startet
 `llama-server` nacheinander mit jeder Stufe und stoppt die Server, die sie gestartet hat. Ein Server, den du selbst
@@ -1504,6 +1510,37 @@ heruntergeladen ist, wird mit einem Hinweis auf **Ditto > Lokale Modelle...** ab
 mit Fortschritt und **Abbrechen** und zeigt dieselben Tabellen (ein ersetzter Server von dir wird gemeldet, auch nach
 **Abbrechen**); **Bericht speichern...** schreibt den `--json`-Bericht in eine Datei deiner Wahl. `--min-pass` setzt
 nur den Exit-Code für Skripte.
+
+#### Messung auf diesem Rechner
+
+`llm-cli ditto eval --measure --tier STUFE` misst eine Stufe von Dittos lokalem Modell vor den Fällen auf diesem
+Rechner, mit dem selbst gebauten llama.cpp dieses Rechners: die erzeugten Tokens pro Sekunde (llama-bench) und die
+KL-Divergenz ihrer Antworten von ihrer Referenz (llama-perplexity, derselbe Aufruf wie beim Auto-Tuning) auf einem
+festen englischen und deutschen Text. Die Referenz ist das 16-Bit-Original der Stufe, wenn es in drei Viertel des
+RAM passt, sonst ihr Q8_0; beide sind im Katalog festgelegt. Eine fehlende Referenz wird erst nach deinem Ja (oder
+`--download-reference`) geladen und bleibt in Dittos Modellordner. Das Urteil: **bestanden** mit mindestens 8 Tokens
+pro Sekunde und einer KLD von höchstens 0,05, **brauchbar** bis 0,10, sonst **nicht bestanden**, gesagt mit den
+Zahlen. Es wird je Stufe mit diesem Rechner, der Datei und dem llama.cpp-Build aufbewahrt; eine Stufe, deren Messung
+noch gilt, wird nicht erneut gemessen (`--again` misst trotzdem). Die vorübergehende Logits-Datei (etwa 2 GB für
+Qwen3.5 bei 16 Abschnitten; der Speicherplatz wird vorher geprüft) wird gelöscht, wenn die Messung endet, auch nach
+Strg+C.
+
+Eine 2-Bit-Stufe (`small-q2`, `default-q2`, `large-iq2`) wird Ditto erst angeboten, wenn sie hier bestanden hat: Bis
+dahin nennt `ditto models list` sie „candidate to evaluate“ (oder „failed here“), und ein einfaches `ditto runtime
+start` lädt sie nicht. Jede Stufe kannst du weiter per Namen starten (`--model small-q2`); dann bekommst du einen
+Hinweis.
+
+```bash
+# Das 2B-Modell mit 2 Bit hier messen, ohne die Fälle
+llm-cli ditto eval --measure-only --tier small-q2
+
+# Beide 2B-Stufen messen (ein Referenzdurchgang für beide), dann die Fälle mit jeder
+llm-cli ditto eval --measure --tier small --tier small-q2 --effort low
+```
+
+In der GUI: **Ditto > Bewertung...** > **Auf diesem Computer messen** (die Optionen oben als Kästchen, Zahl und Liste;
+**Bewertung starten...** fragt, bevor eine Referenz geladen wird), oder **Ditto > Lokale Modelle...** > **Erst
+prüfen...**, das die Bewertung mit der Stufe und der Messung gewählt öffnet.
 
 #### Token- und Cache-Messung
 
@@ -1888,7 +1925,10 @@ llm-cli ditto models list
 ```
 
 Listet die festgelegten Modelle auf: Stufe, Datei, Größe, Lizenz, ob es heruntergeladen (und geprüft) ist, und
-Hinweise („recommended“, „chosen“, „on request“).
+Hinweise („recommended“, „chosen“, „on request“; für eine 2-Bit-Stufe „candidate to evaluate“, „passed here“,
+„usable here“, „failed here“ oder „not evaluated here“, aus der [Messung auf diesem
+Rechner](#messung-auf-diesem-rechner)). Die Zeile unter der Tabelle ist die Empfehlung oder „No local model is
+recommended yet: ...“ mit dem Befehl, der den Kandidaten prüft.
 
 In der GUI: **Ditto > Lokale Modelle...** (dieselbe Liste, mit der Empfehlung für diesen Computer und dem Grund).
 
@@ -1900,8 +1940,8 @@ llm-cli ditto models download [STUFE] [-y]
 
 Lädt ein Modell in seiner festgelegten Hugging-Face-Revision herunter und prüft Größe und sha256. Ohne `STUFE` das
 Modell, das ein einfaches `ditto runtime start` lädt: die früher mit `runtime start --model` gewählte Stufe („Chosen
-earlier with 'runtime start --model': ...“), sonst die empfohlene Stufe für diesen Rechner („Recommended: ...“).
-Unterbrochene Downloads werden fortgesetzt. Im Offline-Modus lehnt er in klaren Worten ab und nennt die
+earlier with 'runtime start --model': ...“), sonst die empfohlene Stufe für diesen Rechner („Recommended: ...“; ein 2-Bit-Kandidat wird zum
+Prüfen geladen und sagt das). Unterbrochene Downloads werden fortgesetzt. Im Offline-Modus lehnt er in klaren Worten ab und nennt die
 Ditto-Modelle, die schon auf diesem Computer sind, außer die Download-Adresse liegt in deinem eigenen Netz (ein
 lokaler Modell-Spiegel).
 

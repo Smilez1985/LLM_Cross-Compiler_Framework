@@ -35,7 +35,7 @@ REPORT_FILE = "tuning_report.json"
 KIND = "tuning"                 # build_info.json "kind" of a tuning run (no model file)
 RESULTS_FOLDER = "tuning"       # tune.sh's results in the tuning job's output folder
 
-# The thresholds (the ROADMAP row "Start thresholds for Ditto's local model"): a KLD up to KLD_GOOD is good, up to
+# The thresholds (DESIGN, the row "Start thresholds for Ditto's local model"): a KLD up to KLD_GOOD is good, up to
 # KLD_FLOOR usable (the quality floor of the choice rule), above it below the floor; a measured speed below SPEED_FLOOR
 # tokens per second is not recommended.
 KLD_GOOD = 0.05

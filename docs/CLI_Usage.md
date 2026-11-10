@@ -1418,6 +1418,12 @@ and repeat). How it works: [Features.md](Features.md#ditto-evaluation).
 | `--json FILE` | Write the full report (setup, pass rates, every answer) as JSON. |
 | `--min-pass FLOAT RANGE` | Exit code 1 if a run passes fewer cases than this share (0 to 1, e.g. `0.8`). |
 | `--effort [low\|medium\|high]` | Effort for this run (local models: `low` = no thinking). Default: AI settings. |
+| `--measure` | With `--tier`: first [measure each tier on this computer](#measurement-on-this-computer) (tokens per second, KL divergence from its reference). Without `--tier`: exit code 2. |
+| `--measure-only` | `--measure` without the cases; exit code 1 when a tier failed. |
+| `--chunks INTEGER RANGE` | `--measure`: chunks of the evaluation text, 4 to 48 (default 16). |
+| `--ctx [256\|512\|1024]` | `--measure`: tokens per chunk (default 512). |
+| `--again` | `--measure`: measure a tier again although its measurement on this computer still counts. |
+| `--download-reference` | `--measure`: download a missing reference without asking (otherwise the CLI asks at a terminal; without one it stops with exit code 2). |
 
 With `--tier`, the local runtime must be installed and the tier's model downloaded. The CLI starts `llama-server`
 with each tier in turn and stops the servers it started. A server you started yourself keeps running if it already
@@ -1445,6 +1451,35 @@ of the AI settings names a cloud provider ("No" is the default); a tier that is 
 pointer to **Ditto > Local Models...**. The run goes in the background with progress and **Cancel** and shows the same
 tables (a replaced server of yours is reported, also after Cancel); **Save report...** writes the `--json` report to a
 file you choose. `--min-pass` only sets the exit code for scripts.
+
+#### Measurement on this computer
+
+`llm-cli ditto eval --measure --tier TIER` measures a tier of Ditto's local model on this computer before the cases,
+with this computer's self-built llama.cpp: the generated tokens per second (llama-bench) and the KL divergence of its
+answers from its reference (llama-perplexity, the same call as Auto-Tuning) on a fixed English and German text. The
+reference is the tier's 16-bit original when it fits into three quarters of the RAM, else its Q8_0; both are pinned
+in the catalogue. A missing reference is downloaded only after your yes (or `--download-reference`) and stays in
+Ditto's models folder. The verdict: **passed** with at least 8 tokens per second and a KLD of at most 0.05,
+**usable** up to 0.10, **failed** otherwise, said with the numbers. It is kept per tier with this computer, the file
+and the llama.cpp build; a tier whose measurement still counts is not measured again (`--again` measures anyway).
+The temporary logits file (about 2 GB for Qwen3.5 at 16 chunks; the disk is checked first) is deleted when the
+measurement ends, also after Ctrl+C.
+
+A 2-bit tier (`small-q2`, `default-q2`, `large-iq2`) is offered to Ditto only after it passed here: until then
+`ditto models list` names it "candidate to evaluate" (or "failed here"), and a plain `ditto runtime start` does not
+load it. You can still start any tier by name (`--model small-q2`); you then get a notice.
+
+```bash
+# Measure the 2B model at 2 bits here, without the cases
+llm-cli ditto eval --measure-only --tier small-q2
+
+# Measure both 2B tiers (one reference pass for both), then run the cases with each
+llm-cli ditto eval --measure --tier small --tier small-q2 --effort low
+```
+
+In the GUI: **Ditto > Evaluation...** > **Measure on this computer** (the options above as checkboxes, a number and a
+list; **Run evaluation...** asks before a reference is downloaded), or **Ditto > Local Models...** > **Evaluate
+first...**, which opens the evaluation with the tier and the measurement chosen.
 
 #### Token and cache measurement
 
@@ -1808,7 +1843,10 @@ llm-cli ditto models list
 ```
 
 Lists the pinned models: tier, file, size, license, whether it is downloaded (and verified), and notes
-("recommended", "chosen", "on request").
+("recommended", "chosen", "on request"; for a 2-bit tier "candidate to evaluate", "passed here", "usable here",
+"failed here" or "not evaluated here", from the [measurement on this computer](#measurement-on-this-computer)). The
+line under the table is the recommendation, or "No local model is recommended yet: ..." with the command to
+evaluate the candidate.
 
 In the GUI: **Ditto > Local Models...** (the same list, with the recommendation for this computer and why).
 
@@ -1820,7 +1858,8 @@ llm-cli ditto models download [TIER] [-y]
 
 Downloads a model at its pinned Hugging Face revision and checks size and sha256. Without `TIER` the model a plain
 `ditto runtime start` loads: the tier chosen earlier with `runtime start --model` ("Chosen earlier with 'runtime start
---model': ..."), else the recommended tier for this machine ("Recommended: ..."). Interrupted downloads resume.
+--model': ..."), else the recommended tier for this machine ("Recommended: ..."; a 2-bit candidate is downloaded to be evaluated and
+says so). Interrupted downloads resume.
 In offline mode it refuses in plain words and names the Ditto models already on this computer, unless the
 download address is in your own network (a local model mirror).
 

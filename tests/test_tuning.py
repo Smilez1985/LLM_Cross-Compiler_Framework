@@ -410,8 +410,10 @@ def test_the_plan_round_trips_and_hands_tune_sh_its_values():
 
 def test_the_thresholds_are_the_ditto_rows():
     assert (tuning.KLD_GOOD, tuning.KLD_FLOOR, tuning.SPEED_FLOOR) == (0.05, 0.10, 8.0)
-    assert re.search(r"at least 8 tokens per second and a KL divergence of at most 0\.05 \(0\.10 as the outer "
-                     r"bound\)", (REPO_ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8"))
+    # the ROADMAP row is built: the thresholds stand in the design's row under Ditto (evals/tier_check.py uses them)
+    assert re.search(r"at least 8 tokens per second here and its KL divergence from its reference on the fixed "
+                     r"evaluation text is at most 0\.05; up to 0\.10", (REPO_ROOT / "docs" / "DESIGN.md").read_text(
+                         encoding="utf-8"))
 
 
 # --- the build service: a tuning run is one build ---------------------------------------------------------------------

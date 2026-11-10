@@ -1572,6 +1572,28 @@ Lauf gestoppt, und ein Server von dir, den er ersetzt hat, wird gemeldet), das F
 Eingaben jedes Format annimmt, die Tools für Fragen zu Targets und Builds nutzen, Compiler-Flags in
 Modulvorschlägen). Diese Lücken sind inzwischen behoben, und eine neue Messung läuft.
 
+### Startschwellen auf diesem Rechner
+
+`llm-cli ditto eval --measure --tier STUFE` misst jede Stufe zuerst auf diesem Rechner, mit seinem eigenen selbst
+gebauten llama.cpp: **Geschwindigkeit**, die erzeugten Tokens pro Sekunde (llama-bench, 512 Prompt- und 128 erzeugte
+Tokens, 3 Wiederholungen), und **Nähe zum Original**, die KL-Divergenz der Verteilung des nächsten Tokens der Stufe von
+ihrer Referenz auf dem festen Bewertungstext (llama-perplexity, derselbe Aufruf wie beim
+[Auto-Tuning](#auto-tuning-die-beste-quantisierung-für-ein-board-gemessen), standardmäßig 16 Abschnitte zu 512
+Tokens), mit der Top-1-Übereinstimmung. Die Referenz ist das 16-Bit-Original der Stufe, wenn es in drei Viertel des
+RAM passt, sonst das Q8_0 desselben Repositorys; beide sind im Katalog festgelegt und werden erst nach deinem Ja
+geladen. Ein Referenzdurchgang dient allen Stufen desselben Modells in einem Lauf.
+
+| Urteil | Tokens pro Sekunde | KLD |
+|---|---|---|
+| bestanden | mindestens 8 | höchstens 0,05 |
+| brauchbar (mit diesem Wort angeboten) | mindestens 8 | höchstens 0,10 |
+| nicht bestanden (klar gesagt, mit den Zahlen) | unter 8 | oder über 0,10 |
+
+Das Ergebnis wird je Stufe mit einem Fingerabdruck dieses Rechners, der Modelldatei und des llama.cpp-Builds
+aufbewahrt; ein neuer Rechner, eine neue Datei oder Festlegung misst neu. Gemessen auf einer Cloud-CPU mit 4 Threads
+am 2026-11-10: das 2B-Modell mit 4 Bit 13,9 Tokens/s und eine KLD von 0,030 (bestanden), mit 2 Bit 14,1 Tokens/s und
+eine KLD von 0,338 (nicht bestanden).
+
 ### Token- und Cache-Messung
 
 `llm-cli ditto eval --kind tokens` misst, was Dittos Gespräche an Tokens kosten, bevor am Kontext oder am Cache
@@ -1762,6 +1784,18 @@ Es gewinnt die erste Regel, deren Bedingungen zutreffen und deren Modell passt:
 für das System passen, plus 95 % des Speichers einer eigenen GPU. Integrierte AMD- und Intel-GPUs teilen sich den RAM,
 deshalb zählt bei ihnen nur der RAM. `runtime start --model <Stufe>` überstimmt die Wahl und merkt sie sich;
 `--model auto` kehrt zur Empfehlung zurück.
+
+**2-Bit-Stufen erst nach bestandener Messung.** Eine 2-Bit-Stufe (`small-q2`, `default-q2`, `large-iq2`) wird Ditto
+erst angeboten, wenn `llm-cli ditto eval --measure` mit ihr auf diesem Rechner bestanden hat (siehe [Startschwellen
+auf diesem Rechner](#startschwellen-auf-diesem-rechner)). Bis dahin ist das `small-q2` der Regel für 3 GiB RAM oder
+weniger nur ein **Kandidat zum Prüfen**: Die Liste sagt das, nennt den Befehl (oder **Erst prüfen...** in **Ditto >
+Lokale Modelle...**) und die Alternativen (ein Cloud-Anbieter oder eine Stufe, die du per Namen wählst), und ein
+einfaches `ditto runtime start` lädt es nicht. Nach dem Bestehen wird es empfohlen; mit einer KLD zwischen 0,05 und
+0,10 wird es als **brauchbar** angeboten; nach einer nicht bestandenen Messung sagt die Liste „hier nicht bestanden“
+mit den Zahlen. `default-q2` und `large-iq2` werden nie empfohlen und nur per Namen geladen; nach dem Bestehen stehen
+sie als „hier bestanden“ in der Liste. Die CLI, beide Fenster, `get_status` (`recommended_tier_state` und die
+gemessenen Zahlen) und der MCP-Prompt über diesen Rechner zeigen dieselbe Empfehlung. Eine KI kann eine 2-Bit-Stufe
+nicht starten, bevor sie bestanden hat, und kein Werkzeug kann eine als bestanden markieren.
 
 **GUI: Ditto > Lokale Modelle...** zeigt jede Stufe mit Datei, Größe, Lizenz, ob sie heruntergeladen (und geprüft) ist,
 und ihrem Hinweis (empfohlen für diesen Computer, gewählt, auf Wunsch, nicht festgelegt), mit dem Grund der Empfehlung

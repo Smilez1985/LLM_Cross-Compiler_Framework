@@ -1421,6 +1421,26 @@ off) and the prompts of that time, the 2-bit tier `small-q2` passed 42% of the 1
 accepts, using the tools for questions about targets and builds, compiler flags in module proposals). These gaps are
 fixed now, and a new measurement is running.
 
+### Start thresholds on this computer
+
+`llm-cli ditto eval --measure --tier TIER` first measures each tier on this computer, with its own self-built
+llama.cpp: **speed**, the generated tokens per second (llama-bench, 512 prompt and 128 generated tokens, 3
+repetitions), and **closeness to the original**, the KL divergence of the tier's next-token distribution from its
+reference on the fixed evaluation text (llama-perplexity, the same invocation as [Auto-Tuning](#auto-tuning-the-best-quantization-for-a-board-measured),
+16 chunks of 512 tokens by default), with the top-1 agreement. The reference is the tier's 16-bit original when it fits
+into three quarters of the RAM, else the Q8_0 of the same repository; both are pinned in the catalogue and downloaded
+only after your yes. One reference pass serves every tier of the same model in a run.
+
+| Verdict | Tokens per second | KLD |
+|---|---|---|
+| passed | at least 8 | at most 0.05 |
+| usable (offered with that word) | at least 8 | at most 0.10 |
+| failed (said plainly, with the numbers) | below 8 | or above 0.10 |
+
+The result is kept per tier with a fingerprint of this computer, the model file and the llama.cpp build; a new
+computer, file or pin measures again. Measured on a 4-thread cloud CPU on 2026-11-10: the 2B model at 4 bits 13.9
+tokens/s and a KLD of 0.030 (passed), at 2 bits 14.1 tokens/s and a KLD of 0.338 (failed).
+
 ### Token and cache measurement
 
 `llm-cli ditto eval --kind tokens` measures what Ditto's conversations cost in tokens, before anything about the
@@ -1598,6 +1618,17 @@ The first rule whose conditions hold and whose model fits wins:
 the system, plus 95% of a dedicated GPU's memory. Integrated AMD and Intel GPUs share the RAM, so only the RAM counts
 for them. `runtime start --model <tier>` overrides the choice and remembers it; `--model auto` returns to the
 recommendation.
+
+**2-bit tiers only after a passed measurement.** A 2-bit tier (`small-q2`, `default-q2`, `large-iq2`) is offered to
+Ditto only after `llm-cli ditto eval --measure` passed with it on this computer (see [Start thresholds on this
+computer](#start-thresholds-on-this-computer)). Until then the rule's `small-q2` for 3 GiB of RAM or less is only a
+**candidate to evaluate**: the list says so, names the command (or **Evaluate first...** in **Ditto > Local
+Models...**) and the alternatives (a cloud provider, or a tier you choose by name), and a plain `ditto runtime start`
+does not load it. After a pass it is recommended; with a KLD between 0.05 and 0.10 it is offered as **usable**; after a
+failed measurement the list says "failed here" with the numbers. `default-q2` and `large-iq2` are never recommended and
+only downloaded by name; after a pass they are listed as "passed here". The CLI, both windows, `get_status`
+(`recommended_tier_state` and the measured numbers) and the MCP prompt about this computer show the same advice. An AI
+cannot start a 2-bit tier before it passed, and no tool can mark one as passed.
 
 **GUI: Ditto > Local Models...** shows every tier with file, size, licence, whether it is downloaded (and verified)
 and its note (recommended for this computer, chosen, on request, not pinned), with the reason for the
