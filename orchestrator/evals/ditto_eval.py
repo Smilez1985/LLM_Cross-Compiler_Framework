@@ -361,7 +361,8 @@ class EvalBuildService(BuildService):
 
     def start_build(self, request: BuildRequestIn, *, local_paths: bool = False, owner: str = "",
                     optimization: str = "balanced", disk_reservation: str = "",
-                    preflight_accepted: Optional[List[str]] = None) -> BuildHandle:
+                    preflight_accepted: Optional[List[str]] = None,
+                    memory_estimate: Optional[dict] = None) -> BuildHandle:
         req = self.validate(request, local_paths=local_paths)
         # the real pre-flight check, as start_build runs it (a stop the person did not accept starts nothing)
         self._preflight_gate(req.target, req.format, req.board, req.probe, req.use_gpu, local_paths=local_paths,

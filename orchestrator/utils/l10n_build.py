@@ -21,7 +21,7 @@ TEXTS = {
         "mem.part.kv": "KV cache about {mb} MB for {ctx} tokens ({kv})",
         "mem.source.probe": "the board's probe",
         "mem.source.max": "the most memory a {board} comes with",
-        "mem.probe_hint": "; a probe of the board gives its own: llm-cli scan --import FILE",
+        "mem.probe_hint": "; a hardware probe of the board gives its own",
         "mem.verdict.fits": "fits",
         "mem.verdict.tight": "tight: little room is left for the system and a longer context",
         "mem.verdict.does_not_fit": "does not fit: it runs only with swap and much slower, if at all; your choice "
@@ -37,8 +37,8 @@ TEXTS = {
         "mem.reason.no_quantization": "no quantization type is chosen",
         "mem.reason.unknown_type": "the size of this type is not known to the estimate",
         "mem.reason.no_parameters": "the model's parameter count is not known before the build",
-        "mem.reason.no_memory": "the memory of {board} is not known: no probe of the board (import one with llm-cli "
-                                "scan --import FILE) and no ram_max_gb",
+        "mem.reason.no_memory": "the memory of {board} is not known: no hardware probe of the board and no most "
+                                "memory in its target",
         "mem.estimating": "Memory estimate: reading the model's size ...",
         # a module's CMake options outside the allowlist: the person decides (DESIGN round 25 Q6; Core/module_flags)
         "bld.builder.start": "🚀 Start Build Pipeline",
@@ -475,7 +475,7 @@ TEXTS = {
         "mem.part.kv": "KV-Cache etwa {mb} MB für {ctx} Token ({kv})",
         "mem.source.probe": "die Probe des Boards",
         "mem.source.max": "der größte Speicher, mit dem ein {board} kommt",
-        "mem.probe_hint": "; eine Probe des Boards nennt seinen eigenen: llm-cli scan --import FILE",
+        "mem.probe_hint": "; eine Hardware-Probe des Boards nennt seinen eigenen",
         "mem.verdict.fits": "passt",
         "mem.verdict.tight": "knapp: wenig Platz bleibt für das System und einen längeren Kontext",
         "mem.verdict.does_not_fit": "passt nicht: Es läuft nur mit Swap und viel langsamer, wenn überhaupt; deine "
@@ -493,8 +493,8 @@ TEXTS = {
         "mem.reason.no_quantization": "keine Quantisierung gewählt",
         "mem.reason.unknown_type": "die Größe dieses Typs kennt die Schätzung nicht",
         "mem.reason.no_parameters": "die Parameterzahl des Modells ist vor dem Build nicht bekannt",
-        "mem.reason.no_memory": "der Speicher von {board} ist nicht bekannt: keine Probe des Boards (importiere eine "
-                                "mit llm-cli scan --import FILE) und kein ram_max_gb",
+        "mem.reason.no_memory": "der Speicher von {board} ist nicht bekannt: keine Hardware-Probe des Boards und kein "
+                                "größter Speicher in seinem Target",
         "mem.estimating": "Speicherschätzung: lese die Größe des Modells ...",
         "bld.builder.start": "🚀 Build-Pipeline starten",
         "bld.flags.title": "CMake-Optionen des Moduls",

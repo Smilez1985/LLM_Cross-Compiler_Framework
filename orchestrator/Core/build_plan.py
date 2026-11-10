@@ -852,8 +852,9 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
     estimate = getattr(service, "memory_estimate", None)
     if callable(estimate) and req.board:
         try:
+            # the facts looked up above (never a second look-up); the model's config.json at their commit
             plan.memory = estimate(req, model_path=Path(pin.path) if pin is not None else None, facts=plan.facts,
-                                   look_up_hub=look_up_hub and plan.source == "hf")
+                                   look_up_hub=False)
         except Exception:  # noqa: BLE001 - an estimate that cannot be made is "unknown", never a stop
             plan.memory = None
     if plan.memory is not None:

@@ -22,6 +22,9 @@ blocks of a target's target.yml (schemas in orchestrator/schemas/targets.py), ma
 
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+# The server's share, the tight share, the one verdict and the need of the board's memory rule live in memory_estimate
+# (the lower module, which the estimate before the build reads); the warning after the build uses them from here.
+from orchestrator.Core.memory_estimate import SERVER_SHARE, TIGHT_SHARE, memory_need_mib, memory_state  # noqa: F401
 from orchestrator.schemas.targets import (BENCHMARK_VALUES, MEASURED_VALUES, OPTIMIZATION_LEVELS, BenchmarkEntry,
                                           BenchmarkSource, BoardData, OptimizationProfile, TargetCapabilities)
 
@@ -220,28 +223,6 @@ def ordered_quantizations(offered: Sequence[str], profile: Optional[Optimization
 
 
 # --- the board's memory: a warning, the person decides ---------------------------------------------------------
-
-# The server's buffers next to the weights (compute buffers) as a share of the model file: an estimate for the
-# warning only; the board measurement says the real need. The KV cache of the context comes on top when it is known
-# (the memory estimate before the build counts it, and the warning after the build takes the same number).
-SERVER_SHARE = 0.10
-TIGHT_SHARE = 0.75
-
-
-def memory_state(need_mib: float, ram_mib: float) -> str:
-    """The verdict of a need against the board's memory, for the estimate before the build (memory_estimate) and the
-    warning after it alike, so the two never disagree on the same numbers: does_not_fit above the memory, tight above
-    TIGHT_SHARE of it, else fits."""
-    if need_mib > ram_mib:
-        return "does_not_fit"
-    return "tight" if need_mib > ram_mib * TIGHT_SHARE else "fits"
-
-
-def memory_need_mib(model_bytes: int, kv_bytes: int = 0) -> int:
-    """MiB a model needs on the board: the file plus SERVER_SHARE of it for the server, plus the KV cache when it is
-    known."""
-    return int((model_bytes * (1 + SERVER_SHARE) + max(0, int(kv_bytes or 0))) / 1048576 + 0.5)
-
 
 def memory_warning(model_bytes: int, ram_mib: Optional[float], board: str, source: str,
                    kv_bytes: int = 0, estimate_mib: Optional[int] = None) -> Optional[str]:

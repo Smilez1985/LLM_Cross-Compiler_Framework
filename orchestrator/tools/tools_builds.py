@@ -384,10 +384,12 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
                             code="failed", next="Call start_build again through the framework's tool registry.")
         if inp.preload:   # the build's preload the person made (Core/build_preload.py), taken in before the build
             service.take_preload(inp.target, inp.preload)
+        # the memory estimate the question showed, recorded with the build (only to a service that takes it)
+        estimate = bound.get("memory_estimate")
+        extra = {"memory_estimate": estimate} if isinstance(estimate, dict) else {}
         return start_accepted(service, bound, ctx, lambda reservation: service.start_build(
             start_request(inp, bound), owner=ctx.owner, optimization=bound.get("optimization") or inp.optimization,
-            disk_reservation=reservation, preflight_accepted=list(bound.get("preflight") or []),
-            memory_estimate=bound.get("memory_estimate") if isinstance(bound.get("memory_estimate"), dict) else None))
+            disk_reservation=reservation, preflight_accepted=list(bound.get("preflight") or []), **extra))
 
     def check_build_request(inp, ctx):
         look_up = inp.include_download_size and hub_lookup_allowed(inp, ctx)

@@ -24,7 +24,7 @@ to the real file size, so later work can calibrate it). The parts:
   hardware.kv_kind_for_left), else f16.
 
 The need is compared with the board's memory (the probe's RAM, else the most memory the board comes with,
-`ram_max_gb`) by board_profiles.memory_state, the thresholds of the post-build warning: above the memory "does not
+`ram_max_gb`) by memory_state, the thresholds of the post-build warning: above the memory "does not
 fit" (it runs only with swap, if at all), above three quarters of it "tight". Every number is an estimate and says
 so; the board measurement on the board (runtime/device/measure.py) measures what really fits.
 
@@ -40,6 +40,28 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 MIB = 1024 * 1024
 PROBE_SOURCE = "the board's probe"   # board_profiles.board_memory's source when the probe gave the memory
+
+# The server's buffers next to the weights (compute buffers) as a share of the model file: an estimate for the
+# warning only; the board measurement says the real need. The KV cache of the context comes on top when it is known
+# (the memory estimate before the build counts it, and the warning after the build takes the same number).
+SERVER_SHARE = 0.10
+TIGHT_SHARE = 0.75
+
+
+def memory_state(need_mib: float, ram_mib: float) -> str:
+    """The verdict of a need against the board's memory, for the estimate before the build (memory_estimate) and the
+    warning after it alike (board_profiles.memory_warning), so the two never disagree on the same numbers:
+    does_not_fit above the memory, tight above TIGHT_SHARE of it, else fits."""
+    if need_mib > ram_mib:
+        return "does_not_fit"
+    return "tight" if need_mib > ram_mib * TIGHT_SHARE else "fits"
+
+
+def memory_need_mib(model_bytes: int, kv_bytes: int = 0) -> int:
+    """MiB a model needs on the board: the file plus SERVER_SHARE of it for the server, plus the KV cache when it is
+    known."""
+    return int((model_bytes * (1 + SERVER_SHARE) + max(0, int(kv_bytes or 0))) / 1048576 + 0.5)
+
 
 # --- ggml's types: (values per block, bytes per block), ggml/src/ggml-common.h at the pin ---------------------------
 GGML_BLOCKS: Dict[str, Tuple[int, int]] = {
@@ -419,7 +441,7 @@ def kv_bytes(shape: ModelShape, ctx: int, kv_type: str = "f16") -> int:
 @dataclass
 class MemoryEstimate:
     """The estimate of one model at one quantization on one board. `state`: fits, tight, does_not_fit (the thresholds
-    of board_profiles.memory_state) or unknown (no size or no board memory known; `reason` says which)."""
+    of memory_state) or unknown (no size or no board memory known; `reason` says which)."""
     board: str
     quantization: str
     state: str = "unknown"
@@ -486,7 +508,7 @@ class MemoryEstimate:
 
     def probe_hint(self) -> str:
         """Without the board's probe: how the board's own memory is known (its probe)."""
-        return "" if self.ram_source == PROBE_SOURCE else "; a probe of the board gives its own: llm-cli scan --import FILE"
+        return "" if self.ram_source == PROBE_SOURCE else "; a hardware probe of the board gives its own"
 
 
 def _mb(value: Optional[int]) -> int:
@@ -506,10 +528,9 @@ def estimate(shape: Optional[ModelShape], quantization: Optional[str], *, board:
              kv_type: Optional[str] = None, imatrix: bool = True) -> MemoryEstimate:
     """The memory estimate of a model (`shape`) at `quantization` on `board` with `ram_mib` of memory (from
     `ram_source`: "the board's probe" or "the most memory a <board> comes with"): the weights (weights_bytes), the
-    server's buffers (board_profiles.SERVER_SHARE of them), the KV cache for the context (context_for; `kv_type`
-    given, else the boards' rule), judged by board_profiles.memory_state. Never raises for missing facts: the state
+    server's buffers (SERVER_SHARE of them), the KV cache for the context (context_for; `kv_type`
+    given, else the boards' rule), judged by memory_state. Never raises for missing facts: the state
     is then "unknown" with the reason."""
-    from orchestrator.Core.board_profiles import SERVER_SHARE, memory_state
     from orchestrator.runtime.device.measure import RESERVE_MIN_MIB, RESERVE_SHARE
     from orchestrator.runtime.hardware import kv_kind_for_left
     from orchestrator.utils.localization import ui_text
@@ -546,8 +567,7 @@ def estimate(shape: Optional[ModelShape], quantization: Optional[str], *, board:
     est.uncertainty = ui_text(f"mem.uncertainty.{basis}", "en")
     if ram is None:
         est.reason_code = "no_memory"
-        est.reason = (f"the memory of {est.board} is not known: no probe of the board (import one with llm-cli scan "
-                      "--import FILE) and no ram_max_gb")
+        est.reason = f"the memory of {est.board} is not known: no hardware probe of the board and no ram_max_gb"
         est.extras["need_known"] = True
         return est
     est.ram_mib, est.ram_source = ram, ram_source or "the board"
@@ -560,6 +580,6 @@ def unknown(board: Optional[str], quantization: Optional[str], reason: str) -> M
     return MemoryEstimate(board=str(board or "the board"), quantization=str(quantization or ""), reason=reason)
 
 
-__all__ = ["FTYPE_BASE", "GGML_BLOCKS", "MemoryEstimate", "ModelShape", "QUANT_BITS", "bits_per_weight", "context_for",
-           "estimate", "kv_bytes", "shape_from_config", "shape_from_gguf", "shape_from_local", "tensor_type",
-           "unknown", "weights_bytes"]
+__all__ = ["FTYPE_BASE", "GGML_BLOCKS", "MemoryEstimate", "ModelShape", "QUANT_BITS", "SERVER_SHARE", "TIGHT_SHARE",
+           "bits_per_weight", "context_for", "estimate", "kv_bytes", "memory_need_mib", "memory_state",
+           "shape_from_config", "shape_from_gguf", "shape_from_local", "tensor_type", "unknown", "weights_bytes"]

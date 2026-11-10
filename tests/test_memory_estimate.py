@@ -83,7 +83,7 @@ def test_parameters_the_shape_does_not_explain_are_added_at_the_types_bits():
     assert more - plain == int(100_000_000 * me.QUANT_BITS["Q8_0"] / 8)
 
 
-# --- the table, the per-tensor rules, the KV cache, a GGUF header -------------------------------------------------------
+# --- the table, the per-tensor rules, the KV cache, a GGUF header ----------------------------------------------------
 
 def test_one_table_of_bits_per_weight_from_ggmls_block_sizes():
     """The IQ and ternary types against the bits quantize.cpp's list names; the disk rule reads the same table."""
@@ -182,14 +182,14 @@ def test_the_states_and_the_text_say_it_is_an_estimate():
     assert "estimate" in small.text() and "benchmark on the board" in small.text()
     big = me.estimate(shape_of("Llama 3.2 1B Instruct"), "IQ4_XS", board="bcm2837", ram_mib=1024,
                       ram_source="the most memory a bcm2837 comes with")
-    assert big.state == "tight" and "scan --import" in big.text()
+    assert big.state == "tight" and "hardware probe of the board" in big.text()
     roomy = me.estimate(shape_of("Llama 3.2 1B Instruct"), "Q4_K_M", board="bcm2712", ram_mib=16384,
                         ram_source="the most memory a bcm2712 comes with")
     assert roomy.state == "fits" and roomy.kv_type == "f16"
     unknown = me.estimate(None, "Q4_K_M", board="bcm2837", ram_mib=416)
     assert unknown.state == "unknown" and "not known" in unknown.text()
     no_ram = me.estimate(shape_of("Llama 3.2 1B Instruct"), "Q4_K_M", board="x", ram_mib=None)
-    assert no_ram.state == "unknown" and no_ram.need_mib and "scan --import" in no_ram.text()
+    assert no_ram.state == "unknown" and no_ram.need_mib and "no hardware probe" in no_ram.text()
     assert "Speicherschätzung" in small.text("de") and "passt" in small.text("de")
 
 
