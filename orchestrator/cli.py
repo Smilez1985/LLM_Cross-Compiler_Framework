@@ -588,6 +588,36 @@ def _open_in_editor(session, files) -> None:
             session.set_text(rel, text)
 
 
+def _open_variables(session) -> None:
+    """The module's template variables first (the formats of target.yml's template_variables, as YAML) in $EDITOR, for
+    a module that records them: a changed value makes the files that hold them anew (their diff is shown with the
+    others); a value that fails its checks is said, and the variables open again on request."""
+    text = session.variables()
+    if text is None:
+        return
+    console.print("Its template variables (the output formats) open first; the files follow.")
+    while True:
+        new = click.edit(text, extension=".yml", require_save=True)
+        if new is None or new == text:
+            return
+        try:
+            changed = session.set_variables(new)
+        except ValueError as e:
+            console.print(f"[red]{escape(_printable(e))}[/red]")
+            if not click.confirm("Open the variables again?", default=True):
+                return
+            text = new
+            continue
+        console.print("The variables change: " + (", ".join(changed) or "nothing"))
+        return
+
+
+def _apply_variables_file(session, path: str) -> None:
+    """`--variables FILE`: changed template variables applied to the step (ValueError with the reasons)."""
+    changed = session.set_variables(Path(path).read_text(encoding="utf-8"))
+    console.print("The variables change: " + (", ".join(changed) or "nothing"))
+
+
 def _review_module_edit(session, files, question: str) -> bool:
     """The edit step's end in the terminal: the diff, the checks (refused with the reasons while one fails; with
     files to edit, they open again on request), then the person's yes. True: the person said yes."""
@@ -620,6 +650,7 @@ def _create_with_edit_step(targets_dir: Path, name: str, generate) -> Optional[P
         session = ModuleEdit(Path(generate(scratch)), template_for(targets_dir))
         console.print("The module is made, not saved yet. Its files open in your editor one after the other: "
                       + ", ".join(session.files) + " (never the framework's stage runner).")
+        _open_variables(session)
         _open_in_editor(session, session.files)
         if not _review_module_edit(session, session.files, "Save the module into the targets folder?"):
             return None
@@ -850,13 +881,19 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
 @click.option('--apply', 'patch_file', type=click.Path(exists=True, dir_okay=False), default=None,
               help="Apply a unified diff (an AI's proposal, or one written by hand) to the files first; it is shown "
                    "and checked like any edit, and saved only on your yes")
+@click.option('--variables', 'variables_file', type=click.Path(exists=True, dir_okay=False), default=None,
+              help="Change the module's template variables (its output formats, as YAML or JSON) first: the files "
+                   "that hold them are made anew from the template, shown as their diff and checked like any edit")
 @pass_context
-def module_edit(ctx: FrameworkContext, target: str, files: tuple, patch_file: Optional[str]):
+def module_edit(ctx: FrameworkContext, target: str, files: tuple, patch_file: Optional[str],
+                variables_file: Optional[str]):
     """Edit the files of a target module: the "edit all files" step of the module wizard
 
-    The stage modules, the slot modules, target.yml and the Dockerfile (never the framework's stage runner) open in
-    $EDITOR; the diff against the saved files is shown, the checks run again (validate_target_folder), and the files
-    are written only when every check passes and you say yes.
+    A module made from the general template shows its template variables first (its output formats, as YAML in
+    $EDITOR): a changed value makes the files that hold them anew from the template. Then the stage modules, the slot
+    modules, target.yml and the Dockerfile (never the framework's stage runner) open in $EDITOR; the diff against the
+    saved files is shown, the checks run again (validate_target_folder), and the files are written only when every
+    check passes and you say yes.
     """
     from orchestrator.Core.module_edit import EditRefused, ModuleEdit
     config, resolve = _settings(ctx)
@@ -869,15 +906,19 @@ def module_edit(ctx: FrameworkContext, target: str, files: tuple, patch_file: Op
         sys.exit(1)
     try:
         chosen = [session._known(f) for f in files]
+        if variables_file:
+            _apply_variables_file(session, variables_file)
         if patch_file:
             changed = session.apply_diff(Path(patch_file).read_text(encoding="utf-8"))
             console.print("The diff changes: " + (", ".join(changed) or "nothing"))
     except (OSError, UnicodeDecodeError, ValueError) as e:
         console.print(f"[red]{escape(_printable(e))}[/red]")
         sys.exit(1)
-    to_edit = chosen or ([] if patch_file else session.files)
+    to_edit = chosen or ([] if (patch_file or variables_file) else session.files)
     console.print(f"The files of {escape(folder.name)}: {', '.join(session.files)} (never the framework's stage "
                   "runner).")
+    if not (chosen or patch_file or variables_file):
+        _open_variables(session)
     _open_in_editor(session, to_edit)
     if not session.changed():
         console.print("No file changed; nothing was written.")
@@ -901,6 +942,9 @@ def module_edit(ctx: FrameworkContext, target: str, files: tuple, patch_file: Op
                    "the files and shown, and saved only on your yes")
 @click.option('--apply', 'patch_file', type=click.Path(exists=True, dir_okay=False), default=None,
               help="Apply a unified diff (an AI's proposal, or one written by hand) to the files first")
+@click.option('--variables', 'variables_file', type=click.Path(exists=True, dir_okay=False), default=None,
+              help="Repair by changed template variables (the module's output formats, as YAML or JSON): the files "
+                   "that hold them are made anew from the template and shown as their diff")
 @click.option('--file', 'files', multiple=True, metavar='FILE',
               help="Open this file of the step in $EDITOR (repeatable); without --propose, --apply or a waiting "
                    "proposal every file opens")
@@ -908,7 +952,7 @@ def module_edit(ctx: FrameworkContext, target: str, files: tuple, patch_file: Op
               help="After the repair is saved, start the failed build again with its settings (asked first)")
 @click.pass_context
 def module_repair(click_ctx: click.Context, target: str, propose: bool, patch_file: Optional[str], files: tuple,
-                  retry: bool):
+                  retry: bool, variables_file: Optional[str] = None):
     """Repair a generated module after a failed build, by hand or from its error log
 
     Shows the module's build test (tested, untested, needs rework), the failed build with its error and the end of
@@ -961,13 +1005,17 @@ def module_repair(click_ctx: click.Context, target: str, propose: bool, patch_fi
             how, by, summary = "proposal", str(waiting.get("by") or "ai"), str(waiting.get("summary") or "")
             console.print(f"The proposal of {escape(by)} changes: " + (", ".join(changed) or "nothing")
                           + " (shown below; nothing is saved without your yes).")
+        if variables_file:
+            _apply_variables_file(session, variables_file)
         if patch_file:
             changed = session.apply_diff(Path(patch_file).read_text(encoding="utf-8"))
             console.print("The diff changes: " + (", ".join(changed) or "nothing"))
     except (OSError, UnicodeDecodeError, ValueError) as e:
         console.print(f"[red]{escape(_printable(e))}[/red]")
         sys.exit(1)
-    to_edit = chosen or ([] if (patch_file or session.changed()) else session.files)
+    to_edit = chosen or ([] if (patch_file or variables_file or session.changed()) else session.files)
+    if to_edit and not chosen:   # every file opens: the variables first
+        _open_variables(session)
     _open_in_editor(session, to_edit)
     if not session.changed():
         console.print("No file changed; nothing was written.")

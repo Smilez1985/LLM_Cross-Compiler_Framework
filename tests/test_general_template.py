@@ -355,3 +355,115 @@ def test_the_tool_asks_with_the_formats_and_makes_them(fw, registry_fake):  # no
                                                                             "args": ["--get", "wget"]})]},
              confirm=asking(True))
     assert "downloads at build time" in str(e.value)
+
+
+# --- the edit step shows the variables first; a repair may change them -------------------------------------------
+
+def _changed_args(text: str) -> str:
+    formats = yaml.safe_load(text)
+    formats[0]["converter"]["args"].append("--fast")
+    return yaml.safe_dump(formats, sort_keys=False)
+
+
+def test_the_edit_step_changes_the_variables_and_makes_their_files_anew(tmp_path):
+    from orchestrator.Core.module_edit import ModuleEdit
+    target = generate(tmp_path, formats=[npu_format(), "gguf"])
+    edit = ModuleEdit(target)
+    shown = edit.variables()
+    assert [f["id"] for f in yaml.safe_load(shown)] == ["fakenpu", "gguf"]
+    assert edit.set_variables(shown) == [] and not edit.changed(), "the same values change nothing"
+    assert edit.set_variables(_changed_args(shown)) == ["modules/config_module.sh", "target.yml"]
+    assert "+FORMAT_ARGS_fakenpu=('--model' '{input}' '--output' '{output}' '--dtype' '{quant}' '--name={model_name}' " \
+           "'--fast')" in edit.diff()
+    assert edit.problems() == []
+    assert edit.save() == ["modules/config_module.sh", "target.yml"]
+    assert validate_target_folder(target) == []
+    meta = yaml.safe_load((target / "target.yml").read_text())
+    assert meta["template_variables"]["formats"][0]["converter"]["args"][-1] == "--fast"
+    assert meta["metadata"]["untested"] is True
+
+
+def test_the_edit_step_refuses_variables_that_fail_or_need_a_new_file(tmp_path):
+    from orchestrator.Core.module_edit import ModuleEdit
+    target = generate(tmp_path, formats=[npu_format()])
+    edit = ModuleEdit(target)
+    with pytest.raises(ValueError, match="downloads at build time"):
+        edit.set_variables([npu_format(converter={"command": "/opt/x/c", "args": ["curl"]})])
+    with pytest.raises(ValueError, match="adds no file: make the module again"):
+        edit.set_variables([npu_format(), "rknn"])
+    assert not edit.changed()
+    plain = generate(tmp_path, module_name="Old Style")
+    meta = yaml.safe_load((plain / "target.yml").read_text())
+    meta.pop("template_variables")
+    (plain / "target.yml").write_text(yaml.safe_dump(meta, sort_keys=False))
+    old = ModuleEdit(plain)
+    assert old.variables() is None
+    with pytest.raises(ValueError, match="records no template variables"):
+        old.set_variables(["gguf"])
+
+
+def test_module_edit_takes_a_variables_file(tmp_path):
+    from click.testing import CliRunner
+    from orchestrator import cli as cli_module
+    from orchestrator.Core.module_edit import ModuleEdit
+    from test_cli_builds import write_user_config
+    target = generate(tmp_path, formats=[npu_format()])
+    write_user_config(tmp_path, targets_dir=str(target.parent))
+    variables = tmp_path / "variables.yml"
+    variables.write_text(_changed_args(ModuleEdit(target).variables()))
+    result = CliRunner().invoke(cli_module.cli, ["-q", "module", "edit", target.name, "--variables", str(variables)],
+                                input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "The variables change: modules/config_module.sh, target.yml" in result.output
+    assert "'--fast'" in (target / "modules" / "config_module.sh").read_text()
+    variables.write_text(yaml.safe_dump([npu_format(converter={"command": "/opt/x/c", "args": ["sudo"]})]))
+    result = CliRunner().invoke(cli_module.cli, ["-q", "module", "edit", target.name, "--variables", str(variables)],
+                                input="y\n")
+    assert result.exit_code == 1 and "uses sudo" in result.output
+
+
+def test_a_repair_may_propose_changed_variables(tmp_path):
+    from orchestrator.Core import module_test
+    from orchestrator.Core.module_edit import ModuleEdit
+    target = generate(tmp_path, formats=[npu_format()])
+    module_test.record_build(target, build_id="b1", passed=False, request_id="req_1", stage="convert",
+                             error="fakec: unknown option", log=["fakec: unknown option --dtype"],
+                             settings={"model": "m", "format": "fakenpu", "quantization": "int8", "board": None})
+    changed = _changed_args(ModuleEdit(target).variables())
+    proposal = module_test.store_client_proposal(target, request_id="req_1", diff="", summary="add --fast",
+                                                 variables=changed)
+    waiting = module_test.waiting_proposal(target)
+    assert waiting["variables"] == changed and "'--fast'" in waiting["diff"] and proposal["problems"] == []
+    assert "'--fast'" not in (target / "modules" / "config_module.sh").read_text(), "never saved by itself"
+    edit = ModuleEdit(target)
+    assert edit.apply_diff(waiting["diff"]) == ["modules/config_module.sh", "target.yml"]
+    with pytest.raises(module_test.RepairError, match="do not fit the module"):
+        module_test.store_client_proposal(target, request_id="req_1", diff="", summary="s",
+                                          variables="- id: x\n")
+
+
+def test_the_edit_panel_shows_the_variables_first_and_applies_them(qapp, tmp_path):
+    from orchestrator.Core.module_edit import ModuleEdit
+    from orchestrator.gui.module_edit import ModuleEditPanel
+    target = generate(tmp_path, formats=[npu_format()])
+    panel = ModuleEditPanel()
+    try:
+        panel.load(ModuleEdit(target))
+        assert not panel.variables_box.isHidden()
+        assert "fakenpu" in panel.variables_edit.toPlainText()
+        assert "variables" in [f.id for f in panel.form.fields]   # an AI may fill it (marked, with its Undo); the person applies
+        panel.variables_edit.setPlainText(_changed_args(panel.variables_edit.toPlainText()))
+        assert panel.apply_variables() == ["modules/config_module.sh", "target.yml"]
+        assert "'--fast'" in panel.editors["modules/config_module.sh"].toPlainText()
+        assert panel.save() == ["modules/config_module.sh", "target.yml"]
+        panel.variables_edit.setPlainText("- id: [")
+        assert panel.apply_variables() == [] and "not taken" in panel.problems_view.toPlainText()
+        plain = generate(tmp_path, module_name="Plain")
+        meta = yaml.safe_load((plain / "target.yml").read_text())
+        meta.pop("template_variables")
+        (plain / "target.yml").write_text(yaml.safe_dump(meta, sort_keys=False))
+        panel.load(ModuleEdit(plain))
+        assert panel.variables_box.isHidden()
+    finally:
+        panel.unload()
+        panel.deleteLater()

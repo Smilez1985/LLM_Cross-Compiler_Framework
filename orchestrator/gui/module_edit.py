@@ -13,6 +13,11 @@ fields an AI reads but never fills, and one field "proposal" that takes a unifie
 to the editors, marked, listed in the banner with its Undo and shown in the diff; it is only a change in this step.
 A file the person edited is theirs, so a proposal that would change it is refused. Only the person's Finish or
 Save writes anything. Every text is plain text.
+
+A module made from the general template shows its template variables first (its output formats as YAML, above the
+files): Apply the Variables makes the files that hold them anew from the template (ModuleEdit.set_variables), shown
+in the diff and checked like any edit. The variables are a field of the form an AI may fill (marked, with its Undo);
+only the person applies and saves them.
 """
 
 import copy
@@ -55,6 +60,23 @@ class ModuleEditPanel(QWidget):
         layout.addWidget(self.note)
         self.banner_slot = QVBoxLayout()
         layout.addLayout(self.banner_slot)
+        # the template's variables first, for a module that records them (hidden otherwise)
+        self.variables_box = QWidget(self)
+        box = QVBoxLayout(self.variables_box)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.addWidget(plain_label(self._t("bld.edit.variables")))
+        self.variables_edit = QPlainTextEdit(self.variables_box)
+        self.variables_edit.setObjectName("text_module_edit_variables")
+        self.variables_edit.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.variables_edit.setMaximumHeight(160)
+        box.addWidget(self.variables_edit)
+        self.btn_variables = QPushButton(button_text(self._t("bld.edit.variables_apply")), self.variables_box)
+        self.btn_variables.setObjectName("btn_module_edit_variables")
+        self.btn_variables.setAutoDefault(False)
+        self.btn_variables.clicked.connect(lambda *_a: self.apply_variables())
+        box.addWidget(self.btn_variables)
+        self.variables_box.setVisible(False)
+        layout.addWidget(self.variables_box)
         split = QSplitter(Qt.Horizontal, self)
         self.file_list = QListWidget(split)
         self.file_list.setObjectName("list_module_edit_files")
@@ -113,6 +135,9 @@ class ModuleEditPanel(QWidget):
             self.stack.addWidget(editor)
             self.file_list.addItem(rel)
         self.file_list.setCurrentRow(0)
+        variables = edit.variables()
+        self.variables_edit.setPlainText(variables or "")
+        self.variables_box.setVisible(variables is not None)
         self._bind()
         self.show_note(note)
         self.problems_view.setPlainText("")
@@ -144,6 +169,8 @@ class ModuleEditPanel(QWidget):
             editor.deleteLater()
         self.editors = {}
         self.diff_view.setPlainText("")
+        self.variables_edit.setPlainText("")
+        self.variables_box.setVisible(False)
         self._set_enabled(False)
 
     def _bind(self) -> None:
@@ -155,6 +182,11 @@ class ModuleEditPanel(QWidget):
         for rel, editor in self.editors.items():
             b.text(f"file:{rel}", rel, editor, read_only=lambda: never,
                    hint="the file's text now (the stage runner is never among the files)")
+        if self.edit.variables() is not None:
+            b.text("variables", "bld.edit.field.variables", self.variables_edit,
+                   hint="the module's output formats as YAML (the general template's variables: converter with its "
+                        "args, input, output_extension, quantizations, runtime_libraries, board_paths, sdk, "
+                        "vendor_files); the person applies them, which makes the files that hold them anew")
         b.add(PROPOSAL_FIELD, "bld.edit.field.proposal", "code", lambda: self._proposal, self._set_proposal,
               [self.diff_view], check=lambda _current, value: self._proposal_problem(value),
               hint="a unified diff (--- a/<file>, +++ b/<file>, @@ hunks) against the files' text now; it is applied "
@@ -244,6 +276,28 @@ class ModuleEditPanel(QWidget):
             self._set_editor(rel, texts[rel])
             if self.form is not None:
                 self.form.person_edited(f"file:{rel}")
+        self.tabs.setCurrentWidget(self.diff_view)
+        return changed
+
+    def apply_variables(self) -> List[str]:
+        """The person applies the variables shown: the files that hold them are made anew (their diff shown); the
+        reasons are shown when a value fails its checks."""
+        if self.edit is None:
+            return []
+        before = dict(self.edit.texts)
+        try:
+            changed = self.edit.set_variables(self.variables_edit.toPlainText())
+        except ValueError as e:
+            self.edit.texts = before
+            self.problems_view.setPlainText(self._t("bld.edit.variables_failed", reason=e))
+            return []
+        texts = dict(self.edit.texts)
+        self.edit.texts = before
+        for rel in changed:
+            self._set_editor(rel, texts[rel])
+            if self.form is not None:
+                self.form.person_edited(f"file:{rel}")
+        self.problems_view.setPlainText(self._t("bld.edit.variables_changed", files=", ".join(changed) or "-"))
         self.tabs.setCurrentWidget(self.diff_view)
         return changed
 

@@ -18,6 +18,12 @@ own.
 A new module is made in a private scratch folder outside the targets folder (`stage_folder`) and moved into the
 targets folder only when the person saves it (`commit_staged`), so a module being edited is never a target a build
 could pick up.
+
+A module made from the general template records its variables (the formats of target.yml's `template_variables`,
+orchestrator/schemas/target_template.py): the step shows them first (`variables`), and a changed value
+(`set_variables`) makes the files that hold them anew from the template (target.yml's record and capabilities, the
+config stage's block) as edits with their diff, checked like any edit; the files stay the fallback. A repair may
+propose changed variable values the same way (`variables_diff`).
 """
 
 import difflib
@@ -158,6 +164,68 @@ class ModuleEdit:
     def changed(self) -> List[str]:
         return [rel for rel in self.files if self.texts[rel] != self.generated[rel]]
 
+    # --- the template's variables ----------------------------------------------------------------------------------
+
+    def _meta(self) -> Dict:
+        try:
+            meta = yaml.safe_load(self.texts.get("target.yml", "")) or {}
+        except yaml.YAMLError as e:
+            raise ValueError(f"target.yml is no valid YAML now ({str(e).splitlines()[0][:200]})") from None
+        if not isinstance(meta, dict):
+            raise ValueError("target.yml is no mapping now")
+        return meta
+
+    def variables(self) -> Optional[str]:
+        """The module's template variables as the step shows them first: the formats of target.yml's
+        template_variables as YAML text (as target.yml holds them now). None for a module that records none (a module
+        made before the general template, or a shipped target): its files are the step then."""
+        try:
+            record = self._meta().get("template_variables")
+        except ValueError:
+            return None
+        if not isinstance(record, dict):
+            return None
+        return yaml.safe_dump(record.get("formats") or [], sort_keys=False, allow_unicode=True)
+
+    def set_variables(self, formats) -> List[str]:
+        """Takes changed template variables (YAML or JSON text of the formats, or a list): target.yml's
+        template_variables and the formats of its capabilities, and the config stage's block, are made anew from the
+        template with them, as edits of those files (their diff shows the change). Returns the files it changed.
+        ValueError with the reasons when a value fails its checks, when the module records no variables or its block
+        is gone, or when a format would need a file the module does not have (the step adds no file: the module is
+        made again then)."""
+        from orchestrator.Core.module_generator import (FORMATS_BEGIN, FORMATS_END, format_problems, parse_formats,
+                                                        render_formats)
+        from orchestrator.schemas.target_template import FormatVariables
+        values, problems = format_problems(parse_formats(formats))
+        if problems:
+            raise ValueError("The variables were not taken:\n- " + "\n- ".join(problems))
+        if not values:
+            raise ValueError("The variables declare no format; a module builds at least one (gguf, for example).")
+        meta = self._meta()
+        if not isinstance(meta.get("template_variables"), dict):
+            raise ValueError(f"{self.folder.name} records no template variables (it was made before the general "
+                             "template); change its files instead.")
+        config_rel = "modules/config_module.sh"
+        text = self.texts.get(config_rel, "")
+        begin, end = text.find(FORMATS_BEGIN), text.find(FORMATS_END)
+        if begin < 0 or end < begin:
+            raise ValueError(f"{config_rel} has no block of the template variables any more; restore it (Reset) "
+                             "before changing the variables.")
+        needed = [rel for f in values for rel in FormatVariables.model_validate(f).helper_files()]
+        missing = sorted({rel for rel in needed if not (self.folder / rel).is_file()})
+        if missing:
+            raise ValueError(f"These formats need {', '.join(missing)}, which {self.folder.name} does not have; the "
+                             "edit step adds no file: make the module again with these formats.")
+        caps = meta.get("capabilities") if isinstance(meta.get("capabilities"), dict) else {}
+        caps["formats"] = {f["id"]: FormatVariables.model_validate(f).capability() for f in values}
+        meta["capabilities"] = caps
+        meta["template_variables"] = {"schema_version": 1, "formats": values}
+        before = dict(self.texts)
+        self.texts[config_rel] = text[:begin] + render_formats(values) + text[end + len(FORMATS_END):]
+        self.texts["target.yml"] = yaml.dump(meta, default_flow_style=False, sort_keys=False)
+        return [rel for rel in self.files if self.texts[rel] != before[rel]]
+
     def diff(self, rel: Optional[str] = None) -> str:
         """The unified diff of one file, or of every changed file, against the text it had when the step opened."""
         names = [self._known(rel)] if rel else self.changed()
@@ -230,6 +298,14 @@ class ModuleEdit:
                           summary=repair.get("summary", ""))
         except Exception as e:  # noqa: BLE001 - the files are saved; only the history line is missing
             get_logger(__name__).warning(f"The repair of {self.folder.name} was not recorded: {e}")
+
+
+def variables_diff(folder: Path, formats, template_dir: Optional[Path] = None) -> str:
+    """The unified diff that changed template variables make of a module's files (ModuleEdit.set_variables on its
+    saved files): how a repair proposes changed variable values. ValueError as set_variables."""
+    session = ModuleEdit(Path(folder), template_dir)
+    session.set_variables(formats)
+    return session.diff()
 
 
 # --- a new module in a scratch folder ---------------------------------------------------------------------------------
@@ -345,4 +421,4 @@ def _apply_hunks(rel: str, text: str, hunks: Iterable[tuple]) -> str:
 
 
 __all__ = ["EditRefused", "MARKS", "ModuleEdit", "RUNNER_FILES", "commit_staged", "discard_staged", "editable_files",
-           "name_taken", "stage_folder", "template_for"]
+           "name_taken", "stage_folder", "template_for", "variables_diff"]

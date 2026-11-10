@@ -23,7 +23,9 @@ secrets redacted) for the repair, a waiting repair proposal, and the history of 
 
 A repair proposal (`propose_repair`, the pattern library first, then Ditto; an AI client's through
 propose_healing_fix's `module_diff`, `store_client_proposal`) is a unified diff of the edit step's files, checked to
-apply and free of dangerous commands; it waits in the record until the person opens the edit step, where only the
+apply and free of dangerous commands; for a module made from the general template it may be changed values of its
+template variables instead (`module_variables`), which become that diff by the edit step's own path
+(module_edit.variables_diff) and are kept with it; it waits in the record until the person opens the edit step, where only the
 person's Save writes it (Core/module_edit.py records the repair). Nothing here runs a command or saves a module file.
 """
 
@@ -368,10 +370,11 @@ def propose_repair(framework: Any, folder: Path) -> Dict[str, Any]:
 
 
 def store_client_proposal(folder: Path, *, request_id: str, diff: str, summary: str, root_cause: str = "",
-                          confidence: float = 0.0, by: str = "ai client") -> Dict[str, Any]:
-    """An AI client's repair diff for the module's failed build (propose_healing_fix's module_diff): the build of
-    `request_id` must be the one the module needs rework for; the diff is checked like Ditto's and waits in the
-    record. RepairError otherwise."""
+                          confidence: float = 0.0, by: str = "ai client", variables: str = "") -> Dict[str, Any]:
+    """An AI client's repair for the module's failed build (propose_healing_fix's module_diff, or its
+    module_variables: changed values of the module's template variables, made into the diff of its files by the edit
+    step's own path): the build of `request_id` must be the one the module needs rework for; the diff is checked like
+    Ditto's and waits in the record. RepairError otherwise."""
     from orchestrator.Core.ditto_manager import dangerous_command
     folder = Path(folder)
     record = _needs_rework(folder)
@@ -380,11 +383,21 @@ def store_client_proposal(folder: Path, *, request_id: str, diff: str, summary: 
     danger = dangerous_command(summary, root_cause)
     if danger:
         raise RepairError(f"the proposal contains a dangerous command ({danger}); it was discarded")
+    if variables and str(variables).strip():
+        if diff and diff.strip():
+            raise RepairError("propose either changed variables or a diff of the files, not both")
+        from orchestrator.Core.module_edit import variables_diff
+        try:
+            diff = variables_diff(folder, variables)
+        except ValueError as e:
+            raise RepairError(f"the variables do not fit the module: {e}") from None
     problems = check_diff(folder, diff)
-    return _store_proposal(folder, record, {"build_id": record["rework"].get("build_id"), "created": _now(),
-                                            "by": str(by)[:80], "summary": summary, "root_cause": root_cause,
-                                            "step": "", "diff": diff, "confidence": float(confidence),
-                                            "problems": problems})
+    proposal = {"build_id": record["rework"].get("build_id"), "created": _now(), "by": str(by)[:80],
+                "summary": summary, "root_cause": root_cause, "step": "", "diff": diff,
+                "confidence": float(confidence), "problems": problems}
+    if variables and str(variables).strip():
+        proposal["variables"] = str(variables)
+    return _store_proposal(folder, record, proposal)
 
 
 def waiting_proposal(folder: Path) -> Optional[Dict[str, Any]]:

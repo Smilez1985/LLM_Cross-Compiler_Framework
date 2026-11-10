@@ -48,11 +48,13 @@ CLI_PATHS: Dict[str, str] = {
     "module edit": "btn_targets_edit",
     "module edit --file": "btn_targets_edit",
     "module edit --apply": "btn_targets_edit",
+    "module edit --variables": "btn_targets_edit",   # the step's variables, shown first
     # the same step for a generated module that needs rework: the failed build's error and log above the files, a
     # waiting proposal applied, Propose a Repair from the Log, and after the save the question to build again
     "module repair": "btn_targets_edit",
     "module repair --propose": "btn_targets_edit",   # its button Propose a Repair from the Log
     "module repair --apply": "btn_targets_edit",     # its button Apply a Diff...
+    "module repair --variables": "btn_targets_edit",   # the step's variables, shown first
     "module repair --file": "btn_targets_edit",
     "module repair --retry": "btn_targets_edit",
     "build start": "btn_builder_start",

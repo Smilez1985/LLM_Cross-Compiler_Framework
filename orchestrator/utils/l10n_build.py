@@ -398,6 +398,13 @@ TEXTS = {
         "bld.edit.saved": "Saved: {files}",
         "bld.edit.open_failed": "The files of {target} cannot be opened:\n{reason}",
         "bld.edit.field.proposal": "Proposal (a unified diff)",
+        "bld.edit.variables": "Template variables (the module's output formats, YAML). Change a value here and "
+                              "apply it: the files that hold the variables are made anew from the template and "
+                              "shown in the diff; the files below are the fallback.",
+        "bld.edit.variables_apply": "Apply the Variables",
+        "bld.edit.variables_failed": "The variables were not taken:\n{reason}",
+        "bld.edit.variables_changed": "The variables changed: {files}",
+        "bld.edit.field.variables": "Template variables (the output formats, YAML)",
         "bld.targets.edit": "Edit Files...",
         "bld.targets.col.test": "Build test",
         "bld.test.shipped": "- (shipped)",
@@ -829,6 +836,13 @@ TEXTS = {
         "bld.edit.saved": "Gespeichert: {files}",
         "bld.edit.open_failed": "Die Dateien von {target} lassen sich nicht öffnen:\n{reason}",
         "bld.edit.field.proposal": "Vorschlag (ein Unified Diff)",
+        "bld.edit.variables": "Variablen der Vorlage (die Ausgabeformate des Moduls, YAML). Einen Wert hier ändern "
+                              "und anwenden: Die Dateien, die die Variablen enthalten, werden aus der Vorlage neu "
+                              "erzeugt und im Diff gezeigt; die Dateien darunter sind der Rückweg.",
+        "bld.edit.variables_apply": "Variablen anwenden",
+        "bld.edit.variables_failed": "Die Variablen wurden nicht übernommen:\n{reason}",
+        "bld.edit.variables_changed": "Die Variablen haben geändert: {files}",
+        "bld.edit.field.variables": "Variablen der Vorlage (die Ausgabeformate, YAML)",
         "bld.targets.edit": "Dateien bearbeiten...",
         "bld.targets.col.test": "Build-Test",
         "bld.test.shipped": "- (mitgeliefert)",

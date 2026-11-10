@@ -41,6 +41,11 @@ class ProposeHealingIn(BaseModel):
                                          "build_test in get_target_capabilities): a unified diff of its files "
                                          "(get_target_capabilities with module_files), shown to the person in the "
                                          "module's edit step; only the person saves it")
+    module_variables: str = Field(default="", max_length=20000,
+                                  description="Instead of module_diff, for a module made from the general template "
+                                              "(its template_variables in target.yml): the changed formats as YAML "
+                                              "(the whole list); the framework makes them into the diff of its "
+                                              "files, shown to the person in the edit step")
 
 
 class ProposeHealingOut(ToolOutput):
@@ -60,7 +65,7 @@ def register_healing_tools(registry: ToolRegistry, framework, request_field: Fie
     def propose_healing_fix(inp: ProposeHealingIn, ctx: ToolContext) -> ProposeHealingOut:
         proposal = service.propose_fix(inp.request_id, inp.summary, inp.root_cause, inp.manual_step, inp.confidence,
                                        inp.where, proposed_by=ctx.actor, client=ctx.client,
-                                       module_diff=inp.module_diff)
+                                       module_diff=inp.module_diff, module_variables=inp.module_variables)
         return ProposeHealingOut(proposal_id=proposal.proposal_id, request_id=inp.request_id)
 
     registry.register(ToolSpec(
