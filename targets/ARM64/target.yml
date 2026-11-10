@@ -1,0 +1,212 @@
+# LLM Cross-Compiler Framework - the generic ARM64 CPU target
+# GGUF models and llama.cpp's programs for 64-bit ARM boards that need no vendor SDK, with board defaults for the
+# Raspberry Pi 4 (BCM2711) and the Raspberry Pi 5 (BCM2712). The design: docs/DESIGN.md, "Targets, hardware and
+# templates", the row of the generic ARM64 CPU target.
+
+metadata:
+  name: "Generic ARM64 (CPU)"
+  description: "GGUF models and llama.cpp for 64-bit ARM boards without a vendor SDK: Raspberry Pi 4 (BCM2711) and Raspberry Pi 5 (BCM2712)"
+  maintainer: "LLM Framework Core Team"
+  version: "1.0.0"
+  created: "2026-11-10"
+  updated: "2026-11-10"
+
+  # Target classification
+  category: "embedded_soc"
+  architecture_family: "aarch64"
+  vendor: "generic"
+
+  # Documentation links
+  documentation_url: "https://www.raspberrypi.com/documentation/computers/processors.html"
+  community_url: "https://forums.raspberrypi.com/"
+
+# Supported hardware boards (descriptive; the capabilities block below is what the framework reads). A board id is the
+# SoC of the board's device tree: the hardware probe reads it from the last entry of /proc/device-tree/compatible
+# (brcm,bcm2711 on a Raspberry Pi 4, brcm,bcm2712 on a Raspberry Pi 5), so a probe of the board finds its board here.
+supported_boards:
+  - name: "bcm2711"
+    description: "Raspberry Pi 4: quad-core Arm Cortex-A72 (Armv8-A), LPDDR4"
+    specifications:
+      cpu_cores: 4
+      cpu_arch: "cortex-a72"
+      cpu_max_freq: "1.8GHz"
+      memory_max: "8GB LPDDR4"
+      typical_boards: ["Raspberry Pi 4 Model B", "Raspberry Pi 400", "Compute Module 4"]
+
+  - name: "bcm2712"
+    description: "Raspberry Pi 5: quad-core Arm Cortex-A76 (Armv8.2-A), LPDDR4X"
+    specifications:
+      cpu_cores: 4
+      cpu_arch: "cortex-a76"
+      cpu_max_freq: "2.4GHz"
+      memory_max: "16GB LPDDR4X"
+      typical_boards: ["Raspberry Pi 5", "Raspberry Pi 500", "Compute Module 5"]
+
+# Docker configuration
+docker:
+  # A local image name: the builder builds its images on this computer under this name
+  # (llm-framework/arm64:<tag>); they are never pushed or pulled.
+  image_name: "llm-framework/arm64"
+  # No registry: the framework publishes no images. Nothing reads this field.
+  registry: ""
+  build_context: "."
+  dockerfile: "Dockerfile"
+
+  # Build arguments
+  build_args:
+    LLAMA_CPP_TAG: "b11429"   # the llama.cpp pin of configs/llama_runtime.yml (llama_cpp.source.tag)
+    LLAMA_CPP_COMMIT: "d81235049384534c167caea52b85a694f6103d14"   # llama_cpp.source.commit, fetched and checked
+    BUILD_JOBS: "4"
+    PYTHON_VERSION: "3.11"
+
+  # Local tag names only: nothing reads them, and no image is published under them.
+  tags:
+    - "latest"
+    - "v1.0.0"
+
+  # Resource requirements for building
+  build_requirements:
+    memory_gb: 8
+    disk_gb: 15
+    cpu_cores: 4
+
+# The stage order of every build (the framework's stage runner, orchestrator/Core/runtime_layer.py stage_order): the
+# four stages source -> config -> convert -> target, plus the target's own modules in three fixed slots. A name N in a
+# slot runs modules/N_module.sh (lower case letters, digits and _; not one of the four stages, not benchmark).
+stages:
+  before_convert: []
+  between_convert_and_target: []
+  after_target: []
+
+# The build: the framework's stage runner runs the four stage modules in this order inside the image, for every build
+# (the stages: block above); each module's header says which image it runs in, which system the result is for and
+# what its stage does. This block describes the folder; nothing reads it.
+modules:
+  source: "modules/source_module.sh"
+  config: "modules/config_module.sh"
+  convert: "modules/convert_module.sh"
+  target: "modules/target_module.sh"
+  # Optional hook between convert and target (roadmap: rotation such as SpinQuant or QuaRot): runs when the
+  # stages: block names rotate; none is shipped.
+  rotate: "modules/rotate_module.sh"
+
+  module_info:
+    source:
+      description: "Toolchain sources of the image (the llama.cpp pin); no vendor SDK, no download"
+      dependencies: ["llama.cpp of the image (/usr/src/llama.cpp)"]
+      runtime: "container"
+
+    config:
+      description: "Request checks and the build plan, with the board: from its hardware profile, or from the board
+        defaults of its SoC; the CMake toolchain for the board, checked (compiler test, CMake reads the toolchain
+        file, the plan is a valid shell script)"
+      dependencies: ["gcc-aarch64-linux-gnu, g++-aarch64-linux-gnu", "cmake"]
+      runtime: "container"
+      inputs: ["the request (environment)", "target_hardware_config.txt (optional)"]
+      outputs: ["build_config.sh", "cross_compile_toolchain.cmake"]
+
+    convert:
+      description: "Model conversion: HF -> GGUF (F16 intermediate or a direct type); the imatrix job. Around it
+        (scripts/model_check.py): format detection, integrity checks of the input and the output, the statistics, a
+        functional test of the GGUF, cleanup on failure"
+      dependencies: ["convert_hf_to_gguf.py", "llama-imatrix", "llama-completion (the functional test)"]
+      runtime: "container"
+      inputs: ["model_directory (or a GGUF file: nothing converted)", "build_config.sh"]
+      outputs: ["<model>-<type>.gguf", "tmp-<model>-F16.gguf (or the --output file) and quantize_jobs.sh",
+                "imatrix.dat", "convert_stats.json (\"conversion\" in build_info.json)"]
+
+    target:
+      description: "Quantization, the results (build_info.json) and the package for the board: llama-cli,
+        llama-server, model card, test_model.sh, deploy.sh, MANIFEST.json and SHA256SUMS, checked before it is kept"
+      dependencies: ["llama-quantize", "llama-completion (functional test)", "cmake", "make", "python3"]
+      runtime: "container"
+      inputs: ["quantize_jobs.sh", "build_config.sh"]
+      outputs: ["<model>-<type>.gguf", "build_info.json", "packages/"]
+
+# Hardware optimization profiles, one per board of the capabilities below (schema: orchestrator/schemas/targets.py
+# OptimizationProfile; read by orchestrator/Core/board_profiles.py).
+# - Source side (cmake_options, cpu_flags): what the build recipe (orchestrator/runtime/build/recipe.py) plans for a
+#   cross build for the SoC from its CPU features; tests/test_board_profiles.py, tests/test_arm64_target.py and
+#   `llm-cli targets validate` plan that build and refuse a profile that differs. The features per core: GCC's core
+#   table aarch64-cores.def (cortex-a72: Armv8-A with CRC; cortex-a76: Armv8.2-A with F16, RCpc and DOTPROD; neither
+#   has int8 matrix multiply or SVE). config_module.sh load_board_defaults plans the same features without a probe.
+# - Target side (recommended_quantization, memory_profile, optimization): the Builder, `llm-cli build start` and
+#   start_build offer these quantizations first and start from this level when none is given. With the dot product,
+#   llama.cpp's ARM kernels at the pin repack Q4_0, IQ4_NL and Q8_0 (4x4) and Q4_K, Q5_K and Q6_K (8x4) when the model
+#   loads (ggml/src/ggml-cpu/repack.cpp, ggml_repack_get_optimal_repack_type); without it nothing is repacked.
+optimization_profiles:
+  bcm2711:
+    arch: arm64
+    cpu: cortex-a72
+    cpu_features: [neon]   # Armv8-A: no dot product, no FP16 arithmetic
+    cmake_options: {GGML_NATIVE: "OFF", GGML_CPU_ARM_ARCH: "armv8-a"}
+    cpu_flags: "-march=armv8-a"
+    memory_profile: medium_memory
+    optimization: balanced
+    recommended_quantization: [Q4_K_M, Q4_0, IQ4_XS, Q5_K_M]
+    note: "No type is repacked on the Cortex-A72, so quality per bit decides; IQ4_XS is the smallest 4-bit type, for the boards with the least memory. Threads: the four cores (llama.cpp's default)."
+
+  bcm2712:
+    arch: arm64
+    cpu: cortex-a76
+    cpu_features: [neon, dotprod, fp16]
+    cmake_options: {GGML_NATIVE: "OFF", GGML_CPU_ARM_ARCH: "armv8.2-a+dotprod+fp16"}
+    cpu_flags: "-march=armv8.2-a+dotprod+fp16"
+    memory_profile: high_memory
+    optimization: balanced
+    recommended_quantization: [Q4_K_M, Q4_0, IQ4_NL, Q5_K_M, Q6_K, Q8_0]
+    note: "Every recommended type is repacked for the dot product kernels; Q5_K_M to Q8_0 for the boards with more memory. Threads: the four cores (llama.cpp's default)."
+
+# Framework requirements
+requirements:
+  framework:
+    docker_version: ">=20.10"
+    python_version: ">=3.10"
+
+  host_system:
+    memory_gb: 8
+    disk_gb: 15
+    network: "required"
+
+  target_system:
+    architecture: "aarch64"
+    kernel_version: ">=5.10"
+    memory_mb: ">=1024"
+
+# Machine-readable capabilities (schema: orchestrator/schemas/targets.py). GUI, CLI, the build service, Ditto and
+# the MCP server offer and validate exactly what is listed here. Keep in sync with modules/config_module.sh (GGUF types
+# and the default board); the tests check that. The format names no sdk: nothing of the board is asked before a build.
+capabilities:
+  schema_version: 1
+  support_level: official
+  default_board: bcm2712   # what the config stage uses when no board is given (TARGET_BOARD empty)
+  boards:
+    bcm2711:
+      label: "Raspberry Pi 4 (BCM2711, 4x Cortex-A72)"
+      cpu: "4x Cortex-A72"
+      ram_max_gb: 8
+      examples: ["Raspberry Pi 4 Model B", "Raspberry Pi 400", "Compute Module 4"]
+    bcm2712:
+      label: "Raspberry Pi 5 (BCM2712, 4x Cortex-A76)"
+      cpu: "4x Cortex-A76"
+      ram_max_gb: 16
+      examples: ["Raspberry Pi 5", "Raspberry Pi 500", "Compute Module 5"]
+  formats:
+    gguf:
+      label: "GGUF (llama.cpp, CPU)"
+      input: [hf]
+      quantizations: [Q4_K_M, Q4_0, IQ4_NL, IQ4_XS, Q5_K_M, Q6_K, Q8_0, Q4_1, Q5_0, Q5_1, Q2_K, Q2_K_S,
+                      Q3_K_S, Q3_K_M, Q3_K_L, Q4_K_S, Q5_K_S, IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ2_M,
+                      IQ3_XXS, IQ3_XS, IQ3_S, IQ3_M, TQ1_0, TQ2_0, MXFP4_MOE, Q1_0, Q2_0, F16, BF16, F32]
+      default_quantization: Q4_K_M
+      imatrix: true
+      needs_imatrix: [IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ2_M, IQ3_XXS, IQ3_XS, Q2_K_S]
+      dataset: optional
+      dataset_kind: text
+      aliases: {FP16: F16, FP32: F32, INT8: Q8_0, Q8: Q8_0, INT4: Q4_K_M, Q4: Q4_K_M, Q5: Q5_K_M,
+                Q3_K: Q3_K_M, Q4_K: Q4_K_M, Q5_K: Q5_K_M}   # config_module.sh normalize_gguf_type
+      notes: "Runs on the CPU of the board with llama.cpp; no vendor SDK. On the Raspberry Pi 5 Q4_0, IQ4_NL, Q8_0 and the K types from Q4_K to Q6_K are repacked for the dot product kernels."
+
+# Benchmark rows (schema: BenchmarkEntry): none shipped, since no estimate is shown as a measurement. A board test of
+# a build of this target (llama-bench on the board, device_tests.json) shows up as a measured row by itself.
+performance_benchmarks: []

@@ -320,7 +320,7 @@ def test_mounts_are_read_only_and_named_in_llmcf_deps(tmp_path, archive_server):
 
 
 @needs_bash
-@pytest.mark.parametrize("target", ["Rockchip", "_template"])
+@pytest.mark.parametrize("target", ["Rockchip", "ARM64", "_template"])
 def test_the_cross_build_takes_the_mounted_copy_fully_disconnected(tmp_path, target):
     """cross_compile_target: FETCHCONTENT_SOURCE_DIR_<NAME> for each mounted dependency, FULLY_DISCONNECTED=ON, and
     GGML_CPU_KLEIDIAI no longer forced OFF once KleidiAI is mounted."""

@@ -19,7 +19,7 @@ maintainer's design (DESIGN round 16, U9 addendum) and never had.
 
 Runs in the target image with its python3 and the standard library only (no numpy, no gguf-py), so the tests run the
 same code. Reads model files, writes only the files named on its command line and the stage's own files, and never
-uses the network. Every target ships the same copy (targets/Rockchip/scripts and targets/_template/scripts).
+uses the network. Every target ships the same copy (targets/Rockchip, targets/ARM64 and targets/_template, scripts/).
 
   model_check.py input PATH --format FORMAT --stats FILE [--onnx-next TEXT]
   model_check.py begin FILE --state FILE [--scratch DIR]

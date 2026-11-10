@@ -22,6 +22,8 @@ from conftest import REPO_ROOT, posix_shell
 from test_build_stages import PROBE_FIXTURES, Image, by_hand, needs_bash, plan_of, stage_lines
 
 STAGES = "build-cache/work/stages/build"
+# The targets whose stage modules share the same functions (the shipped ones and the module generator's template).
+SHARED_STAGE_TARGETS = ("Rockchip", "ARM64", "_template")
 
 
 @pytest.fixture
@@ -950,7 +952,7 @@ def test_a_module_s_own_cmake_call_refuses_what_every_build_keeps_off():
     from conftest import REPO_ROOT
 
     from orchestrator.runtime.build.recipe import DEPRECATED_DOWNLOAD_OPTIONS, DOWNLOAD_OPTIONS_OFF
-    for target in ("Rockchip", "_template"):
+    for target in SHARED_STAGE_TARGETS:
         text = (REPO_ROOT / "targets" / target / "modules" / "target_module.sh").read_text(encoding="utf-8")
         names = re.search(r"^DOWNLOAD_OFF_OPTIONS=\(([^)]*)\)", text, re.M).group(1).split()
         assert names == [*DOWNLOAD_OPTIONS_OFF, *DEPRECATED_DOWNLOAD_OPTIONS], target
@@ -1020,7 +1022,7 @@ def test_the_shell_s_project_include_pattern_is_the_recipe_s():
              "CMAKE_TOOLCHAIN_FILE", "LLAMA_INCLUDE", "CMAKE_PROJECT_INCLUDES", "XCMAKE_PROJECT_INCLUDE"]
     refused = [n for n in names if SCRIPT_VARIABLE_RE.match(n)]
     assert refused == names[:5]
-    for target in ("Rockchip", "_template"):
+    for target in SHARED_STAGE_TARGETS:
         text = (REPO_ROOT / "targets" / target / "modules" / "target_module.sh").read_text(encoding="utf-8")
         pattern = re.search(r"^SCRIPT_VARIABLE_PATTERN='([^']*)'$", text, re.M).group(1)
         shell = re.compile(pattern.replace("[:space:]", r"\s"))  # the POSIX class in Python's spelling
@@ -1273,11 +1275,12 @@ def test_the_template_packages_with_the_same_functions_and_helpers_as_the_rockch
     from conftest import REPO_ROOT
     targets = REPO_ROOT / "targets"
     blocks = [_block(targets / t / "modules" / "target_module.sh", "# PACKAGE FOR THE BOARD (version 1.x",
-                     "# END OF PACKAGE") for t in ("Rockchip", "_template")]
-    assert blocks[0] == blocks[1]
+                     "# END OF PACKAGE") for t in SHARED_STAGE_TARGETS]
+    assert all(block == blocks[0] for block in blocks)
     for name in ("board_package.py", "package_test_model.sh", "package_deploy.sh"):
-        assert (targets / "_template" / "scripts" / name).read_bytes() == \
-            (targets / "Rockchip" / "scripts" / name).read_bytes(), name
+        for target in SHARED_STAGE_TARGETS[1:]:
+            assert (targets / target / "scripts" / name).read_bytes() == \
+                (targets / "Rockchip" / "scripts" / name).read_bytes(), (target, name)
 
 
 def test_a_generated_module_gets_the_package_helpers_executable(tmp_path):
@@ -1354,14 +1357,14 @@ def test_the_source_stage_says_where_the_image_s_source_came_from(image):
            "repository when it builds this target's image" in result.stdout
 
 
-def test_the_clone_default_is_a_pin_place_of_both_shipped_targets():
+def test_the_clone_default_is_a_pin_place_of_every_shipped_target():
     from orchestrator.runtime.build import pins
     from orchestrator.runtime.catalog import load_catalog
     source = load_catalog().llama_cpp.source
     places = [p for p in pins.pin_places(source) if "--clone-llama-cpp" in p.what]
     assert {(p.path, p.kind) for p in places} == {
-        (f"targets/{t}/modules/source_module.sh", "derived") for t in ("Rockchip", "_template")}
-    assert len(places) == 4 and all(p.ok for p in places)
+        (f"targets/{t}/modules/source_module.sh", "derived") for t in SHARED_STAGE_TARGETS}
+    assert len(places) == 2 * len(SHARED_STAGE_TARGETS) and all(p.ok for p in places)
 
 
 def test_a_clone_default_off_the_pin_is_a_mismatch(tmp_path):
@@ -1382,8 +1385,8 @@ def test_a_clone_default_off_the_pin_is_a_mismatch(tmp_path):
 def test_the_template_clones_with_the_same_functions_as_the_rockchip_target():
     from conftest import REPO_ROOT
     blocks = [_block(REPO_ROOT / "targets" / t / "modules" / "source_module.sh", "# THE LLAMA.CPP SOURCE BY HAND",
-                     "# END OF LLAMA.CPP SOURCE") for t in ("Rockchip", "_template")]
-    assert blocks[0] == blocks[1] and "repo_url_ok" in blocks[0]
+                     "# END OF LLAMA.CPP SOURCE") for t in SHARED_STAGE_TARGETS]
+    assert all(block == blocks[0] for block in blocks) and "repo_url_ok" in blocks[0]
 
 
 # --- the image builds take LLAMA_CPP_REPO_OVERRIDE as where the pinned commit comes from ---------------------------
@@ -1440,7 +1443,8 @@ def test_a_dockerfile_without_the_repository_argument_gets_none(tmp_path, monkey
 
 def test_the_shipped_images_fetch_the_pinned_commit_from_llama_cpp_repo_and_check_it():
     from conftest import REPO_ROOT
-    for dockerfile in (REPO_ROOT / "targets" / "Rockchip" / "dockerfile", REPO_ROOT / "targets" / "_template" / "Dockerfile",
+    for dockerfile in (REPO_ROOT / "targets" / "Rockchip" / "dockerfile", REPO_ROOT / "targets" / "ARM64" / "Dockerfile",
+                       REPO_ROOT / "targets" / "_template" / "Dockerfile",
                        REPO_ROOT / "targets" / "_template" / "Dockerfile.gpu"):
         text = dockerfile.read_text(encoding="utf-8")
         assert 'remote add origin "${LLAMA_CPP_REPO}"' in text, dockerfile
@@ -1458,7 +1462,8 @@ def _validation(path):
 def test_the_template_validates_with_the_same_functions_as_the_rockchip_target():
     from conftest import REPO_ROOT
     rockchip = _validation(REPO_ROOT / "targets" / "Rockchip" / "modules" / "config_module.sh")
-    assert _validation(REPO_ROOT / "targets" / "_template" / "modules" / "config_module.sh") == rockchip
+    for target in SHARED_STAGE_TARGETS[1:]:
+        assert _validation(REPO_ROOT / "targets" / target / "modules" / "config_module.sh") == rockchip, target
     for name in ("elf_machine", "compiler_test", "check_toolchain_file", "check_plan_file"):
         assert f"\n{name}() {{" in rockchip
 
@@ -1474,7 +1479,8 @@ def test_the_template_plans_an_x86_cpu_with_the_same_functions_as_the_rockchip_t
     -march=native only for this one), with the very functions of the Rockchip target."""
     from conftest import REPO_ROOT
     rockchip = _x86_block(REPO_ROOT / "targets" / "Rockchip" / "modules" / "config_module.sh")
-    assert _x86_block(REPO_ROOT / "targets" / "_template" / "modules" / "config_module.sh") == rockchip
+    for target in SHARED_STAGE_TARGETS[1:]:
+        assert _x86_block(REPO_ROOT / "targets" / target / "modules" / "config_module.sh") == rockchip, target
     for name in ("explicit_x86_flags", "profile_is_this_machine", "avx512_missing", "plan_x86_cpu"):
         assert f"\n{name}() {{" in rockchip
 
@@ -1604,7 +1610,8 @@ def test_the_template_plans_an_arm_cpu_with_the_same_functions_as_the_rockchip_t
     from orchestrator.runtime.build import recipe
     from orchestrator.runtime.profile import load_schema
     rockchip = _arm_block(REPO_ROOT / "targets" / "Rockchip" / "modules" / "config_module.sh")
-    assert _arm_block(REPO_ROOT / "targets" / "_template" / "modules" / "config_module.sh") == rockchip
+    for target in SHARED_STAGE_TARGETS[1:]:
+        assert _arm_block(REPO_ROOT / "targets" / target / "modules" / "config_module.sh") == rockchip, target
     for name in ("arm_feature_value", "plan_c_compiler_version", "sme_problem", "plan_arm_cpu"):
         assert f"\n{name}() {{" in rockchip
     schema = load_schema()
@@ -1665,7 +1672,7 @@ def _shell_arm_plan(script, profile, compiler):
 
 
 @needs_bash
-@pytest.mark.parametrize("target", ["Rockchip", "_template"])
+@pytest.mark.parametrize("target", SHARED_STAGE_TARGETS)
 @pytest.mark.parametrize("case", list(ARM_PARITY))
 def test_the_config_stage_plans_every_arm_profile_as_the_build_recipe(tmp_path, target, case):
     """The parity table: for each profile (and the plan's C compiler, which decides +sme) the -march, the features
@@ -1688,7 +1695,7 @@ def test_the_config_stage_plans_every_arm_profile_as_the_build_recipe(tmp_path, 
         family = ("clang" if "clang" in banner else "gcc", version)
     march, used, unusable = arm_plan(parse_profile(text), family)
 
-    folder = REPO_ROOT / "targets" / "Rockchip"
+    folder = REPO_ROOT / "targets" / target
     if target == "_template":  # an aarch64 module the generator made from the template
         from test_target_template import generate
         folder = generate(tmp_path, cpu_flags="-mcpu=cortex-a55", architecture="aarch64")

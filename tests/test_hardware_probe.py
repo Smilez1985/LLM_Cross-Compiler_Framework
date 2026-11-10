@@ -170,6 +170,24 @@ def make_sysroot(base: Path, kind: str) -> Path:
         write(root, "/proc/rknpu/version", "RKNPU driver: v0.9.6\n")
         pci_device(root, "0000:01:00.0", "0x1e60", "0x2864", "0x120000")  # a Hailo-8 on the M.2 slot
         write(root, "/dev/hailo0", b"")
+    elif kind in ("rpi4", "rpi5"):
+        # A Raspberry Pi 4 (BCM2711, 4x Cortex-A72) and a Raspberry Pi 5 (BCM2712, 4x Cortex-A76) on the 64-bit
+        # Raspberry Pi OS, whose os-release is Debian's: the device tree's compatible and model as the Raspberry Pi
+        # kernel's bcm2711-rpi-4-b.dts and bcm2712-rpi-5-b.dts write them.
+        soc, model, compatible, clock, kernel = {
+            "rpi4": ("bcm2711", "Raspberry Pi 4 Model B Rev 1.4", "raspberrypi,4-model-b", "1800000", "rpi-v8"),
+            "rpi5": ("bcm2712", "Raspberry Pi 5 Model B Rev 1.0", "raspberrypi,5-model-b", "2400000", "rpi-2712")}[kind]
+        write(root, "/proc/cpuinfo", (FIXTURES / f"cpuinfo_{soc}.txt").read_text())
+        write(root, "/etc/os-release", (FIXTURES / "os-release_dietpi.txt").read_text())
+        write(root, "/proc/sys/kernel/osrelease", f"6.6.51+rpt-{kernel}\n")
+        write(root, "/proc/sys/kernel/arch", "aarch64\n")
+        write(root, "/proc/meminfo", meminfo(8139000, 7400000, 524284))
+        (root / "run/systemd/system").mkdir(parents=True)
+        write(root, "/lib/aarch64-linux-gnu/libc.so.6", b"")
+        for cpu in range(4):
+            write(root, f"/sys/devices/system/cpu/cpu{cpu}/cpufreq/cpuinfo_max_freq", clock + "\n")
+        write(root, "/proc/device-tree/compatible", f"{compatible}\0brcm,{soc}\0".encode())
+        write(root, "/proc/device-tree/model", model.encode() + b"\0")
     else:
         raise ValueError(kind)
     return root
@@ -419,6 +437,18 @@ class TestFixtureMachines:
         assert profile.get("NVIDIA_DRIVER_CUDA_MAX") == "13.0" and profile.get("VULKAN_DEVICES") == "2"
         assert profile.is_on("SUPPORTS_CUDA") and profile.is_on("VULKAN")
 
+    @pytest.mark.parametrize("kind, soc, cpu, part, features", [
+        ("rpi4", "bcm2711", "Cortex-A72", "0xd08", {"SUPPORTS_DOTPROD": "OFF", "SUPPORTS_FP16_ARITH": "OFF"}),
+        ("rpi5", "bcm2712", "Cortex-A76", "0xd0b", {"SUPPORTS_DOTPROD": "ON", "SUPPORTS_FP16_ARITH": "ON"})])
+    def test_a_raspberry_pi_names_its_soc_and_its_cores(self, tmp_path, kind, soc, cpu, part, features):
+        """The SoC of the device tree's last compatible entry is the board of the generic ARM64 target."""
+        profile = parse_profile(probe.render_text(py_probe(make_sysroot(tmp_path, kind))))
+        expect = {"ARCH": "arm64", "SOC_VENDOR": "brcm", "SOC_MODEL": soc, "CPU_MODEL": cpu, "CPU_CORES_LOGICAL": "4",
+                  "SUPPORTS_NEON": "ON", "SUPPORTS_I8MM": "OFF", "SUPPORTS_SVE": "OFF", "NPU_VENDOR": None, **features}
+        assert {k: profile.get(k) for k in expect} == expect
+        assert profile.get("CPU_CLUSTERS").startswith(f"0-3:0x41:{part}:")
+        assert profile.soc_model_known and profile.get("BOARD_MODEL").startswith("Raspberry Pi")
+
     def test_json_view_has_the_same_values(self, tmp_path):
         values = py_probe(make_sysroot(tmp_path, "rk3588"))
         assert parse_profile_json(probe.render_json(values)) == parse_profile(probe.render_text(values))
@@ -440,7 +470,8 @@ class TestShellEquivalence:
 
     @pytest.mark.parametrize("shell", available_shells())
     @pytest.mark.parametrize("kind, fake_tools", [("intel", False), ("intel", True), ("amd", False),
-                                                  ("rk3566", False), ("rk3588", False)])
+                                                  ("rk3566", False), ("rk3588", False), ("rpi4", False),
+                                                  ("rpi5", False)])
     def test_sh_and_py_agree(self, tmp_path, shell, kind, fake_tools):
         root = make_sysroot(tmp_path, kind)
         bindir = tool_dir(tmp_path, fake_gpu_tools=fake_tools)

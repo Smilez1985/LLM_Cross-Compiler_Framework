@@ -102,7 +102,7 @@ EOF
 # PACKAGE FOR THE BOARD (version 1.x: "Professional Packaging - deployment-ready with documentation", "Helper
 # Scripts - test_model.sh, deploy.sh", "Complete Manifest - JSON with all build details", "Automated Testing -
 # functional tests + validation")
-# The same functions in targets/Rockchip and targets/_template (tests/test_target_stage.py compares them). They read
+# The same functions in targets/Rockchip, targets/ARM64 and targets/_template (tests/test_target_stage.py compares them). They read
 # the board's part of the build plan (config_module.sh: board_plan_lines) and PACKAGE_TARGET, the target's name.
 # ============================================================================
 

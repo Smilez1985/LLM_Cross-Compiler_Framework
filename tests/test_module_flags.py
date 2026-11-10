@@ -50,7 +50,7 @@ def shell_verdicts(words, context, prefetched=(), target="Rockchip", tmp=None, e
 
 
 @needs_bash
-@pytest.mark.parametrize("target", ["Rockchip", "_template"])
+@pytest.mark.parametrize("target", ["Rockchip", "ARM64", "_template"])
 def test_the_shell_gives_the_same_verdicts_as_the_recipe(tmp_path, target):
     """The in-container last check agrees with the Python verdict on every vector and in every context."""
     for vector in VECTORS["vectors"]:
@@ -63,7 +63,7 @@ def test_the_shell_gives_the_same_verdicts_as_the_recipe(tmp_path, target):
 
 
 def test_the_shell_lists_are_the_recipe_s():
-    for target in ("Rockchip", "_template"):
+    for target in ("Rockchip", "ARM64", "_template"):
         text = (REPO_ROOT / "targets" / target / "modules" / "target_module.sh").read_text(encoding="utf-8")
 
         def names(variable, text=text):
@@ -179,7 +179,7 @@ def _shim(tmp_path, *words, env=None, target="Rockchip"):
 
 
 @needs_bash
-@pytest.mark.parametrize("target", ["Rockchip", "_template"])
+@pytest.mark.parametrize("target", ["Rockchip", "ARM64", "_template"])
 def test_a_module_s_cmake_call_starts_from_a_fresh_cache_without_a_toolchain_from_the_environment(tmp_path, target):
     """Review leftover (build-probe/build-safety): a CMakeCache.txt left in the module's build folder or a
     CMAKE_TOOLCHAIN_FILE in the environment set options without a word on the command line."""
@@ -210,7 +210,7 @@ def test_the_shell_s_program_variables_are_the_recipe_s():
              "CMAKE_BUILD_TYPE", "GGML_CCACHE"]
     refused = [n for n in names if recipe.PROGRAM_VARIABLE_RE.match(n)]
     assert refused == names[:12]
-    for target in ("Rockchip", "_template"):
+    for target in ("Rockchip", "ARM64", "_template"):
         text = (REPO_ROOT / "targets" / target / "modules" / "target_module.sh").read_text(encoding="utf-8")
         shell = re.compile(re.search(r"^PROGRAM_VARIABLE_PATTERN='([^']*)'$", text, re.M).group(1))
         assert [n for n in names if shell.search(n)] == refused, target

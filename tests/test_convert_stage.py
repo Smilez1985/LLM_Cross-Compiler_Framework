@@ -52,8 +52,9 @@ def check(*args) -> int:
 # ---------------------------------------------------------------------------------------------------------------
 
 def test_every_target_ships_the_same_model_check():
-    assert (ROCKCHIP / "scripts" / "model_check.py").read_bytes() == \
-        (TEMPLATE / "scripts" / "model_check.py").read_bytes()
+    for other in (TEMPLATE, ROCKCHIP.parent / "ARM64"):
+        assert (ROCKCHIP / "scripts" / "model_check.py").read_bytes() == \
+            (other / "scripts" / "model_check.py").read_bytes(), other.name
 
 
 def test_the_model_suffixes_are_the_frameworks():

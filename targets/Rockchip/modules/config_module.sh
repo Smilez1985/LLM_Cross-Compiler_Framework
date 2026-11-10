@@ -241,7 +241,7 @@ load_plain_defaults() {
 
 # ============================================================================
 # THE CPU OF AN x86_64 PROFILE: -march=native only for this build machine itself
-# The same functions in targets/Rockchip and targets/_template (tests/test_target_stage.py compares them). They read
+# The same functions in targets/Rockchip, targets/ARM64 and targets/_template (tests/test_target_stage.py compares them). They read
 # the profile from HW_CONFIG (ARCHITECTURE_FULL, CPU_MODEL_NAME, the SUPPORTS_* keys) and its file
 # (HARDWARE_CONFIG_FILE, for CPU_FLAGS_ALL as written), and set X86_CFLAGS and X86_CMAKE_FLAGS.
 # ============================================================================
@@ -411,7 +411,7 @@ plan_x86_cpu() {
 
 # ============================================================================
 # THE CPU OF AN aarch64 PROFILE: -march and GGML_CPU_ARM_ARCH from the probe's features
-# The same functions in targets/Rockchip and targets/_template (tests/test_target_stage.py compares them, and runs them
+# The same functions in targets/Rockchip, targets/ARM64 and targets/_template (tests/test_target_stage.py compares them, and runs them
 # against the build recipe on the same profiles). They read the profile from HW_CONFIG (the SUPPORTS_* keys) and its
 # file (HARDWARE_CONFIG_FILE, for CPU_FLAGS_ALL as written), and set ARM_ARCH, ARM_CFLAGS, ARM_CMAKE_FLAGS,
 # CPU_FEATURES_USED and CPU_FEATURES_UNUSABLE.
@@ -624,7 +624,7 @@ find_compilers() {
 
 # ============================================================================
 # VALIDATION (version 1.x: "Professional Validation - compiler tests, syntax checks")
-# The same functions in targets/Rockchip and targets/_template (tests/test_target_stage.py compares them). They read
+# The same functions in targets/Rockchip, targets/ARM64 and targets/_template (tests/test_target_stage.py compares them). They read
 # the plan's compilers and flags from COMPILER_CONFIG (CC, CXX, CFLAGS, CXXFLAGS) and its system from
 # HW_CONFIG[ARCHITECTURE_FULL].
 # ============================================================================

@@ -51,7 +51,7 @@ report_sources() {
 
 # ============================================================================
 # THE LLAMA.CPP SOURCE BY HAND (source_module.sh --clone-llama-cpp: the source setup of version 1.x)
-# The same functions in targets/Rockchip and targets/_template (tests/test_target_stage.py compares them).
+# The same functions in targets/Rockchip, targets/ARM64 and targets/_template (tests/test_target_stage.py compares them).
 # ============================================================================
 
 # The framework's llama.cpp pin (configs/llama_runtime.yml, llama_cpp.source): what --clone-llama-cpp checks out when

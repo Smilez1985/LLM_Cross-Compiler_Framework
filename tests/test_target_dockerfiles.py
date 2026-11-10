@@ -33,9 +33,10 @@ CATALOG = load_catalog()
 PIN = CATALOG.llama_cpp.source
 PROBES = REPO_ROOT / "tests" / "fixtures" / "hardware_probe"
 ROCKCHIP = REPO_ROOT / "targets" / "Rockchip" / "dockerfile"
+ARM64 = REPO_ROOT / "targets" / "ARM64" / "Dockerfile"
 TEMPLATE = REPO_ROOT / "targets" / "_template" / "Dockerfile"
 TEMPLATE_GPU = REPO_ROOT / "targets" / "_template" / "Dockerfile.gpu"
-DOCKERFILES = [ROCKCHIP, TEMPLATE, TEMPLATE_GPU]
+DOCKERFILES = [ROCKCHIP, ARM64, TEMPLATE, TEMPLATE_GPU]
 FETCH_MARKER = 'rev-parse HEAD'
 BUILD_MARKER = '${LLAMA_CMAKE_ARGS}'
 
@@ -68,7 +69,7 @@ class TestTheRecipeInTheDockerfiles:
         """The template follows the shipped target: the same fetch and build steps (decision D21, recipes are what is
         shared)."""
         rockchip = text(ROCKCHIP)
-        for other in (TEMPLATE, TEMPLATE_GPU):
+        for other in (ARM64, TEMPLATE, TEMPLATE_GPU):
             assert find_run(text(other), FETCH_MARKER) == find_run(rockchip, FETCH_MARKER), other.name
             assert find_run(text(other), BUILD_MARKER) == find_run(rockchip, BUILD_MARKER), other.name
             for arg in ("LLAMA_CPP_REPO", "LLAMA_CPP_TAG", "LLAMA_CPP_COMMIT", "LLAMA_CMAKE_ARGS"):

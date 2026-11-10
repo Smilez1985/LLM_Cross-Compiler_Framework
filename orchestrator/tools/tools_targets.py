@@ -46,7 +46,7 @@ from orchestrator.tools.registry import ResourceSpec, ToolContext, ToolError, To
 from orchestrator.tools.spec import CallFacts, Fact, FieldMeta, GrantRule, ToolLimits
 
 # Target folders the framework ships (in its own targets folder): trust "shipped".
-SHIPPED_TARGET_FOLDERS = frozenset({"Rockchip"})
+SHIPPED_TARGET_FOLDERS = frozenset({"Rockchip", "ARM64"})
 TRUST_VALUES = ("shipped", "verified", "community", "local", "revoked", "ai-generated", "own", "unknown")
 PROBE_ID_PATTERN = r"^(local|[0-9a-f]{16})$"
 AI_TEXT = "written by the AI"
