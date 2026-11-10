@@ -505,8 +505,8 @@ def report_lines(report: Mapping[str, Any]) -> List[str]:
         lines.append(f"No recommendation: {rec.get('reason')}"
                      + (f" The best measured type is {rec['best_measured']}." if rec.get("best_measured") else ""))
     if any(r.get("status") == "done" and r.get("tokens_s") is None for r in report.get("candidates") or []):
-        lines.append("Speed: build a type, then run the board benchmark (llm-cli device runtime verify --bench-model);"
-                     " this report shows the measured tokens/s from then on.")
+        lines.append("Speed: build a type and run the board benchmark on it; this report shows the measured tokens/s "
+                     "from then on.")
     lines += [f"Note: {n}" for n in report.get("notes") or []]
     return lines
 

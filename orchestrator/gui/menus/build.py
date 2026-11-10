@@ -106,6 +106,22 @@ CLI_PATHS: Dict[str, str] = {
     "build interrupted continue --ignore-preflight": "btn_history_interrupted",   # its Continue anyway question
     # the Builder's progress panel follows a build until its end record and says how it ended
     "build status --wait": "panel_builder_progress",
+    # the Auto-Tuning tab (orchestrator/gui/tuning_tab.py): Plan, Start Tuning, the finished runs and their report
+    "build tune start": "btn_tuning_start",
+    "build tune start --model": "txt_tuning_model",
+    "build tune start --target": "cmb_tuning_target",
+    "build tune start --board": "cmb_tuning_board",
+    "build tune start --probe": "btn_deploy_scan",            # the probe the Deployment tab imported or scanned last
+    "build tune start --type": "txt_tuning_types",
+    "build tune start --imatrix": "cmb_tuning_imatrix",
+    "build tune start --chunks": "spin_tuning_chunks",
+    "build tune start --yes": "btn_tuning_plan",              # the tab shows the plan first, Start Tuning starts it
+    "build tune start --follow": "panel_builder_progress",    # the run is a build: the Builder's progress panel
+    "build tune list": "lst_tuning_runs",
+    "build tune show": "txt_tuning_report",
+    "build tune build": "btn_tuning_build",
+    "build tune build --type": "combo_builder_quantization",  # another measured type: chosen in the Builder
+    "build tune build --follow": "panel_builder_progress",
     "config show": "act_file_settings",
     # File > Settings... > General: the framework mode (private or enterprise), the person's alone
     "config set": "act_file_settings",
@@ -137,6 +153,10 @@ MACHINE_ONLY: Dict[str, str] = {
     "targets list --format": "json or yaml output for scripts; Build > Targets... shows the same rows as a table",
     "config local-network --yes": "skips the question with the explanation, for scripts; the window always asks",
     "build preflight --json": "machine-readable output for scripts; the Builder's Pre-flight check shows the same lines",
+    "build tune start --ctx": "the tab measures 512 tokens per chunk, llama-perplexity's own context; another one is "
+                              "for comparisons by script",
+    "build tune list --json": "machine-readable output for scripts; the Auto-Tuning tab lists the same runs",
+    "build tune show --json": "the report as JSON for scripts; the Auto-Tuning tab shows the same report",
     # what an earlier version wrote into the installation folder (Core/install_migration.py)
     "config take-over": "the GUI asks the same question once at its first start after the change; the command "
                         "moves what was declined there",

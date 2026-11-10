@@ -2049,8 +2049,8 @@ class BuildService:
         found = next((r for r in reports if run in (r["id"], r["label"], r["label"].split(":", 1)[-1])), None)
         if found is None:
             raise BuildServiceError(f"Unknown tuning run '{run}'.", code="unknown_id",
-                                    next="list the tuning runs ('llm-cli build tune list', get_tuning_report without "
-                                         "a run) and use one of their ids.")
+                                    next="List the finished tuning runs (get_tuning_report without a run) and use one "
+                                         "of their ids.")
         return found
 
     def build_tuned(self, run: str, label: Optional[str] = None, *, local_paths: bool = False, owner: str = "",
