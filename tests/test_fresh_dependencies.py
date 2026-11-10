@@ -242,7 +242,10 @@ def test_install_bat_resolves_fresh_audits_installs_checks_and_rolls_back():
     install_venv = step[step.index("function Install-Venv"):step.index("$UseFresh = $false")]
     assert "& $PythonVenv scripts\\fresh_deps.py selfcheck --root . --gui | Out-Host" in install_venv
     assert "return ($LASTEXITCODE -eq 0)" in install_venv
-    assert "& $Pip install --require-hashes --no-deps -r $ReqFile | Out-Null" in install_venv
+    # @PipSource is empty with a network; from a preload it is --no-index and the preload's folders (the lock's hashes
+    # are checked either way)
+    assert "& $Pip install @PipSource --require-hashes --no-deps -r $ReqFile | Out-Null" in install_venv
+    assert '$PipSource = @("--no-index", "--find-links"' in install_venv
     # offline: nothing resolved, the tested lock
     assert '$Offline = ($env:LCF_OFFLINE -eq "1")' in text
     assert 'if ($InstallArg -eq "--offline") { $Offline = $true }' in text
