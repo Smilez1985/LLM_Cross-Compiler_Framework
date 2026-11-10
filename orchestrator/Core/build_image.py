@@ -47,7 +47,11 @@ from orchestrator.utils.modes import SHARED_READ, SHARED_RUN
 
 # The build arguments that say where the image's sources come from, never what they are: they stay out of the image's
 # INPUTS_LABEL, so an image built online is found offline and the other way round (the pins are in the other args).
-SOURCE_ARGS = ("APT_MIRROR", "APT_PROXY", "PIP_INDEX_URL", "PIP_TRUSTED_HOST", "LLAMA_CPP_SOURCE")
+SOURCE_ARGS = ("APT_MIRROR", "APT_PROXY", "PIP_INDEX_URL", "PIP_TRUSTED_HOST", "LLAMA_CPP_SOURCE", "PIP_FIND_LINKS",
+               "PIP_NO_INDEX")
+# The build's preload's Python packages in the build context (Core/build_preload.py stages them into sources/wheels;
+# the Dockerfile COPYs sources/ to /tmp/llmcf-sources): pip installs only from them (PIP_NO_INDEX).
+PRELOAD_WHEELS = "/tmp/llmcf-sources/wheels"
 APT_MIRROR, APT_PROXY, PIP_INDEX = BUILD_SOURCE_SETTINGS
 SETTING_ARGS = {APT_MIRROR: "APT_MIRROR", APT_PROXY: "APT_PROXY", PIP_INDEX: "PIP_INDEX_URL"}
 # Where the local copy of llama.cpp lands in the build context (the Dockerfile COPYs sources/ and builds from it with
@@ -101,6 +105,7 @@ class ImageSource:
     local: bool
     how: str = ""
     detail: str = ""
+    ref: str = ""   # a base image's reference or a source image's (the build's preload; never given to an AI)
 
     def ai(self) -> Dict[str, Any]:
         return {"kind": self.kind, "label": self.label, "local": self.local, "how": self.how}
@@ -113,6 +118,8 @@ class ImagePlan:
     the local copy of llama.cpp to stage into the build context."""
     sources: List[ImageSource] = field(default_factory=list)
     build_args: Dict[str, str] = field(default_factory=dict)
+    # (kind, path) the build engine stages from the build's preload into the build context (Core/build_preload.stage)
+    preload_stage: List[Tuple[str, Path]] = field(default_factory=list)
     hosts: List[str] = field(default_factory=list)
     llama_copy: Optional[Path] = None
     bases: List[str] = field(default_factory=list)
@@ -267,10 +274,11 @@ def _base_sources(text: str, config: Any, client: Any, plan: ImagePlan) -> List[
         label = f"base image {ref}"
         if "$" in ref:
             out.append(ImageSource("base_image", label, False, "the Dockerfile names it through a build argument "
-                                   "without a default; write the image out"))
+                                   "without a default; write the image out", ref=ref))
             continue
         if client is None:
-            out.append(ImageSource("base_image", label, False, "Docker is not available, so it cannot be checked"))
+            out.append(ImageSource("base_image", label, False, "Docker is not available, so it cannot be checked",
+                                   ref=ref))
             continue
         if _image_here(client, ref):
             out.append(ImageSource("base_image", label, True, "on this computer"))
@@ -292,9 +300,9 @@ def _base_sources(text: str, config: Any, client: Any, plan: ImagePlan) -> List[
                                        verdict.why()))
                 continue
         out.append(ImageSource("base_image", label, False,
-                               "bring it onto this computer while online or from a file, use a registry or a "
-                               "registry mirror in your own network, or import the whole build container image",
-                               f"it would be pulled from {registry_host(ref)}"))
+                               "bring it onto this computer while online or from a file (the build's preload), use a "
+                               "registry or a registry mirror in your own network, or import the whole build "
+                               "container image", f"it would be pulled from {registry_host(ref)}", ref=ref))
     if hub_missing and client is not None:
         for mirror in _daemon_mirrors(client):
             verdict = check_reach(mirror, config)
@@ -393,9 +401,11 @@ def _mirror_source(kind: str, label: str, keys: Iterable[str], text: str, config
     return ImageSource(kind, label, False, how, detail)
 
 
-def _download_sources(text: str, config: Any) -> Tuple[List[ImageSource], bool]:
+def _download_sources(text: str, config: Any, preloaded: Optional[Dict[str, Path]] = None,
+                      plan: Optional[ImagePlan] = None) -> Tuple[List[ImageSource], bool]:
     """Every other address the Dockerfile fetches from, one source per host; and whether it has a pip location
-    (an ARG ..._PIP_URL) that the pip index replaces."""
+    (an ARG ..._PIP_URL) that the pip index replaces. A host whose every address is a pinned download the build's
+    preload brought (`preloaded`: url -> file) is local: the files go into the plan's preload_stage."""
     from orchestrator.utils.locality import check_reach
     hosts: Dict[str, List[str]] = {}
     pip_urls = False
@@ -421,8 +431,13 @@ def _download_sources(text: str, config: Any) -> Tuple[List[ImageSource], bool]:
             if host and "$" not in host:
                 hosts.setdefault(host, []).append(url)
     out = []
-    for host in hosts:
+    for host, urls in hosts.items():
         verdict = check_reach(host, config)
+        if not verdict.local and preloaded and all(u in preloaded for u in urls):
+            if plan is not None:
+                plan.preload_stage += [("files", preloaded[u]) for u in dict.fromkeys(urls)]
+            out.append(ImageSource("download", f"downloads from {host}", True, "from the build's preload"))
+            continue
         out.append(ImageSource("download", f"downloads from {host}", verdict.local,
                                "in your own network" if verdict.local else
                                "the Dockerfile fetches from this address at build time; put it in your own network "
@@ -450,13 +465,29 @@ def _other_package_sources(body: str) -> List[ImageSource]:
                         "once with offline mode off", "") for name in found]
 
 
+def _preload_pip(pip: ImageSource, text: str, preload: Any, plan: ImagePlan) -> ImageSource:
+    """pip packages that are not local through a mirror: local from the build's preload when it brought the target's
+    declared packages and the Dockerfile takes them (ARG PIP_FIND_LINKS and ARG PIP_NO_INDEX)."""
+    wheels = getattr(preload, "wheels", None)
+    if pip.local or wheels is None:
+        return pip
+    if not (_declares(text, "PIP_FIND_LINKS") and _declares(text, "PIP_NO_INDEX")):
+        return ImageSource("pip", pip.label, False, "the build's preload has the packages, but the target's Dockerfile "
+                           "takes no ARG PIP_FIND_LINKS and ARG PIP_NO_INDEX; " + pip.how, pip.detail)
+    plan.build_args.update({"PIP_FIND_LINKS": PRELOAD_WHEELS, "PIP_NO_INDEX": "1"})
+    plan.preload_stage.append(("wheels", Path(wheels)))
+    return ImageSource("pip", pip.label, True, "from the build's preload (pip installs only from it)")
+
+
 def offline_plan(text: str, config: Any, client: Any, *, state_dir: Any = None, llama_repo: Optional[str] = None,
-                 copy_finder=None) -> ImagePlan:
+                 copy_finder=None, preload: Any = None) -> ImagePlan:
     """The plan of an offline build of the build container image from the Dockerfile `text`: every source it needs
     and whether it is local by the one locality rule (the person's opt-outs in `config` count). `client`: the docker-py
     client (None: base images cannot be checked); `state_dir`: the per-user state folder (the local llama.cpp copy);
     `llama_repo`: the LLAMA_CPP_REPO_OVERRIDE the build uses. Names are resolved through the system resolver (never on
-    the GUI thread: the GUI asks it in a worker). Nothing is pulled, fetched or built."""
+    the GUI thread: the GUI asks it in a worker). `preload`: what the person's taken-in build preloads give
+    (Core/build_preload.PreloadSources: wheels, pinned downloads, the source images whose files are missing). Nothing is
+    pulled, fetched or built."""
     plan = ImagePlan()
     plan.sources += _base_sources(text, config, client, plan)
     llama = _llama_source(text, config, plan, state_dir, llama_repo, copy_finder or local_llama_copy)
@@ -468,13 +499,17 @@ def offline_plan(text: str, config: Any, client: Any, *, state_dir: Any = None, 
     pip = None
     if _PIP.search(body):
         pip = _mirror_source("pip", "pip packages", (PIP_INDEX,), text, config, plan)
-    downloads, pip_urls = _download_sources(text, config)
+    downloads, pip_urls = _download_sources(text, config, getattr(preload, "downloads", None), plan)
     if pip_urls and pip is None:
         pip = _mirror_source("pip", "pip packages", (PIP_INDEX,), text, config, plan)
     if pip is not None:
-        plan.sources.append(pip)
+        plan.sources.append(_preload_pip(pip, text, preload, plan))
     plan.sources += downloads
     plan.sources += _other_package_sources(body)
+    for image in getattr(preload, "images_missing", None) or []:
+        plan.sources.append(ImageSource("image_files", f"files taken from the source image {image.split('@')[0]}",
+                                        False, "take them while online once, or bring them with the build's preload",
+                                        ref=image))
     plan.hosts = list(dict.fromkeys(plan.hosts))
     return plan
 
@@ -517,8 +552,9 @@ def stop_text(target: str, plan: ImagePlan) -> str:
     return (f"Offline mode is on, and the image of the target {target} for these settings is not on this computer. "
             f"Building it offline needs every source on this computer or in your own network, and "
             f"{len(missing)} {'is' if len(missing) == 1 else 'are'} not: {numbered}. Its base images: {bases}. "
-            "Provide what is missing and start the build again, or import a build container image exported on "
-            "another computer. Start this build once with offline mode off; later builds with the same settings use "
+            "Provide what is missing and start the build again: the build's preload brings what a computer with a "
+            f"network can fetch for it (llm-cli build preload write {target}, or start the build at a terminal or in "
+            "the Builder, which offer it), or import a build container image exported on another computer. Start this build once with offline mode off; later builds with the same settings use "
             "that image offline. An image built before the framework also recorded the modules and scripts copied "
             "into it is not reused (it may hold older copies of them).")
 
@@ -572,15 +608,17 @@ def target_dockerfile(engine: Any, target: str, gpu: bool = False) -> Tuple[Path
 
 def target_plan(framework: Any, target: str, *, gpu: bool = False) -> ImagePlan:
     """offline_plan() for an installed target as a build here would make it (its Dockerfile, the person's settings,
-    the llama.cpp override, the local copy, the Docker client)."""
+    the llama.cpp override, the local copy, the build's preloads taken in, the Docker client)."""
+    from orchestrator.Core.build_preload import preload_sources
     engine = _engine(framework)
-    _folder, dockerfile = target_dockerfile(engine, target, gpu)
+    folder, dockerfile = target_dockerfile(engine, target, gpu)
     config = getattr(framework, "config", None) or getattr(engine, "config", None)
     overrides = engine._repo_overrides() if hasattr(engine, "_repo_overrides") else {}
     text = dockerfile.read_text(encoding="utf-8", errors="replace")
-    return offline_plan(text, config, docker_client(framework, engine),
-                        state_dir=getattr(config, "user_state_dir", None),
-                        llama_repo=overrides.get("LLAMA_CPP_REPO_OVERRIDE") or None)
+    state = getattr(config, "user_state_dir", None)
+    return offline_plan(text, config, docker_client(framework, engine), state_dir=state,
+                        llama_repo=overrides.get("LLAMA_CPP_REPO_OVERRIDE") or None,
+                        preload=preload_sources(state, target, folder, text, gpu))
 
 
 @dataclass(frozen=True)

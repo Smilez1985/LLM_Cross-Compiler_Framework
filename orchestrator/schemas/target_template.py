@@ -213,19 +213,135 @@ HELPER_SCRIPTS = {"modules/rknn_module.sh": ("scripts/rknn_converter.py",),
                   "modules/rkllm_module.sh": ("scripts/export_rkllm.py",)}
 
 
+IMAGE_PIN_RE = (r"^(?:[a-z0-9.-]+(?::\d{1,5})?/)?[a-z0-9]+(?:[._-]+[a-z0-9]+)*(?:/[a-z0-9]+(?:[._-]+[a-z0-9]+)*)*"
+                r"(?::[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?@sha256:[0-9a-f]{64}$")
+PLATFORM_RE = r"^linux/(?:amd64|arm64)$"
+SHA256_HEX_RE = r"^[0-9a-f]{64}$"
+
+
+class ImageFile(BaseModel):
+    """One file taken from a source image: where it is in that image, its sha256, where it goes in llmcf's image."""
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(pattern=ABS_PATH_RE, max_length=300, description="Its path in the source image")
+    sha256: str = Field(pattern=SHA256_HEX_RE)
+    dest: str = Field(pattern=ABS_PATH_RE, max_length=300, description="Its path in llmcf's build image")
+    executable: bool = False
+    redistributable: bool = Field(default=False, description="Whether its licence allows passing it on; a file that "
+                                                             "may not stays with the person")
+
+    @model_validator(mode="after")
+    def _dots(self):
+        _no_dots(self.path, "path")
+        _no_dots(self.dest, "dest")
+        return self
+
+
+class SourceImage(BaseModel):
+    """A vendor's or a community's image that already has files the build image needs: pinned by digest, read
+    without running it, only the named files taken (orchestrator/utils/image_files.py, Core/build_preload.py)."""
+    model_config = ConfigDict(extra="forbid")
+
+    image: str = Field(pattern=IMAGE_PIN_RE, max_length=400, description="name@sha256:DIGEST (manifest or index)")
+    platform: Optional[str] = Field(default=None, pattern=PLATFORM_RE,
+                                    description="linux/amd64 or linux/arm64; default: the build computer's")
+    licence_url: Optional[str] = Field(default=None, pattern=HTTPS_RE, max_length=500)
+    purpose: str = Field(default="", max_length=200, pattern=TEXT_RE)
+    files: List[ImageFile] = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def _unique(self):
+        if len({f.path for f in self.files}) != len(self.files):
+            raise ValueError(f"{self.image}: each file path once")
+        return self
+
+
 class TemplateVariables(BaseModel):
-    """The `template_variables:` block of a generated target.yml: the formats the module was made with."""
+    """The `template_variables:` block of a generated target.yml: the formats the module was made with and the files
+    its build image takes from source images."""
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal[1] = 1
     formats: List[FormatVariables] = Field(min_length=1, max_length=8)
+    source_images: List[SourceImage] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode="after")
     def _unique(self):
         ids = [f.id for f in self.formats]
         if len(set(ids)) != len(ids):
             raise ValueError("formats: each id once")
+        dests = [f.dest for image in self.source_images for f in image.files]
+        if len(set(dests)) != len(dests):
+            raise ValueError("source_images: each dest once")
         return self
+
+
+# One requirement line of pip: a name with optional extras and version clauses, or `name @ https://...`; nothing a
+# shell or pip's option parser would read (no leading -, no quote, no ; marker).
+REQUIREMENT_RE = (r"^[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9._,-]+\])?"
+                  r"(?:\s*(?:===|==|~=|!=|>=|<=|<|>)\s*[A-Za-z0-9.*+!_-]+(?:\s*,\s*(?:===|==|~=|!=|>=|<=|<|>)\s*"
+                  r"[A-Za-z0-9.*+!_-]+)*|\s@\shttps://[A-Za-z0-9._~%/+=:#-]+)?$")
+LLAMA_FILE_RE = r"^requirements(?:/[A-Za-z0-9_.-]+)*\.txt$|^requirements\.txt$"
+
+
+class PipGroup(BaseModel):
+    """Requirement lines the build image's pip installs from one index (llama.cpp's own requirement files by their
+    path at the pinned commit)."""
+    model_config = ConfigDict(extra="forbid")
+
+    requirements: List[str] = Field(default_factory=list, max_length=200)
+    index_url: Optional[str] = Field(default=None, pattern=HTTPS_RE, max_length=500)
+    extra_index_urls: List[str] = Field(default_factory=list, max_length=4)
+    llama_cpp_requirements: List[str] = Field(default_factory=list, max_length=8)
+    platforms: List[str] = Field(default_factory=list, max_length=2,
+                                 description="Only for these build computers (linux/amd64, linux/arm64); empty: all")
+
+    @model_validator(mode="after")
+    def _lines(self):
+        if any(not re.fullmatch(PLATFORM_RE, p) for p in self.platforms):
+            raise ValueError("platforms: linux/amd64 or linux/arm64")
+        bad = [r for r in self.requirements if len(r) > 300 or not re.fullmatch(REQUIREMENT_RE, r)]
+        bad += [u for u in self.extra_index_urls if not re.fullmatch(HTTPS_RE, u)]
+        bad += [f for f in self.llama_cpp_requirements if not re.fullmatch(LLAMA_FILE_RE, f) or ".." in f]
+        if bad:
+            raise ValueError(f"not a plain requirement, https index or llama.cpp requirement file: {bad[0][:80]}")
+        if not self.requirements and not self.llama_cpp_requirements:
+            raise ValueError("a pip group names requirements or llama.cpp requirement files")
+        return self
+
+
+class BuildPreload(BaseModel):
+    """target.yml `build_preload:`: the Python packages the build image installs, for the build's preload of a
+    computer without a network (Core/build_preload.py): the image's Python and glibc and the pip groups."""
+    model_config = ConfigDict(extra="forbid")
+
+    python: str = Field(default="3.11", pattern=r"^3\.(?:1[0-4]|[89])$")
+    glibc: str = Field(default="2.36", pattern=r"^2\.\d{1,3}$")
+    pip: List[PipGroup] = Field(default_factory=list, max_length=16)
+    gpu_python: Optional[str] = Field(default=None, pattern=r"^3\.(?:1[0-4]|[89])$",
+                                      description="The Python of the GPU image (Dockerfile.gpu); default: python")
+    gpu_glibc: Optional[str] = Field(default=None, pattern=r"^2\.\d{1,3}$")
+    gpu_pip: List[PipGroup] = Field(default_factory=list, max_length=16,
+                                    description="The pip groups of the GPU image; empty: pip")
+    tools: List[str] = Field(default_factory=lambda: ["pip", "setuptools", "wheel", "poetry-core"], max_length=16,
+                             description="Fetched one by one without dependencies: what the image's pip upgrades to "
+                                         "and builds local packages with")
+
+    @model_validator(mode="after")
+    def _tools(self):
+        bad = [r for r in self.tools if not re.fullmatch(REQUIREMENT_RE, r)]
+        if bad:
+            raise ValueError(f"tools: not a plain requirement: {bad[0][:80]}")
+        return self
+
+    def section(self, gpu: bool = False) -> Optional[Dict[str, Any]]:
+        """What the preload fetches for the image (gpu: Dockerfile.gpu), as the recipe holds it; None without groups."""
+        groups = (self.gpu_pip or self.pip) if gpu else self.pip
+        if not groups:
+            return None
+        return {"python": (self.gpu_python or self.python) if gpu else self.python,
+                "glibc": (self.gpu_glibc or self.glibc) if gpu else self.glibc,
+                "groups": [g.model_dump(exclude_none=True) for g in groups], "tools": list(self.tools)}
 
 
 def gguf_format(quantizations: List[str]) -> Dict[str, Any]:

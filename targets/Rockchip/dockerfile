@@ -48,6 +48,10 @@ RUN set -eu; \
 # only for an http index). Not set: PyPI and the Dockerfile's own addresses.
 ARG PIP_INDEX_URL
 ARG PIP_TRUSTED_HOST
+# The build's preload for a computer without a network (orchestrator/Core/build_preload.py): its wheels in the build
+# context's sources/wheels; pip reads both from the environment and installs only from them. Not set: the index.
+ARG PIP_FIND_LINKS
+ARG PIP_NO_INDEX
 
 # libgl1/libglib2.0-0: opencv (rknn-toolkit2), which the RKNN venv's check below imports.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -114,8 +118,8 @@ ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 # rkllm_module.sh refuses with it, and the build service refuses RKLLM there before a build starts
 # (build_formats.format_refusal). The CPU-only PyTorch wheels come from the PyTorch index (TORCH_PIP_URL) and the wheel
 # from Rockchip's repository (RKLLM_PIP_URL), checked against RKLLM_WHEEL_SHA256; with a pip index of the own network
-# both come from that index instead (an ARG named ..._PIP_URL is a pip location the index replaces), the wheel again
-# checked against the same sha256.
+# (or the build's preload, PIP_FIND_LINKS) both come from there instead (an ARG named ..._PIP_URL is a pip location the
+# index replaces), the wheel again checked against the same sha256.
 ARG TORCH_PIP_URL=https://download.pytorch.org/whl/cpu
 ARG RKLLM_PIP_URL=https://raw.githubusercontent.com/airockchip/rknn-llm
 RUN set -eu; \
@@ -130,7 +134,7 @@ RUN set -eu; \
         /opt/venv-rkllm/bin/pip install --upgrade pip setuptools wheel; \
         /opt/venv-rkllm/bin/pip install torch==2.6.0 torchvision==0.21.0 --index-url "${PIP_INDEX_URL:-${TORCH_PIP_URL}}"; \
         wheel="rkllm_toolkit-${RKLLM_VERSION}-cp311-cp311-linux_x86_64.whl"; \
-        if [ -n "${PIP_INDEX_URL:-}" ]; then \
+        if [ -n "${PIP_INDEX_URL:-}${PIP_FIND_LINKS:-}" ]; then \
             /opt/venv-rkllm/bin/pip download --no-deps --only-binary=:all: --dest /tmp/rkllm "rkllm-toolkit==${RKLLM_VERSION}"; \
             printf '%s  %s\n' "${RKLLM_WHEEL_SHA256}" "/tmp/rkllm/${wheel}" | sha256sum -c -; \
             /opt/venv-rkllm/bin/pip install "/tmp/rkllm/${wheel}"; \

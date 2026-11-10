@@ -427,7 +427,11 @@ def vendor_blocks(data: Dict[str, Any]) -> Dict[str, str]:
         lines = ["RUN set -eu; \\", f"    mkdir -p {VENDOR_DIR}; \\"]
         for d in downloads:
             dest = f"{VENDOR_DIR}/{d['name']}"
-            lines += [f"    curl -fsSL --proto '=https' --tlsv1.2 -o {_q(dest + '.part')} {_q(d['url'])}; \\",
+            # The build's preload stages the same pinned file into the build context (sources/files, COPYd to
+            # /tmp/llmcf-sources); either way the size and the sha256 below are checked.
+            local = f"/tmp/llmcf-sources/files/{d['name']}"
+            lines += [f"    if [ -f {_q(local)} ]; then cp {_q(local)} {_q(dest + '.part')}; else \\",
+                      f"    curl -fsSL --proto '=https' --tlsv1.2 -o {_q(dest + '.part')} {_q(d['url'])}; fi; \\",
                       f"    test \"$(wc -c < {_q(dest + '.part')})\" -eq {int(d['size_bytes'])} \\",
                       f"        || {{ echo '{d['name']}: not the size the module declares' >&2; exit 1; }}; \\",
                       f"    echo {_q(d['sha256'] + '  ' + dest + '.part')} | sha256sum -c -; \\",
@@ -605,6 +609,29 @@ def format_problems(formats: Any) -> tuple:
     return values, problems
 
 
+def source_image_problems(images: Any) -> tuple:
+    """(the source images as validated plain values, the problems): template_variables.source_images, the vendor's or
+    community's images the build image takes named files from (schemas/target_template.py SourceImage)."""
+    from pydantic import ValidationError
+    from orchestrator.schemas.target_template import SourceImage
+    if images in (None, []):
+        return [], []
+    if not isinstance(images, list):
+        return [], ["source_images: a list of images, each with image, files and optional platform and licence_url"]
+    values, problems = [], []
+    for n, entry in enumerate(images):
+        try:
+            values.append(SourceImage.model_validate(entry).model_dump(exclude_none=True))
+        except ValidationError as e:
+            for err in e.errors()[:5]:
+                where = ".".join(str(part) for part in err.get("loc", ()))
+                problems.append(f"source_images[{n}]{'.' + where if where else ''}: {err.get('msg', 'invalid')}"[:300])
+    dests = [f["dest"] for v in values for f in v["files"]]
+    if len(set(dests)) != len(dests):
+        problems.append("source_images: each dest once")
+    return values, problems
+
+
 def parse_formats(value: Any) -> List[Any]:
     """The formats a module declares, from what the wizard's field, `llm-cli module create --formats FILE` or a tool
     give: a list of formats (each its values or a preset name), YAML or JSON text of one, or a template_variables
@@ -687,9 +714,10 @@ def template_variable_problems(root: Path) -> List[str]:
     if record is None:
         return []
     if not isinstance(record, dict) or record.get("schema_version", 1) != 1 or \
-            set(record) - {"schema_version", "formats"}:
-        return ["target.yml: template_variables holds schema_version 1 and formats"]
+            set(record) - {"schema_version", "formats", "source_images"}:
+        return ["target.yml: template_variables holds schema_version 1, formats and optionally source_images"]
     values, problems = format_problems(record.get("formats") or [])
+    problems += source_image_problems(record.get("source_images"))[1]
     problems = [f"target.yml: template_variables: {p}" for p in problems]
     if not values:
         return problems or ["target.yml: template_variables declares no format"]
@@ -714,6 +742,30 @@ def template_variable_problems(root: Path) -> List[str]:
 
 
 DEFAULT_BASE = "debian:bookworm-slim"
+# The packages the general template's Dockerfiles install besides llama.cpp's converter (targets/_template/Dockerfile
+# and Dockerfile.gpu, "Install Framework Dependencies"); a test keeps the two in step.
+TEMPLATE_PIP = ["transformers", "tokenizers", "safetensors", "sentencepiece", "protobuf", "huggingface-hub",
+                "datasets", "numpy", "scipy", "onnx", "onnxruntime", "tqdm", "psutil", "pyyaml", "requests"]
+TEMPLATE_GPU_PIP = ["torch", "torchvision", "torchaudio"] + [p if p != "onnxruntime" else "onnxruntime-gpu"
+                                                             for p in TEMPLATE_PIP]
+
+
+def generated_build_preload(data: Dict[str, Any], gpu: bool) -> Dict[str, Any]:
+    """target.yml build_preload of a generated module: what its build image's pip installs (llama.cpp's converter
+    requirements at the pinned commit for the CPU template, the template's packages, the module's pip_packages from their index), for the
+    build's preload (Core/build_preload.py). The template's Debian bookworm has Python 3.11 and glibc 2.36, its GPU
+    image Ubuntu 22.04 Python 3.10 and glibc 2.35."""
+    groups: List[Dict[str, Any]] = [] if gpu else [
+        {"llama_cpp_requirements": ["requirements/requirements-convert_hf_to_gguf.txt"]}]
+    groups.append({"requirements": list(TEMPLATE_GPU_PIP if gpu else TEMPLATE_PIP)})
+    if data.get("pip_packages"):
+        group: Dict[str, Any] = {"requirements": list(data["pip_packages"])}
+        if data.get("pip_index_url"):
+            group["index_url"] = data["pip_index_url"]
+        groups.append(group)
+    if gpu:
+        return {"python": "3.10", "glibc": "2.35", "pip": groups}
+    return {"python": "3.11", "glibc": "2.36", "pip": groups}
 
 
 def uses_gpu_template(data: Dict[str, Any]) -> bool:
@@ -1318,6 +1370,8 @@ class ModuleGenerator:
         # The template's variables the module was made with: the one record of its formats, rendered into the config
         # stage (the folder check compares them; the edit step shows them first)
         config["template_variables"] = {"schema_version": 1, "formats": formats}
+        # The Python packages of its build image, for the build's preload of a computer without a network
+        config["build_preload"] = generated_build_preload(data, uses_gpu_template(data))
         # One optimization profile per board: the build recipe's plan for the board's probe (or the plain defaults of
         # the architecture), so `llm-cli targets validate` finds it in agreement.
         from orchestrator.Core.board_profiles import generated_profile

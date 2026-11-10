@@ -49,6 +49,10 @@ RUN set -eu; \
 # only for an http index). Not set: PyPI and the Dockerfile's own addresses.
 ARG PIP_INDEX_URL
 ARG PIP_TRUSTED_HOST
+# The build's preload for a computer without a network (orchestrator/Core/build_preload.py): its wheels in the build
+# context's sources/wheels; pip reads both from the environment and installs only from them. Not set: the index.
+ARG PIP_FIND_LINKS
+ARG PIP_NO_INDEX
 
 # System Dependencies
 # The wizard automatically injects cross-compilers here if needed
@@ -231,6 +235,10 @@ ENV CC=${GNU_TRIPLET}-gcc CXX=${GNU_TRIPLET}-g++
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /usr/src/llama.cpp /usr/src/llama.cpp
 # [PINNED_DOWNLOADS_COPY]
+# Files taken from source images (target.yml template_variables.source_images): only the named files of a vendor's
+# or a community's image pinned by digest, each checked by its sha256, at their path in this image; the framework
+# stages them into sources/image-files (orchestrator/Core/build_preload.py), an empty folder when there are none.
+COPY sources/image-files/ /
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 

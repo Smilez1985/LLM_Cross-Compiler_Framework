@@ -185,6 +185,9 @@ class ModuleEdit:
             return None
         if not isinstance(record, dict):
             return None
+        if record.get("source_images"):   # the formats and the files taken from source images, as one block
+            return yaml.safe_dump({"formats": record.get("formats") or [], "source_images": record["source_images"]},
+                                  sort_keys=False, allow_unicode=True)
         return yaml.safe_dump(record.get("formats") or [], sort_keys=False, allow_unicode=True)
 
     def set_variables(self, formats) -> List[str]:
@@ -195,9 +198,17 @@ class ModuleEdit:
         is gone, or when a format would need a file the module does not have (the step adds no file: the module is
         made again then)."""
         from orchestrator.Core.module_generator import (FORMATS_BEGIN, FORMATS_END, format_problems, parse_formats,
-                                                        render_formats)
+                                                        render_formats, source_image_problems)
         from orchestrator.schemas.target_template import FormatVariables
+        try:
+            given = yaml.safe_load(formats) if isinstance(formats, str) and formats.strip() else formats
+        except yaml.YAMLError:
+            given = None   # parse_formats below names the YAML error
+        # A block with source_images changes them too; formats alone keep the module's source images.
+        images_given = isinstance(given, dict) and "source_images" in given
+        images, image_problems = source_image_problems(given.get("source_images") if images_given else None)
         values, problems = format_problems(parse_formats(formats))
+        problems = problems + image_problems
         if problems:
             raise ValueError("The variables were not taken:\n- " + "\n- ".join(problems))
         if not values:
@@ -220,7 +231,11 @@ class ModuleEdit:
         caps = meta.get("capabilities") if isinstance(meta.get("capabilities"), dict) else {}
         caps["formats"] = {f["id"]: FormatVariables.model_validate(f).capability() for f in values}
         meta["capabilities"] = caps
-        meta["template_variables"] = {"schema_version": 1, "formats": values}
+        record = {"schema_version": 1, "formats": values}
+        kept = images if images_given else (meta["template_variables"].get("source_images") or [])
+        if kept:
+            record["source_images"] = kept
+        meta["template_variables"] = record
         before = dict(self.texts)
         self.texts[config_rel] = text[:begin] + render_formats(values) + text[end + len(FORMATS_END):]
         self.texts["target.yml"] = yaml.dump(meta, default_flow_style=False, sort_keys=False)

@@ -43,6 +43,10 @@ RUN set -eu; \
 # only for an http index). Not set: PyPI and the Dockerfile's own addresses.
 ARG PIP_INDEX_URL
 ARG PIP_TRUSTED_HOST
+# The build's preload for a computer without a network (orchestrator/Core/build_preload.py): its wheels in the build
+# context's sources/wheels; pip reads both from the environment and installs only from them. Not set: the index.
+ARG PIP_FIND_LINKS
+ARG PIP_NO_INDEX
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake git ca-certificates \

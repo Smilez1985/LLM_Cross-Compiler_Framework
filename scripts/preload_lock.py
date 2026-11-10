@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The installer's preload: what install.sh and install.bat would fetch from the network, packed on a computer with a
+The installer's preload (and a build's, `pack-build`): what install.sh and install.bat would fetch from the network, packed on a computer with a
 network into one archive for a computer without one (docs/DESIGN.md, Installer, platforms and dependencies). Used by
 preload.sh and preload.ps1 in the checkout and, offline, by the installers, which write the two scripts for exactly
 this computer and wait for the archive's path. Needs only Python 3 (the standard library) and, to fetch, its pip.
@@ -19,9 +19,14 @@ this computer and wait for the archive's path. Needs only Python 3 (the standard
     preload_lock.py write-scripts --spec SPEC --out FOLDER
         writes FOLDER/preload.sh and FOLDER/preload.ps1, each standing alone (the recipe and this program inside): run
         on any computer with a network and Python 3 with pip, they do `pack` into the current folder (or --out / -Out).
-    preload_lock.py open --archive FILE --out FOLDER [--sha256 HEX]
-        checks a preload archive (only folders and files under llmcf-preload/, SHA256SUMS complete and right) and
-        unpacks it into FOLDER; prints its manifest and the archive's sha256 (install.bat reads it).
+    preload_lock.py open --archive FILE --out FOLDER [--sha256 HEX] [--kind installer|build]
+        checks a preload archive (only folders and files under llmcf-preload/, SHA256SUMS complete and right, the kind
+        asked for) and unpacks it into FOLDER; prints its manifest and the archive's sha256 (install.bat reads it).
+    preload_lock.py pack-build --spec SPEC [--out FOLDER]
+        a build's preload (kind=build): the recipe SPEC (manifest.base, sources.json) that llmcf wrote for an offline
+        build's missing sources; fetches its base images, llama.cpp, Python packages, downloads and the files taken
+        from source images (image_files.py, next to this file or in the checkout) and writes
+        llmcf-preload-build-TARGET-ARCH-RECIPE.tar.gz into FOLDER. The scripts llmcf writes for a build run it.
     preload_lock.py pip-args --target T --python X.Y [--glibc 2.NN]     the pip download options, one per line
     preload_lock.py this-computer                                       target, Python version, glibc of this computer
 
@@ -413,10 +418,11 @@ def pack(spec: Path, out: Path) -> Path:
     return archive_path
 
 
-def open_archive(archive: Path, out: Path, expected: str = "") -> dict:
-    """Checks a preload archive and unpacks it into out/llmcf-preload (install.bat; install.sh does the same in bash):
-    only folders and files under llmcf-preload/, every file listed in SHA256SUMS with its sha256 and nothing else,
-    the format this program reads. Returns the manifest with 'archive_sha256' added."""
+def open_archive(archive: Path, out: Path, expected: str = "", kind: str = "installer") -> dict:
+    """Checks a preload archive and unpacks it into out/llmcf-preload (install.bat; install.sh does the same in bash;
+    a build's preload with kind="build", Core/build_preload.py): only folders and files under llmcf-preload/, every
+    file listed in SHA256SUMS with its sha256 and nothing else, the format this program reads and the kind asked for
+    (the installer's has wheels/). Returns the manifest with 'archive_sha256' added."""
     digest = sha256_of(archive)
     if expected and expected.lower() != digest:
         raise PreloadError(f"the preload is not the archive preload wrote: sha256 {digest}, expected {expected.lower()}")
@@ -442,8 +448,8 @@ def open_archive(archive: Path, out: Path, expected: str = "") -> dict:
         raise PreloadError(f"{archive} is not a readable .tar.gz ({error})")
     top = out / TOP
     sums = top / "SHA256SUMS"
-    if not sums.is_file() or not (top / "manifest.txt").is_file() or not (top / "wheels").is_dir():
-        raise PreloadError("the preload is incomplete (SHA256SUMS, manifest.txt and wheels/ belong in it)")
+    if not sums.is_file() or not (top / "manifest.txt").is_file():
+        raise PreloadError("the preload is incomplete (SHA256SUMS and manifest.txt belong in it)")
     listed = {}
     for line in sums.read_text(encoding="utf-8").splitlines():
         match = re.fullmatch(r"([0-9a-f]{64})  ([^/ ][^ ]*)", line)
@@ -461,6 +467,14 @@ def open_archive(archive: Path, out: Path, expected: str = "") -> dict:
     manifest = read_manifest((top / "manifest.txt").read_text(encoding="utf-8"))
     if manifest.get("format") != FORMAT:
         raise PreloadError(f"the preload has format {manifest.get('format')!r}, this installer reads {FORMAT}")
+    found = manifest.get("kind") or "installer"
+    if found != kind:
+        raise PreloadError("this is a build's preload (its images, sources and packages), not the installer's: give "
+                           "it to llmcf when a build asks (llm-cli build preload take FILE)" if found == "build" else
+                           f"this is the installer's preload, not a build's: install.sh --offline --preload FILE"
+                           if found == "installer" else f"the preload is of the unknown kind {found!r}")
+    if kind == "installer" and not (top / "wheels").is_dir():
+        raise PreloadError("the preload is incomplete (wheels/ belongs in it)")
     return dict(manifest, archive_sha256=digest, folder=str(top))
 
 
@@ -541,6 +555,306 @@ def write_scripts(spec: Path, out: Path):
     return out / "preload.sh", out / "preload.ps1", what
 
 
+# --- the build's preload (kind=build) ------------------------------------------------------------------------------
+# A build's preload carries exactly the sources an offline build of one target's build container image lacks
+# (Core/build_preload.py writes the recipe, BUILD_SPEC_FILES): base images, the pinned llama.cpp commit, the image's
+# Python packages, pinned downloads and the files taken from source images; same folder, manifest, SHA256SUMS and
+# checks as the installer's preload. The image reader is orchestrator/utils/image_files.py, standard library only,
+# next to this file in the scripts the build writes.
+BUILD_SPEC_FILES = ("manifest.base", "sources.json")
+ARCHES = {"linux/amd64": "x86_64", "linux/arm64": "aarch64"}
+
+
+def _image_files_path() -> Path:
+    """orchestrator/utils/image_files.py: next to this file (in the scripts the build writes) or in the checkout."""
+    here = Path(__file__).resolve()
+    for path in (here.with_name("image_files.py"), here.parents[1] / "orchestrator" / "utils" / "image_files.py"):
+        if path.is_file():
+            return path
+    raise PreloadError("image_files.py is missing next to preload_lock.py")
+
+
+def _image_files():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("llmcf_image_files", _image_files_path())
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def build_archive_name(manifest: dict) -> str:
+    arch = ARCHES.get(manifest.get("platform", ""), "unknown")
+    return f"{TOP}-build-{manifest['target'].lower()}-{arch}-{manifest['recipe_sha256'][:12]}.tar.gz"
+
+
+def _fetch(url: str, dest: Path, sha256: str = "", size: int = 0) -> None:
+    import urllib.request
+    check, got = hashlib.sha256(), 0
+    part = Path(str(dest) + ".part")
+    try:
+        with urllib.request.urlopen(url, timeout=120) as answer, open(part, "wb") as sink:  # nosec B310 - https pins
+            for block in iter(lambda: answer.read(1 << 20), b""):
+                check.update(block)
+                sink.write(block)
+                got += len(block)
+    except OSError as error:
+        part.unlink(missing_ok=True)
+        raise PreloadError(f"{url}: {getattr(error, 'reason', error)}")
+    if (size and got != size) or (sha256 and check.hexdigest() != sha256):
+        part.unlink()
+        raise PreloadError(f"{url}: not the file the build pins (size {got}, sha256 {check.hexdigest()}; pinned "
+                           f"{size or '-'} and {sha256 or '-'})")
+    os.replace(part, dest)
+
+
+def raw_base(repo: str, commit: str) -> str:
+    """Where llama.cpp's files of `commit` are read one by one (GitHub's raw address of the repository)."""
+    match = re.fullmatch(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?", repo or "")
+    if not match or not re.fullmatch(r"[0-9a-f]{40}", commit or ""):
+        raise PreloadError(f"llama.cpp's requirement files are read from a GitHub repository at a full commit, not "
+                           f"{repo} {commit}")
+    return f"https://raw.githubusercontent.com/{match.group(1)}/{match.group(2)}/{commit}/"
+
+
+def _llama_requirements(base: str, names, work: Path) -> list:
+    """Fetches llama.cpp's requirement files `names` (paths at the pinned commit) and every file they include with
+    -r, into work/ at the same paths. Returns the local paths of `names`."""
+    todo, seen = list(names), set()
+    while todo:
+        name = todo.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        parts = name.split("/")
+        if not name or ".." in parts or name.startswith("/") or len(seen) > 50:
+            raise PreloadError(f"llama.cpp requirement file {name!r} is not a path inside the repository")
+        dest = work / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        _fetch(base + name, dest)
+        folder = "/".join(parts[:-1])
+        for line in dest.read_text(encoding="utf-8").splitlines():
+            match = re.match(r"\s*(?:-r|--requirement)\s*=?\s*(\S+)", line)
+            if match:
+                joined = os.path.normpath(f"{folder}/{match.group(1)}" if folder else match.group(1))
+                todo.append(joined.replace("\\", "/"))
+    return [work / name for name in names]
+
+
+def build_pip_args(platform_name: str, python: str, glibc: str):
+    """The pip download options for the build image's platform and Python (manylinux and plain linux wheels; the
+    PyTorch index serves plain linux ones)."""
+    arch = ARCHES.get(platform_name)
+    if arch is None:
+        raise PreloadError(f"the build image's platform {platform_name!r} is not one the preload knows")
+    args = pip_args(f"linux-{arch}", python, glibc)
+    return args + [f"--platform=linux_{arch}", "--only-binary=:all:"]
+
+
+def _gather_pip(pip: dict, platform_name: str, llama: dict, wheels: Path, work: Path) -> int:
+    args = build_pip_args(platform_name, pip.get("python", "3.11"), pip.get("glibc", "2.36"))
+    for number, group in enumerate(pip.get("groups") or []):
+        if group.get("platforms") and platform_name not in group["platforms"]:
+            continue   # a group only for another build computer (RKLLM's wheels are x86_64 only)
+        lines = list(group.get("requirements") or [])
+        if group.get("llama_cpp_requirements"):
+            if not llama:
+                raise PreloadError("a group names llama.cpp's requirement files, but the recipe has no llama.cpp pin")
+            files = _llama_requirements(raw_base(llama["repo"], llama["commit"]), group["llama_cpp_requirements"],
+                                        work / f"llama-{number}")
+            lines += [f"-r {path}" for path in files]
+        part = work / f"group-{number}.txt"
+        part.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        index = (["--index-url", group["index_url"]] if group.get("index_url") else [])
+        for extra in group.get("extra_index_urls") or []:
+            index += ["--extra-index-url", extra]
+        command = [sys.executable, "-m", "pip", "download", "--disable-pip-version-check", "--no-input",
+                   "--dest", str(wheels), "-r", str(part), *index, *args]
+        say(f"fetching the Python packages of group {number + 1} with their dependencies (pip download)...")
+        if subprocess.run(command).returncode != 0:
+            raise PreloadError("pip could not fetch every package of the build image (above)")
+    # pip, setuptools, wheel and the build backends the image's pip upgrades to or builds with, one call each (two
+    # versions of one name, setuptools and setuptools<81, cannot share one call)
+    for tool in pip.get("tools") or ["pip", "setuptools", "wheel", "poetry-core"]:
+        if subprocess.run([sys.executable, "-m", "pip", "download", "--disable-pip-version-check", "--no-input",
+                           "--no-deps", "--dest", str(wheels), tool, *args]).returncode != 0:
+            raise PreloadError(f"pip could not fetch {tool} for the build image (above)")
+    return sum(1 for p in wheels.iterdir() if p.is_file())
+
+
+def _bundle_llama(llama: dict, dest: Path, work: Path) -> None:
+    """The pinned llama.cpp commit as a git bundle (llm-cli ditto runtime export-source writes the same)."""
+    import shutil
+    git = shutil.which("git")
+    if not git:
+        raise PreloadError("git is needed on this computer to fetch the pinned llama.cpp commit (install git, or "
+                           "export the source with llm-cli ditto runtime export-source on a computer with llmcf)")
+    repo = work / "llama.cpp"
+    run = [git, "-C", str(repo)]
+    steps = [[git, "init", "-q", str(repo)], run + ["fetch", "-q", "--depth", "1", llama["repo"], llama["commit"]],
+             run + ["-c", "advice.detachedHead=false", "checkout", "-q", "FETCH_HEAD"]]
+    for step in steps:
+        if subprocess.run(step).returncode != 0:
+            raise PreloadError("git could not fetch the pinned llama.cpp commit (above)")
+    head = subprocess.run(run + ["rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    if head != llama["commit"]:
+        raise PreloadError(f"llama.cpp: got commit {head}, the pin is {llama['commit']}")
+    if subprocess.run(run + ["bundle", "create", str(dest), "HEAD"], capture_output=True).returncode != 0:
+        raise PreloadError("git could not write the llama.cpp bundle")
+
+
+def pack_build(spec: Path, out: Path) -> Path:
+    """Fetches what a build's recipe names and writes the build's preload into `out`."""
+    for name in BUILD_SPEC_FILES:
+        if not (spec / name).is_file():
+            raise PreloadError(f"{name} is missing in {spec}")
+    manifest = read_manifest((spec / "manifest.base").read_text(encoding="utf-8"))
+    recipe_bytes = (spec / "sources.json").read_bytes()
+    if hashlib.sha256(recipe_bytes).hexdigest() != manifest.get("recipe_sha256"):
+        raise PreloadError("sources.json is not the recipe the manifest names")
+    import json
+    recipe = json.loads(recipe_bytes.decode("utf-8"))
+    platform_name = manifest["platform"]
+    images = _image_files()
+    here = images.host_platform()
+    say(f"the build's preload of the target {manifest['target']} (llmcf {manifest['version']}), for {platform_name}")
+    if here != platform_name and recipe.get("pip"):
+        say(f"note: this computer is {here}; pip evaluates the packages' markers for this computer, so make the "
+            f"preload on a {platform_name} computer if a package is missing on the other side")
+    out.mkdir(parents=True, exist_ok=True)
+    archive_path = out.resolve() / build_archive_name(manifest)
+    personal = False
+    with tempfile.TemporaryDirectory() as work:
+        work = Path(work)
+        top = work / TOP
+        top.mkdir()
+        lines = []
+        if recipe.get("images"):
+            (top / "images").mkdir()
+        for number, ref in enumerate(recipe.get("images") or []):
+            say(f"fetching the base image {ref} ({platform_name}; every blob checked against its digest)...")
+            try:
+                saved = images.save_image(ref, top / "images" / f"{number:02d}.tar", platform_name)
+            except images.ImageFilesError as error:
+                raise PreloadError(str(error))
+            lines.append(f"images/{number:02d}.tar {saved['name']} {saved['digest']} {saved['config']}")
+        if lines:
+            (top / "images.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        llama = recipe.get("llama_cpp") or {}
+        if recipe.get("llama_cpp_bundle") and llama:
+            say(f"fetching llama.cpp at the pinned commit {llama['commit'][:12]} (git)...")
+            (top / "llama.cpp").mkdir()
+            _bundle_llama(llama, top / "llama.cpp" / "llama.cpp.bundle", work)
+        if recipe.get("pip"):
+            (top / "wheels").mkdir()
+            count = _gather_pip(recipe["pip"], platform_name, llama, top / "wheels", work)
+            say(f"{count} Python packages for the build image")
+        if recipe.get("downloads"):
+            (top / "files").mkdir()
+        for item in recipe.get("downloads") or []:
+            say(f"fetching {item['name']} (size and sha256 pinned)...")
+            _fetch(item["url"], top / "files" / item["name"], item["sha256"], int(item.get("size") or 0))
+        for source in recipe.get("source_images") or []:
+            wanted = {f["path"]: f["sha256"] for f in source.get("files") or []}
+            say(f"taking {len(wanted)} file(s) from {source['image']} (its layers read, nothing run; the rest "
+                "discarded)...")
+            try:
+                images.take_files(source["image"], wanted, top / "image-files", source.get("platform") or
+                                  platform_name)
+            except images.ImageFilesError as error:
+                raise PreloadError(str(error))
+            personal = personal or any(not f.get("redistributable") for f in source.get("files") or [])
+        (top / "sources.json").write_bytes(recipe_bytes)
+        created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        (top / "manifest.txt").write_text((spec / "manifest.base").read_text(encoding="utf-8")
+                                          + f"personal={'yes' if personal else 'no'}\ncreated={created}\n",
+                                          encoding="utf-8")
+        files = sorted(p.relative_to(top).as_posix() for p in top.rglob("*") if p.is_file())
+        (top / "SHA256SUMS").write_text("".join(f"{sha256_of(top / f)}  {f}\n" for f in files), encoding="utf-8")
+        part = archive_path.with_name(archive_path.name + ".part")
+        with tarfile.open(part, "w:gz") as archive:
+            _tar_add(archive, top, TOP, int(time.time()))
+        os.replace(part, archive_path)
+    digest = sha256_of(archive_path)
+    say(f"done: {archive_path} ({archive_path.stat().st_size // (1 << 20)} MB)")
+    say(f"sha256: {digest}")
+    if personal:
+        say("it holds files whose licence does not allow passing them on: it is for your own computers only; do not "
+            "share it")
+    for item in recipe.get("not_covered") or []:
+        say(f"not in the preload: {item}")
+    print("Carry the archive to the computer without a network and give llmcf its path when the build asks, or:")
+    print(f"  llm-cli build preload take {archive_path.name} --target {manifest['target']} --sha256 {digest}")
+    return archive_path
+
+
+def write_build_scripts(spec: Path, out: Path, what: str):
+    """preload.sh and preload.ps1 for a build's recipe: the recipe, this program and the image reader inside."""
+    files = {name: (spec / name).read_text(encoding="utf-8") for name in BUILD_SPEC_FILES}
+    programs = {"preload_lock.py": Path(__file__).read_text(encoding="utf-8"),
+                "image_files.py": _image_files_path().read_text(encoding="utf-8")}
+    end = _delimiter([*files.values(), *programs.values()])
+    out.mkdir(parents=True, exist_ok=True)
+    sh = ["#!/bin/sh",
+          "# llmcf preload of a build, written by llmcf for the computer without a network.",
+          "# Run it on a computer WITH a network (Linux or macOS, Python 3 with pip; git for llama.cpp):",
+          "#   sh preload.sh [--out FOLDER]",
+          f"# It fetches: {what}.",
+          "# It writes the archive (.tar.gz) into the current folder (or FOLDER); carry it back and give llmcf its",
+          "# path. The recipe and the programs are inside this script.",
+          "set -eu",
+          'out="$PWD"',
+          'if [ "${1:-}" = "--out" ] && [ -n "${2:-}" ]; then out="$2"; fi',
+          'py="${PRELOAD_PYTHON:-}"',
+          'if [ -z "$py" ]; then for c in python3 python; do if command -v "$c" > /dev/null 2>&1; then py="$c"; break; fi; '
+          'done; fi',
+          'if [ -z "$py" ]; then echo "preload: Python 3 with pip is needed (PRELOAD_PYTHON names one)" >&2; exit 1; fi',
+          'work="$(mktemp -d)"',
+          "trap 'rm -rf \"$work\"' EXIT",
+          'mkdir "$work/spec"']
+    for name, text in files.items():
+        sh += [f"cat > \"$work/spec/{name}\" <<'{end}'", text.rstrip("\n"), end]
+    for name, text in programs.items():
+        sh += [f"cat > \"$work/{name}\" <<'{end}'", text.rstrip("\n"), end]
+    sh += ['"$py" -I "$work/preload_lock.py" pack-build --spec "$work/spec" --out "$out"', ""]
+    ps = ["# llmcf preload of a build, written by llmcf for the computer without a network.",
+          "# Run it on a computer WITH a network (Windows, Python 3 with pip; git for llama.cpp):",
+          "#   powershell -ExecutionPolicy Bypass -File preload.ps1 [-Out FOLDER]",
+          f"# It fetches: {what}.",
+          "# It writes the archive (.tar.gz) into the current folder (or FOLDER); carry it back and give llmcf its",
+          "# path. The recipe and the programs are inside this script.",
+          "param([string]$Out = (Get-Location).Path)",
+          '$ErrorActionPreference = "Stop"',
+          "$Py = $null; $PyArgs = @()",
+          "if ($env:PRELOAD_PYTHON) { $Py = $env:PRELOAD_PYTHON }",
+          'elseif (Get-Command "py" -ErrorAction SilentlyContinue) { $Py = "py"; $PyArgs = @("-3") }',
+          'elseif (Get-Command "python" -ErrorAction SilentlyContinue) { $Py = "python" }',
+          'elseif (Get-Command "python3" -ErrorAction SilentlyContinue) { $Py = "python3" }',
+          'if (-not $Py) { Write-Error "preload: Python 3 with pip is needed (PRELOAD_PYTHON names one)." }',
+          '$Work = Join-Path ([IO.Path]::GetTempPath()) ("llmcf-preload-" + [Guid]::NewGuid().ToString("N"))',
+          '$Spec = Join-Path $Work "spec"',
+          "New-Item -ItemType Directory -Path $Spec -Force | Out-Null",
+          "$Utf8 = New-Object System.Text.UTF8Encoding $false",
+          "function Write-Part ($Path, $Text) { [IO.File]::WriteAllText($Path, $Text.Replace(\"`r`n\", \"`n\"), $Utf8) }"]
+    for name, text in files.items():
+        ps += [f'Write-Part (Join-Path $Spec "{name}") @\'', text.rstrip("\n"), "'@"]
+    for name, text in programs.items():
+        ps += [f'Write-Part (Join-Path $Work "{name}") @\'', text.rstrip("\n"), "'@"]
+    ps += ["try {",
+           '    & $Py @PyArgs -I (Join-Path $Work "preload_lock.py") pack-build --spec $Spec --out $Out',
+           "    $Code = $LASTEXITCODE",
+           "} finally {",
+           "    Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue",
+           "}",
+           "exit $Code", ""]
+    if any(line.startswith("'@") for text in [*files.values(), *programs.values()] for line in text.splitlines()):
+        raise PreloadError("a recipe line would end a PowerShell here-string")
+    (out / "preload.sh").write_text("\n".join(sh), encoding="utf-8", newline="\n")
+    (out / "preload.sh").chmod(0o755)
+    (out / "preload.ps1").write_text("\n".join(ps).replace("\r\n", "\n").replace("\n", "\r\n"),
+                                     encoding="utf-8-sig", newline="")
+    return out / "preload.sh", out / "preload.ps1"
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -563,6 +877,10 @@ def main(argv=None) -> int:
     p.add_argument("--archive", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--sha256", default="")
+    p.add_argument("--kind", default="installer", choices=("installer", "build"))
+    p = sub.add_parser("pack-build")
+    p.add_argument("--spec", type=Path, required=True)
+    p.add_argument("--out", type=Path, default=Path("."))
     p = sub.add_parser("pip-args")
     p.add_argument("--target", required=True)
     p.add_argument("--python", required=True)
@@ -582,7 +900,10 @@ def main(argv=None) -> int:
         elif args.command == "pack":
             pack(args.spec, args.out)
         elif args.command == "open":
-            print("".join(f"{k}={v}\n" for k, v in open_archive(args.archive, args.out, args.sha256).items()), end="")
+            print("".join(f"{k}={v}\n" for k, v in open_archive(args.archive, args.out, args.sha256,
+                                                                    args.kind).items()), end="")
+        elif args.command == "pack-build":
+            pack_build(args.spec, args.out)
         else:
             sh, ps, what = write_scripts(args.spec, args.out)
             print(f"{sh}\n{ps}\n{what}")

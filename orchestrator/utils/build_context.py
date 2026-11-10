@@ -91,6 +91,9 @@ def stage_build_context(target_dir: Path, app_root: Path, context_dir: Path,
     (context_dir / "sources").mkdir()
     (context_dir / "sources" / ".keep").write_text("Local sources of an offline build (empty unless one is used).\n",
                                                   encoding="utf-8")
+    # The files a target's template takes from source images (Core/build_preload.image_files), at their path in the
+    # image; the template's Dockerfile copies the folder into its image root, so it holds nothing else.
+    (context_dir / "sources" / "image-files").mkdir()
     (context_dir / "docker").mkdir()
     shutil.copy2(Path(app_root) / "entrypoint.sh", context_dir / "docker" / "entrypoint.sh")
 

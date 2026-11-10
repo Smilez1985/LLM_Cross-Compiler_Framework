@@ -1982,6 +1982,9 @@ preload_open() {
     if [ "$(preload_value format)" != "$PRELOAD_FORMAT" ]; then
         log_error "Das Preload hat das Format '$(preload_value format)', dieser Installer liest $PRELOAD_FORMAT; mach es mit preload.sh aus diesem Checkout neu."
     fi
+    if [ "$(preload_value kind)" = "build" ]; then
+        log_error "Das ist das Preload eines Builds (seine Images, Quellen und Pakete), nicht das des Installers: Gib es llmcf, wenn ein Build danach fragt (llm-cli build preload take DATEI); das des Installers macht preload.sh."
+    fi
     preload_matches_computer
     log_success "Preload geprüft: $(find "$PRELOAD_DIR/wheels" -type f | wc -l) Pakete für $(preload_value target), Python $(preload_value python) (llmcf $(preload_value version))."
 }

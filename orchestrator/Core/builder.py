@@ -148,7 +148,8 @@ OFFLINE_NO_PROXY_ARGS = {"HTTP_PROXY": "", "HTTPS_PROXY": "", "ALL_PROXY": "", "
 # The build arguments that only say where the build container image's sources come from (Core/build_image.SOURCE_ARGS:
 # the person's apt and pip mirrors in the own network, the local llama.cpp copy) and the proxy settings: not inputs of
 # the image (INPUTS_LABEL).
-SOURCE_ONLY_ARGS = frozenset(("APT_MIRROR", "APT_PROXY", "PIP_INDEX_URL", "PIP_TRUSTED_HOST", "LLAMA_CPP_SOURCE")) \
+SOURCE_ONLY_ARGS = frozenset(("APT_MIRROR", "APT_PROXY", "PIP_INDEX_URL", "PIP_TRUSTED_HOST", "LLAMA_CPP_SOURCE",
+                              "PIP_FIND_LINKS", "PIP_NO_INDEX")) \
     | frozenset(OFFLINE_NO_PROXY_ARGS)
 # The build arguments that only say how this computer builds the image, never what it holds: the user and group id
 # (the stage containers run as the host user: the sandbox's --user, or the entrypoint maps PUID/PGID; the image is no
@@ -1259,12 +1260,14 @@ class BuildEngine:
                 earlier = self._earlier_image(config, progress, tag, labels[INPUTS_LABEL])
                 if earlier is not None:
                     return earlier
+                self._take_image_files(config, progress, path, online=False)
                 plan = self._offline_build_plan(config, progress, path)
                 buildargs.update(plan.build_args)
                 buildargs.update(OFFLINE_NO_PROXY_ARGS)
                 hosts = list(dict.fromkeys((hosts or []) + plan.hosts)) or None
                 offline_build = True
             else:
+                self._take_image_files(config, progress, path, online=True)
                 offline_build = False
             if engine_name(self.docker_client) == "podman":
                 progress.add_log("Podman builds the image (its builder buildah, through its Docker-compatible "
@@ -1333,14 +1336,18 @@ class BuildEngine:
         fetched or built (OfflineImageMissing naming each one and how to provide it); otherwise the local copy of
         llama.cpp is staged into the build context when the plan uses it, and the plan is returned."""
         from orchestrator.Core.build_image import offline_plan, stage_llama_copy, stop_text
+        from orchestrator.Core.build_preload import preload_sources, stage
         try:
             text = dockerfile.read_text(encoding="utf-8", errors="replace")
         except OSError:
             text = ""
         overrides = self._repo_overrides()
-        plan = offline_plan(text, self.config, self.docker_client,
-                            state_dir=getattr(self.config, "user_state_dir", None),
-                            llama_repo=overrides.get("LLAMA_CPP_REPO_OVERRIDE") or None)
+        state = getattr(self.config, "user_state_dir", None)
+        folder = self.resolve_target_dir(config.target_arch)
+        preload = preload_sources(state, config.target_arch, folder, text, bool(config.use_gpu)) \
+            if folder is not None else None
+        plan = offline_plan(text, self.config, self.docker_client, state_dir=state,
+                            llama_repo=overrides.get("LLAMA_CPP_REPO_OVERRIDE") or None, preload=preload)
         for line in plan.lines(person=False):
             progress.add_log(f"Offline image plan: {line}")
         if not plan.ready:
@@ -1348,9 +1355,25 @@ class BuildEngine:
         self._pull_mirrored_bases(config, plan, progress)
         if plan.llama_copy is not None:
             stage_llama_copy(plan.llama_copy, dockerfile.parent)
+        if plan.preload_stage:
+            stage(dockerfile.parent, plan)
+            progress.add_log("Offline mode: the sources the build's preload brought are in the build context.")
         progress.add_log(f"Offline mode: building the image of {config.target_arch} from local sources only (every "
                          "source is on this computer or in your own network; no proxy).")
         return plan
+
+    def _take_image_files(self, config: BuildConfiguration, progress: BuildProgress, dockerfile: Path, *,
+                          online: bool) -> None:
+        """The files the target's template takes from source images (template_variables.source_images) into the build
+        context: from the person's cache, and online the missing ones read from the image's registry (its layers read,
+        nothing run, the rest of the image discarded; Core/build_preload.image_files). Offline, a file not in the cache
+        is a source the offline plan names."""
+        from orchestrator.Core.build_preload import image_files
+        folder = self.resolve_target_dir(config.target_arch)
+        state = getattr(self.config, "user_state_dir", None)
+        if folder is None or state is None:
+            return
+        image_files(state, folder, dockerfile.parent, online=online, log=progress.add_log)
 
     def _pull_mirrored_bases(self, config: BuildConfiguration, plan: Any, progress: BuildProgress) -> None:
         """Offline mode: each Docker Hub base image the plan takes through a registry mirror of the Docker daemon in the

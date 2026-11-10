@@ -111,6 +111,16 @@ docker:
     disk_gb: 15
     cpu_cores: 4
 
+# The build's preload for a computer without a network (orchestrator/Core/build_preload.py): what the image's pip
+# installs, fetched as wheels for the image's Python (Debian bookworm: 3.11, glibc 2.36) when an offline build lacks a
+# pip index; the Dockerfile then installs only from them (PIP_FIND_LINKS, PIP_NO_INDEX). Keep it in step with the
+# Dockerfile's pip lines (the GGUF venv: llama.cpp's converter requirements at the pinned commit).
+build_preload:
+  python: "3.11"
+  glibc: "2.36"
+  pip:
+    - llama_cpp_requirements: ["requirements/requirements-convert_hf_to_gguf.txt"]
+
 # The stage order of every build (the framework's stage runner, orchestrator/Core/runtime_layer.py stage_order): the
 # four stages source -> config -> convert -> target, plus the target's own modules in three fixed slots. A name N in a
 # slot runs modules/N_module.sh (lower case letters, digits and _; not one of the four stages, not benchmark).
