@@ -1,4 +1,4 @@
-Version 3.4.0 · Last updated 2026-11-08
+Version 3.4.0 · Last updated 2026-11-10
 
 **English** · [Deutsch](README_DE.md)
 
@@ -502,7 +502,9 @@ after a network error). Suggestions from an AI are only shown as advice.
 
 **AI chat panel on the right:** talk to Ditto (see [Ditto](#ditto-the-built-in-assistant)); questions that wait for
 you and what AI apps did for you arrive there too. F9 or **View > AI Chat Panel** shows or hides it. **Deployment
-tab:** copy a finished build to a board. The **Auto-Tuning** and **Models** tabs are placeholders.
+tab:** copy a finished build to a board. **Auto-Tuning tab:** measure which quantization of a model gives the best
+quality that fits a board ([Features](docs/Features.md#auto-tuning-the-best-quantization-for-a-board-measured)). The
+**Models** tab is a placeholder.
 
 Menus: **Security > Set OpenAI API Key**, **Tools > Configure AI Agent (Ditto)...**, **Tools > Create Hardware
 Module...** (wizard for a new target, including "Deep Ingest" to add documentation to the knowledge base),

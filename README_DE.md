@@ -1,4 +1,4 @@
-Version 3.4.0 · Stand 2026-11-08
+Version 3.4.0 · Stand 2026-11-10
 
 [English](README.md) · **Deutsch**
 
@@ -527,8 +527,10 @@ Platte voll ist, ein erneuter Versuch nach einem Netzwerkfehler). Vorschläge ei
 
 **KI-Chat-Bereich rechts:** mit Ditto sprechen (siehe [Ditto](#ditto-der-eingebaute-assistent)); auch Fragen, die
 auf dich warten, und was KI-Apps für dich getan haben, kommen dort an. F9 oder **Ansicht > KI-Chat-Bereich** zeigt
-oder verbirgt ihn. **Reiter „Deployment“:** einen fertigen Build auf ein Board kopieren. Die Reiter **Auto-Tuning**
-und **Models** sind Platzhalter.
+oder verbirgt ihn. **Reiter „Deployment“:** einen fertigen Build auf ein Board kopieren. **Reiter „Auto-Tuning“:**
+messen, welche Quantisierung eines Modells die beste Qualität ergibt, die auf ein Board passt
+([Features](docs/Features_DE.md#auto-tuning-die-beste-quantisierung-für-ein-board-gemessen)). Der Reiter **Models**
+ist ein Platzhalter.
 
 Menüs: **Security > Set OpenAI API Key**, **Tools > Configure AI Agent (Ditto)...**, **Tools > Create Hardware
 Module...** (Assistent für ein neues Target, mit „Deep Ingest“, um Dokumentation in die Wissensbasis aufzunehmen),

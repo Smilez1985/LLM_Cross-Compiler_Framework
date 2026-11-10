@@ -1,4 +1,4 @@
-Version 3.4.0 · Last updated 2026-11-08
+Version 3.4.0 · Last updated 2026-11-10
 
 **English** · [Deutsch](Features_DE.md)
 
@@ -328,6 +328,40 @@ template for new targets use the same steps.
   AVX without AVX2 or FMA. Building the five tools took 3 to 6 minutes on a 4-core virtual machine (`-j4`).
 
 ---
+
+### Auto-Tuning: the best quantization for a board, measured
+
+Which quantization of a model, and whether with the importance matrix, gives the best quality that still fits a
+board is measured, not guessed: **Auto-Tuning** tab, `llm-cli build tune start` ([CLI](CLI_Usage.md#build-tune)), or
+the optional AI tool `start_tuning` (you answer every run).
+
+- **One build.** A tuning run is a build of the build service: the model is fetched and converted to F16 like for
+  any build, then the framework's own measuring stage quantizes each candidate with the build image's pinned
+  `llama-quantize` (with the importance matrix a build would use) and measures it with `llama-perplexity` against the
+  reference's logits, in the build sandbox without network. Each quantized file is deleted after its measurement; the
+  result is a report (`tuning_report.json` next to the run's `build_info.json`), no model. Cancel, the disk
+  reservation, the build history and continuing an interrupted run work as for every build; a continued run measures
+  only what is missing.
+- **Candidates.** The types the board's profile recommends (in its order) whose [memory estimate](#targets-and-capabilities)
+  says they fit or are tight, plus every type you name, whatever its estimate: nothing is refused. Without a board
+  profile Q8_0, Q6_K, Q5_K_M, Q4_K_M, IQ4_XS and Q4_0; at most 8 per run. Types below 5 bits per weight are measured
+  with the importance matrix; "both" measures them also without one.
+- **Quality.** The KL divergence of each candidate's next-token probabilities from the original's (with its
+  uncertainty) and the top-1 agreement (how often both put the same token first), on a fixed evaluation text
+  (`data/evaluation`: public-domain English and German prose, never the calibration text). The original is the F16
+  model, or a Q8_0 made from it when the F16 does not fit into three quarters of this computer's memory. 16 chunks of
+  512 tokens by default (4 to 48); the reference's logits file needs about 0.4 GB for a vocabulary of 49k tokens and
+  1.2 GB for 152k, which the disk check counts.
+- **Speed.** Only measured: the tokens per second a board test measured for this model, board and type
+  (`llm-cli device runtime verify --bench-model` after a build of that type), read whenever the report is shown;
+  otherwise "not measured on the board".
+- **The recommendation.** Of the measured types that fit the board (when none fits: the tight ones; never one that
+  does not fit), with a KL divergence of at most 0.10 and, where a board speed was measured, at least 8 tokens per
+  second: the lowest KL divergence, the smaller file when two are within their uncertainties. Up to 0.05 reads good, up
+  to 0.10 usable. It is a recommendation: **Build the Recommended** (or `llm-cli build tune build`) starts the normal
+  build of that type, which names the run in its `build_info.json`; any other measured type can be built the same way.
+- **Limits.** GGUF only (RKLLM and RKNN are measured on the board). A KL divergence on fixed prose is no task test
+  (`llm-cli ditto eval` is). The build computer's CPU measures quality, not the board's speed.
 
 ## Build sandbox
 
@@ -1203,6 +1237,8 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | external | Optional, hidden until enabled: probe a trusted board, install its self-built runtime, or check and benchmark it (always asked; jobs) |
 | `delete_artifact` | external, optional | Move one built model (its folder below the output folder and its golden ZIP) to the trash; hidden until you enable it, always asked |
 | `propose_bundle_block` | read, optional | A bundle building block proposed from a Hugging Face model or a task: the model's facts, the draft block (kind, files, `reach`) and the reason of every field; a note it gives is shown to you in the review dialog, never applied; it never writes a block; hidden until you enable it |
+| `start_tuning` | local write, optional | Auto-Tuning of a model for a board (a build that measures its quantization types; no model is kept); hidden until you enable it, and you answer every run: no standing approval covers it |
+| `get_tuning_report` | read, optional | The finished tuning runs and one run's report: per type the size, the memory verdict, the KL divergence, the top-1 agreement and the speed measured on the board, and the recommendation; hidden until you enable it |
 | `remove_pack` | external, optional | Ask to uninstall one installed community pack: you see its folder, its import notes and the excerpts only it holds in the framework's own window and decide; it goes to the trash; hidden until you enable it, always asked |
 | `list_trash` / `restore_from_trash` | read / local write, optional | See the trash by name, kind and size; restore what this AI asked to delete itself (always asked); hidden until you enable them. No tool empties the trash |
 | `restore_knowledge_snapshot` | external, optional | Replace the knowledge base with an earlier snapshot, after a backup of the current content (a job); hidden until you enable it, always asked |
@@ -1812,7 +1848,8 @@ verification here, still matches its manifest and is of the pinned commit.
   root file system and your user; the program, the model and the text are mounted read-only.
 - Every run uses the shared launch policy (no forbidden option, a cleared environment). Failures are errors with the
   reason (for example a text too short for the context), never placeholder values.
-- In this version nothing in the GUI or CLI calls the check yet; the benchmark and auto-tune work of the roadmap will.
+- In this version nothing in the GUI or CLI calls the check yet. Auto-Tuning measures in the build image instead
+  ([Auto-Tuning](#auto-tuning-the-best-quantization-for-a-board-measured)).
 
 ---
 
@@ -3707,7 +3744,7 @@ What does not work yet, so you are not surprised:
   available yet; Ditto signs in with API keys, and local engines need none.
 - **Device runtime:** the self-built llama.cpp runtime on a board works from the command line and is tested with a
   fake SSH channel, not yet on a real board; there is no GUI or MCP tool for it yet.
-- **GUI:** the Auto-Tuning and Models tabs are placeholders (the local runtime is in **Ditto > Local Runtime...**).
+- **GUI:** the Models tab is a placeholder (the local runtime is in **Ditto > Local Runtime...**).
 - **Deep Ingest** runs only from the module wizard in the GUI; there is no CLI command for it. Restoring a
   knowledge-base snapshot is not available from the GUI or the CLI.
 - **Reranking** runs only for build recommendations; `rag_rerank_default` adds the chat and the MCP tool

@@ -1,4 +1,4 @@
-Version 3.4.0 · Last updated 2026-11-08
+Version 3.4.0 · Last updated 2026-11-10
 
 **English** · [Deutsch](CLI_Usage_DE.md)
 
@@ -23,7 +23,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [update](#update): update the framework (git fast-forward, then the installer again)
 - [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
-- [build](#build): `start`, `preflight`, `save`, `deps`, `status`
+- [build](#build): `start`, `preflight`, `tune`, `save`, `deps`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`, `devices`, `ssh-config`
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
@@ -137,6 +137,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `targets boards` | Each board of a target with its optimization profile and its benchmark rows (measured, published or unmeasured) |
 | `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
 | `build preflight` | The pre-flight check of a build without starting it: the hardware probes against what the build and the target's SDK need; with `--model` the memory estimate of the model on the board |
+| `build tune` | Auto-Tuning: measure a model's quantization types for a board (KL divergence and top-1 agreement against the original), show the reports and build the recommended type |
 | `build save` | Save a build that waits in the framework's build folder to the output folder or another folder |
 | `build image plan/sources/export/import` | The build container image of a target: can an offline build make it, the build sources in your network, move it to another offline computer as a checked file |
 | `build preload write/take` | The build's preload for a computer without any network: scripts for exactly what an offline build lacks, and the archive they write taken in |
@@ -728,6 +729,49 @@ security warning of its start question, which only you answer; no standing appro
 In the GUI: the **Builder** tab, **Pre-flight check** beside the start button shows the same lines and writes them
 into the Builder log; the start button asks before a build the check stops (**Build anyway**, Cancel is the default).
 The memory estimate is the line under **Quantization**, updated when the model, the board or the type changes.
+
+### build tune
+
+```
+llm-cli build tune start -m MODEL -t TARGET [-b BOARD] [--probe ID] [--type TYPE ...] [--imatrix auto|both] [--chunks N] [--ctx 256|512|1024] [-y] [-F]
+llm-cli build tune list [--json]
+llm-cli build tune show [RUN] [--json]
+llm-cli build tune build [RUN] [--type LABEL] [-F]
+```
+
+Auto-Tuning: which GGUF quantization of a model, and whether with the importance matrix, gives the best quality that
+still fits a board, measured instead of guessed.
+
+- **`start`** plans the run and prints it (the candidates with their memory verdict, the reference, the evaluation and
+  the disk it needs), asks at a terminal (`--yes` starts without asking) and runs it as one build: the model is
+  fetched and converted like for `build start`, then every candidate is quantized as a build makes it and compared
+  with the original by the KL divergence and the top-1 agreement on a fixed English and German evaluation text, in the
+  build image, without network. **Candidates**: the types the board's profile recommends that its memory estimate says
+  fit (or are tight), plus every `--type` you name, whatever its estimate (nothing is refused). Types below 5 bits per
+  weight are measured with the importance matrix; `--imatrix both` measures them also without. The reference is the
+  F16 model, or a Q8_0 made from it when the F16 does not fit into three quarters of this computer's memory.
+  `--chunks` (4 to 48, default 16) and `--ctx` (default 512) set how much text is measured. Ctrl+C cancels it; it is
+  continued like an interrupted build and measures only what is missing. Exit code 2 for a request that cannot be
+  planned (for example a format other than gguf, or a `--type` the target does not build).
+- **`list`** shows the finished runs, newest first, with their recommendation; **`show`** a run's report (default the
+  latest): per type the size, the memory verdict, the KL divergence with its uncertainty (up to 0.05 good, up to 0.10
+  usable), the top-1 agreement and the tokens per second measured on the board, and the recommendation with its
+  reason. A speed is shown only when a board test measured it (`llm-cli device runtime verify --bench-model` after a
+  build of that type); a type measured below 8 tokens per second is not recommended.
+- **`build`** starts the normal build of the recommended type (or `--type`, any measured candidate, as the report
+  names it, for example `Q4_K_M-imatrix`) with the run's model, target and board; its `build_info.json` names the
+  tuning run, and `llm-cli zoo export recipe` makes a recipe of it.
+
+```bash
+llm-cli build tune start -m HuggingFaceTB/SmolLM2-360M-Instruct -t ARM64 -b bcm2712
+llm-cli build tune start -m HuggingFaceTB/SmolLM2-135M-Instruct -t ARM64 -b bcm2837 --type Q8_0 --imatrix both -y
+llm-cli build tune show
+llm-cli build tune build --type Q5_K_M
+```
+
+In the GUI: the **Auto-Tuning** tab (**Plan**, **Start Tuning**, the finished runs with their report and **Build the
+Recommended**). An AI client uses the optional tools `start_tuning` and `get_tuning_report`; you answer every tuning run
+it starts, no standing approval covers one.
 
 ### build save
 

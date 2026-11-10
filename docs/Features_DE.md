@@ -1,4 +1,4 @@
-Version 3.4.0 · Stand 2026-11-08
+Version 3.4.0 · Stand 2026-11-10
 
 [English](Features.md) · **Deutsch**
 
@@ -353,6 +353,43 @@ Rockchip-Target und die Vorlage für neue Targets nutzen dieselben Schritte.
   6 Minuten (`-j4`).
 
 ---
+
+### Auto-Tuning: die beste Quantisierung für ein Board, gemessen
+
+Welche Quantisierung eines Modells, und ob mit Importance Matrix, die beste Qualität ergibt, die noch auf ein Board
+passt, wird gemessen, nicht geraten: Reiter **Auto-Tuning**, `llm-cli build tune start` ([CLI](CLI_Usage_DE.md#build-tune))
+oder das optionale KI-Werkzeug `start_tuning` (jeden Lauf beantwortest du).
+
+- **Ein Build.** Ein Tuning-Lauf ist ein Build des Build-Dienstes: Das Modell wird geholt und nach F16 konvertiert wie
+  bei jedem Build, dann quantisiert die eigene Messstufe des Frameworks jeden Kandidaten mit dem gepinnten
+  `llama-quantize` des Build-Images (mit der Importance Matrix, die ein Build nähme) und misst ihn mit
+  `llama-perplexity` gegen die Logits der Referenz, in der Build-Sandbox ohne Netz. Jede quantisierte Datei wird nach
+  ihrer Messung gelöscht; das Ergebnis ist ein Bericht (`tuning_report.json` neben der `build_info.json` des Laufs),
+  kein Modell. Abbrechen, die Platzreservierung, der Build-Verlauf und das Fortsetzen eines unterbrochenen Laufs
+  funktionieren wie bei jedem Build; ein fortgesetzter Lauf misst nur, was fehlt.
+- **Kandidaten.** Die Typen, die das Profil des Boards empfiehlt (in seiner Reihenfolge), deren
+  [Speicherschätzung](#targets-und-capabilities) sagt, dass sie passen oder knapp sind, dazu jeder Typ, den du nennst,
+  gleich was seine Schätzung sagt: nichts wird verweigert. Ohne Board-Profil Q8_0, Q6_K, Q5_K_M, Q4_K_M, IQ4_XS und
+  Q4_0; höchstens 8 je Lauf. Typen unter 5 Bit pro Gewicht werden mit Importance Matrix gemessen; „both“ misst sie
+  auch ohne.
+- **Qualität.** Die KL-Divergenz der Wahrscheinlichkeiten für das nächste Token jedes Kandidaten von denen des
+  Originals (mit ihrer Unsicherheit) und die Top-1-Übereinstimmung (wie oft beide dasselbe Token zuerst setzen), auf
+  einem festen Bewertungstext (`data/evaluation`: gemeinfreie englische und deutsche Prosa, nie der
+  Kalibrierungstext). Das Original ist das F16-Modell, oder ein daraus gemachtes Q8_0, wenn das F16 nicht in drei
+  Viertel des Speichers dieses Computers passt. Vorgabe 16 Chunks zu 512 Tokens (4 bis 48); die Logits-Datei der
+  Referenz braucht etwa 0,4 GB bei einem Vokabular von 49k Tokens und 1,2 GB bei 152k, was die Platzprüfung zählt.
+- **Geschwindigkeit.** Nur gemessen: die Tokens pro Sekunde, die ein Board-Test für dieses Modell, Board und diesen
+  Typ gemessen hat (`llm-cli device runtime verify --bench-model` nach einem Build dieses Typs), gelesen, wann immer
+  der Bericht gezeigt wird; sonst „nicht auf dem Board gemessen“.
+- **Die Empfehlung.** Von den gemessenen Typen, die auf das Board passen (passt keiner: die knappen; nie einer, der
+  nicht passt), mit einer KL-Divergenz von höchstens 0,10 und, wo eine Board-Geschwindigkeit gemessen ist, mindestens
+  8 Tokens pro Sekunde: die niedrigste KL-Divergenz, die kleinere Datei, wenn zwei innerhalb ihrer Unsicherheiten
+  liegen. Bis 0,05 heißt gut, bis 0,10 brauchbar. Es ist eine Empfehlung: **Das Empfohlene bauen** (oder
+  `llm-cli build tune build`) startet den normalen Build dieses Typs, der den Lauf in seiner `build_info.json` nennt;
+  jeder andere gemessene Typ lässt sich genauso bauen.
+- **Grenzen.** Nur GGUF (RKLLM und RKNN werden auf dem Board gemessen). Eine KL-Divergenz auf fester Prosa ist kein
+  Aufgabentest (das ist `llm-cli ditto eval`). Die CPU des Build-Computers misst Qualität, nicht die Geschwindigkeit
+  des Boards.
 
 ## Build-Sandbox
 
@@ -1324,6 +1361,8 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | extern | Optional, verborgen bis zur Freigabe: ein vertrautes Board prüfen, seine selbst gebaute Laufzeit installieren oder sie prüfen und messen (immer mit Frage; Jobs) |
 | `delete_artifact` | extern, optional | Ein gebautes Modell (seinen Ordner unter dem Ausgabeordner und sein Golden-ZIP) in den Papierkorb verschieben; verborgen, bis du es freigibst, immer mit Frage |
 | `propose_bundle_block` | lesen, optional | Ein Baustein für das Bündel, aus einem Hugging-Face-Modell oder einer Aufgabe vorgeschlagen: die Fakten des Modells, der Entwurf (Art, Dateien, `reach`) und der Grund jedes Felds; eine Notiz von ihm siehst du im Prüfdialog, nie übernommen; es schreibt nie einen Baustein; verborgen, bis du es freigibst |
+| `start_tuning` | lokal schreiben, optional | Auto-Tuning eines Modells für ein Board (ein Build, der seine Quantisierungstypen misst; kein Modell bleibt); verborgen, bis du es freigibst, und jeden Lauf beantwortest du: keine stehende Freigabe deckt ihn |
+| `get_tuning_report` | lesen, optional | Die fertigen Tuning-Läufe und der Bericht eines Laufs: je Typ die Größe, das Urteil der Speicherschätzung, die KL-Divergenz, die Top-1-Übereinstimmung und die auf dem Board gemessene Geschwindigkeit, und die Empfehlung; verborgen, bis du es freigibst |
 | `remove_pack` | extern, optional | Bitten, ein installiertes Community-Paket zu deinstallieren: Du siehst seinen Ordner, seine Import-Notizen und die Auszüge, die nur es hält, im eigenen Fenster des Frameworks und entscheidest; es geht in den Papierkorb; verborgen, bis du es freigibst, immer mit Frage |
 | `list_trash` / `restore_from_trash` | lesen / lokal schreiben, optional | Den Papierkorb mit Name, Art und Größe sehen; wiederherstellen, was diese KI selbst löschen wollte (immer mit Frage); verborgen, bis du sie freigibst. Kein Tool leert den Papierkorb |
 | `restore_knowledge_snapshot` | extern, optional | Die Wissensbasis durch einen früheren Snapshot ersetzen, nach einer Sicherung des aktuellen Inhalts (ein Job); verborgen, bis du es freigibst, immer mit Frage |
@@ -2004,8 +2043,8 @@ Commit ist.
   schreibgeschützt eingebunden.
 - Jeder Lauf nutzt die gemeinsame Startregel (keine verbotene Option, eine geleerte Umgebung). Fehler sind Fehler mit
   Grund (zum Beispiel ein Text, der für den Kontext zu kurz ist), nie Platzhalterwerte.
-- In dieser Version ruft noch nichts in GUI oder CLI die Prüfung auf; die Benchmark- und Auto-Tune-Arbeit der
-  Roadmap wird das tun.
+- In dieser Version ruft noch nichts in GUI oder CLI die Prüfung auf. Auto-Tuning misst stattdessen im Build-Image
+  ([Auto-Tuning](#auto-tuning-die-beste-quantisierung-für-ein-board-gemessen)).
 
 ---
 
@@ -4117,8 +4156,7 @@ Was noch nicht funktioniert, damit dich nichts überrascht:
 - **Laufzeit auf dem Gerät:** Die selbst gebaute llama.cpp-Laufzeit auf einem Board funktioniert über die
   Kommandozeile und ist mit einem nachgebildeten SSH-Kanal getestet, noch nicht auf einem echten Board; eine GUI oder
   ein MCP-Werkzeug dafür gibt es noch nicht.
-- **GUI:** Die Reiter Auto-Tuning und Models sind Platzhalter (die lokale Laufzeit steht in **Ditto > Lokale
-  Laufzeit...**).
+- **GUI:** Der Reiter Models ist ein Platzhalter (die lokale Laufzeit steht in **Ditto > Lokale Laufzeit...**).
 - **Deep Ingest** läuft nur aus dem Modul-Assistenten in der GUI; einen CLI-Befehl dafür gibt es nicht. Einen
   Schnappschuss der Wissensbasis wiederherstellen kann man über GUI oder CLI nicht.
 - **Reranking** läuft nur bei Build-Empfehlungen; `rag_rerank_default` nimmt den Chat und das MCP-Tool
