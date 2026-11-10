@@ -986,7 +986,7 @@ The [roadmap](docs/ROADMAP.md) lists what is planned; finished items move to the
   vision with `--mmproj`); next come the token-saving gateway `llmcf-gateway` in Rust, the further components built
   by the framework (speech output, a wake word), and MCP on the board
   (loopback first, the network only with TLS).
-- **Device runtime and more hardware:** a rotation stage before quantization, a generic
+- **Device runtime and more hardware:** a rotation before RKLLM quantization once a measurement shows a gain (for GGUF it was measured and left out), a generic
   ARM64 target for the Raspberry Pi, targets from the hardware probe proven on the board, the self-built llama.cpp
   with CUDA and on Windows, and targets for NVIDIA GPUs and the AMD Ryzen Z1 Extreme.
 - **Decided, waiting for its turn:** delegations, a message box for every MCP client, an own `llmcf` account,

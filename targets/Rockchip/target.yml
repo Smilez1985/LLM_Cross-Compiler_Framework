@@ -119,7 +119,7 @@ modules:
   config: "modules/config_module.sh"
   convert: "modules/convert_module.sh"
   target: "modules/target_module.sh"
-  # Optional hook between convert and target (roadmap: rotation such as SpinQuant or QuaRot): runs when the
+  # Optional hook between convert and target (no rotation for GGUF: docs/recherche/Rotation.md): runs when the
   # stages: block names rotate; none is shipped.
   rotate: "modules/rotate_module.sh"
   # The convert stage's format helpers

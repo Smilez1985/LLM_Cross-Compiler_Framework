@@ -55,6 +55,8 @@ EXPECTED_PAIRS: List[Tuple[str, str]] = [
     ("docs/recherche/MCP_vs_ACP.md", "docs/recherche/MCP_vs_ACP_DE.md"),  # research: MCP, ACP and A2A side by side
     # research: Rockchip's NPU runtime, vision models and cameras for the board's vision engine
     ("docs/recherche/RKNN_Vision.md", "docs/recherche/RKNN_Vision_DE.md"),
+    # research: rotation before quantization (QuaRot, SpinQuant) measured against importance-matrix GGUF types
+    ("docs/recherche/Rotation.md", "docs/recherche/Rotation_DE.md"),
     ("configs/SSOT_ARCHITECTURE.md", "configs/SSOT_ARCHITECTURE_DE.md"),
     ("data/calibration/README.md", "data/calibration/README_DE.md"),
 ]

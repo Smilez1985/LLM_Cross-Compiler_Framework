@@ -1048,8 +1048,8 @@ Version 3.4.0 ist in Arbeit. Sie führt fort, was 3.3.0 offen ließ, danach LoRA
   Board gebaut, und Bilderkennung mit `--mmproj`); als Nächstes kommen das Token sparende Gateway `llmcf-gateway` in
   Rust, die weiteren vom Framework gebauten Bestandteile (Sprachausgabe, ein Weckwort) und MCP
   auf dem Board (zuerst nur Loopback, ins Netz nur mit TLS).
-- **Laufzeit auf dem Gerät und mehr Hardware:** eine Rotationsstufe vor der
-  Quantisierung, ein allgemeines ARM64-Target für den Raspberry Pi, Targets aus der Hardware-Probe, auf dem Board
+- **Laufzeit auf dem Gerät und mehr Hardware:** eine Rotation vor der RKLLM-Quantisierung, sobald eine Messung einen Gewinn zeigt (für GGUF gemessen und
+  weggelassen), ein allgemeines ARM64-Target für den Raspberry Pi, Targets aus der Hardware-Probe, auf dem Board
   bewiesen, das selbst gebaute llama.cpp mit CUDA und unter Windows sowie Targets für NVIDIA-GPUs und den AMD Ryzen
   Z1 Extreme.
 - **Entschieden, wartet auf seine Reihe:** Vollmachten, ein Postfach für jeden MCP-Client, ein eigenes Konto
