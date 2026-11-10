@@ -137,7 +137,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
 | `targets boards` | Jedes Board eines Targets mit seinem Optimierungsprofil und seinen Benchmark-Zeilen (gemessen, veröffentlicht oder ungemessen) |
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
-| `build preflight` | Die Prüfung vor dem Build, ohne ihn zu starten: die Hardware-Probes gegen das, was der Build und das SDK des Targets brauchen |
+| `build preflight` | Die Prüfung vor dem Build, ohne ihn zu starten: die Hardware-Probes gegen das, was der Build und das SDK des Targets brauchen; mit `--model` die Speicherschätzung des Modells auf dem Board |
 | `build save` | Einen Build, der im Build-Ordner des Frameworks wartet, im Ausgabeordner oder einem anderen Ordner speichern |
 | `build image plan/sources/export/import` | Das Build-Container-Image eines Targets: Kann ein Offline-Build es bauen, die Build-Quellen in deinem Netz, auf einen anderen Offline-Rechner als geprüfte Datei bringen |
 | `build preload write/take` | Das Preload des Builds für einen Rechner ganz ohne Netz: Skripte für genau das, was einem Offline-Build fehlt, und das Archiv, das sie schreiben, aufgenommen |
@@ -661,6 +661,15 @@ Verhalten:
   startet nichts, wenn du ihn nicht übergehst; Warnungen (eine neuere CUDA-Nebenversion, keine NVIDIA-GPU, eine
   Runtime auf dem Board, die älter als das Toolkit ist) werden ausgegeben und in den Warnungen des Builds behalten,
   und der Build startet.
+- Mit einem Board folgt die Speicherschätzung: wie viel Speicher das Modell im gewählten Typ auf dem Board braucht
+  (die Gewichte Tensor für Tensor aus der `config.json` des Modells mit den Regeln von llama.cpp für den Typ
+  geschätzt, etwa ein Zehntel für die Puffer des Servers und der KV-Cache eines Kontexts von 2048 Token) gegen den
+  Speicher des Boards (seine Probe, sonst der größte Speicher, mit dem das Board kommt), mit dem Urteil passt, knapp
+  (über drei Vierteln) oder passt nicht (über dem Speicher: nur mit Swap, wenn überhaupt). Sie ist eine Schätzung,
+  sagt das und hält den Build nie an: Du entscheidest. Die `config.json` des Modells wird von huggingface.co zu dem
+  Commit gelesen, den der Build holt (offline: die Kopie auf diesem Computer); ohne sie ist die Schätzung die gröbere
+  aus der Parameterzahl. Der Build hält die Schätzung in `build_info.json` fest (`memory_estimate`, neben der echten
+  Dateigröße), und die Warnung nach dem Build zählt denselben KV-Cache.
 - Mit `--recipe` gibt der Befehl zuerst das Rezept aus (Autor, Modell und Commit, Lizenz des Modells, Kontextlänge),
   die Optimierungsstufe und ob sie die des Rezepts, deine oder die des Board-Profils ist, was du daran geändert hast,
   seine Referenzergebnisse (Artefakt, sha256, Framework-Version, Toolchain-Image, ein Gerätetest) und eine Warnung,
@@ -704,7 +713,7 @@ llm-cli build start --recipe smollm2-135m-instruct-rk3588-gguf-q4_k_m -q Q8_0 -F
 ### build preflight
 
 ```
-llm-cli build preflight -t TARGET [-f FORMAT] [-b BOARD] [--probe ID] [--gpu] [--json]
+llm-cli build preflight -t TARGET [-f FORMAT] [-b BOARD] [--probe ID] [--gpu] [-m MODEL [-q QUANT]] [--json]
 ```
 
 Die Prüfung vor einem Build, ohne etwas zu starten; `build start`, der Builder, der Build eines Rezepts, ein
@@ -728,9 +737,15 @@ bestanden ist oder nur Warnungen fand, 1, wenn der Build anhalten würde, 2 bei 
 ablehnt (ein unbekanntes Target, ein Format, das das Target nicht baut, die Probe eines anderen Boards). `--json` gibt
 das Urteil, die Befunde, was verglichen wurde und was nicht aus.
 
+Mit `--model` (eine Hugging-Face-ID oder ein lokaler Pfad) und einem Board wird auch die
+[Speicherschätzung](#build-start) des Modells in `--quantization` (Vorgabe: der Standardtyp des Boards) gegen den
+Speicher des Boards ausgegeben, und `--json` trägt sie als `memory_estimate` (ihre Zahlen, ihr Urteil und ihr Text).
+Sie ist nur eine Warnung und ändert den Exit-Code nie.
+
 ```bash
 llm-cli build preflight -t Rockchip -f rknn -b rk3588
 llm-cli build preflight -t Rockchip -f gguf --gpu --json
+llm-cli build preflight -t ARM64 -b bcm2837 -m HuggingFaceTB/SmolLM2-360M-Instruct -q IQ4_XS
 ```
 
 Nur du kannst trotzdem bauen: `build start --ignore-preflight` oder dein Ja im Terminal. Ein KI-Client sieht einen Halt
@@ -739,7 +754,8 @@ deckt ihn.
 
 In der GUI: der Tab **Builder**, **Prüfung vor dem Build** neben dem Start-Knopf zeigt dieselben Zeilen und schreibt sie
 ins Builder-Protokoll; der Start-Knopf fragt vor einem Build, den die Prüfung anhält (**Trotzdem bauen**, Abbrechen ist
-die Vorgabe).
+die Vorgabe). Die Speicherschätzung ist die Zeile unter **Quantization**, aktualisiert, wenn Modell, Board oder Typ
+wechseln.
 
 ### build save
 

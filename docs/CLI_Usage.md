@@ -136,7 +136,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
 | `targets boards` | Each board of a target with its optimization profile and its benchmark rows (measured, published or unmeasured) |
 | `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
-| `build preflight` | The pre-flight check of a build without starting it: the hardware probes against what the build and the target's SDK need |
+| `build preflight` | The pre-flight check of a build without starting it: the hardware probes against what the build and the target's SDK need; with `--model` the memory estimate of the model on the board |
 | `build save` | Save a build that waits in the framework's build folder to the output folder or another folder |
 | `build image plan/sources/export/import` | The build container image of a target: can an offline build make it, the build sources in your network, move it to another offline computer as a checked file |
 | `build preload write/take` | The build's preload for a computer without any network: scripts for exactly what an offline build lacks, and the archive they write taken in |
@@ -637,6 +637,15 @@ Behaviour:
   board's NPU driver below what the format needs) starts nothing unless you override it; warnings (a newer CUDA
   minor version, no NVIDIA GPU, a board runtime older than the toolkit) are printed and kept in the build's
   warnings, and the build starts.
+- With a board, the memory estimate follows: how much memory the model needs on the board at the chosen type
+  (the weights estimated tensor by tensor from the model's `config.json` with llama.cpp's rules for the type, about a
+  tenth for the server's buffers and the KV cache of a 2048-token context) against the board's memory (its probe,
+  else the most memory the board comes with), with the verdict fits, tight (above three quarters) or does not fit
+  (above the memory: only with swap, if at all). It is an estimate, says so, and never stops the build: you decide.
+  The model's `config.json` is read from huggingface.co at the commit the build fetches (offline: the copy on this
+  computer); without it the estimate is the rougher one from the parameter count. The build records the estimate in
+  `build_info.json` (`memory_estimate`, next to the real file size), and the warning after the build counts the same
+  KV cache.
 - With `--recipe` the command first prints the recipe (author, model and commit, model licence, context length), the
   optimization level and whether it is the recipe's, yours or the board profile's, what you changed from it, its
   reference results (artifact, sha256, framework version, toolchain image, a device test) and, when the installed
@@ -679,7 +688,7 @@ llm-cli build start --recipe smollm2-135m-instruct-rk3588-gguf-q4_k_m -q Q8_0 -F
 ### build preflight
 
 ```
-llm-cli build preflight -t TARGET [-f FORMAT] [-b BOARD] [--probe ID] [--gpu] [--json]
+llm-cli build preflight -t TARGET [-f FORMAT] [-b BOARD] [--probe ID] [--gpu] [-m MODEL [-q QUANT]] [--json]
 ```
 
 The pre-flight check of a build, without starting anything; `build start`, the Builder, the build of a recipe, a
@@ -702,9 +711,15 @@ warnings only, 1 when the build would stop, 2 for a request the build service re
 the target does not build, a probe of another board). `--json` prints the verdict, the findings, what was compared
 and what was not.
 
+With `--model` (a Hugging Face id or a local path) and a board, the [memory estimate](#build-start) of the model at
+`--quantization` (default: the board's default type) against the board's memory is printed as well, and `--json`
+carries it as `memory_estimate` (its numbers, its verdict and its text). It is a warning only and never changes the
+exit code.
+
 ```bash
 llm-cli build preflight -t Rockchip -f rknn -b rk3588
 llm-cli build preflight -t Rockchip -f gguf --gpu --json
+llm-cli build preflight -t ARM64 -b bcm2837 -m HuggingFaceTB/SmolLM2-360M-Instruct -q IQ4_XS
 ```
 
 Only you can build anyway: `build start --ignore-preflight` or your yes at the terminal. An AI client sees a stop as a
@@ -712,6 +727,7 @@ security warning of its start question, which only you answer; no standing appro
 
 In the GUI: the **Builder** tab, **Pre-flight check** beside the start button shows the same lines and writes them
 into the Builder log; the start button asks before a build the check stops (**Build anyway**, Cancel is the default).
+The memory estimate is the line under **Quantization**, updated when the model, the board or the type changes.
 
 ### build save
 
