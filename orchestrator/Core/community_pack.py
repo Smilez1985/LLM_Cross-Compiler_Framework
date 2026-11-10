@@ -52,7 +52,10 @@ MANIFEST_NAME = "pack.json"
 SIGNATURE_NAME = "pack.sig"
 # Written next to an installed pack (source, trust level, digests); never part of a pack or its fingerprint.
 PROVENANCE_NAME = ".lcf-provenance.json"
-RESERVED_NAMES = frozenset({MANIFEST_NAME, SIGNATURE_NAME, PROVENANCE_NAME})
+# A generated module's build test record (Core/module_test.py): this computer's results, never part of a pack or of
+# the target's content digest, so recording a build changes nothing a build, a recipe or a pack check compares.
+MODULE_TEST_NAME = ".lcf-module-test.json"
+RESERVED_NAMES = frozenset({MANIFEST_NAME, SIGNATURE_NAME, PROVENANCE_NAME, MODULE_TEST_NAME})
 Kind = Literal["target", "recipe", "knowledge", "block"]   # block: a board bundle building block
 PACK_KINDS = get_args(Kind)
 # Packs carry scripts, recipes and text, never model weights.

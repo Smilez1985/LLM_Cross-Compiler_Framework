@@ -56,6 +56,77 @@ DOCKER_DISK_STEP = ("Free space on Docker's disk yourself, then start the build 
                     "confirm; nothing is ticked by default. Docker's build cache is not touched by the framework: it "
                     "belongs to every project on this computer ('docker system df' shows its size).")
 
+# Expert knowledge base (regex heuristics), the pattern library.
+# Format: (Regex, Cause, Fix, Strategy, Scope). Only the strategy decides what the framework does;
+# the fix text is shown to the user and is never executed as a shell command.
+KNOWN_ISSUES = (
+    (
+        # The compiler was killed while building the image (OOM): fewer parallel jobs help.
+        r"(?:^|\n)Image build failed[\s\S]*(?:internal compiler error.*(?-i:Killed)|Killed signal terminated program|"
+        r"\b(?:cc1plus|cc1|collect2|ld)\b.*(?-i:Killed))",
+        "Out of memory while compiling the build image.",
+        "Lower the parallel compile jobs for image builds to 1 (setting build_jobs) and retry.",
+        HealingStrategy.CONFIG_ADJUSTMENT,
+        "HOST"
+    ),
+    (
+        # The conversion itself was killed (SIGKILL / exit code 137), usually by the OOM killer.
+        r"\b(?:exit(?:ed)? (?:code|status)|code):? 137\b|\bline \d+: +\d+ (?-i:Killed)\b",
+        "The conversion was killed, most likely out of memory.",
+        "Free memory or add swap, close other programs, or choose a smaller model or quantization. "
+        "Large models need roughly their size in RAM during conversion.",
+        HealingStrategy.MANUAL_INTERVENTION,
+        "HOST"
+    ),
+    (
+        # Which disk is full decides the proposal (_disk_full_proposal): pruning Docker frees only Docker's
+        # data root, never the model cache or the output folder (G40).
+        DISK_FULL_PATTERN,
+        "Disk full.",
+        DOCKER_DISK_STEP,
+        HealingStrategy.DOCKER_PRUNE,
+        "HOST"
+    ),
+    (
+        r"permission denied.*docker\.sock|Got permission denied while trying to connect to the Docker daemon", 
+        "Your user may not access the Docker daemon.",
+        "Use a rootless engine: 'sudo ./install.sh' sets up rootless Podman for your account (the framework "
+        "prefers it). The group 'docker' would give your account root-equivalent rights permanently; only "
+        "with that knowingly: sudo usermod -aG docker $USER, then log in again. Never make "
+        "/var/run/docker.sock world-writable.",
+        HealingStrategy.MANUAL_INTERVENTION,
+        "HOST"
+    ),
+    (
+        r"Could not resolve host|Temporary failure in name resolution", 
+        "Network connectivity issue.",
+        "Check the network/DNS; the build is retried once.",
+        HealingStrategy.RETRY_BUILD,
+        "HOST"
+    ),
+    (
+        r"(?:404\s+Not Found|does not have a Release file).*(?:apt|debian|ubuntu)|apt-get.*404", 
+        "Outdated apt repositories in the base image.",
+        "Update the target's base image (or add 'apt-get update --allow-releaseinfo-change' to its Dockerfile).",
+        HealingStrategy.MANUAL_INTERVENTION,
+        "HOST"
+    )
+)
+
+# The one cause of the pattern library that lies in a target module (its base image's apt sources); every other known
+# cause is the host's (a full disk, the container engine's permission, the network, memory).
+MODULE_CAUSE = "Outdated apt repositories in the base image."
+
+
+def host_cause(log: str) -> Optional[str]:
+    """The cause the pattern library traces the log to when it is the host's, not the module's; None otherwise. A
+    generated module's failed build is marked for rework only without one (Core/module_test.py)."""
+    for pattern, cause, _fix, _strategy, _scope in KNOWN_ISSUES:
+        if cause != MODULE_CAUSE and re.search(pattern, log or "", re.IGNORECASE):
+            return cause
+    return None
+
+
 @dataclass
 class HealingProposal:
     """Strukturierter Vorschlag zur Fehlerbehebung."""
@@ -77,62 +148,7 @@ class SelfHealingManager:
         self.framework = framework_manager
         self._enabled = True # Kann via Config deaktiviert werden
         
-        # Expert Knowledge Base (Regex Heuristics)
-        # Format: (Regex, Cause, Fix, Strategy, Scope). Only the strategy decides what the framework does;
-        # the fix text is shown to the user and is never executed as a shell command.
-        self.known_issues = [
-            (
-                # The compiler was killed while building the image (OOM): fewer parallel jobs help.
-                r"(?:^|\n)Image build failed[\s\S]*(?:internal compiler error.*(?-i:Killed)|Killed signal terminated program|"
-                r"\b(?:cc1plus|cc1|collect2|ld)\b.*(?-i:Killed))",
-                "Out of memory while compiling the build image.",
-                "Lower the parallel compile jobs for image builds to 1 (setting build_jobs) and retry.",
-                HealingStrategy.CONFIG_ADJUSTMENT,
-                "HOST"
-            ),
-            (
-                # The conversion itself was killed (SIGKILL / exit code 137), usually by the OOM killer.
-                r"\b(?:exit(?:ed)? (?:code|status)|code):? 137\b|\bline \d+: +\d+ (?-i:Killed)\b",
-                "The conversion was killed, most likely out of memory.",
-                "Free memory or add swap, close other programs, or choose a smaller model or quantization. "
-                "Large models need roughly their size in RAM during conversion.",
-                HealingStrategy.MANUAL_INTERVENTION,
-                "HOST"
-            ),
-            (
-                # Which disk is full decides the proposal (_disk_full_proposal): pruning Docker frees only Docker's
-                # data root, never the model cache or the output folder (G40).
-                DISK_FULL_PATTERN,
-                "Disk full.",
-                DOCKER_DISK_STEP,
-                HealingStrategy.DOCKER_PRUNE,
-                "HOST"
-            ),
-            (
-                r"permission denied.*docker\.sock|Got permission denied while trying to connect to the Docker daemon", 
-                "Your user may not access the Docker daemon.",
-                "Use a rootless engine: 'sudo ./install.sh' sets up rootless Podman for your account (the framework "
-                "prefers it). The group 'docker' would give your account root-equivalent rights permanently; only "
-                "with that knowingly: sudo usermod -aG docker $USER, then log in again. Never make "
-                "/var/run/docker.sock world-writable.",
-                HealingStrategy.MANUAL_INTERVENTION,
-                "HOST"
-            ),
-            (
-                r"Could not resolve host|Temporary failure in name resolution", 
-                "Network connectivity issue.",
-                "Check the network/DNS; the build is retried once.",
-                HealingStrategy.RETRY_BUILD,
-                "HOST"
-            ),
-            (
-                r"(?:404\s+Not Found|does not have a Release file).*(?:apt|debian|ubuntu)|apt-get.*404", 
-                "Outdated apt repositories in the base image.",
-                "Update the target's base image (or add 'apt-get update --allow-releaseinfo-change' to its Dockerfile).",
-                HealingStrategy.MANUAL_INTERVENTION,
-                "HOST"
-            )
-        ]
+        self.known_issues = list(KNOWN_ISSUES)
 
         self.logger.info("Self-Healing Manager initialized (Hybrid Mode: Regex + AI).")
 

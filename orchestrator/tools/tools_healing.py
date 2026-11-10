@@ -5,7 +5,9 @@ The client's own healing proposal (MCP design 2.3, work package T4): `propose_he
 An AI client that takes over Ditto's job (DESIGN round 1 item 5) analyses a failed build itself (prompt
 `diagnose_build_failure`) and hands its proposal to the framework. It passes the same checks as Ditto's own analysis:
 the HealingAnalysis model (summary up to 300 characters, cause and step up to 2000, confidence 0-1, HOST or DEVICE)
-and the dangerous-command filter. It is kept with the build as a manual step for the person, shown in
+and the dangerous-command filter. For a generated module that needs rework after the build, `module_diff` carries a
+repair of its files (Core/module_test.py): checked to apply and free of dangerous commands, it waits for the person in
+the module's edit step and is never saved by itself. It is kept with the build as a manual step for the person, shown in
 get_build_status, the GUI and `llm-cli build status` with who proposed it, and is never run: resolve_healing refuses
 to apply it. A low confidence with an honest "cause unclear" is a valid result.
 """
@@ -34,6 +36,11 @@ class ProposeHealingIn(BaseModel):
     confidence: float = Field(ge=0, le=1, description="How sure you are, from 0 to 1")
     where: Literal["HOST", "DEVICE"] = Field(default="HOST",
                                              description="HOST: the build computer; DEVICE: the edge device")
+    module_diff: str = Field(default="", max_length=20000,
+                             description="Only for a generated module that needs rework after this build (its "
+                                         "build_test in get_target_capabilities): a unified diff of its files "
+                                         "(get_target_capabilities with module_files), shown to the person in the "
+                                         "module's edit step; only the person saves it")
 
 
 class ProposeHealingOut(ToolOutput):
@@ -52,7 +59,8 @@ def register_healing_tools(registry: ToolRegistry, framework, request_field: Fie
 
     def propose_healing_fix(inp: ProposeHealingIn, ctx: ToolContext) -> ProposeHealingOut:
         proposal = service.propose_fix(inp.request_id, inp.summary, inp.root_cause, inp.manual_step, inp.confidence,
-                                       inp.where, proposed_by=ctx.actor, client=ctx.client)
+                                       inp.where, proposed_by=ctx.actor, client=ctx.client,
+                                       module_diff=inp.module_diff)
         return ProposeHealingOut(proposal_id=proposal.proposal_id, request_id=inp.request_id)
 
     registry.register(ToolSpec(
@@ -60,7 +68,9 @@ def register_healing_tools(registry: ToolRegistry, framework, request_field: Fie
         "Hands your own analysis of a failed build to the framework: summary, cause, one manual step and your "
         "confidence. It goes through the same dangerous-command filter as Ditto's analysis and is shown to the "
         "person as a manual step written by an AI client; the framework never runs it. Use it after "
-        "diagnose_build_failure or read_build_log; an unclear cause with a low confidence is an honest answer.",
+        "diagnose_build_failure or read_build_log; an unclear cause with a low confidence is an honest answer. For "
+        "a generated module that needs rework, module_diff carries a repair of its files, which waits for the "
+        "person in the module's edit step.",
         ToolTier.LOCAL_WRITE, ProposeHealingIn, ProposeHealingOut, propose_healing_fix, takes_context=True,
         fields={"request_id": request_field, "confidence": FieldMeta(kind="value"),
                 "where": FieldMeta(kind="choice", choices=("HOST", "DEVICE"))},

@@ -158,7 +158,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `mcp serve` / `mcp config` | Run the MCP server / show how to connect AI clients |
 | `acp` / `acp config` / `acp servers` | Ditto as an agent of editors that speak ACP (the editor starts it) / show the editor entry / the MCP servers editors passed, with your consent per entry |
 | `secrets set` / `secrets list` | Store a token (Hugging Face, GitHub) / list the stored names |
-| `module create` / `module generate-ai` / `module edit` | Create a new hardware target, by questions or from a probe file with Ditto / edit its files with a diff and the checks |
+| `module create` / `module generate-ai` / `module edit` / `module repair` | Create a new hardware target, by questions or from a probe file with Ditto / edit its files with a diff and the checks / repair it after a failed build, by hand or from its error log |
 | `scan` | Run the hardware probe on this computer or, with `--device`, on a board over SSH, or with `--import` store a board's probe file, and print its probe id |
 | `device list` / `device settings` | The probed boards / how the runtime is installed on a board (start script or systemd), decided before a deployment |
 | `device runtime plan/build/deploy/verify/status` | The self-built llama.cpp runtime of a board: plan it from the board's profile, cross-build it, install it over SSH and check it there |
@@ -484,6 +484,11 @@ Lists the targets in the configured targets folder. The table shows each target'
 "Rockchip Family"), architecture, and the boards and formats its `capabilities:` block declares; a target without
 one is marked "no capabilities declared". **The value for `--target` is the id** (for example `Rockchip`); the
 target's folder name works as well. `json` and `yaml` give the same data with the quantizations per format.
+The column **Build test** is the state of a generated module (made by the wizard, `module create`, an AI, or an
+installed pack): *untested* (not built yet, or changed since its last build), *tested* (a build of these files passed
+its target stage: the build's id, the date and the framework version) or *needs rework* (its newest build failed in the
+module's own part; repair it with [`module repair`](#module-repair)); a shipped target shows "- (shipped)". In `json`
+and `yaml` it is the field `build_test`.
 
 | Option | Meaning |
 |---|---|
@@ -2333,6 +2338,47 @@ In the GUI: **Build > Targets...**, select the target, **Edit Files...**: the sa
 Checks**, **Apply a Diff...** (`--apply`) and **Save**, which is refused with the reasons while a check fails. An AI
 app or Ditto may propose a change there through the GUI tools, as a diff in the field "proposal": it is applied in the
 window, marked and listed with an Undo, and only your **Save** writes it.
+
+### module repair
+
+```
+llm-cli module repair TARGET [--propose] [--apply DIFF_FILE] [--file FILE]... [--retry]
+```
+
+Repairs a generated module after a failed build. A build of a module that is not shipped marks it: **tested** when its
+target stage passed (the board package was made), **needs rework** when it failed in the module's own part (building
+its image from its Dockerfile, or its stage modules) and the pattern library does not trace the log to this computer (a
+full disk, the container engine's permission, the network, memory). The state is kept in `.lcf-module-test.json`
+beside `target.yml`, never in `target.yml` itself, so a recorded result changes nothing a build, a recipe or a pack
+check compares; it holds the newest failed build's log (its last 400 lines, secrets redacted) and the history of
+results and repairs. `metadata.untested` in `target.yml` stays until a run on the board.
+
+The command shows the state, the failed build with its error and the end of its log, and a repair proposal that waits
+(from Ditto, the pattern library or an AI app). The repair runs through the same step as [`module edit`](#module-edit):
+the waiting proposal (or your diff) is applied to the files, the files open in `$EDITOR`, the diff is shown and the
+checks run again, and only your yes writes the files. The module then stays untested until a build passes, and the
+command prints the `llm-cli build start` line that builds the failed build's settings again.
+
+| Option | Meaning |
+|---|---|
+| `--propose` | Ask the self-healing analysis for a repair from the error log first: the pattern library, then Ditto (the log cleaned, scrubbed and wrapped as untrusted text; the module's files as untrusted text). A known cause gives a step for you as text (nothing is run); Ditto's answer is a unified diff of the module's files, refused when it does not fit them or names a dangerous command. Needs the framework (and an AI provider for Ditto). |
+| `--apply DIFF_FILE` | Apply a unified diff first instead of the waiting proposal, as in `module edit --apply`. |
+| `--file FILE` | Open this file of the step in `$EDITOR`; repeatable. Without `--propose`, `--apply` or a waiting proposal every file opens. |
+| `--retry` | After the repair is saved, start the failed build again with its settings (model, format, quantization, board), after a yes. |
+
+```bash
+llm-cli module repair my_board --propose
+llm-cli module repair my_board --apply fix.diff --retry
+```
+
+In the GUI: **Build > Targets...** shows the column **Build test**; **Edit Files...** on a module that needs rework
+shows the failed build's error and log above the files, applies a waiting proposal (marked in the diff, **Undo the
+Proposal**), offers **Propose a Repair from the Log** (`--propose`) and, after **Save**, asks to start the failed
+build again in the Builder (`--retry`). The Builder shows the state as the tooltip of each target, writes it into the
+build log when a build ends, and after a failed build of a module offers to open its files with the error. An AI app
+reads the state in `list_targets` and `get_target_capabilities` (`build_test`; with `module_files` also the module's
+files and the failed log) and proposes a repair with `propose_healing_fix` and its field `module_diff`; the proposal
+waits for you here, and no AI saves it.
 
 ---
 

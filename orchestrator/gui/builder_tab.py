@@ -1324,6 +1324,10 @@ class BuilderTab(QWidget):
                 for t in tm.list_targets():
                     arch = t.get('architecture') or t.get('architecture_family') or "?"
                     self.target_combo.addItem(f"{t.get('name')} ({arch})", t.get('id'))
+                    tip = self._build_test_line(t.get('id'))
+                    if tip:   # a generated module's build test (tested, untested, needs rework) as the tooltip
+                        self.target_combo.setItemData(self.target_combo.count() - 1,
+                                                      ui_text("bld.test.tip", line=tip), Qt.ToolTipRole)
             idx = self.target_combo.findData(previous)
             if idx >= 0:
                 self.target_combo.setCurrentIndex(idx)
@@ -1331,6 +1335,76 @@ class BuilderTab(QWidget):
             self.target_combo.blockSignals(False)
         if hasattr(self, "format_combo"):
             self._apply_target_capabilities()
+
+    def _build_test(self, target):
+        """A generated module's build test (Core/module_test.py) through the build service; None for a shipped
+        target or without a service."""
+        service = self._build_service()
+        try:
+            return service.build_test(target) if service is not None and target else None
+        except Exception:  # noqa: BLE001 - a stand-in service: no state
+            return None
+
+    def _build_test_line(self, target) -> str:
+        from orchestrator.gui.module_edit import test_line
+        test = self._build_test(target)
+        return test_line(test) if test is not None else ""
+
+    def _module_after_build(self, request_id, status) -> None:
+        """After a build ended: the module's build test in the log, and for a module now marked for rework the
+        question to open its files with the error (the repair; nothing opens without the person's yes)."""
+        service = self._build_service()
+        try:
+            request = service.get_status(request_id).request if service is not None else None
+        except Exception:  # noqa: BLE001 - an unknown request: nothing to say
+            request = None
+        target = getattr(request, "target", None)
+        test = self._build_test(target)
+        if test is None:
+            return
+        from orchestrator.gui.module_edit import test_line
+        self._log(ui_text("bld.repair.module_line", target=target, line=test_line(test)))
+        if status != "error" or test.state != "needs_rework":
+            return
+        answer = QMessageBox.question(self, ui_text("bld.repair.ask_title"), ui_text("bld.repair.ask", target=target),
+                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if answer == QMessageBox.Yes:
+            self.open_repair(target)
+
+    def open_repair(self, target):
+        """The edit step of `target` with its failed build (gui/module_edit.py); a saved repair offers the failed
+        build again in this form (retry_build)."""
+        tm = self.framework.get_component("target_manager") if hasattr(self.framework, "get_component") else None
+        folder = tm.folder_of(target) if tm is not None and hasattr(tm, "folder_of") else None
+        if folder is None:
+            return None
+        from orchestrator.gui.module_edit import open_module_edit
+        return open_module_edit(self, folder, registry=getattr(self.framework, "tool_registry", None),
+                                on_saved=lambda _files: self._refresh_targets(), framework=self.framework,
+                                on_retry=self.retry_build)
+
+    def retry_build(self, settings) -> None:
+        """A repaired module's failed build again: its settings in this form, then Start (the person said yes); the
+        build's own checks and questions run as for any start."""
+        idx = next((i for i in range(self.target_combo.count())
+                    if str(self.target_combo.itemData(i)).casefold() == str(settings.get("target")).casefold()), -1)
+        if idx < 0:
+            return
+        self.target_combo.setCurrentIndex(idx)
+        if settings.get("model"):
+            self.model_input.setCurrentText(str(settings["model"]))
+        fmt = self.format_combo.findData(settings.get("format"))
+        if fmt >= 0:
+            self.format_combo.setCurrentIndex(fmt)
+        if settings.get("board"):
+            board = self.board_combo.findData(settings["board"])
+            if board >= 0:
+                self.board_combo.setCurrentIndex(board)
+            elif self.board_combo.isEditable():
+                self.board_combo.setCurrentText(str(settings["board"]))
+        if settings.get("quantization"):
+            self.quant_combo.setCurrentText(str(settings["quantization"]))
+        self._submit_build()
 
     def _log_context_menu(self, pos):
         menu = self.log_area.createStandardContextMenu()
@@ -1858,7 +1932,7 @@ class BuilderTab(QWidget):
         """Targets...: every target with its ID, boards, formats and support level; the window selects this one."""
         from orchestrator.gui.targets_window import open_targets_dialog
         return open_targets_dialog(self, self.framework, select=self.target_combo.currentData(),
-                                   on_reload=self._refresh_targets)
+                                   on_reload=self._refresh_targets, on_retry=self.retry_build)
 
     def _check_target(self):
         """Check target: TargetManager.validate on the selected target (its target.yml read again)."""
@@ -1923,6 +1997,8 @@ class BuilderTab(QWidget):
                 except Exception:  # noqa: BLE001 - the status word then
                     reason = None
                 self._log(f"Build {rid} ended: {reason_text(reason) or status}")
+            if status in ("completed", "error"):
+                self._module_after_build(rid, status)
             if status == "completed":
                 self._offer_save(rid)
 

@@ -7,8 +7,9 @@ or "no capabilities declared", from BuildService.list_targets, the same query as
 TargetManager.validate, the CLI's check, on the selected target (its target.yml read again, so an edited file is
 checked as it is now) and shows each schema error by field, or that the target declares no capabilities. The same
 check runs after the module wizard created a target and after a Community Hub target install (target_check_text).
-[Edit Files...] opens the "edit all files" step (gui/module_edit.py, `llm-cli module edit`) for the selected target.
-Every text is plain text.
+[Edit Files...] opens the "edit all files" step (gui/module_edit.py, `llm-cli module edit`) for the selected target,
+with the failed build of a generated module that needs rework (`llm-cli module repair`). The column "Build test" is
+a generated module's state (tested, untested, needs rework; Core/module_test.py). Every text is plain text.
 """
 
 from typing import Any, List, Optional
@@ -21,7 +22,7 @@ from orchestrator.gui.plain import button_text, one_line, plain_box, plain_label
 from orchestrator.utils.localization import current_language, ui_text
 
 COLUMNS = ("bld.targets.col.id", "bld.targets.col.name", "bld.targets.col.arch", "bld.targets.col.boards",
-           "bld.targets.col.formats", "bld.targets.col.support")
+           "bld.targets.col.formats", "bld.targets.col.support", "bld.targets.col.test")
 
 
 def _target_manager(framework: Any) -> Any:
@@ -93,9 +94,10 @@ class TargetsDialog(QDialog):
     folder again. `select`: the target to select first (the Builder's current one)."""
 
     def __init__(self, framework: Any, parent: Optional[QWidget] = None, select: Optional[str] = None,
-                 lang: Optional[str] = None):
+                 lang: Optional[str] = None, on_retry: Any = None):
         super().__init__(parent)
         self.framework = framework
+        self.on_retry = on_retry   # a repaired module's failed build again (the Builder's form, its Start)
         self.lang = lang or current_language()
         self.targets: List[Any] = []
         self.reloaded = False   # the targets folder was read again (the caller refreshes its lists)
@@ -157,9 +159,10 @@ class TargetsDialog(QDialog):
         for row, target in enumerate(self.targets):
             formats = ", ".join(f.id for f in target.formats)
             support = getattr(target.support_level, "value", target.support_level)
+            from orchestrator.gui.module_edit import test_line
             values = (target.id, target.name or "", target.architecture or "-", ", ".join(target.boards) or "-",
                       formats or (invalid if declares_capabilities(self.framework, target.id) else none),
-                      support or "-")
+                      support or "-", test_line(getattr(target, "build_test", None), self.lang))
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(one_line(value))   # plain text, never rich text
                 if column == 0:
@@ -232,7 +235,8 @@ class TargetsDialog(QDialog):
             return None
         from orchestrator.gui.module_edit import open_module_edit
         return open_module_edit(self, folder, registry=getattr(self.framework, "tool_registry", None),
-                                on_saved=lambda _files: self._reload())
+                                on_saved=lambda _files: self._reload(), framework=self.framework,
+                                on_retry=self.on_retry)
 
     def _reload(self) -> None:
         tm = _target_manager(self.framework)
@@ -243,11 +247,12 @@ class TargetsDialog(QDialog):
 
 
 def open_targets_dialog(parent: Optional[QWidget], framework: Any, select: Optional[str] = None,
-                        on_reload: Optional[Any] = None) -> Optional[TargetsDialog]:
+                        on_reload: Optional[Any] = None, on_retry: Optional[Any] = None) -> Optional[TargetsDialog]:
     """Build > Targets... and the Builder's Targets... button: the window, then `on_reload()` when the person read
-    the targets folder again (the caller refreshes its target lists)."""
+    the targets folder again (the caller refreshes its target lists). `on_retry`: a repaired module's failed build
+    again (the Builder's)."""
     try:
-        dialog = TargetsDialog(framework, parent, select=select)
+        dialog = TargetsDialog(framework, parent, select=select, on_retry=on_retry)
     except Exception as e:  # noqa: BLE001 - no framework: said in plain text
         plain_box(parent, "critical", ui_text("bld.targets.title"), one_line(str(e)))
         return None

@@ -390,6 +390,38 @@ TEXTS = {
         "bld.edit.open_failed": "The files of {target} cannot be opened:\n{reason}",
         "bld.edit.field.proposal": "Proposal (a unified diff)",
         "bld.targets.edit": "Edit Files...",
+        "bld.targets.col.test": "Build test",
+        "bld.test.shipped": "- (shipped)",
+        "bld.test.tested": "tested: build {build} passed on {date} (llmcf {version})",
+        "bld.test.rework": "needs rework: build {build} failed{where} on {date}",
+        "bld.test.rework_where": " in stage {stage}",
+        "bld.test.waiting": "; a repair proposal waits",
+        "bld.test.changed": "untested: changed since build {build}",
+        "bld.test.not_built": "untested: not built yet",
+        "bld.test.tip": "Build test: {line}",
+        "bld.repair.error": "Error: {error}",
+        "bld.repair.proposal": "Proposal ({by}): {summary}",
+        "bld.repair.cause": "Cause: {cause}",
+        "bld.repair.step": "Step for you (nothing is run): {step}",
+        "bld.repair.check": "Check: {problem}",
+        "bld.repair.log": "End of the failed build's log:",
+        "bld.repair.propose": "Propose a Repair from the Log",
+        "bld.repair.undo": "Undo the Proposal",
+        "bld.repair.proposing": "The self-healing analysis reads the log (the pattern library, then Ditto) ...",
+        "bld.repair.none": "No repair was proposed:\n{reason}",
+        "bld.repair.no_diff": "The analysis names no change to the module's files. {cause}\n\nStep for you "
+                              "(nothing is run): {step}",
+        "bld.repair.applied": "The proposal of {by} is applied to the files (see the diff): {summary}. Check it and "
+                              "save it, or undo it; nothing is saved without you.",
+        "bld.repair.retry_title": "Build again",
+        "bld.repair.retry": "The repair is saved; {target} stays untested until a build passes. Start the failed "
+                            "build again with its settings?",
+        "bld.repair.retry_cli": "The repair is saved; {target} stays untested until a build passes. Build it again "
+                                "in the Builder with the failed build's settings: {settings}",
+        "bld.repair.ask_title": "The module needs rework",
+        "bld.repair.ask": "The build failed in the module {target}, which is now marked for rework. Open its files "
+                          "with the error to repair it (by hand, or from a proposal made from its log)?",
+        "bld.repair.module_line": "Module {target}: {line}",
     },
     "de": {
         "bld.builder.start": "🚀 Build-Pipeline starten",
@@ -780,5 +812,38 @@ TEXTS = {
         "bld.edit.open_failed": "Die Dateien von {target} lassen sich nicht öffnen:\n{reason}",
         "bld.edit.field.proposal": "Vorschlag (ein Unified Diff)",
         "bld.targets.edit": "Dateien bearbeiten...",
+        "bld.targets.col.test": "Build-Test",
+        "bld.test.shipped": "- (mitgeliefert)",
+        "bld.test.tested": "getestet: Build {build} bestanden am {date} (llmcf {version})",
+        "bld.test.rework": "Nacharbeit nötig: Build {build} gescheitert{where} am {date}",
+        "bld.test.rework_where": " in Stufe {stage}",
+        "bld.test.waiting": "; ein Reparaturvorschlag wartet",
+        "bld.test.changed": "ungetestet: geändert seit Build {build}",
+        "bld.test.not_built": "ungetestet: noch nicht gebaut",
+        "bld.test.tip": "Build-Test: {line}",
+        "bld.repair.error": "Fehler: {error}",
+        "bld.repair.proposal": "Vorschlag ({by}): {summary}",
+        "bld.repair.cause": "Ursache: {cause}",
+        "bld.repair.step": "Schritt für dich (nichts wird ausgeführt): {step}",
+        "bld.repair.check": "Prüfung: {problem}",
+        "bld.repair.log": "Ende des Logs des gescheiterten Builds:",
+        "bld.repair.propose": "Reparatur aus dem Log vorschlagen",
+        "bld.repair.undo": "Vorschlag zurücknehmen",
+        "bld.repair.proposing": "Die Analyse der Selbstheilung liest das Log (die Musterbibliothek, dann Ditto) ...",
+        "bld.repair.none": "Es wurde keine Reparatur vorgeschlagen:\n{reason}",
+        "bld.repair.no_diff": "Die Analyse nennt keine Änderung an den Dateien des Moduls. {cause}\n\nSchritt für "
+                              "dich (nichts wird ausgeführt): {step}",
+        "bld.repair.applied": "Der Vorschlag von {by} ist auf die Dateien angewendet (siehe den Diff): {summary}. "
+                              "Prüfe und speichere ihn oder nimm ihn zurück; nichts wird ohne dich gespeichert.",
+        "bld.repair.retry_title": "Erneut bauen",
+        "bld.repair.retry": "Die Reparatur ist gespeichert; {target} bleibt ungetestet, bis ein Build besteht. Den "
+                            "gescheiterten Build mit seinen Einstellungen erneut starten?",
+        "bld.repair.retry_cli": "Die Reparatur ist gespeichert; {target} bleibt ungetestet, bis ein Build besteht. "
+                                "Baue es im Builder mit den Einstellungen des gescheiterten Builds erneut: {settings}",
+        "bld.repair.ask_title": "Das Modul braucht Nacharbeit",
+        "bld.repair.ask": "Der Build ist im Modul {target} gescheitert, das jetzt zur Nacharbeit markiert ist. Seine "
+                          "Dateien mit dem Fehler öffnen, um es zu reparieren (von Hand oder aus einem Vorschlag aus "
+                          "seinem Log)?",
+        "bld.repair.module_line": "Modul {target}: {line}",
     },
 }

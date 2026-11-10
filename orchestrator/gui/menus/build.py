@@ -47,6 +47,13 @@ CLI_PATHS: Dict[str, str] = {
     "module edit": "btn_targets_edit",
     "module edit --file": "btn_targets_edit",
     "module edit --apply": "btn_targets_edit",
+    # the same step for a generated module that needs rework: the failed build's error and log above the files, a
+    # waiting proposal applied, Propose a Repair from the Log, and after the save the question to build again
+    "module repair": "btn_targets_edit",
+    "module repair --propose": "btn_targets_edit",   # its button Propose a Repair from the Log
+    "module repair --apply": "btn_targets_edit",     # its button Apply a Diff...
+    "module repair --file": "btn_targets_edit",
+    "module repair --retry": "btn_targets_edit",
     "build start": "btn_builder_start",
     "build start --model": "combo_builder_model",
     "build start --target": "combo_builder_target",
@@ -174,7 +181,8 @@ def open_targets(window, select: Optional[str] = None):
     if select is None and builder is not None:
         select = builder.target_combo.currentData()
     return open_targets_dialog(window, window.framework, select=select,
-                               on_reload=lambda: _refresh_target_lists(window))
+                               on_reload=lambda: _refresh_target_lists(window),
+                               on_retry=builder.retry_build if builder is not None else None)
 
 
 def open_build_history(window):

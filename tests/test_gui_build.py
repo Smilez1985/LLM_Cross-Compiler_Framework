@@ -340,7 +340,8 @@ def test_the_builder_buttons_open_the_targets_and_check_the_selected_one(builder
     from orchestrator.gui import targets_window
     opened, checked = [], []
     monkeypatch.setattr(targets_window, "open_targets_dialog",
-                        lambda parent, framework, select=None, on_reload=None: opened.append((framework, select)))
+                        lambda parent, framework, select=None, on_reload=None, on_retry=None:
+                        opened.append((framework, select)))
     monkeypatch.setattr(targets_window, "show_target_check",
                         lambda parent, framework, name, lang=None, intro="": checked.append((framework, name)))
     builder.btn_targets.click()

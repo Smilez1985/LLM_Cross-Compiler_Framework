@@ -81,6 +81,17 @@ MODULE_TASK = (
     "module is for hardware nobody here may have tested: that is no reason to refuse; the framework marks it as "
     "untested (support level community). Say that you cannot only when there is really nothing to base a module on "
     "(neither a probe nor the board and its SoC). The user reviews every value before the module is created.")
+MODULE_REPAIR_TASK = (
+    "A build of a target module "
+    "that a person or an AI generated failed in the module's own part (its build image from its Dockerfile, or its "
+    "stage modules). From the end of the build log and the module's files, find the cause and propose one change to "
+    "the module as a unified diff of its files: '--- a/<file>' and '+++ b/<file>' lines with '@@' hunks against the "
+    "files exactly as given, changing only the files listed (never adding, deleting or renaming one, never the "
+    "framework's stage runner). Keep the change small and the module's structure; the framework checks the files "
+    "again (forbidden shell patterns, placeholders, pinned images, bash syntax) and the person reviews the diff before "
+    "anything is saved, and the build is then run again. Never add a download piped into a shell, sudo, "
+    "world-writable permissions or the deletion of user data. When the cause lies outside the module (the host, the "
+    "network, a full disk) or is unclear, leave diff empty, say so in root_cause and give a low confidence.")
 OPTIMIZER_TASK = (
     "Recommend build settings "
     "for a model on a target: a format and a quantization type strictly from the options given, and an "
@@ -95,6 +106,8 @@ HEALING_SYSTEM = (f"You are the self-healing analyst of the LLM Cross-Compiler F
 MODULE_SYSTEM = (f"You are Ditto, an expert embedded systems engineer for the LLM Cross-Compiler Framework. "
                  f"{FRAMEWORK} " + MODULE_TASK + " When you cannot, fill cannot and nothing else.\n" + CANNOT_RULE
                  + "\n" + UNTRUSTED_RULE)
+MODULE_REPAIR_SYSTEM = (f"You are the self-healing analyst of the LLM Cross-Compiler Framework. {FRAMEWORK} "
+                        + MODULE_REPAIR_TASK + "\n" + CANNOT_RULE + "\n" + UNTRUSTED_RULE)
 OPTIMIZER_SYSTEM = (f"You are Ditto, the build engineer of the LLM Cross-Compiler Framework. {FRAMEWORK} "
                     + OPTIMIZER_TASK + " When you cannot, fill cannot.\n" + CANNOT_RULE + "\n" + UNTRUSTED_RULE)
 
@@ -185,6 +198,28 @@ def healing_parts(log_content: str, context_info: str = "", knowledge: str = "",
              "Build log (last part):\n" + wrap_untrusted(log_for_ai(log_content, roots=roots), "build log")]
     if knowledge:
         parts.append("Possibly related knowledge-base excerpts:\n" + knowledge)
+    return parts
+
+
+MODULE_FILE_CHARS = 48000   # one file of a module in a repair task (a generated config stage is about 41,000)
+MODULE_FILES_CHARS = 64000  # all of them: the failed stage's file first (module_test.repair_files)
+
+
+def module_repair_parts(log_content: str, files: Dict[str, str], context_info: str = "",
+                        roots: Optional[Dict[str, str]] = None) -> List[str]:
+    """The user turns of a module repair task: the build context, the end of the log (log_for_ai) and each file of
+    the module's edit step as its own untrusted block (a file is the person's or an AI's text, scrubbed like the
+    log); a file past the limits is named, not shown."""
+    parts = healing_parts(log_content, context_info, roots=roots)
+    used = 0
+    for name, text in files.items():
+        text = scrub_for_ai(text or "", roots=roots, limit=sys.maxsize)
+        if len(text) > MODULE_FILE_CHARS or used + len(text) > MODULE_FILES_CHARS:
+            parts.append(f"Module file {name}: too long to show here; do not change it.")
+            continue
+        used += len(text)
+        parts.append(f"Module file {name}:\n" + wrap_untrusted(text, f"module file {name}",
+                                                              max_len=MODULE_FILE_CHARS + 200))
     return parts
 
 

@@ -302,6 +302,10 @@ class BuildProgress:
     # A build that stopped with finished stages: its folder is kept, and the person decides to continue it or delete
     # what it left (Core/interrupted_build.py)
     resumable: bool = False
+    # The build failed while the target module's own part ran (its build image, its stage modules) and not for a
+    # cause of the host (module_test.module_failure): a generated module is then marked for rework
+    failed_in_module: bool = False
+    failed_step: Optional[str] = None   # the step it failed in (current_stage then)
 
     def end_facts(self) -> Optional[Dict[str, Any]]:
         """{'reason', 'exit', 'stage'} of an ended build (build_info.json's "end", the build record), else None."""
@@ -919,6 +923,13 @@ class BuildEngine:
         try:
             outcome = self._execute_build_stages(config, prog)
         finally:
+            # A generated module's mark is written before the outcome is visible, so a poller that sees the build
+            # ended reads the module's state after it.
+            if prog.status != BuildStatus.CANCELLED:
+                try:
+                    self._mark_module(config, prog, outcome)
+                except Exception as e:  # noqa: BLE001 - the outcome stands; only the module's mark is missing
+                    self.logger.warning(f"Build {bid}: the module's build test was not recorded: {e}")
             # The outcome becomes visible together with the free slot, so a poller that sees it can submit
             # its next build right away. A cancel is never undone. The record names the outcome before the slot is
             # free: a poller that sees the build ended reads its record next.
@@ -931,6 +942,31 @@ class BuildEngine:
                 self._running.discard(bid)
                 self._settled.discard(bid)
                 self.__dict__.get("_meters", {}).pop(bid, None)
+
+    def _mark_module(self, config: BuildConfiguration, prog: "BuildProgress", outcome: "BuildStatus") -> None:
+        """A generated module's build test (Core/module_test.py): a completed build (its target stage passed, the
+        board package made) marks it tested; a failure in the module's own part marks it for rework with this build's
+        log. A shipped target gets no record; a record that cannot be written never changes the build's outcome."""
+        passed = outcome == BuildStatus.COMPLETED
+        if not passed and not (outcome == BuildStatus.FAILED and prog.failed_in_module):
+            return
+        from orchestrator.Core.module_test import safe_record_build
+        try:
+            folder = self.resolve_target_dir(config.target_arch) if TARGET_ID.fullmatch(config.target_arch or "") \
+                else None
+        except Exception:  # noqa: BLE001 - the target's folder is gone: nothing to mark
+            folder = None
+        record = getattr(prog, "end_record", None)
+        stage = getattr(record, "stage", None)
+        settings = {"model": config.model_source, "format": getattr(config.target_format, "value", None),
+                    "quantization": config.quantization, "board": config.target_board}
+        done = safe_record_build(folder, build_id=config.build_id, passed=passed, request_id=config.request_id,
+                                 stage=stage if stage and stage != "-" else prog.failed_step,
+                                 error=prog.errors[-1] if prog.errors else "", log=prog.logs,
+                                 target_sha256=config.target_pack_sha256, settings=settings)
+        if done is not None:
+            prog.add_log(f"Module {config.target_arch}: " + ("marked tested by this build." if passed else
+                         "marked for rework; its repair starts from its files and this build's log."))
 
     @staticmethod
     def _end_reason_of(prog: "BuildProgress") -> str:
@@ -1027,7 +1063,13 @@ class BuildEngine:
             prog.end_time = datetime.now()
             from orchestrator.Core.build_end import reason_of_timeout
             prog.end_reason = reason_of_timeout(e) or "failed"
-            prog.add_error(self._disk_full_text(e) or str(e))
+            disk_full = self._disk_full_text(e)
+            prog.add_error(disk_full or str(e))
+            if not disk_full:
+                from orchestrator.Core.module_test import module_failure
+                prog.failed_step = prog.current_stage
+                prog.failed_in_module = module_failure(prog.current_stage, prog.end_reason,
+                                                       "\n".join(prog.logs[-400:]))
             self.logger.error(f"Build {bid} failed: {e}", exc_info=True)
             self._keep_or_discard(config, prog)
             return BuildStatus.FAILED

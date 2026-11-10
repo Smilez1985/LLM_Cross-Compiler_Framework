@@ -159,7 +159,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `mcp serve` / `mcp config` | Den MCP-Server betreiben / zeigen, wie man KI-Clients verbindet |
 | `acp` / `acp config` / `acp servers` | Ditto als Agent von Editoren, die ACP sprechen (der Editor startet es) / den Eintrag für den Editor zeigen / die MCP-Server, die Editoren übergeben haben, mit deiner Zustimmung je Eintrag |
 | `secrets set` / `secrets list` | Ein Token speichern (Hugging Face, GitHub) / die gespeicherten Namen auflisten |
-| `module create` / `module generate-ai` / `module edit` | Ein neues Hardware-Target anlegen, per Fragen oder mit Ditto aus einer Probe-Datei / seine Dateien mit Diff und Prüfungen bearbeiten |
+| `module create` / `module generate-ai` / `module edit` / `module repair` | Ein neues Hardware-Target anlegen, per Fragen oder mit Ditto aus einer Probe-Datei / seine Dateien mit Diff und Prüfungen bearbeiten / es nach einem gescheiterten Build reparieren, von Hand oder aus seinem Fehlerlog |
 | `scan` | Die Hardware-Probe auf diesem Rechner oder mit `--device` auf einem Board per SSH ausführen, oder mit `--import` die Probe-Datei eines Boards ablegen, und ihre Probe-ID zeigen |
 | `device list` / `device settings` | Die untersuchten Boards / wie die Laufzeit auf einem Board installiert wird (Startskript oder systemd), vor einem Deployment entschieden |
 | `device runtime plan/build/deploy/verify/status` | Die selbst gebaute llama.cpp-Laufzeit eines Boards: aus seinem Profil planen, cross-kompilieren, per SSH installieren und dort prüfen |
@@ -498,6 +498,12 @@ Beispiel „Rockchip Family“), die Architektur sowie die Boards und Formate, d
 Target ohne diesen Block ist mit „no capabilities declared“ markiert. **Der Wert für `--target` ist die ID** (zum
 Beispiel `Rockchip`); der Ordnername des Targets funktioniert ebenso. `json` und `yaml` liefern dieselben Daten mit
 den Quantisierungen je Format.
+Die Spalte **Build test** ist der Zustand eines erzeugten Moduls (vom Assistenten, von `module create`, von einer KI
+oder aus einem installierten Paket): *untested* (noch nicht gebaut oder seit seinem letzten Build geändert), *tested*
+(ein Build dieser Dateien hat seine Target-Stufe bestanden: die ID des Builds, das Datum und die Framework-Version) oder
+*needs rework* (sein neuester Build ist im Teil des Moduls gescheitert; repariere es mit
+[`module repair`](#module-repair)); ein mitgeliefertes Target zeigt „- (shipped)“. In `json` und `yaml` ist es das
+Feld `build_test`.
 
 | Option | Bedeutung |
 |---|---|
@@ -2439,6 +2445,51 @@ In der GUI: **Build > Targets...**, das Target wählen, **Dateien bearbeiten...*
 solange eine Prüfung scheitert. Eine KI-App oder Ditto kann dort über die GUI-Werkzeuge eine Änderung vorschlagen, als
 Diff im Feld „Vorschlag“: Er wird im Fenster angewendet, markiert und mit einem Rückgängig gelistet, und nur dein
 **Speichern** schreibt ihn.
+
+### module repair
+
+```
+llm-cli module repair TARGET [--propose] [--apply DIFF_DATEI] [--file DATEI]... [--retry]
+```
+
+Repariert ein erzeugtes Modul nach einem gescheiterten Build. Ein Build eines Moduls, das nicht mitgeliefert ist,
+markiert es: **getestet**, wenn seine Target-Stufe bestanden hat (das Board-Paket erstellt wurde), **Nacharbeit
+nötig**, wenn er im Teil des Moduls gescheitert ist (beim Bau seines Images aus seinem Dockerfile oder in seinen
+Stage-Modulen) und die Musterbibliothek das Log nicht auf diesen Computer zurückführt (volle Platte, Berechtigung der
+Container-Engine, Netz, Speicher). Der Zustand liegt in `.lcf-module-test.json` neben der `target.yml`, nie in der
+`target.yml` selbst, sodass ein festgehaltenes Ergebnis nichts ändert, was ein Build, ein Rezept oder die Prüfung eines
+Pakets vergleicht; er hält das Log des neuesten gescheiterten Builds (seine letzten 400 Zeilen, Geheimnisse
+geschwärzt) und den Verlauf der Ergebnisse und Reparaturen. `metadata.untested` in der `target.yml` bleibt bis zu einem
+Lauf auf dem Board.
+
+Der Befehl zeigt den Zustand, den gescheiterten Build mit seinem Fehler und dem Ende seines Logs und einen
+Reparaturvorschlag, der wartet (von Ditto, der Musterbibliothek oder einer KI-App). Die Reparatur läuft durch denselben
+Schritt wie [`module edit`](#module-edit): Der wartende Vorschlag (oder dein Diff) wird auf die Dateien angewendet, die
+Dateien öffnen in `$EDITOR`, der Diff wird gezeigt und die Prüfungen laufen erneut, und nur dein Ja schreibt die
+Dateien. Das Modul bleibt danach ungetestet, bis ein Build besteht, und der Befehl gibt die Zeile `llm-cli build start`
+aus, die die Einstellungen des gescheiterten Builds erneut baut.
+
+| Option | Bedeutung |
+|---|---|
+| `--propose` | Zuerst die Analyse der Selbstheilung um eine Reparatur aus dem Fehlerlog bitten: die Musterbibliothek, dann Ditto (das Log bereinigt, geschwärzt und als nicht vertrauenswürdiger Text eingepackt; die Dateien des Moduls als nicht vertrauenswürdiger Text). Eine bekannte Ursache gibt einen Schritt für dich als Text (nichts wird ausgeführt); Dittos Antwort ist ein Unified Diff der Dateien des Moduls, abgelehnt, wenn er nicht auf sie passt oder einen gefährlichen Befehl nennt. Braucht das Framework (und für Ditto einen KI-Anbieter). |
+| `--apply DIFF_DATEI` | Zuerst einen Unified Diff statt des wartenden Vorschlags anwenden, wie bei `module edit --apply`. |
+| `--file DATEI` | Diese Datei des Schritts in `$EDITOR` öffnen; wiederholbar. Ohne `--propose`, `--apply` oder einen wartenden Vorschlag öffnet jede Datei. |
+| `--retry` | Nachdem die Reparatur gespeichert ist, den gescheiterten Build mit seinen Einstellungen (Modell, Format, Quantisierung, Board) erneut starten, nach einem Ja. |
+
+```bash
+llm-cli module repair my_board --propose
+llm-cli module repair my_board --apply fix.diff --retry
+```
+
+In der GUI: **Build > Targets...** zeigt die Spalte **Build-Test**; **Dateien bearbeiten...** an einem Modul mit
+Nacharbeit zeigt Fehler und Log des gescheiterten Builds über den Dateien, wendet einen wartenden Vorschlag an
+(markiert im Diff, **Vorschlag zurücknehmen**), bietet **Reparatur aus dem Log vorschlagen** (`--propose`) und fragt
+nach dem **Speichern**, ob der gescheiterte Build im Builder erneut starten soll (`--retry`). Der Builder zeigt den
+Zustand als Tooltip jedes Targets, schreibt ihn am Ende eines Builds ins Build-Log und bietet nach einem gescheiterten
+Build eines Moduls an, seine Dateien mit dem Fehler zu öffnen. Eine KI-App liest den Zustand in `list_targets` und
+`get_target_capabilities` (`build_test`; mit `module_files` auch die Dateien des Moduls und das Log des Fehlschlags)
+und schlägt eine Reparatur mit `propose_healing_fix` und seinem Feld `module_diff` vor; der Vorschlag wartet hier auf
+dich, und keine KI speichert ihn.
 
 ---
 

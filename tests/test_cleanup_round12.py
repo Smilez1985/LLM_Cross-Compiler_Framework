@@ -335,14 +335,16 @@ def test_the_chat_client_finds_the_managed_server_of_its_state_folder(tmp_path, 
 def test_the_target_tool_models_keep_their_schemas():
     from orchestrator.tools.tools_targets import TargetCheckIn, TargetDetailsOut
     # Round 36 (on purpose): check_image and build_image, the read-only status of the build container image.
-    assert list(TargetCheckIn.model_fields) == ["target", "check_files", "check_image"]
+    # module_files (on purpose): a generated module's files and failed log for a repair diff
+    assert list(TargetCheckIn.model_fields) == ["target", "check_files", "check_image", "module_files"]
     assert list(TargetDetailsOut.model_fields) == [
         "notes", "schema_version", "support_level", "boards", "formats", "default_board",
         "variants",   # chips served by a board's profile, with the reason (on purpose: the chip variants row)
         "target", "trust",
         "untested", "description", "assumptions", "base_image", "base_image_reason", "checked_files", "problems",
         "board_profiles", "benchmarks",   # the board profiles and marked benchmark rows (round 23 item 10)
-        "build_image"]
+        "build_image",
+        "build_test", "module_files", "failed_log"]   # a generated module's build test and repair (on purpose)
     schema = TargetCheckIn.model_json_schema()
     assert schema["additionalProperties"] is False and schema["required"] == ["target"]
     assert schema["properties"]["target"] == {"description": "Target id, e.g. Rockchip", "maxLength": 64,
@@ -365,7 +367,14 @@ def test_the_target_tool_input_schema_an_ai_reads_is_the_one_of_before():
             "check_image": {"default": False, "description": "Also show the target's build container image: how many "
                                                              "are on this computer and whether an offline build could "
                                                              "make one (each source by its label)",
-                            "title": "Check Image", "type": "boolean"}}}
+                            "title": "Check Image", "type": "boolean"},
+            # on purpose: a generated module's files and failed build log for a repair diff
+            "module_files": {"default": False, "description": "Also give a generated module's files of the edit step "
+                                                              "(stage modules, target.yml, Dockerfiles) and, when it "
+                                                              "needs rework, the end of its failed build's log: what a "
+                                                              "repair diff (propose_healing_fix's module_diff) is "
+                                                              "written against",
+                             "title": "Module Files", "type": "boolean"}}}
 
 
 def test_the_shared_target_models_keep_their_schemas():

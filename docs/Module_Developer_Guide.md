@@ -375,8 +375,8 @@ repaired by hand here too.
 - **The checks.** Finish, Save and the CLI's question come only after `validate_target_folder`
   ([section 9.1](#91-what-the-validators-check)) passed on a copy with your changes: the shell deny patterns, the
   template placeholders, the pinned images, the slots, `bash -n`. While a check fails nothing is saved, and the
-  reasons are shown. The marks `untested` and `provenance` of `target.yml` stay as they are: a passed build or a run on
-  the board changes them, never an edit.
+  reasons are shown. The marks `untested` and `provenance` of `target.yml` stay as they are: only a run on the board
+  changes `untested`, never an edit (a build's result is kept beside `target.yml`, [section 3.7](#37-tested-by-a-build-repaired-after-a-failed-one)).
 - **An AI's proposal.** Ditto or an AI app may propose a change as a unified diff: through the GUI tools into the
   step's field "proposal" (applied in the window, marked, listed with an Undo, shown in the diff; a file you edited
   yourself is never overwritten), or as a file you apply with `module edit --apply` or **Apply a Diff...**. A proposal
@@ -386,6 +386,43 @@ repaired by hand here too.
 llm-cli module create --name my_board --arch aarch64 --sdk None --edit
 llm-cli module edit my_board --file modules/config_module.sh
 llm-cli module edit my_board --apply proposal.diff
+```
+
+### 3.7 Tested by a build, repaired after a failed one
+
+Every module that is not shipped with llmcf (yours, an AI's, an installed pack) has a build test: **untested** until a
+build passes, **tested** after a build whose target stage passed (the board package made), **needs rework** after a
+build that failed in the module's own part (its build image from its Dockerfile, or its stage modules). A failure the
+pattern library traces to the computer (a full disk, the container engine's permission, the network, memory) or one
+before the module's part (the model download, the checks) marks nothing. `llm-cli targets list`, Build > Targets...,
+the Builder's tooltip and the AI tools (`build_test`) show the state; the AI tools never change it.
+
+- **Where it is kept.** In `.lcf-module-test.json` beside `target.yml`, readable only by you: the state, the passed
+  build (id, date, framework version), the newest failed build with its error and the last 400 lines of its log
+  (secrets redacted), a waiting repair proposal and the history of results, repairs and edits. It is never written into
+  `target.yml`: every file of the folder counts in the target's digest, which the build image, a recipe and a pack's
+  signature check compare. Its name is reserved like the pack provenance file, so it is never part of a pack you
+  export.
+- **Changed files count.** The state belongs to the files a build used: when the folder's files differ from them, the
+  module is untested again ("changed since build ..."), whether you changed them in the edit step or elsewhere.
+- **Repair by hand.** `llm-cli module repair <target>` or Build > Targets... > Edit Files... opens the edit step
+  ([section 3.6](#36-edit-all-files-before-the-module-is-saved)) with the failed build's error and log in view; the
+  diff, the checks and your Save work as for any edit.
+- **Repair from the log.** `llm-cli module repair <target> --propose` or **Propose a Repair from the Log** asks the
+  self-healing analysis: the pattern library first (a known cause gives a step as text; nothing is run), then Ditto,
+  which reads the log (cleaned, scrubbed, wrapped as untrusted text) and the module's files and answers with a unified
+  diff. An AI app can propose one too, with `propose_healing_fix` and its field `module_diff` (it reads the files and
+  the log with `get_target_capabilities` and `module_files`). A diff that does not fit the files or names a dangerous
+  command is refused; one that fits waits in the record and is applied in the edit step, marked, with **Undo the
+  Proposal**. Only your Save writes it. While llmcf's CPU template records no variables of its own, a proposal is
+  always a diff of the files.
+- **After the repair.** The repair goes into the history and the module stays untested until a build passes; the
+  failed build is offered again with its settings (the Builder's question, `--retry`, or the `llm-cli build start`
+  line the command prints).
+
+```bash
+llm-cli targets list
+llm-cli module repair my_board --propose --retry
 ```
 
 ## 4. target.yml and the capabilities block

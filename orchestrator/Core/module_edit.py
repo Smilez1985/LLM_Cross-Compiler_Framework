@@ -38,7 +38,8 @@ from orchestrator.Core.module_generator import (SHIPPED_TEMPLATE, STAGE_MODULES,
 # The runner of every build is the framework's runtime layer; a target's own runner files are ignored by builds
 # (runtime_layer.own_runner_note). None of them is ever offered for editing.
 RUNNER_FILES = ("runner.sh", "build.sh", "stage_user.sh")
-# The marks of target.yml's metadata that a passed build or a board run changes, never an edit.
+# The marks of target.yml's metadata that only a run on the board changes, never an edit (a build's result is kept
+# beside target.yml: Core/module_test.py).
 MARKS = ("untested", "provenance")
 STAGING_PREFIX = "llmcf-module-edit-"
 
@@ -129,6 +130,9 @@ class ModuleEdit:
         self.generated: Dict[str, str] = {rel: (self.folder / rel).read_text(encoding="utf-8", errors="replace")
                                           for rel in self.files}
         self.texts: Dict[str, str] = dict(self.generated)
+        # A repair of a failed build (Core/module_test.py): {"how": "by hand" | "proposal", "by": who proposed,
+        # "summary"}; None: an edit. A save records it in the module's build test record.
+        self.repair: Optional[Dict[str, str]] = None
 
     # --- the texts -------------------------------------------------------------------------------------------------
 
@@ -192,8 +196,8 @@ class ModuleEdit:
         problems: List[str] = []
         if "target.yml" in self.texts:
             before, after = _marks(self.generated["target.yml"]), _marks(self.texts["target.yml"])
-            problems += [f"target.yml: the mark metadata.{k} ({before[k]}) may not be removed or changed here; a "
-                         "passed build or a board run changes it" for k in before if after.get(k) != before[k]]
+            problems += [f"target.yml: the mark metadata.{k} ({before[k]}) may not be removed or changed here; the "
+                         "framework sets it (untested: a run on the board)" for k in before if after.get(k) != before[k]]
         with tempfile.TemporaryDirectory(prefix="llmcf-module-check-") as scratch:
             copy = Path(scratch) / self.folder.name
             shutil.copytree(self.folder, copy, symlinks=True)
@@ -212,7 +216,20 @@ class ModuleEdit:
         for rel in written:
             _write_lf(self.folder / rel, self.texts[rel])
             self.generated[rel] = self.texts[rel]
+        if written:
+            self._record_change(written)
         return written
+
+    def _record_change(self, written: List[str]) -> None:
+        """A saved repair or edit of a module in its build test record (untested until a build passes); a record that
+        cannot be written never undoes the save."""
+        from orchestrator.Core.module_test import record_change
+        repair = self.repair or {}
+        try:
+            record_change(self.folder, files=written, how=repair.get("how", "edit"), by=repair.get("by", "person"),
+                          summary=repair.get("summary", ""))
+        except Exception as e:  # noqa: BLE001 - the files are saved; only the history line is missing
+            get_logger(__name__).warning(f"The repair of {self.folder.name} was not recorded: {e}")
 
 
 # --- a new module in a scratch folder ---------------------------------------------------------------------------------

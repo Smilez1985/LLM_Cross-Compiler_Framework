@@ -193,6 +193,29 @@ class BenchmarkRowOut(BenchmarkEntry):
                                                                        "estimate, never a measurement)")
 
 
+class BuildTestOut(BaseModel):
+    """A generated module's build test (Core/module_test.py): the record beside its target.yml, as the files are now.
+    None for a shipped target."""
+    state: Literal["untested", "tested", "needs_rework"] = Field(
+        description="untested: no build passed since the module was made or changed; tested: a build of these files "
+                    "passed its target stage; needs_rework: the newest build of these files failed in the module")
+    line: untrusted_text(600) = Field(default="", description="The state as one line of text")
+    tested_build: Optional[str] = None
+    tested_date: Optional[str] = None
+    tested_version: Optional[str] = Field(default=None, description="The framework version of the passed build")
+    failed_build: Optional[str] = None
+    failed_request: Optional[str] = Field(default=None, description="The build request of the failed build "
+                                                                    "(propose_healing_fix's request_id)")
+    failed_date: Optional[str] = None
+    failed_stage: Optional[untrusted_text(64)] = None
+    failed_error: Optional[untrusted_text(500)] = None
+    changed_since: Optional[str] = Field(default=None, description="The module's files changed since this build, so "
+                                                                   "its result no longer counts")
+    repairs: int = Field(default=0, description="Repairs and edits saved through the edit step")
+    proposal_waiting: bool = Field(default=False, description="A repair proposal waits for the person in the edit "
+                                                              "step")
+
+
 class TargetOut(BaseModel):
     id: str
     name: untrusted_text(200)  # from target.yml (a community target pack can install one)
@@ -208,6 +231,8 @@ class TargetOut(BaseModel):
     variants: Dict[str, BoardVariant] = Field(
         default_factory=dict, description="Chips without a board of their own: the board each one uses (a build for "
                                           "the chip runs as that board), the reason and its source")
+    build_test: Optional[BuildTestOut] = Field(default=None, description="A generated module's build test (None: a "
+                                                                        "shipped target)")
 
 
 class TargetList(BaseModel):

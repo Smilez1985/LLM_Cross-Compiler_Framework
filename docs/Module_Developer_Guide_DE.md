@@ -391,8 +391,9 @@ repariert.
   ([Abschnitt 9.1](#91-was-die-prüfungen-verlangen)) auf einer Kopie mit deinen Änderungen bestanden hat: die
   Sperrmuster für Shell-Code, die Platzhalter der Vorlage, die gepinnten Images, die Slots, `bash -n`. Solange eine
   Prüfung scheitert, wird nichts gespeichert, und die Gründe werden gezeigt. Die Markierungen `untested` und
-  `provenance` der `target.yml` bleiben, wie sie sind: Ein bestandener Build oder ein Lauf auf dem Board ändert sie,
-  nie eine Bearbeitung.
+  `provenance` der `target.yml` bleiben, wie sie sind: Nur ein Lauf auf dem Board ändert `untested`, nie eine
+  Bearbeitung (das Ergebnis eines Builds liegt neben der `target.yml`,
+  [Abschnitt 3.7](#37-durch-einen-build-getestet-nach-einem-gescheiterten-repariert)).
 - **Der Vorschlag einer KI.** Ditto oder eine KI-App kann eine Änderung als Unified Diff vorschlagen: über die
   GUI-Werkzeuge ins Feld „Vorschlag“ des Schritts (im Fenster angewendet, markiert, mit einem Rückgängig gelistet, im
   Diff gezeigt; eine Datei, die du selbst bearbeitet hast, wird nie überschrieben) oder als Datei, die du mit
@@ -403,6 +404,46 @@ repariert.
 llm-cli module create --name my_board --arch aarch64 --sdk None --edit
 llm-cli module edit my_board --file modules/config_module.sh
 llm-cli module edit my_board --apply proposal.diff
+```
+
+### 3.7 Durch einen Build getestet, nach einem gescheiterten repariert
+
+Jedes Modul, das nicht mit llmcf mitgeliefert ist (deines, das einer KI, ein installiertes Paket), hat einen Build-Test:
+**ungetestet**, bis ein Build besteht, **getestet** nach einem Build, dessen Target-Stufe bestanden hat (das
+Board-Paket erstellt), **Nacharbeit nötig** nach einem Build, der im Teil des Moduls gescheitert ist (sein Build-Image
+aus seinem Dockerfile oder seine Stage-Module). Ein Fehlschlag, den die Musterbibliothek auf den Computer zurückführt
+(volle Platte, Berechtigung der Container-Engine, Netz, Speicher), oder einer vor dem Teil des Moduls (der
+Modell-Download, die Prüfungen) markiert nichts. `llm-cli targets list`, Build > Targets..., der Tooltip im Builder und
+die KI-Tools (`build_test`) zeigen den Zustand; die KI-Tools ändern ihn nie.
+
+- **Wo er liegt.** In `.lcf-module-test.json` neben der `target.yml`, nur für dich lesbar: der Zustand, der bestandene
+  Build (ID, Datum, Framework-Version), der neueste gescheiterte Build mit seinem Fehler und den letzten 400 Zeilen
+  seines Logs (Geheimnisse geschwärzt), ein wartender Reparaturvorschlag und der Verlauf der Ergebnisse, Reparaturen und
+  Bearbeitungen. Er wird nie in die `target.yml` geschrieben: Jede Datei des Ordners zählt in den Digest des Targets,
+  den das Build-Image, ein Rezept und die Signaturprüfung eines Pakets vergleichen. Sein Name ist reserviert wie die
+  Herkunftsdatei eines Pakets, also ist er nie Teil eines Pakets, das du exportierst.
+- **Geänderte Dateien zählen.** Der Zustand gehört zu den Dateien, die ein Build benutzt hat: Weichen die Dateien des
+  Ordners davon ab, ist das Modul wieder ungetestet („changed since build ...“), ob du sie im Bearbeitungsschritt oder
+  anderswo geändert hast.
+- **Reparatur von Hand.** `llm-cli module repair <target>` oder Build > Targets... > Dateien bearbeiten... öffnet den
+  Bearbeitungsschritt ([Abschnitt 3.6](#36-alle-dateien-bearbeiten-bevor-das-modul-gespeichert-wird)) mit Fehler und
+  Log des gescheiterten Builds im Blick; Diff, Prüfungen und dein Speichern wirken wie bei jeder Bearbeitung.
+- **Reparatur aus dem Log.** `llm-cli module repair <target> --propose` oder **Reparatur aus dem Log vorschlagen**
+  fragt die Analyse der Selbstheilung: zuerst die Musterbibliothek (eine bekannte Ursache gibt einen Schritt als Text;
+  nichts wird ausgeführt), dann Ditto, das das Log (bereinigt, geschwärzt, als nicht vertrauenswürdiger Text
+  eingepackt) und die Dateien des Moduls liest und mit einem Unified Diff antwortet. Auch eine KI-App kann einen
+  vorschlagen, mit `propose_healing_fix` und seinem Feld `module_diff` (sie liest Dateien und Log mit
+  `get_target_capabilities` und `module_files`). Ein Diff, der nicht auf die Dateien passt oder einen gefährlichen
+  Befehl nennt, wird abgelehnt; einer, der passt, wartet im Datensatz und wird im Bearbeitungsschritt angewendet,
+  markiert, mit **Vorschlag zurücknehmen**. Nur dein Speichern schreibt ihn. Solange die CPU-Vorlage von llmcf keine
+  eigenen Variablen festhält, ist ein Vorschlag immer ein Diff der Dateien.
+- **Nach der Reparatur.** Die Reparatur kommt in den Verlauf, und das Modul bleibt ungetestet, bis ein Build besteht;
+  der gescheiterte Build wird mit seinen Einstellungen erneut angeboten (die Frage des Builders, `--retry` oder die
+  Zeile `llm-cli build start`, die der Befehl ausgibt).
+
+```bash
+llm-cli targets list
+llm-cli module repair my_board --propose --retry
 ```
 
 ## 4. target.yml und der Capabilities-Block

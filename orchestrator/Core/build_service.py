@@ -305,8 +305,19 @@ class BuildService:
                                      support_level=caps.support_level if caps else None,
                                      boards=list(caps.boards) if caps else [], formats=formats,
                                      board_profiles=profiles, benchmarks=rows,
-                                     variants=dict(caps.variants) if caps else {}))
+                                     variants=dict(caps.variants) if caps else {},
+                                     build_test=self.build_test(tid)))
         return TargetList(targets=targets)
+
+    def build_test(self, tid: str):
+        """A generated module's build test as its files are now (Core/module_test.state_of); None for a shipped
+        target or a target whose folder is not found."""
+        from orchestrator.Core.module_test import state_of
+        try:
+            folder = self._targets().folder_of(tid)
+            return state_of(Path(folder)) if folder is not None else None
+        except Exception:  # noqa: BLE001 - a stand-in registry or a folder that vanished: no state
+            return None
 
     def _status_of(self, state: WorkflowState) -> BuildStatusOut:
         pending = None
@@ -1865,8 +1876,29 @@ class BuildService:
             raise error
         return state, proposal
 
+    def _module_repair(self, state, request_id: str, diff: str, analysis, proposed_by: str) -> None:
+        """An AI client's repair diff for the generated module the failed build of `request_id` built
+        (module_test.store_client_proposal): checked to apply and free of dangerous commands, then it waits for the
+        person in the module's edit step; never saved here."""
+        from orchestrator.Core.module_test import RepairError, store_client_proposal
+        target = (getattr(state, "summary", None) or {}).get("target")
+        folder = self._targets().folder_of(target) if target else None
+        if folder is None:
+            raise BuildServiceError(f"The target of build request '{request_id}' is not known here, so module_diff "
+                                    "cannot be kept.", code="not_supported",
+                                    next="Propose the manual step without module_diff.")
+        try:
+            store_client_proposal(Path(folder), request_id=request_id, diff=diff, summary=analysis.summary,
+                                  root_cause=analysis.root_cause, confidence=float(analysis.confidence),
+                                  by=proposed_by)
+        except RepairError as e:
+            raise BuildServiceError(f"The module repair was not kept: {e}", code="invalid_value",
+                                    next="Read the module's files again (get_target_capabilities with "
+                                         "module_files) and write the diff against them, or propose the manual "
+                                         "step alone.") from None
+
     def propose_fix(self, request_id: str, summary: str, root_cause: str, manual_step: str, confidence: float,
-                    where: str, proposed_by: str, client: str = ""):
+                    where: str, proposed_by: str, client: str = "", module_diff: str = ""):
         """An AI client's fix proposal for a failed build (propose_healing_fix): checked like Ditto's own analysis
         (HealingAnalysis and the dangerous-command filter), kept with the build as a manual step and in the per-user
         folder, so the GUI and `llm-cli build status` show it with who proposed it. Never applied."""
@@ -1889,6 +1921,8 @@ class BuildService:
                                     "build log may contain instructions aimed at the AI.", code="invalid_value",
                                     next="Propose a step without that command, or tell the person to check the log "
                                          "themselves.")
+        if module_diff.strip():
+            self._module_repair(state, request_id, module_diff, analysis, proposed_by)
         proposal = ClientProposal(proposal_id=new_proposal_id(), request_id=request_id, summary=analysis.summary,
                                   root_cause=analysis.root_cause, manual_step=analysis.fix_command,
                                   confidence=float(analysis.confidence), where=analysis.target,

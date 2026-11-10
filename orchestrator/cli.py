@@ -315,11 +315,16 @@ def list_targets(ctx: FrameworkContext, format: str):
     table.add_column("Architecture", style="green")
     table.add_column("Boards", style="magenta")
     table.add_column("Formats", style="yellow")
+    table.add_column("Build test")
     for t in targets:
         table.add_row(escape(t.id), escape(t.name or ""), escape(t.architecture or "-"),
                       escape(", ".join(t.boards) or "-"),
-                      escape(", ".join(f.id for f in t.formats) or "- (no capabilities declared)"))
+                      escape(", ".join(f.id for f in t.formats) or "- (no capabilities declared)"),
+                      escape(t.build_test.line if t.build_test else "- (shipped)"))
     console.print(table)
+    if any(t.build_test is not None and t.build_test.state == "needs_rework" for t in targets):
+        console.print("A module that needs rework is repaired with 'llm-cli module repair <ID>' (by hand, or "
+                      "--propose for a proposal from its error log).")
 
 
 @targets.command('boards')
@@ -879,6 +884,109 @@ def module_edit(ctx: FrameworkContext, target: str, files: tuple, patch_file: Op
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     console.print(f"[green]Saved: {escape(', '.join(written))}[/green]")
+
+
+@module.command('repair')
+@click.argument('target')
+@click.option('--propose', is_flag=True, default=False,
+              help="Ask the self-healing analysis for a repair first: the pattern library, then Ditto (the failed "
+                   "build's log cleaned and scrubbed, the module's files as untrusted text); its diff is applied to "
+                   "the files and shown, and saved only on your yes")
+@click.option('--apply', 'patch_file', type=click.Path(exists=True, dir_okay=False), default=None,
+              help="Apply a unified diff (an AI's proposal, or one written by hand) to the files first")
+@click.option('--file', 'files', multiple=True, metavar='FILE',
+              help="Open this file of the step in $EDITOR (repeatable); without --propose, --apply or a waiting "
+                   "proposal every file opens")
+@click.option('--retry', is_flag=True, default=False,
+              help="After the repair is saved, start the failed build again with its settings (asked first)")
+@click.pass_context
+def module_repair(click_ctx: click.Context, target: str, propose: bool, patch_file: Optional[str], files: tuple,
+                  retry: bool):
+    """Repair a generated module after a failed build, by hand or from its error log
+
+    Shows the module's build test (tested, untested, needs rework), the failed build with its error and the end of
+    its log, and a repair proposal that waits for you (from Ditto, the pattern library or an AI app). The repair runs
+    through the edit step: the proposal or your diff is applied, the files open in $EDITOR, the diff is shown and the
+    checks run again; the files are written only on your yes. The module stays untested until a build passes; with
+    --retry the failed build starts again.
+    """
+    from orchestrator.Core import module_test
+    from orchestrator.Core.module_edit import EditRefused, ModuleEdit
+    ctx = click_ctx.find_object(FrameworkContext)
+    config, resolve = _settings(ctx)
+    targets_dir = Path(resolve(config.get("targets_dir", "targets")))
+    folder = _module_folder(targets_dir, target)
+    test = module_test.state_of(folder)
+    if test is None:
+        console.print(f"[yellow]{escape(folder.name)} is a target the framework ships; only a generated module is "
+                      "marked tested or repaired here.[/yellow]")
+        sys.exit(1)
+    console.print(f"{escape(folder.name)}: {escape(test.line)}")
+    for line in module_test.repair_view(folder).split("\n")[1:]:
+        console.print(escape(_printable(line)))
+    if propose:
+        if test.state != "needs_rework":
+            console.print("[yellow]No failed build to propose a repair from.[/yellow]")
+            sys.exit(1)
+        ctx.require_framework()
+        console.print("Asking the self-healing analysis (the pattern library, then Ditto) ...")
+        try:
+            proposal = module_test.propose_repair(ctx.framework_manager, folder)
+        except module_test.RepairError as e:
+            console.print(f"[red]{escape(_printable(e))}[/red]")
+            sys.exit(1)
+        console.print(f"Proposal ({escape(str(proposal.get('by')))}): {escape(_printable(proposal.get('summary')))}")
+        if proposal.get("root_cause"):
+            console.print(f"Cause: {escape(_printable(proposal['root_cause']))}")
+        if proposal.get("step"):
+            console.print(f"Step for you (nothing is run): {escape(_printable(proposal['step']))}")
+    waiting = module_test.waiting_proposal(folder)
+    try:
+        session = ModuleEdit(folder)
+    except (OSError, ValueError) as e:
+        console.print(f"[red]The files of {escape(folder.name)} cannot be opened: {escape(str(e))}[/red]")
+        sys.exit(1)
+    how, by, summary = "by hand", "person", ""
+    try:
+        chosen = [session._known(f) for f in files]
+        if waiting and waiting.get("diff") and not patch_file:
+            changed = session.apply_diff(waiting["diff"])
+            how, by, summary = "proposal", str(waiting.get("by") or "ai"), str(waiting.get("summary") or "")
+            console.print(f"The proposal of {escape(by)} changes: " + (", ".join(changed) or "nothing")
+                          + " (shown below; nothing is saved without your yes).")
+        if patch_file:
+            changed = session.apply_diff(Path(patch_file).read_text(encoding="utf-8"))
+            console.print("The diff changes: " + (", ".join(changed) or "nothing"))
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        console.print(f"[red]{escape(_printable(e))}[/red]")
+        sys.exit(1)
+    to_edit = chosen or ([] if (patch_file or session.changed()) else session.files)
+    _open_in_editor(session, to_edit)
+    if not session.changed():
+        console.print("No file changed; nothing was written.")
+        return
+    if not _review_module_edit(session, to_edit, f"Save this repair to {folder.name}?"):
+        console.print("[yellow]Not saved; the files are as they were.[/yellow]")
+        sys.exit(1)
+    session.repair = {"how": how, "by": by, "summary": summary}
+    try:
+        written = session.save()
+    except EditRefused as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]Saved: {escape(', '.join(written))}. {escape(folder.name)} stays untested until a build "
+                  "passes.[/green]")
+    settings = module_test.retry_settings(folder)
+    if not settings.get("model"):
+        return
+    command = module_test.retry_command(folder.name, settings)
+    if not retry:
+        console.print(f"Build it again: {escape(command)}")
+        return
+    if not click.confirm(f"Start the failed build again ({command})?", default=True):
+        return
+    click_ctx.invoke(start_build, model=settings.get("model"), target=folder.name, format=settings.get("format"),
+                     board=settings.get("board"), quantization=settings.get("quantization"))
 
 
 # ============================================================================

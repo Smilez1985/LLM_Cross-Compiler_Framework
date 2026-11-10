@@ -35,7 +35,8 @@ from orchestrator.Core.module_generator import (ARCHITECTURES, DEFAULT_BASE, INP
 from orchestrator.Core.module_generator import record_module_saved  # noqa: F401
 from orchestrator.runtime.probe_service import (IMPORT_NEXT, LIST_LIMIT, LOCAL_ID, PROBE_TIMEOUT, HardwareProbes,
                                                 ProbeError, access_line, match_target)
-from orchestrator.schemas.build import BenchmarkRowOut, TargetOut
+from orchestrator.llm.task_prompts import MODULE_FILE_CHARS, MODULE_FILES_CHARS
+from orchestrator.schemas.build import BenchmarkRowOut, BuildTestOut, TargetOut
 from orchestrator.schemas.modules import PackageSourceIn, PinnedDownloadIn
 from orchestrator.schemas.targets import OptimizationProfile, TargetCapabilities, TargetIn
 from orchestrator.tools.facts_catalog import warn
@@ -69,6 +70,11 @@ class TargetCheckIn(TargetIn):
     check_image: bool = Field(default=False, description="Also show the target's build container image: how many are "
                                                          "on this computer and whether an offline build could make "
                                                          "one (each source by its label)")
+    module_files: bool = Field(default=False, description="Also give a generated module's files of the edit step "
+                                                          "(stage modules, target.yml, Dockerfiles) and, when it "
+                                                          "needs rework, the end of its failed build's log: what a "
+                                                          "repair diff (propose_healing_fix's module_diff) is written "
+                                                          "against")
 
 
 class TargetSummary(TargetOut):
@@ -116,6 +122,14 @@ class TargetDetailsOut(TargetCapabilitiesOut):
                                                           "(measured, published or unmeasured)")
     build_image: Optional[BuildImageOut] = Field(default=None, description="With check_image: the build container image "
                                                                        "(the toolchain image, not the package)")
+    build_test: Optional[BuildTestOut] = Field(default=None, description="A generated module's build test (None: a "
+                                                                        "shipped target)")
+    module_files: Dict[str, untrusted_text(MODULE_FILE_CHARS)] = Field(
+        default_factory=dict, description="With module_files: each file of the module's edit step by its path in the "
+                                          "target folder (a file too long to show is left out, with a note)")
+    failed_log: Optional[untrusted_text(8000)] = Field(default=None, description="With module_files, for a module "
+                                                                                 "that needs rework: the end of the "
+                                                                                 "failed build's log (cleaned)")
 
 
 class ProbeIn(BaseModel):
@@ -376,6 +390,9 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
                                base_image_reason=(str(meta["base_image_reason"]) if meta.get("base_image_reason")
                                                   else None))
         out.board_profiles, out.benchmarks = service.board_data_out(tid)
+        out.build_test = service.build_test(tid) if hasattr(service, "build_test") else None
+        if inp.module_files:
+            module_files(out, m.get("folder"), ctx)
         if inp.check_files:
             folder = m.get("folder")
             if folder is None:
@@ -399,6 +416,37 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
         elif m["untested"]:
             ctx.notes.append("This target was generated on this computer and is untested on real hardware.")
         return out
+
+    def module_files(out: TargetDetailsOut, folder: Any, ctx: ToolContext) -> None:
+        """The edit step's files of a generated module (scrubbed like any text an AI reads) and, when it needs
+        rework, its failed build's log as log_for_ai gives it. A shipped target's files are not offered."""
+        from orchestrator.Core.folder_labels import ai_folder_labels
+        from orchestrator.Core.module_edit import ModuleEdit
+        from orchestrator.Core.module_test import ai_log, gets_marks, repair_files
+        from orchestrator.security.paths import scrub_for_ai
+        if folder is None or not gets_marks(Path(folder)):
+            ctx.notes.append("module_files: only a generated module (not a shipped target) is offered for repair.")
+            return
+        roots = ai_folder_labels(framework)
+        try:
+            edit = ModuleEdit(Path(folder))
+        except (OSError, ValueError) as e:
+            ctx.notes.append(f"module_files: the module's files could not be read: {e}")
+            return
+        used = 0
+        for rel in repair_files(Path(folder)):   # the failed stage's file first
+            text = scrub_for_ai(edit.text(rel), roots=roots, limit=MODULE_FILE_CHARS + 1)
+            if len(text) > MODULE_FILE_CHARS or used + len(text) > MODULE_FILES_CHARS:
+                ctx.notes.append(f"module_files: {rel} is left out (too long to show with the others); leave it "
+                                 "unchanged.")
+                continue
+            used += len(text)
+            out.module_files[rel] = text
+        if out.build_test is not None and out.build_test.state == "needs_rework":
+            out.failed_log = ai_log(Path(folder), roots=roots) or None
+            ctx.notes.append("A repair goes to the person as a unified diff against these files: propose_healing_fix "
+                             f"with request_id {out.build_test.failed_request or '(the failed build request)'} and "
+                             "module_diff. Only the person saves it in the edit step.")
 
     # --- probes ---
 
@@ -655,8 +703,10 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
         ToolSpec("get_target_capabilities", "Target capabilities",
                  "Shows what a target can build: boards, chips served by a board (variants, with the reason), "
                  "formats, quantizations per board, calibration needs, its trust and, for an AI-created target, its "
-                 "assumptions. check_files also checks its files; "
-                 "check_image shows its build container image and whether an offline build could make one.",
+                 "assumptions, and a generated module's build test (tested, untested, needs rework). check_files "
+                 "also checks its files; check_image shows its build container image and whether an offline build "
+                 "could make one; module_files gives a generated module's files and its failed build's log, for a "
+                 "repair diff.",
                  ToolTier.READ, TargetCheckIn, TargetDetailsOut, get_target_capabilities, idempotent=True,
                  takes_context=True, fields={"target": target_field},
                  examples=({"target": "Rockchip"}, {"target": "Rockchip", "check_files": True},

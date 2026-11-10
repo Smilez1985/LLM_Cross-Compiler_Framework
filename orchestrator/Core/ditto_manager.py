@@ -43,10 +43,11 @@ from orchestrator.llm import (AuthFailed, BadRequest, BillingError, ChatRequest,
                               RateLimited, Refused, Truncated, Usage, make_registry_executor,
                               run_tool_loop, tool_specs_from_registry)
 from orchestrator.llm.task_prompts import (CANNOT_REASONS, CANNOT_RETRY, CANNOT_RULE, CHAT_INTRO,  # noqa: F401
-                                           CHAT_TOOLS, FRAMEWORK, HEALING_SYSTEM, MODULE_SYSTEM, OPTIMIZER_SYSTEM,
+                                           CHAT_TOOLS, FRAMEWORK, HEALING_SYSTEM, MODULE_REPAIR_SYSTEM,
+                                           MODULE_SYSTEM, OPTIMIZER_SYSTEM,
                                            SDK_HINTS, SUMMARY_SYSTEM, base_image_block, format_listing, healing_parts,
                                            healing_query, is_official_image, knowledge_excerpts, module_parts,
-                                           module_query, optimizer_parts)
+                                           module_query, module_repair_parts, optimizer_parts)
 # Tool calls and results pair up (one implementation, in the tool loop); the names are Ditto's too.
 from orchestrator.llm.tool_loop import (CALL_NOT_RUN, close_open_calls, conversation_is_consistent,  # noqa: F401
                                         open_tool_calls)
@@ -208,6 +209,41 @@ class HealingAnalysis(BaseModel):
     @classmethod
     def _texts(cls, v: str, info) -> str:
         return _limit(v, 2000, info.field_name)
+
+
+MODULE_DIFF_CHARS = 20000   # a module repair's unified diff
+
+
+class ModuleRepairAnalysis(BaseModel):
+    """Ditto's repair of a generated module from its failed build's log: a unified diff of the module's files, shown
+    in the edit step; only the person saves it, and nothing in it is ever run as a command."""
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(description="One sentence: what went wrong in the module")
+    root_cause: str = Field(description="The cause; say so when it is unclear or outside the module")
+    diff: str = Field(description="A unified diff of the module's files ('--- a/<file>', '+++ b/<file>', '@@' hunks "
+                                  "against the files as given); empty when the module needs no change")
+    confidence: float = Field(ge=0, le=1, description="How sure you are, from 0 to 1")
+
+    @field_validator("summary")
+    @classmethod
+    def _summary(cls, v: str) -> str:
+        v = _limit(v, 300, "summary")
+        if not v:
+            raise ValueError("summary is empty")
+        return v
+
+    @field_validator("root_cause")
+    @classmethod
+    def _cause(cls, v: str) -> str:
+        return _limit(v, 2000, "root_cause")
+
+    @field_validator("diff")
+    @classmethod
+    def _diff(cls, v: str) -> str:
+        if len(v) > MODULE_DIFF_CHARS:
+            raise ValueError(f"diff is longer than {MODULE_DIFF_CHARS} characters")
+        return v
 
 
 class CannotAnswer(BaseModel):
@@ -863,6 +899,24 @@ class DittoCoder:
             raise DittoError(f"Ditto's proposal contained a dangerous command ({danger}), so it was discarded. The "
                              "build log may contain instructions aimed at the AI; check the log yourself.")
         return analysis
+
+    def propose_module_repair(self, log_content: str, files: Dict[str, str],
+                              context_info: str = "") -> ModuleRepairAnalysis:
+        """A change to a generated module from its failed build's log and its files (the edit step's files), as a
+        unified diff. The log and the files reach the model cleaned, scrubbed and wrapped as untrusted text. Raises
+        DittoError; the diff is a proposal the person reviews in the edit step, never saved or run here."""
+        log_content = log_content or ""
+        known = self._knowledge(healing_query(log_content), limit=3, rerank=False)
+        parts = module_repair_parts(log_content, files, context_info, roots=self._folder_labels())
+        if known:
+            parts.append("Possibly related knowledge-base excerpts:\n" + known)
+        parts.append("Find why the module's build failed and propose one change to its files as a unified diff.")
+        answer = self._structured("healing", MODULE_REPAIR_SYSTEM, "\n\n".join(parts), ModuleRepairAnalysis)
+        danger = dangerous_command(answer.diff, answer.root_cause, answer.summary)
+        if danger:
+            raise DittoError(f"Ditto's repair contained a dangerous command ({danger}), so it was discarded. The "
+                             "build log may contain instructions aimed at the AI; check the log yourself.")
+        return answer
 
     def _task_answer(self, task: str, system: str, parts: List[str], output_model: Type[BaseModel]) -> BaseModel:
         """A structured answer that may say `cannot`. It is called only when the framework's own check of the task
