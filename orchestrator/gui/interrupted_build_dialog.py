@@ -56,8 +56,18 @@ def ask_interrupted(parent: Optional[QWidget], framework: Any, build_id: str, la
     if clicked is continue_button:
         service = getattr(framework, "build_service", None)
         try:
-            started = interrupted_build.decide(engine, cache, build_id, "continue", "gui", state_dir=state,
-                                               service=service)
+            try:
+                started = interrupted_build.decide(engine, cache, build_id, "continue", "gui", state_dir=state,
+                                                   service=service)
+            except interrupted_build.InterruptedBuildError as e:
+                # the pre-flight check stopped it (a driver changed): the person's Continue anyway, Cancel the default
+                if getattr(e, "preflight", None) is None:
+                    raise
+                from orchestrator.gui.preflight_box import ask_preflight
+                if not ask_preflight(parent, e.preflight, "bld.preflight.continue_anyway"):
+                    return "later"
+                started = interrupted_build.decide(engine, cache, build_id, "continue", "gui", state_dir=state,
+                                                   service=service, ignore_preflight=True)
         except interrupted_build.InterruptedBuildError as e:
             plain_box(parent, "warning", title, one_line(str(e)))
             return "failed"

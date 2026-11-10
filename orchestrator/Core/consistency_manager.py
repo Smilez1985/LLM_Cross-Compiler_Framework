@@ -1,241 +1,317 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Consistency Manager
-DIREKTIVE: Goldstandard, Determinismus, Pre-Flight Checks.
+LLM Cross-Compiler Framework - the pre-flight check before a build (DESIGN, "Build pipeline and target modules": a
+build that cannot succeed stops before it starts).
 
-Zweck:
-Sichert die Integrität des Builds VOR dem Start.
-Prüft Kompatibilität zwischen Hardware-Treibern (Probe) und Software-SDKs (Target Definition).
-Verhindert "Doomed to Fail" Builds durch strikte Gates.
+`check` compares what the hardware probes found with what the build and the target's SDK need, and returns a
+`Preflight`: its findings (each one stops the build or is a warning, with what was found, what is needed and what to
+do), what was compared and what could not be compared. It is pure: the build service (Core/build_service.py
+`BuildService.preflight_for`) gathers the inputs and runs it at every build start, in the build plan of an AI caller's
+question (Core/build_plan.py) and for `llm-cli build preflight` and the Builder's Pre-flight check button.
 
-Updates v2.0.1:
-- Removed hardcoded assumptions.
-- Implemented dynamic parsing of Target Dockerfiles to determine required SDK versions.
-- Strict mapping of CUDA/Driver versions based on NVIDIA compatibility matrix.
+Two probes, each for what it can tell:
+- this computer (only a GPU build): the CUDA version of the target's GPU image (`gpu_image`) against the CUDA version
+  the NVIDIA driver reports (NVIDIA_DRIVER_CUDA_MAX: the driver's place in NVIDIA's compatibility matrix). A newer
+  CUDA major version than the driver supports stops (the CUDA runtime refuses a driver of an older major version);
+  a newer minor version of the same major is a warning (minor version compatibility); no NVIDIA GPU with a working
+  driver and a target without a GPU image are warnings (the build runs on the CPU).
+- the board's probe (the board the build is for): the format's `sdk:` declaration of the target's capabilities
+  (schemas/targets.py SdkNeeds). The NPU driver below its minimum stops, below the recommended version it is a
+  warning; the board's runtime older than the toolkit (or of another major version) is a warning.
+
+Only what makes the build or its result fail for certain stops; a value a probe does not have is listed as not checked,
+never guessed. Probe values are untrusted: only versions that parse as numbers are compared and shown.
+
+What the build service refuses outright before this check (the NPU missing in the board's probe, RKLLM on another SoC
+or on a build computer that is not x86_64, a probe of another board, a GPU build under Podman:
+build_formats.format_refusal and BuildService._validated) is not repeated here.
 """
 
-import logging
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from packaging import version
-from orchestrator.utils.logging import get_logger
+from orchestrator.runtime.catalog import version_tuple
+
+# The closed codes of a finding: the facts catalogue's warning preflight_error names one of them as its `check`
+STOP_CODES = ("cuda_driver", "npu_driver")
+WARNING_CODES = ("cuda_minor", "no_nvidia_gpu", "no_gpu_image", "npu_driver_old", "npu_runtime")
+CODES = STOP_CODES + WARNING_CODES
+
+THIS_COMPUTER = "this computer"
+THE_BOARD = "the board"
+
+_CUDA_ARG = re.compile(r"^\s*ARG\s+CUDA_VERSION\s*=\s*\"?(\d{1,2}\.\d{1,3}(?:\.\d{1,3})?)\"?\s*$", re.MULTILINE)
+_CUDA_IMAGE = re.compile(r"^\s*FROM\s+(?:--\S+\s+)*\S*nvidia/cuda:(\d{1,2}\.\d{1,3}(?:\.\d{1,3})?)", re.MULTILINE |
+                         re.IGNORECASE)
+_VERSION = re.compile(r"^\d{1,3}(\.\d{1,5}){0,3}$")
+
+
+@dataclass(frozen=True)
+class Finding:
+    """One result of the check: `code` (CODES), whether it stops the build, where the fact was found (this computer or
+    the board), what was found and what is needed (`message`) and what to do (`next`)."""
+    code: str
+    stop: bool
+    where: str
+    message: str
+    next: str
+
+    def line(self) -> str:
+        kind = "Stops the build" if self.stop else "Warning"
+        return f"{kind} ({self.where}): {self.message} {self.next}".strip()
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"code": self.code, "stop": self.stop, "where": self.where, "message": self.message, "next": self.next}
+
 
 @dataclass
-class ConsistencyIssue:
-    component: str
-    severity: str
-    message: str
-    detected_value: str
-    required_value: str
-    suggested_fix: str
+class Preflight:
+    """The result of the pre-flight check: the findings, what was compared (`checked`) and what could not be compared,
+    with how to get it (`unchecked`)."""
+    findings: List[Finding] = field(default_factory=list)
+    checked: List[str] = field(default_factory=list)
+    unchecked: List[str] = field(default_factory=list)
 
-class ConsistencyManager:
-    """
-    The Guardian of the Build Pipeline.
-    Validates prerequisites before execution using semantic versioning.
-    """
-    
-    def __init__(self, framework_manager):
-        self.logger = get_logger(__name__)
-        self.framework = framework_manager
-        self.config = framework_manager.config
-        
-        # NVIDIA Compatibility Matrix (Lookup Table)
-        # Maps CUDA Toolkit Version -> Minimum Linux Driver Version
-        # Source: https://docs.nvidia.com/deploy/cuda-compatibility/
-        self.nvidia_matrix = {
-            "11.0": "450.36.06",
-            "11.1": "455.32",
-            "11.2": "460.27.04",
-            "11.3": "465.19.01",
-            "11.4": "470.42.01",
-            "11.5": "495.29.05",
-            "11.6": "510.39.01",
-            "11.7": "515.43.04",
-            "11.8": "520.61.05",
-            "12.0": "525.60.13",
-            "12.1": "530.30.02",
-            "12.2": "535.54.03",
-            "12.3": "545.23.06",
-            "12.4": "550.54.14",
-            "12.5": "555.42.02",
-            "12.6": "560.28.03"
-        }
+    def stops(self) -> List[Finding]:
+        return [f for f in self.findings if f.stop]
 
-    def check_build_compatibility(self, build_config: Dict[str, Any]) -> List[ConsistencyIssue]:
-        """Haupt-Prüfmethode."""
-        issues = []
-        target = build_config.get("target", "").lower()
-        
-        # 1. Lade Hardware-Profil (Ist-Zustand)
-        hw_profile = self._load_hardware_profile()
-        if not hw_profile:
-            self.logger.warning("No hardware profile found (target_hardware_config.txt). Skipping consistency checks.")
-            # In strict mode, this might be an error, but for flexibility we allow it with warning
-            return []
+    def warnings(self) -> List[Finding]:
+        return [f for f in self.findings if not f.stop]
 
-        self.logger.info(f"Running Consistency Check for Target: {target}...")
+    @property
+    def stopped(self) -> bool:
+        return bool(self.stops())
 
-        # 2. Router zu spezifischen Checks
-        if "rockchip" in target:
-            issues.extend(self._check_rockchip(hw_profile, build_config))
-        elif "nvidia" in target or "cuda" in target:
-            issues.extend(self._check_nvidia(hw_profile, build_config, target))
-        elif "intel" in target:
-            issues.extend(self._check_intel(hw_profile, build_config))
+    def stop_codes(self) -> List[str]:
+        return sorted({f.code for f in self.stops()})
 
-        # 3. Ressourcen Checks
-        issues.extend(self._check_resources(hw_profile, build_config))
+    def verdict(self) -> str:
+        """stopped, warnings or passed."""
+        return "stopped" if self.stopped else "warnings" if self.findings else "passed"
 
-        return issues
+    def summary(self) -> str:
+        if self.stopped:
+            n = len(self.stops())
+            return (f"Pre-flight check: the build cannot succeed as asked ({n} reason{'s' if n != 1 else ''}); "
+                    "nothing was started.")
+        if self.findings:
+            return "Pre-flight check: passed with warnings."
+        if self.checked:
+            return "Pre-flight check: passed."
+        return "Pre-flight check: nothing to compare for this build."
 
-    def _load_hardware_profile(self) -> Optional[Dict[str, str]]:
-        """Liest die target_hardware_config.txt aus dem Cache."""
-        profile_path = Path(self.config.cache_dir) / "target_hardware_config.txt"
-        if not profile_path.exists():
-            return None
-            
-        data = {}
-        try:
-            with open(profile_path, 'r', encoding='utf-8', errors='ignore') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#"): continue
-                    if "=" in line:
-                        key, val = line.split("=", 1)
-                        data[key.strip()] = val.strip()
-            return data
-        except Exception as e:
-            self.logger.error(f"Failed to parse hardware profile: {e}")
-            return None
+    def lines(self) -> List[str]:
+        """The summary, every finding (stops first), what was compared and what was not."""
+        out = [self.summary()]
+        out += [f.line() for f in self.stops()] + [f.line() for f in self.warnings()]
+        if self.checked:
+            out.append("Compared: " + "; ".join(self.checked) + ".")
+        out += [f"Not checked: {u}" for u in self.unchecked]
+        return out
 
-    def _extract_version(self, version_str: str) -> str:
-        """Extrahiert '1.2.3' aus Strings."""
-        if not version_str or version_str == "Unknown": return "0.0.0"
-        match = re.search(r'(\d+\.\d+(\.\d+)?)', str(version_str))
-        return match.group(1) if match else "0.0.0"
+    def notes(self, overridden: bool = False) -> List[str]:
+        """What a started build keeps in its warnings: every warning, and the stops the person overrode."""
+        kept = [f"Pre-flight check: {f.message}" for f in self.warnings()]
+        if overridden:
+            kept = [f"Pre-flight check overridden by the person: {f.message}" for f in self.stops()] + kept
+        return kept
 
-    def _resolve_target_cuda_version(self, target_name: str) -> str:
-        """
-        Determines the CUDA version required by the target's Dockerfile.
-        Scans targets/{name}/Dockerfile for 'FROM ...cuda:X.Y'.
-        """
-        # Path resolution
-        target_dir = Path(self.config.targets_dir) / target_name
-        
-        # Try Dockerfile.gpu first (Priority), then Dockerfile
-        for fname in ["Dockerfile.gpu", "Dockerfile"]:
-            fpath = target_dir / fname
-            if fpath.exists():
-                try:
-                    content = fpath.read_text(encoding="utf-8")
-                    # Regex for image tag: nvidia/cuda:12.2.2-devel...
-                    # Capture X.Y (Major.Minor)
-                    match = re.search(r'cuda:(\d+\.\d+)', content)
-                    if match:
-                        ver = match.group(1)
-                        self.logger.debug(f"Detected CUDA Requirement {ver} from {fname}")
-                        return ver
-                except Exception as e:
-                    self.logger.warning(f"Failed to parse {fname}: {e}")
-        
-        self.logger.warning(f"Could not detect CUDA version in {target_name} Dockerfiles. Assuming baseline 11.8.")
-        return "11.8" # Safe fallback
+    def as_dict(self) -> Dict[str, Any]:
+        return {"verdict": self.verdict(), "summary": self.summary(),
+                "findings": [f.as_dict() for f in self.stops() + self.warnings()],
+                "checked": list(self.checked), "unchecked": list(self.unchecked)}
 
-    # --- SPECIFIC CHECKS ---
 
-    def _check_rockchip(self, hw: Dict[str, str], cfg: Dict[str, str]) -> List[ConsistencyIssue]:
-        issues = []
-        
-        if hw.get("NPU_VENDOR") != "Rockchip":
-            issues.append(ConsistencyIssue("NPU", "ERROR", "Target is Rockchip, but no NPU detected.",
-                hw.get("NPU_VENDOR", "None"), "Rockchip", "Check hardware connection."))
-            return issues
+@dataclass(frozen=True)
+class GpuImage:
+    """The target's GPU image: whether it has one (Dockerfile.gpu) and the CUDA version it builds with (None: no CUDA
+    found in it, or not readable), with where that version came from."""
+    present: bool
+    cuda: Optional[str] = None
+    source: str = ""
 
-        # Quantization check
-        quant = cfg.get("quantization", "")
-        if "W8A8" in quant and "3588" not in hw.get("NPU_MODEL", ""):
-             issues.append(ConsistencyIssue(
-                component="NPU Capabilities", severity="WARNING",
-                message="W8A8 quantization is optimized for RK3588. May fail on RK3566.",
-                detected_value=hw.get("NPU_MODEL", "Unknown"), required_value="RK3588",
-                suggested_fix="Use INT8 or Q4_K_M."
-            ))
 
-        return issues
+def gpu_image(target_folder: Optional[Path], build_args: Optional[Mapping[str, Any]] = None) -> GpuImage:
+    """The CUDA version of a target's GPU image: a CUDA_VERSION in target.yml docker.build_args (what the build passes
+    to the image build), else the Dockerfile.gpu default (ARG CUDA_VERSION=...), else the tag of an nvidia/cuda base
+    image. GpuImage(False) when the target has no Dockerfile.gpu (the build then uses its CPU Dockerfile)."""
+    if target_folder is None:
+        return GpuImage(False)
+    path = Path(target_folder) / "Dockerfile.gpu"
+    if not path.is_file() or path.is_symlink():
+        return GpuImage(False)
+    arg = str((build_args or {}).get("CUDA_VERSION") or "").strip()
+    if re.fullmatch(r"\d{1,2}\.\d{1,3}(\.\d{1,3})?", arg):
+        return GpuImage(True, arg, "the target's build_args")
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")[:200_000]
+    except OSError:
+        return GpuImage(True)
+    match = _CUDA_ARG.search(text)
+    if match:
+        return GpuImage(True, match.group(1), "Dockerfile.gpu")
+    match = _CUDA_IMAGE.search(text)
+    if match:
+        return GpuImage(True, match.group(1), "the nvidia/cuda base image of Dockerfile.gpu")
+    return GpuImage(True)
 
-    def _check_nvidia(self, hw: Dict[str, str], cfg: Dict[str, str], target_name: str) -> List[ConsistencyIssue]:
-        issues = []
-        
-        # 1. Hardware Presence
-        if hw.get("SUPPORTS_CUDA") != "ON":
-             issues.append(ConsistencyIssue("GPU", "ERROR", "No CUDA-capable GPU detected.",
-                "None", "NVIDIA GPU", "Install NVIDIA Drivers and Container Toolkit."))
-             return issues
 
-        # 2. Driver vs SDK Compatibility
-        detected_driver_ver = self._extract_version(hw.get("GPU_DRIVER_VERSION", "0.0.0"))
-        
-        # Dynamic Lookup of required CUDA version from the Target Definition
-        target_cuda_ver = self._resolve_target_cuda_version(target_name)
-        
-        # Lookup minimum driver for that CUDA version
-        # We match Major.Minor (e.g. 12.2)
-        min_driver_req = self.nvidia_matrix.get(target_cuda_ver)
-        
-        if not min_driver_req:
-             # Try to match Major version (e.g. 12.0 base) if exact match fails
-             base_ver = target_cuda_ver.split('.')[0] + ".0"
-             min_driver_req = self.nvidia_matrix.get(base_ver, "450.00") # Fallback to old driver
+def _version(value: Any) -> Optional[str]:
+    """A probe or declared version that is plainly a number (digits and dots), else None (never shown or compared)."""
+    text = str(value or "").strip().lstrip("vV")
+    return text if _VERSION.fullmatch(text) else None
 
-        if version.parse(detected_driver_ver) < version.parse(min_driver_req):
-             issues.append(ConsistencyIssue(
-                component="NVIDIA Driver", severity="ERROR",
-                message=f"Host Driver too old for CUDA {target_cuda_ver} (Container).",
-                detected_value=detected_driver_ver, required_value=f">={min_driver_req}",
-                suggested_fix=f"Update NVIDIA Drivers to {min_driver_req}+ or downgrade Target CUDA version."
-            ))
 
-        return issues
+def _major_minor(value: str) -> Tuple[int, ...]:
+    parts = version_tuple(value) or (0,)
+    return tuple(parts[:2]) + (0,) * (2 - len(parts[:2]))
 
-    def _check_intel(self, hw: Dict[str, str], cfg: Dict[str, str]) -> List[ConsistencyIssue]:
-        issues = []
-        format_type = str(cfg.get("format", "")).lower()
-        
-        if format_type == "openvino" or "ipex" in format_type:
-            has_gpu = (hw.get("SUPPORTS_INTEL_XPU") == "ON")
-            has_vnni = (hw.get("SUPPORTS_AVX512_VNNI") == "ON")
-            has_amx = (hw.get("SUPPORTS_AMX") == "ON")
-            
-            if not has_gpu and not (has_vnni or has_amx):
-                 issues.append(ConsistencyIssue(
-                    component="Intel Acceleration", severity="WARNING",
-                    message="No XPU/AMX/VNNI detected. Performance will be degraded.",
-                    detected_value="Standard CPU", required_value="Intel Arc/Xeon/Core Ultra",
-                    suggested_fix="Switch to standard 'GGUF' format for better compatibility on this CPU."
-                ))
-        return issues
 
-    def _check_resources(self, hw: Dict[str, str], cfg: Dict[str, str]) -> List[ConsistencyIssue]:
-        issues = []
-        try:
-            total_ram = int(hw.get("Total_RAM_MB", 0))
-            model_name = str(cfg.get("model_name", "")).lower()
-            
-            req = 4000
-            if "7b" in model_name: req = 8000
-            if "13b" in model_name: req = 16000
-            if "70b" in model_name: req = 48000
-            
-            if total_ram > 0 and total_ram < req:
-                 issues.append(ConsistencyIssue(
-                    component="RAM", severity="WARNING",
-                    message=f"Low RAM for model {model_name}.",
-                    detected_value=f"{total_ram} MB", required_value=f">{req} MB",
-                    suggested_fix="Ensure Swap is active or choose smaller model."
-                ))
-        except: pass
-        return issues
+def _get(profile: Any, key: str) -> Optional[str]:
+    get = getattr(profile, "get", None)
+    return get(key) if callable(get) else None
+
+
+def _needs_root(profile: Any, key: str) -> bool:
+    warnings = getattr(profile, "warnings", None)
+    try:
+        listed = warnings() if callable(warnings) else (warnings or [])
+    except Exception:  # noqa: BLE001 - a profile without warnings
+        listed = []
+    return f"needs_root:{key}" in list(listed or [])
+
+
+def _nvidia_gpus(profile: Any) -> List[Dict[str, str]]:
+    """The NVIDIA GPUs whose driver answered (seen by nvidia-smi); a GPU seen only on the PCI bus has no driver."""
+    gpus = getattr(profile, "gpus", None)
+    found = gpus() if callable(gpus) else []
+    return [g for g in found if g.get("VENDOR") == "nvidia" and g.get("SOURCE") != "sysfs"]
+
+
+# --- this computer: a GPU build -----------------------------------------------------------------------------------
+
+def _host_findings(result: Preflight, host: Any, image: GpuImage) -> None:
+    if not image.present:
+        result.findings.append(Finding(
+            "no_gpu_image", False, THIS_COMPUTER,
+            "the target has no GPU image (Dockerfile.gpu), so a GPU build runs its CPU image on the CPU.",
+            "Build without the GPU option, or add a Dockerfile.gpu to the target."))
+        return
+    if host is None:
+        result.unchecked.append("this computer's GPUs could not be probed, so the driver was not compared with the "
+                                "target's CUDA version; run 'llm-cli scan' to see what the probe finds.")
+        return
+    nvidia = _nvidia_gpus(host)
+    if not nvidia:
+        result.findings.append(Finding(
+            "no_nvidia_gpu", False, THIS_COMPUTER,
+            "the probe finds no NVIDIA GPU with a working driver, so the build runs on the CPU (much slower).",
+            "Install or load the NVIDIA driver and the NVIDIA Container Toolkit, or build without the GPU option."))
+        return
+    if image.cuda is None:
+        result.unchecked.append("the CUDA version of the target's GPU image is not named in its Dockerfile.gpu (ARG "
+                                "CUDA_VERSION or an nvidia/cuda base image), so the driver was not compared with it.")
+        return
+    driver_cuda = _version(_get(host, "NVIDIA_DRIVER_CUDA_MAX"))
+    if driver_cuda is None:
+        result.unchecked.append("the NVIDIA driver's CUDA version is not in this computer's probe, so it was not "
+                                "compared with the image's CUDA "
+                                f"{image.cuda}; probe again with the driver loaded ('llm-cli scan').")
+        return
+    result.checked.append(f"the NVIDIA driver of this computer (CUDA {driver_cuda}) with the image's CUDA {image.cuda}")
+    need, have = _major_minor(image.cuda), _major_minor(driver_cuda)
+    if need[0] > have[0]:
+        result.findings.append(Finding(
+            "cuda_driver", True, THIS_COMPUTER,
+            f"the NVIDIA driver supports CUDA up to {driver_cuda}, and the target's GPU image uses CUDA {image.cuda} "
+            f"(from {image.source}): CUDA {need[0]} refuses a driver of CUDA {have[0]}, so the build's GPU work "
+            "cannot run.",
+            f"Update the NVIDIA driver to one that supports CUDA {need[0]}.{need[1]} or newer, or build without the "
+            "GPU option."))
+    elif need > have:
+        result.findings.append(Finding(
+            "cuda_minor", False, THIS_COMPUTER,
+            f"the NVIDIA driver supports CUDA up to {driver_cuda}, and the target's GPU image uses CUDA {image.cuda}: "
+            "it runs through CUDA's minor version compatibility, but code compiled at run time can fail.",
+            f"Update the NVIDIA driver to one that supports CUDA {need[0]}.{need[1]} or newer to be sure."))
+
+
+# --- the board: what the format's SDK needs -------------------------------------------------------------------------
+
+def _board_findings(result: Preflight, fmt: str, sdk: Any, board: Any, board_name: str) -> None:
+    toolkit = str(getattr(sdk, "toolkit", "") or "the toolkit")
+    version = _version(getattr(sdk, "version", None))
+    label = fmt.upper()
+    if board is None:
+        what = [k for k in (getattr(sdk, "driver_key", None), getattr(sdk, "runtime_key", None)) if k]
+        if what:
+            result.unchecked.append(
+                f"no hardware probe of {board_name} is stored, so its NPU driver and runtime were not compared with "
+                f"what {label} needs; probe the board (Scan in the Builder, or 'llm-cli scan --device').")
+        return
+    driver_key = getattr(sdk, "driver_key", None)
+    if driver_key:
+        driver = _version(_get(board, driver_key))
+        minimum = _version(getattr(sdk, "driver_min", None))
+        recommended = _version(getattr(sdk, "driver_recommended", None))
+        if driver is None:
+            why = ("the probe needs root for it: run the probe on the board with sudo" if _needs_root(board, driver_key)
+                   else "the probe did not find it")
+            result.unchecked.append(f"the NPU driver version of {board_name} ({why}), so it was not compared with "
+                                    f"what {label} needs.")
+        else:
+            result.checked.append(f"the NPU driver {driver} of {board_name} with what {label} needs")
+            have = version_tuple(driver) or (0,)
+            if minimum and have < (version_tuple(minimum) or (0,)):
+                result.findings.append(Finding(
+                    "npu_driver", True, THE_BOARD,
+                    f"the NPU driver of {board_name} is {driver}, and {label} models need at least {minimum}: the "
+                    "board's runtime does not run the converted model on it (an NPU job on an unsupported driver can "
+                    "hang the NPU).",
+                    f"Update the board's kernel or NPU driver to {minimum} or newer (recommended "
+                    f"{recommended or minimum}), probe it again, then build; or build GGUF, which runs on its CPU."))
+            elif recommended and have < (version_tuple(recommended) or (0,)):
+                result.findings.append(Finding(
+                    "npu_driver_old", False, THE_BOARD,
+                    f"the NPU driver of {board_name} is {driver}, older than the recommended {recommended}.",
+                    f"Update the board's kernel or NPU driver to {recommended} when you can."))
+    runtime_key = getattr(sdk, "runtime_key", None)
+    if runtime_key and version:
+        runtime = _version(_get(board, runtime_key))
+        name = str(getattr(sdk, "runtime_name", "") or "runtime")
+        if runtime is None:
+            result.unchecked.append(f"the {name} version on {board_name} (not in its probe: not installed, or not "
+                                    "readable), so it was not compared with "
+                                    f"{toolkit} {version}; the board package or bundle brings what it needs.")
+            return
+        result.checked.append(f"the {name} {runtime} of {board_name} with {toolkit} {version}")
+        have, need = version_tuple(runtime) or (0,), version_tuple(version) or (0,)
+        if have[0] != need[0] or _major_minor(runtime) < _major_minor(version):
+            result.findings.append(Finding(
+                "npu_runtime", False, THE_BOARD,
+                f"the {name} on {board_name} is {runtime}, and the model is converted with {toolkit} {version}: "
+                f"the board's {name} must be at least {'.'.join(str(p) for p in _major_minor(version))} of the same "
+                "major version to load it.",
+                f"Update {name} on the board (its vendor package), or let the bundle bring its pinned runtime."))
+
+
+def check(*, fmt: str, board_name: Optional[str] = None, use_gpu: bool = False, sdk: Any = None,
+          board_profile: Any = None, host_profile: Any = None, image: Optional[GpuImage] = None) -> Preflight:
+    """The pre-flight check of one build. `fmt`: the format; `board_name`: the board's id or label for the texts;
+    `use_gpu`: a GPU build (this computer's GPU is passed into the build); `sdk`: the format's SdkNeeds (None: nothing
+    of the board is compared); `board_profile`: the board's probe (a HardwareProfile, None: none stored);
+    `host_profile`: this computer's probe (None: not probed); `image`: the target's GPU image (gpu_image)."""
+    result = Preflight()
+    fid = str(fmt or "").strip().lower()
+    shown = str(board_name or "the board")
+    if use_gpu:
+        _host_findings(result, host_profile, image or GpuImage(False))
+    if sdk is not None:
+        _board_findings(result, fid, sdk, board_profile, shown)
+    return result
+
+
+__all__ = ["CODES", "Finding", "GpuImage", "Preflight", "STOP_CODES", "THE_BOARD", "THIS_COMPUTER",
+           "WARNING_CODES", "check", "gpu_image"]

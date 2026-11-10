@@ -50,9 +50,11 @@ DISCARDED_NOTE = "Nothing of the build could be used again, so what it left was 
 class InterruptedBuildError(RuntimeError):
     """A decision that cannot be made: `code` needs_person (an AI asked), unknown_id, not_resumable, failed."""
 
-    def __init__(self, text: str, code: str = "failed"):
+    def __init__(self, text: str, code: str = "failed", preflight: Any = None):
         super().__init__(text)
         self.code = code
+        # the pre-flight check's result when it stopped the continued build (the person may continue it anyway)
+        self.preflight = preflight
 
 
 @dataclass
@@ -377,7 +379,7 @@ def configuration(item: KeptBuild):
 
 
 def continue_build(engine: Any, item: KeptBuild, actor: str, state_dir: Optional[Path] = None,
-                   service: Any = None) -> str:
+                   service: Any = None, ignore_preflight: bool = False) -> str:
     """The person's "continue": the same build, on the same work folder (the stage runner resumes every finished
     stage whose inputs are unchanged). Only the person; an AI's request is refused with needs_person.
 
@@ -385,14 +387,17 @@ def continue_build(engine: Any, item: KeptBuild, actor: str, state_dir: Optional
     as a build request (BuildService.continue_interrupted) and its request id is returned: it is followed, cancelled
     and reported exactly like a started build (the CLI's follow line and Ctrl+C, the Builder's progress panel,
     get_build_status). Without one (deprecated: a caller without a build service) the engine runs the configuration
-    directly and the build id is returned."""
+    directly and the build id is returned. The build service runs the pre-flight check again; when it stops the build,
+    the error carries its result (`preflight`), and `ignore_preflight` is the person's override."""
     require_person(actor)
     from orchestrator.Core.builder import ValidationError
     if service is not None:
         try:   # a BuildServiceError (the queue is full, ...) is a ValueError
-            started = service.continue_interrupted(configuration(item), description=f"Continued: {item.label}")
+            started = service.continue_interrupted(configuration(item), description=f"Continued: {item.label}",
+                                                   ignore_preflight=ignore_preflight)
         except (RuntimeError, ValidationError, ValueError) as e:
-            raise InterruptedBuildError(f"{item.label} could not be continued now: {e}", "failed") from None
+            raise InterruptedBuildError(f"{item.label} could not be continued now: {e}", "failed",
+                                        preflight=getattr(e, "preflight", None)) from None
         _settled(state_dir, item.build_id)
         return started.request_id
     try:
@@ -405,7 +410,8 @@ def continue_build(engine: Any, item: KeptBuild, actor: str, state_dir: Optional
 
 def decide(engine: Any, cache_dir: Path, build_id: str, choice: str, actor: str, *,
            state_dir: Optional[Path] = None, accepted: Any = None, audit: Any = None,
-           cleanup: Optional[Callable[[], Optional[str]]] = None, service: Any = None):
+           cleanup: Optional[Callable[[], Optional[str]]] = None, service: Any = None,
+           ignore_preflight: bool = False):
     """The one way to answer the question: `continue` or `delete` (with the person's accepted deletion). An AI
     caller's answer is never taken: its question is recorded as pending and refused with needs_person. `continue`
     with the build `service` returns the request id of the continued build (continue_build)."""
@@ -420,7 +426,7 @@ def decide(engine: Any, cache_dir: Path, build_id: str, choice: str, actor: str,
             record_pending(state_dir, item, actor)
         raise InterruptedBuildError(AI_NEXT, code="needs_person")
     if choice == "continue":
-        return continue_build(engine, item, actor, state_dir, service=service)
+        return continue_build(engine, item, actor, state_dir, service=service, ignore_preflight=ignore_preflight)
     if accepted is None:
         raise InterruptedBuildError("Deleting what it left needs your yes to its list first.", "needs_person")
     return discard(item, accepted, audit=audit, state_dir=state_dir, cleanup=cleanup)

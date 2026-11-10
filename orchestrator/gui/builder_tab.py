@@ -612,6 +612,14 @@ class BuilderTab(QWidget):
         left_col.addWidget(build_group)
         self._select_recent_target()
         
+        # The pre-flight check of the build as the form describes it, without starting anything (the CLI's
+        # `build preflight`); Start Build runs the same check and asks before a build it stops
+        self.btn_preflight = QPushButton(button_text(ui_text("bld.preflight.button")))
+        self.btn_preflight.setObjectName("btn_builder_preflight")
+        self.btn_preflight.setToolTip(plain_tooltip(ui_text("bld.preflight.tip")))
+        self.btn_preflight.clicked.connect(self._run_preflight)
+        left_col.addWidget(self.btn_preflight)
+
         # START BUTTON
         self.btn_start = QPushButton(ui_text("bld.builder.start"))
         self.btn_start.setObjectName("btn_builder_start")
@@ -1490,20 +1498,48 @@ class BuilderTab(QWidget):
         options = dict(local_paths=True, optimization=getattr(values["opt_lvl"], "value", "balanced"),
                        priority=values.get("priority", PriorityLevel.NORMAL), output_dir=values["output_dir"],
                        parallel_builds=True, description="Builder Tab Job")
+        # The pre-flight check before the build: its lines go into the Builder log; a stop is the person's to
+        # override for this one build (Cancel is the default)
+        check = getattr(service, "preflight_for", None)   # a stand-in service without it: start_build checks
+        try:
+            preflight = check(values["target"], values["target_fmt"].value, values["board"], values.get("probe"),
+                              values["use_gpu"]) if callable(check) else None
+        except BuildServiceError as e:
+            self._set_state("fail")
+            self._log(f"Submission Error: {e}")
+            QMessageBox.warning(self, "Build settings", "\n".join(getattr(e, "problems", None) or [str(e)]))
+            return
+        for line in preflight.lines() if preflight is not None else []:
+            self._log(line)
+        if preflight is not None and preflight.stopped:
+            if not self._ask_preflight(preflight):
+                self._log(ui_text("bld.preflight.cancelled"))
+                return
+            options["ignore_preflight"] = True
         try:
             try:
                 rid = self._submit(service, values, recipe, options)
             except BuildServiceError as e:
                 # A module's CMake options outside the allowlist (DESIGN round 25 Q6): the person decides here,
                 # after what each one does and the recommendation; then the same request is submitted once more.
+                # A pre-flight stop found only now (a probe changed meanwhile): the person decides the same way.
                 question = getattr(e, "flag_question", None)
-                if question is None:
+                stopped = getattr(e, "preflight", None)
+                if question is None and stopped is None:
                     raise
-                answer = self._ask_module_flags(question)
-                if answer is None:
-                    self._log(ui_text("bld.flags.cancelled"))
-                    return
-                options.update(flag_decision=answer[0], remember_flags=answer[1], flag_channel="framework-gui")
+                if stopped is not None:
+                    for line in stopped.lines():
+                        self._log(line)
+                    if not self._ask_preflight(stopped):
+                        self._log(ui_text("bld.preflight.cancelled"))
+                        return
+                    options["ignore_preflight"] = True
+                else:
+                    answer = self._ask_module_flags(question)
+                    if answer is None:
+                        self._log(ui_text("bld.flags.cancelled"))
+                        return
+                    options.update(flag_decision=answer[0], remember_flags=answer[1], flag_channel="framework-gui")
                 rid = self._submit(service, values, recipe, options)
             self._set_state("success")
             self._log(f"Job Submitted! ID: {rid}")
@@ -1517,6 +1553,36 @@ class BuilderTab(QWidget):
         except Exception as e:
             self._set_state("fail")
             self._log(f"Submission Error: {e}")
+
+    def _ask_preflight(self, result, anyway_key: str = "bld.preflight.anyway") -> bool:
+        """The pre-flight check stopped the build: its findings and Build anyway / Cancel (Cancel is the default).
+        True only when the person builds anyway, for this one build."""
+        from orchestrator.gui.preflight_box import ask_preflight
+        return ask_preflight(self, result, anyway_key)
+
+    def _run_preflight(self):
+        """Pre-flight check: the check of the build as the form describes it (BuildService.preflight_for, the CLI's
+        `build preflight`), shown and written into the Builder log; nothing is started."""
+        from orchestrator.Core.build_service import BuildService, BuildServiceError
+        from orchestrator.gui.plain import plain_box
+        target = self.target_combo.currentData()
+        if not target:
+            plain_box(self, "information", ui_text("bld.preflight.title"), ui_text("bld.builder.no_target"))
+            return None
+        service = self._build_service() or BuildService(self.framework)
+        try:
+            result = service.preflight_for(target, self.format_combo.currentData(), self._selected_board(),
+                                           self._board_probe_id(target), self.chk_gpu.isChecked())
+        except BuildServiceError as e:
+            plain_box(self, "warning", ui_text("bld.preflight.title"),
+                      "\n".join(getattr(e, "problems", None) or [str(e)]))
+            return None
+        lines = result.lines()
+        for line in lines:
+            self._log(line)
+        plain_box(self, "warning" if result.findings else "information", ui_text("bld.preflight.title"),
+                  "\n\n".join(lines))
+        return result
 
     def _ask_module_flags(self, question):
         """The question about the module's CMake options outside the allowlist: (decision, remember) or None

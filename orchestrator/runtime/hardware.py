@@ -214,6 +214,17 @@ def detect_hardware(run: Optional[Runner] = None, system: Optional[str] = None, 
                     rocm_globs: Sequence[str] = ("/opt/rocm*/lib*/libamdhip64.so*",)) -> HardwareInfo:
     """Probes RAM and GPUs now (free RAM and VRAM are always current). Probe tools that are missing or fail simply
     contribute nothing."""
+    profile = detect_profile(run, system=system, machine=machine, memory=memory, sysfs_root=sysfs_root,
+                             find_library=find_library, rocm_globs=rocm_globs)
+    return hardware_from_profile(profile, memory=memory)
+
+
+def detect_profile(run: Optional[Runner] = None, system: Optional[str] = None, machine: Optional[str] = None,
+                   memory: Optional[Tuple[int, int]] = None, sysfs_root: Path = Path("/sys"),
+                   find_library: Optional[LibraryFinder] = None,
+                   rocm_globs: Sequence[str] = ("/opt/rocm*/lib*/libamdhip64.so*",)) -> HardwareProfile:
+    """The memory and GPU part of this computer's probe as a HardwareProfile (the GPUs with their drivers, the NVIDIA
+    driver's CUDA version): what detect_hardware decides on, and what the pre-flight check before a GPU build reads."""
     probe = load_probe()
     given_sys = Path(sysfs_root) != Path("/sys")
     values = probe.collect(root=os.sep, sys_dir=str(sysfs_root) if given_sys else None, run=run or _default_runner,
@@ -226,7 +237,7 @@ def detect_hardware(run: Optional[Runner] = None, system: Optional[str] = None, 
         # value it did write passed the same validation, so the runtime still decides on them.
         logger.warning(f"Hardware probe result incomplete ({e}); deciding on the values it found")
         profile = HardwareProfile(values, schema=load_schema())
-    return hardware_from_profile(profile, memory=memory)
+    return profile
 
 
 def local_probe_values(**options) -> Dict[str, str]:

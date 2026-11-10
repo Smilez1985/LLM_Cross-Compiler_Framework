@@ -36,6 +36,33 @@ class BoardInfo(BaseModel):
     examples: List[untrusted_text(200)] = Field(default_factory=list)
 
 
+_DOTTED_VERSION = r"^\d{1,3}(\.\d{1,4}){1,3}$"
+_PROBE_KEY = r"^[A-Z][A-Z0-9_]{1,47}$"
+_SDK_NAME = r"^[A-Za-z0-9][A-Za-z0-9 ._+-]{0,39}$"   # a closed name: it reaches an AI's refusal text
+
+
+class SdkNeeds(BaseModel):
+    """What a format's SDK needs on the board that runs the result, for the pre-flight check before a build
+    (Core/consistency_manager.py): the toolkit that converts and its version, the probe keys of the board's runtime and
+    NPU driver (configs/hardware_probe_schema.yml), and the driver's minimum (below it the build stops) and recommended
+    version (below it a warning). A key or version left out is not checked."""
+    model_config = ConfigDict(extra="forbid")
+
+    toolkit: str = Field(pattern=_SDK_NAME)
+    version: str = Field(pattern=_DOTTED_VERSION)
+    runtime_key: Optional[str] = Field(default=None, pattern=_PROBE_KEY)
+    runtime_name: Optional[str] = Field(default=None, pattern=_SDK_NAME)
+    driver_key: Optional[str] = Field(default=None, pattern=_PROBE_KEY)
+    driver_min: Optional[str] = Field(default=None, pattern=_DOTTED_VERSION)
+    driver_recommended: Optional[str] = Field(default=None, pattern=_DOTTED_VERSION)
+
+    @model_validator(mode="after")
+    def _driver(self):
+        if (self.driver_min or self.driver_recommended) and not self.driver_key:
+            raise ValueError("driver_min and driver_recommended need driver_key")
+        return self
+
+
 class FormatCapability(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -56,6 +83,8 @@ class FormatCapability(BaseModel):
     # Other spellings the module scripts accept, e.g. {INT8: Q8_0}; matched case-insensitively.
     aliases: Dict[str, str] = Field(default_factory=dict)
     notes: Optional[UntrustedText] = None
+    # What the format's SDK needs on the board (the pre-flight check); None: nothing of the board is compared
+    sdk: Optional[SdkNeeds] = None
 
     @model_validator(mode="after")
     def _consistent(self):

@@ -118,6 +118,9 @@ class BuildRequest:
     # with its own build id and work folder, so the stage runner resumes every finished stage. The request then shows
     # its progress, cancel and end like any started build (BuildService.continue_interrupted).
     resume: Optional[BuildConfiguration] = None
+    # What the pre-flight check before the build found and the build goes on with (its warnings, and the stops the
+    # person overrode; Core/consistency_manager.py Preflight.notes): the request's warnings from the start
+    preflight_notes: List[str] = field(default_factory=list)
 
     def __post_init__(self):
         if not self.request_id:
@@ -309,6 +312,7 @@ class LLMOrchestrator:
                 owner=getattr(request, "owner", "") or "",
                 label=request_label(request),
                 summary=request_summary(request),
+                warnings=list(getattr(request, "preflight_notes", None) or []),
             )
             self._workflows[request.request_id] = state
             self._share(state)

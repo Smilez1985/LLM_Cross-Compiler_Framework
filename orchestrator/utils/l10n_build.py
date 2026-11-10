@@ -20,6 +20,18 @@ TEXTS = {
         "bld.flags.standard": "Use the standard flags",
         "bld.flags.remember": "Remember this decision for this module version",
         "bld.flags.cancelled": "Nothing was started: no decision on the module's CMake options.",
+        # the pre-flight check before a build (Core/consistency_manager.py): what it found, and a stop is the person's
+        # to override for one build (Cancel is the default button)
+        "bld.preflight.button": "Pre-flight check",
+        "bld.preflight.tip": "Compares the hardware probes with what this build needs (this computer's NVIDIA driver "
+                             "for a GPU build, the board's NPU driver and runtime for an NPU format), without starting "
+                             "anything (the CLI's build preflight)",
+        "bld.preflight.title": "Pre-flight check",
+        "bld.preflight.question": "{lines}\n\nThis build cannot succeed as asked. Only you can start it anyway, for "
+                                  "this one build; it is noted in the build's warnings.",
+        "bld.preflight.anyway": "Build anyway",
+        "bld.preflight.continue_anyway": "Continue anyway",
+        "bld.preflight.cancelled": "Nothing was started: the pre-flight check stopped the build.",
         # offline mode: a model that is not on this computer (DESIGN round 25 Q1; Core/local_models.py)
         "bld.offline.not_here": "Offline mode is on, so {repo} is not downloaded from Hugging Face, and it is not on "
                                 "this computer.",
@@ -296,6 +308,17 @@ TEXTS = {
         "bld.flags.standard": "Die Standard-Flags nehmen",
         "bld.flags.remember": "Diese Entscheidung für diese Modulversion merken",
         "bld.flags.cancelled": "Nichts wurde gestartet: keine Entscheidung zu den CMake-Optionen des Moduls.",
+        # die Prüfung vor dem Build
+        "bld.preflight.button": "Prüfung vor dem Build",
+        "bld.preflight.tip": "Vergleicht die Hardware-Probes mit dem, was dieser Build braucht (den NVIDIA-Treiber "
+                             "dieses Computers bei einem GPU-Build, NPU-Treiber und Runtime des Boards bei einem "
+                             "NPU-Format), ohne etwas zu starten (build preflight der CLI)",
+        "bld.preflight.title": "Prüfung vor dem Build",
+        "bld.preflight.question": "{lines}\n\nDieser Build kann so nicht gelingen. Nur Sie können ihn trotzdem "
+                                  "starten, für diesen einen Build; das wird in den Warnungen des Builds vermerkt.",
+        "bld.preflight.anyway": "Trotzdem bauen",
+        "bld.preflight.continue_anyway": "Trotzdem fortsetzen",
+        "bld.preflight.cancelled": "Nichts wurde gestartet: Die Prüfung vor dem Build hat den Build angehalten.",
         # Offline-Modus: ein Modell, das nicht auf diesem Computer ist
         "bld.offline.not_here": "Der Offline-Modus ist an, deshalb wird {repo} nicht von Hugging Face geladen, und "
                                 "es ist nicht auf diesem Computer.",

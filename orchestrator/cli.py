@@ -778,12 +778,16 @@ class _FormatOption(click.Option):
                    "with the standard flags (they are left out). At a terminal without it you are asked")
 @click.option('--remember-flags', is_flag=True, default=False,
               help='Remember this decision for this module version and flag set')
+@click.option('--ignore-preflight', 'ignore_preflight', is_flag=True, default=False,
+              help="Build even when the pre-flight check says the build cannot succeed (a driver too old for what the "
+                   "build or the board needs). Your decision for this one build; at a terminal without it you are "
+                   "asked, with No as the default")
 @pass_context
 def start_build(ctx: FrameworkContext, model: str, target: str, format: str, board: Optional[str],
                 probe: Optional[str], quantization: Optional[str], output_dir: Optional[str], 
                 optimization: Optional[str], priority: str, parallel: bool, follow: bool, gpu: bool,
                 imatrix: Optional[bool], dataset: Optional[str], no_dataset: bool = False,
-                module_flags: Optional[str] = None, remember_flags: bool = False):
+                module_flags: Optional[str] = None, remember_flags: bool = False, ignore_preflight: bool = False):
     """Start a new build job. Ctrl+C cancels it (its container is stopped) and exits with code 130.
 
     When a finished build with exactly the same options exists, you are asked first, as in the Builder tab: use it
@@ -792,8 +796,13 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
 
     In offline mode nothing is downloaded: a Hugging Face model is used from its copy on this computer; without one the
     models already here are listed, and --model takes one of their labels or a local path (at a terminal you are
-    asked)."""
-    from orchestrator.Core.build_service import BuildServiceError, ModelNotHere
+    asked).
+
+    Before anything starts, the pre-flight check compares the hardware probes with what the build needs (the NVIDIA
+    driver of this computer for a GPU build, the board's NPU driver and runtime for an NPU format) and prints what it
+    found. A build that cannot succeed as asked stops there; --ignore-preflight (or your yes at the terminal) builds it
+    anyway."""
+    from orchestrator.Core.build_service import BuildServiceError, ModelNotHere, PreflightStopped
     ctx.require_framework()
     if parallel:
         Console(stderr=True).print("[yellow]--parallel is deprecated and has no effect.[/yellow]")
@@ -852,6 +861,16 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
         calibration_line = describe(bool(request.use_imatrix), Path(request.dataset_path).name
                                     if request.dataset_path else None, request.format,
                                     str(_settings(ctx)[0].get("calibration_language", "mixed") or "mixed"))
+        # The pre-flight check before the build (Core/consistency_manager.py): what it found, and a stop is yours to
+        # override for this build (asked at a terminal, No by default; --ignore-preflight)
+        try:
+            preflight = service.preflight_for(request.target, request.format, request.board, request.probe,
+                                              request.use_gpu)
+        except BuildServiceError as e:
+            for problem in getattr(e, "problems", None) or [str(e)]:
+                console.print(f"[red]{escape(problem)}[/red]")
+            sys.exit(2)
+        ignore_preflight = _decide_preflight(ctx, preflight, ignore_preflight, "Build anyway?")
         # the level given, else the board profile's (round 23 item 10), as the Builder and start_build choose it
         resolve = getattr(service, "optimization_for", None)
         chosen = resolve(request, optimization) if callable(resolve) else None
@@ -891,10 +910,16 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
 
         # The orchestrator runs on the framework's background loop (as for the GUI and the build service), so the
         # build service can cancel the build from here on Ctrl+C.
-        request_id = service.start_build(request, local_paths=True, optimization=optimization, priority=priority,
-                                         output_dir=output_dir, flag_decision=module_flags,
-                                         remember_flags=remember_flags, flag_channel="framework-cli",
-                                         description=f"CLI build: {model} -> {target} ({format})").request_id
+        try:
+            request_id = service.start_build(request, local_paths=True, optimization=optimization, priority=priority,
+                                             output_dir=output_dir, flag_decision=module_flags,
+                                             remember_flags=remember_flags, flag_channel="framework-cli",
+                                             ignore_preflight=ignore_preflight,
+                                             description=f"CLI build: {model} -> {target} ({format})").request_id
+        except PreflightStopped as e:   # a probe changed since the check above: the new stop, nothing started
+            _print_preflight(e.preflight)
+            console.print("Nothing was started. Give --ignore-preflight to build anyway.")
+            sys.exit(2)
 
         # The CLI stays until the build has ended; from here on Ctrl+C cancels it (the one follow loop of a request).
         def header() -> None:
@@ -1153,6 +1178,42 @@ def _ask_module_flags(service, request, decision: Optional[str], remember: bool)
         return "cancel", False
     keep = click.confirm("Remember this decision for this module version?", default=False)
     return {"a": "allow", "s": "standard"}[answer], keep
+
+
+def _print_preflight(result, *, quiet_pass: bool = False) -> None:
+    """The pre-flight check's result (Core/consistency_manager.py Preflight): the verdict, every finding (stops first),
+    what was compared and what was not. `quiet_pass`: a pass with nothing to say prints one line."""
+    color = "red" if result.stopped else "yellow" if result.findings else "green"
+    lines = result.lines()
+    console.print(f"[{color}]{escape(lines[0])}[/{color}]")
+    if quiet_pass and not result.findings and not result.unchecked:
+        return
+    for finding in result.stops() + result.warnings():
+        style = "red" if finding.stop else "yellow"
+        console.print(f"  [{style}]{escape(finding.line())}[/{style}]")
+    for line in lines[1 + len(result.findings):]:
+        console.print(f"  {escape(line)}")
+
+
+def _decide_preflight(ctx: FrameworkContext, result, ignore: bool, question: str) -> bool:
+    """The pre-flight check at a build's start in the terminal: prints the result; a stop goes on only with your
+    decision for this one build (--ignore-preflight, or yes to `question` at a terminal, No by default). Without a
+    terminal and without the option nothing is started (exit code 2). Returns whether the build starts anyway."""
+    _print_preflight(result, quiet_pass=True)
+    if not result.stopped:
+        return False
+    if ignore:
+        console.print("[yellow]You build anyway (--ignore-preflight); this is noted in the build's warnings."
+                      "[/yellow]")
+        return True
+    if not _interactive():
+        console.print("Without a terminal nothing is asked and nothing was started: fix what is named, or give "
+                      "--ignore-preflight to build anyway.")
+        sys.exit(2)
+    if click.confirm(question, default=False):
+        return True
+    console.print("Nothing was started.")
+    sys.exit(2)
 
 
 def _ask_earlier(ctx: FrameworkContext, found) -> str:
@@ -1424,16 +1485,27 @@ def build_interrupted_list(ctx: FrameworkContext):
 
 @build_interrupted.command('continue')
 @click.argument('build_id')
+@click.option('--ignore-preflight', 'ignore_preflight', is_flag=True, default=False,
+              help="Continue even when the pre-flight check says the build cannot succeed; at a terminal without it "
+                   "you are asked, with No as the default")
 @pass_context
-def build_interrupted_continue(ctx: FrameworkContext, build_id: str):
+def build_interrupted_continue(ctx: FrameworkContext, build_id: str, ignore_preflight: bool = False):
     """Continue an interrupted build on its kept work folder (its finished stages are not run again). Its progress is
-    shown as for `build start --follow`; Ctrl+C cancels it (its container is stopped) and exits with code 130"""
+    shown as for `build start --follow`; Ctrl+C cancels it (its container is stopped) and exits with code 130. The
+    pre-flight check runs again first (a driver can have changed)"""
     from orchestrator.Core import interrupted_build
     engine, cache, state = _interrupted_context(ctx)
     service = _build_service(ctx)   # the one build path: the continued build is a build request like any other
     try:
-        started = interrupted_build.decide(engine, cache, build_id, "continue", "cli", state_dir=state,
-                                           service=service)
+        try:
+            started = interrupted_build.decide(engine, cache, build_id, "continue", "cli", state_dir=state,
+                                               service=service, ignore_preflight=ignore_preflight)
+        except interrupted_build.InterruptedBuildError as e:
+            if getattr(e, "preflight", None) is None or ignore_preflight:
+                raise
+            _decide_preflight(ctx, e.preflight, False, "Continue anyway?")   # exits unless you say yes
+            started = interrupted_build.decide(engine, cache, build_id, "continue", "cli", state_dir=state,
+                                               service=service, ignore_preflight=True)
     except interrupted_build.InterruptedBuildError as e:
         console.print(f"[yellow]{escape(str(e))}[/yellow]")
         sys.exit(1)
@@ -1543,6 +1615,40 @@ def build_save(ctx: FrameworkContext, artifact: str, destination: Optional[str])
         console.print(f"Golden ZIP: {escape(str(result.zip))}")
     for note in result.notes:
         console.print(f"[yellow]{escape(note)}[/yellow]")
+
+
+@build.command('preflight')
+@click.option('--target', '-t', required=True, help='Target id or folder name in targets/ (llm-cli targets list)')
+@click.option('--format', '-f', default='gguf', show_default=True, help='Target format, one the target builds')
+@click.option('--board', '-b', help='Board within the target family, e.g. rk3588, rk3566')
+@click.option('--probe', 'probe', default=None, metavar='ID',
+              help="The board's hardware probe by its id ('llm-cli device list'); default: the newest stored probe "
+                   "of a board of this SoC")
+@click.option('--gpu/--no-gpu', default=False, help='Check a GPU build (this computer\'s NVIDIA driver)')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def build_preflight(ctx: FrameworkContext, target: str, format: str, board: Optional[str], probe: Optional[str],
+                    gpu: bool, as_json: bool):
+    """The pre-flight check of a build, without starting anything: compares the hardware probes with what the build
+    needs (for a GPU build this computer's NVIDIA driver with the CUDA version of the target's GPU image; for an NPU
+    format the board's NPU driver and runtime with the target's toolkit) and says what stops the build, what is only a
+    warning, and what could not be compared. `build start` runs the same check. Exit code 0 passed or warnings only, 1
+    the build would stop, 2 an invalid request"""
+    import json as _json
+    from orchestrator.Core.build_service import BuildServiceError
+    ctx.require_framework()
+    service = _build_service(ctx)
+    try:
+        result = service.preflight_for(target, format, board, probe, gpu)
+    except BuildServiceError as e:
+        for problem in getattr(e, "problems", None) or [str(e)]:
+            console.print(f"[red]{escape(problem)}[/red]")
+        sys.exit(2)
+    if as_json:
+        click.echo(_json.dumps(result.as_dict(), indent=2))
+    else:
+        _print_preflight(result)
+    sys.exit(1 if result.stopped else 0)
 
 
 @build.command('status')

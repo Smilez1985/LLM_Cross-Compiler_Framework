@@ -94,6 +94,13 @@ class BuildPlan:
     problems: List[Problem] = field(default_factory=list)
     # what the build fetches before it starts (runtime/build/deps.py): one line each, source, pin and size
     dependencies: List[str] = field(default_factory=list)
+    # the pre-flight check before the build (Core/consistency_manager.py Preflight); None when it could not run. A
+    # stop is the security warning preflight_error of the question: only the person starts the build anyway.
+    preflight: Optional[Any] = None
+
+    def preflight_stops(self) -> List[str]:
+        """The codes of the pre-flight check's stops (what the person's yes to the question overrides)."""
+        return self.preflight.stop_codes() if self.preflight is not None else []
 
     # --- the question --------------------------------------------------------------------------------------------
 
@@ -176,6 +183,13 @@ class BuildPlan:
             facts.append(Fact("Base image", f"{self.base_image} ({self.base_image_class})", TARGET_TEXT))
         for line in self.dependencies:
             facts.append(Fact("Build dependency", line, TARGET_TEXT))
+        if self.preflight is not None:
+            for finding in self.preflight.stops() + self.preflight.warnings():
+                facts.append(Fact("Pre-flight check", finding.line(), TARGET_TEXT))
+            if not self.preflight.findings:
+                facts.append(Fact("Pre-flight check", self.preflight.summary()))
+            for line in self.preflight.unchecked:
+                facts.append(Fact("Pre-flight check", f"not checked: {line}"))
         facts.append(Fact("Sandbox", "the conversion runs without network, capabilities or root, its stage modules "
                                      "under their own user (build_sandbox)"
                           if self.sandbox else "build_sandbox is off: the stage modules run as the stage runner's "
@@ -194,7 +208,10 @@ class BuildPlan:
                 "use_imatrix": bool(getattr(self.request, "use_imatrix", False)),
                 # False when the Hub could not be asked: under a standing approval or a delegation that is the blocker
                 # commit_required (tools_builds.require_commit), never a build of an unseen commit
-                "commit_resolved": self.source != "hf" or bool(self.facts is not None and self.facts.commit)}
+                "commit_resolved": self.source != "hf" or bool(self.facts is not None and self.facts.commit),
+                # the pre-flight stops the person is shown: their yes overrides exactly these (start_build's
+                # preflight_accepted); a stop found after the question refuses the start
+                "preflight": self.preflight_stops()}
 
     # What a decision about the build is bound to (design 4.4): the request, the size class, the grant facts without
     # the disk-derived flag, what a confirmed build records (target, recipe, module, base image digests) and the
@@ -269,6 +286,8 @@ class BuildPlan:
             found.append(catalog.warn("target_unreviewed"))
         if self.first_build:
             found.append(catalog.warn("first_build_unconfirmed"))
+        for code in self.preflight_stops():
+            found.append(catalog.warn("preflight_error", check=code))
         return tuple(found)
 
     def numbers(self) -> Dict[str, Any]:
@@ -327,18 +346,32 @@ _config = disk_plan.config_value
 folder = disk_plan.folder
 
 
-def host_hardware(framework) -> Optional[Any]:
-    """This computer's RAM and GPUs from the hardware probe (cached for a minute); None when it cannot be probed."""
+def host_profile(framework) -> Optional[Any]:
+    """The memory and GPU part of this computer's probe (runtime/hardware.detect_profile, cached for a minute: the
+    probe runs nvidia-smi and friends); None when it cannot be probed. The hardware estimate and the pre-flight check
+    before a GPU build read it."""
     cached = _HARDWARE.get("value")
     if cached is not None and time.monotonic() - _HARDWARE.get("at", 0) < HARDWARE_TTL:
         return cached
     try:
-        from orchestrator.runtime.hardware import detect_hardware
-        value = detect_hardware()
-    except Exception:  # noqa: BLE001 - an estimate is never a reason to fail
+        from orchestrator.runtime.hardware import detect_profile
+        value = detect_profile()
+    except Exception:  # noqa: BLE001 - an estimate is never a reason to fail; the pre-flight says "not checked"
         return None
     _HARDWARE.update(value=value, at=time.monotonic())
     return value
+
+
+def host_hardware(framework) -> Optional[Any]:
+    """This computer's RAM and GPUs from the hardware probe (cached for a minute); None when it cannot be probed."""
+    profile = host_profile(framework)
+    if profile is None:
+        return None
+    try:
+        from orchestrator.runtime.hardware import hardware_from_profile
+        return hardware_from_profile(profile)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _best_vram(hw) -> Optional[int]:
@@ -566,7 +599,7 @@ def grant_scope(plan: "BuildPlan", framework, target_folder: Optional[Path], pin
                 record: Optional[Dict[str, Any]] = None) -> Optional[dict]:
     """The facts of grant_facts without the disk check of a standing approval (None when the plan has a problem): the
     part of a standing approval's facts a decision digest may cover, since free space never belongs to it."""
-    if plan.problems:
+    if plan.problems or plan.preflight_stops():   # a pre-flight stop is only ever the person's to override
         return None
     trust = "other"
     try:
@@ -765,6 +798,14 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
             disk_plan.require(plan.disk)
         except disk_plan.InsufficientSpace as e:
             plan.problems.append(Problem("insufficient_resources", str(e), e.next, "disk_full"))
+
+    # the pre-flight check before the build (Core/consistency_manager.py), the same as start_build's
+    check = getattr(service, "preflight_for", None)
+    if callable(check):
+        try:
+            plan.preflight = check(req.target, req.format, req.board, req.probe, req.use_gpu, local_paths=False)
+        except Exception as e:  # noqa: BLE001 - start_build runs it again and refuses what it refuses
+            plan.problems.append(Problem(getattr(e, "code", "failed") or "failed", str(e), getattr(e, "next", "")))
 
     plan.confirm_record = confirm_record(plan, framework, target_folder, recipe)
     plan.weights = (plan.facts.weights if plan.facts is not None else "") if plan.source == "hf" else \

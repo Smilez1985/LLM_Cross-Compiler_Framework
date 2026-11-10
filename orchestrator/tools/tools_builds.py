@@ -21,8 +21,9 @@ from orchestrator.tools.output import ToolOutput, count, fact, untrusted_text
 from orchestrator.tools.registry import ToolError
 
 HF_REPO = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
-PREFLIGHT_NOTE = ("The pre-flight check and measured quantization recommendations are not part of this framework "
-                  "version yet; fit values are estimates.")
+PREFLIGHT_NOTE = ("Measured quantization recommendations are not part of this framework version yet; fit values are "
+                  "estimates. The pre-flight check (preflight) compares the probes with what the build needs; a stop "
+                  "is only the person's to override, in the start question.")
 # Where an AI caller's finished build goes (DESIGN round 8, answer 3): no dialog, the person's output folder
 SAVED_NOTE = ("When it has finished, the model is saved in the person's output folder; get_build_status names it by "
               "label (output:<target>/<model>/<quantization>, with -2 when an earlier build has that name).")
@@ -147,6 +148,22 @@ class EarlierBuildOut(BaseModel):
     sha256: Optional[str] = Field(default=None, description="sha256 of its model file")
 
 
+class PreflightFindingOut(BaseModel):
+    code: str = Field(description="cuda_driver, npu_driver (these stop the build), cuda_minor, no_nvidia_gpu, "
+                                  "no_gpu_image, npu_driver_old, npu_runtime (warnings)")
+    stop: bool = Field(description="True: the build cannot succeed as asked; only the person can build anyway")
+    where: str
+    message: str
+    next: str
+
+
+class PreflightOut(BaseModel):
+    verdict: Literal["passed", "warnings", "stopped"]
+    findings: List[PreflightFindingOut] = Field(default_factory=list)
+    checked: List[str] = Field(default_factory=list, description="What was compared")
+    unchecked: List[str] = Field(default_factory=list, description="What could not be compared, and how to get it")
+
+
 class CheckBuildOut(ToolOutput):
     normalized: Optional[NormalizedOut] = None
     problems: List[ProblemOut] = Field(default_factory=list)
@@ -166,6 +183,7 @@ class CheckBuildOut(ToolOutput):
     earlier_builds: List[EarlierBuildOut] = Field(
         default_factory=list, description="Finished builds with 100 % the same options: use one, or start_build "
                                           "builds it again; nothing is skipped by itself")
+    preflight: Optional[PreflightOut] = Field(default=None, description="The pre-flight check before the build")
 
 
 # --- the plan as tool output -------------------------------------------------------------------------------------
@@ -199,7 +217,17 @@ def check_out(plan, decision: str, standing: bool) -> CheckBuildOut:
                                      usable_bytes=plan.target.usable, source=plan.target.source)),
         mounts=plan.mounts, target_trust=plan.target_trust, support_level=plan.support_level,
         image_build=plan.image_build, base_image=plan.base_image or None, base_image_class=plan.base_image_class,
-        sandbox=plan.sandbox, decision=decision, standing_approval=standing)
+        sandbox=plan.sandbox, decision=decision, standing_approval=standing,
+        preflight=preflight_out(getattr(plan, "preflight", None)))
+
+
+def preflight_out(result) -> Optional[PreflightOut]:
+    """The pre-flight check's result as the tool shows it (Core/consistency_manager.py Preflight.as_dict)."""
+    if result is None:
+        return None
+    data = result.as_dict()
+    return PreflightOut(verdict=data["verdict"], findings=[PreflightFindingOut(**f) for f in data["findings"]],
+                        checked=data["checked"], unchecked=data["unchecked"])
 
 
 def earlier_out(found) -> List[EarlierBuildOut]:
@@ -356,7 +384,7 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
                             code="failed", next="Call start_build again through the framework's tool registry.")
         return start_accepted(service, bound, ctx, lambda reservation: service.start_build(
             start_request(inp, bound), owner=ctx.owner, optimization=bound.get("optimization") or inp.optimization,
-            disk_reservation=reservation))
+            disk_reservation=reservation, preflight_accepted=list(bound.get("preflight") or [])))
 
     def check_build_request(inp, ctx):
         look_up = inp.include_download_size and hub_lookup_allowed(inp, ctx)

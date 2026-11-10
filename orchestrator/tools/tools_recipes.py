@@ -133,7 +133,7 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
             try:
                 return service.start_recipe(bound["recipe_id"], dataset_path=inp.dataset_path, use_gpu=inp.use_gpu,
                                             owner=ctx.owner, disk_reservation=reservation, expect=expect,
-                                            probe=inp.probe)
+                                            probe=inp.probe, preflight_accepted=list(bound.get("preflight") or []))
             except BuildServiceError as e:
                 raise refusal(e) from None
         return start_accepted(service, bound, ctx, start)

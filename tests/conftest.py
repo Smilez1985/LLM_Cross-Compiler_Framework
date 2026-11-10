@@ -509,7 +509,7 @@ def no_network_llama_source(monkeypatch):
 def no_network_build_plan(monkeypatch):
     """start_build and check_build_request look up the model on Hugging Face, probe this computer and read the free
     disk space before the question (MCP design T1). Tests never reach huggingface.co: the look-up returns a small
-    ungated model, the disk is roomy and the hardware unknown, unless a test injects its own (tests/test_build_tools)."""
+    ungated model, the disk is roomy and the hardware (also the pre-flight check's) unknown, unless a test injects its own (tests/test_build_tools)."""
     from orchestrator.Core import hf_lookup
     from orchestrator.Core.build_service import BuildService
 
@@ -521,6 +521,7 @@ def no_network_build_plan(monkeypatch):
 
     monkeypatch.setattr(hf_lookup, "look_up", canned)
     monkeypatch.setattr(BuildService, "host_hardware", lambda self: None)
+    monkeypatch.setattr(BuildService, "host_profile", lambda self: None)   # the pre-flight check: "not checked"
     monkeypatch.setattr(BuildService, "disk_usage",
                         staticmethod(lambda path: shutil._ntuple_diskusage(1000 * 10 ** 9, 400 * 10 ** 9,
                                                                            600 * 10 ** 9)))

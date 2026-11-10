@@ -19,6 +19,7 @@ MOUSE_LABELS = {
     "btn_builder_check_target": ("builder_tab", "bld.builder.check"),
     "btn_builder_targets": ("builder_tab", "bld.builder.targets"),
     "btn_builder_start": ("builder_tab", "bld.builder.start"),
+    "btn_builder_preflight": ("builder_tab", "bld.preflight.button"),
 }
 
 STEPS = (

@@ -103,6 +103,25 @@ class BuildServiceError(WithSteps, ValueError):
         self.code, self.next, self.field = code, next, field
 
 
+class PreflightStopped(BuildServiceError):
+    """The pre-flight check before a build (Core/consistency_manager.py) found what makes this build fail for certain:
+    nothing was started. `preflight` holds the whole result; `problems` its lines, as the CLI and the Builder show them.
+    Only the person overrides it (start_build's ignore_preflight from their own windows); an AI caller's build goes on
+    only with exactly the stops the person accepted in the start question (preflight_accepted)."""
+
+    blocker = ""
+
+    def __init__(self, preflight: Any, for_ai: bool):
+        reasons = " ".join(f.message[:1].upper() + f.message[1:] + " " + f.next for f in preflight.stops())
+        super().__init__(f"{preflight.summary()} {reasons}".strip(), code="needs_person",
+                         next=("Tell the person why; only they can start this build anyway (in the GUI or CLI, or by "
+                               "answering the start question)." if for_ai else
+                               "Fix what is named, or build anyway: llm-cli build start --ignore-preflight, or answer "
+                               "Build anyway in the Builder."))
+        self.preflight = preflight
+        self.problems = preflight.lines()
+
+
 class ModelNotHere(BuildServiceError):
     """Offline mode is on and the model named by its Hugging Face id is not on this computer (DESIGN round 25 Q1):
     the build is not started, nothing is downloaded. `choices`: the models already here (local_models.models_here; for
@@ -847,6 +866,66 @@ class BuildService:
         from orchestrator.Core.build_plan import host_hardware
         return host_hardware(self.framework)
 
+    def host_profile(self):
+        """This computer's memory and GPU probe (build_plan.host_profile, cached for a minute), None when it cannot be
+        probed: what the pre-flight check before a GPU build compares."""
+        from orchestrator.Core.build_plan import host_profile
+        return host_profile(self.framework)
+
+    # --- the pre-flight check before a build (Core/consistency_manager.py) ---------------------------------------
+
+    def preflight_for(self, target: str, fmt: str, board: Optional[str] = None, probe: Optional[str] = None,
+                      use_gpu: bool = False, *, local_paths: bool = True):
+        """The pre-flight check of a build of `target` in `fmt` for `board` (its probe: `probe`, else the board's newest
+        stored probe) with or without the GPU: consistency_manager.Preflight. The format and board are normalized as
+        start_build does; a target without capabilities has no SDK declaration, so only a GPU build is compared.
+        BuildServiceError for a target, format or probe start_build would refuse too."""
+        from orchestrator.Core import consistency_manager as preflight
+        target_id = self.resolve_target(target)
+        caps = self._targets().get_capabilities(target_id) if local_paths else self.capabilities(target_id)
+        if caps is not None:
+            fid, board, _ = caps.normalize(fmt, board, None)
+            if fid not in caps.formats:
+                raise BuildServiceError(f"The target {target_id} does not build the format {fmt}.",
+                                        code="not_supported", field="format",
+                                        next=f"Use one of: {', '.join(caps.formats)}.")
+            sdk = caps.formats[fid].sdk
+        else:
+            fid, board, sdk = str(fmt or "").strip().lower(), (board or "").strip().lower() or None, None
+        _, profile = self._board_probe(probe, board, caps, target_id)
+        image = None
+        if use_gpu:
+            tm = self._targets()
+            folder = tm.folder_of(target_id) if hasattr(tm, "folder_of") else None
+            try:
+                data = tm.get_target(target_id) if hasattr(tm, "get_target") else None
+            except Exception:  # noqa: BLE001 - no build_args: the Dockerfile's own default
+                data = None
+            docker = data.get("docker") if isinstance(data, dict) else None
+            args = docker.get("build_args") if isinstance(docker, dict) else None
+            image = preflight.gpu_image(Path(folder) if folder is not None else None,
+                                        args if isinstance(args, dict) else None)
+        return preflight.check(fmt=fid, board_name=board, use_gpu=bool(use_gpu), sdk=sdk, board_profile=profile,
+                               host_profile=self.host_profile() if use_gpu else None, image=image)
+
+    def _preflight_gate(self, target: str, fmt: str, board: Optional[str], probe: Optional[str], use_gpu: bool, *,
+                        local_paths: bool, ignore: bool = False,
+                        accepted: Optional[List[str]] = None) -> List[str]:
+        """The pre-flight check at a build's start: the notes the started build keeps in its warnings, or
+        PreflightStopped. A stop goes on only when the person overrides it from their own window (`ignore`, never for
+        an AI caller) or, for an AI caller, when the person accepted exactly these stops in the start question
+        (`accepted`: the stop codes the question showed)."""
+        result = self.preflight_for(target, fmt, board, probe, use_gpu, local_paths=local_paths)
+        if not result.stopped:
+            return result.notes()
+        if local_paths and ignore:
+            self.logger.warning("Pre-flight check overridden by the person: "
+                                + "; ".join(f.message for f in result.stops()))
+            return result.notes(overridden=True)
+        if not local_paths and accepted is not None and set(result.stop_codes()) <= set(accepted):
+            return result.notes(overridden=True)
+        raise PreflightStopped(result, for_ai=not local_paths)
+
     @staticmethod
     def disk_usage(path: str):
         return shutil.disk_usage(path)
@@ -1465,7 +1544,8 @@ class BuildService:
                     dataset_sha256: Optional[str] = None, priority: Any = "normal",
                     output_dir: Optional[str] = None, parallel_builds: bool = False,
                     description: str = "Build service request", flag_decision: Optional[str] = None,
-                    remember_flags: bool = False, flag_channel: str = "") -> BuildHandle:
+                    remember_flags: bool = False, flag_channel: str = "", ignore_preflight: bool = False,
+                    preflight_accepted: Optional[List[str]] = None) -> BuildHandle:
         """Validates and queues a build: the one build-submission path of the CLI, the GUI and AI callers. `owner` is
         the tool caller that starts it (ToolContext.owner; empty for the person's own CLI and GUI, whose builds the
         queue limit for tool callers never refuses); `disk_reservation` the reservation an AI caller's accepted build
@@ -1476,7 +1556,10 @@ class BuildService:
         them. `optimization`: the level; without one the board profile's (optimization_for), else balanced.
         `flag_decision` ("allow" or "standard", the person's own callers only) answers the question about a module's
         CMake options outside the allowlist (flag_question); `remember_flags` keeps it for this module version and flag
-        set, recorded with `flag_channel` (framework-cli or framework-gui)."""
+        set, recorded with `flag_channel` (framework-cli or framework-gui). The pre-flight check runs after the
+        request's checks (_preflight_gate): a stop refuses the build with PreflightStopped unless the person overrides it
+        (`ignore_preflight`, their own callers only) or, for an AI caller, the person accepted exactly these stops in
+        the start question (`preflight_accepted`)."""
         try:
             level = OptimizationLevel(str(optimization).lower()) if optimization else None
         except ValueError:
@@ -1490,6 +1573,8 @@ class BuildService:
                                     next="Leave them out; the build goes to the output folder.",
                                     field="output_dir" if output_dir is not None else "priority")
         req, inputs = self._validated(request, local_paths)
+        notes = self._preflight_gate(req.target, req.format, req.board, req.probe, req.use_gpu,
+                                     local_paths=local_paths, ignore=ignore_preflight, accepted=preflight_accepted)
         if level is None:
             level = OptimizationLevel(self.optimization_for(req))
         flags = self._flag_decision(request, local_paths, flag_decision, remember_flags, flag_channel)
@@ -1517,6 +1602,7 @@ class BuildService:
             owner=owner,
             disk_reservation=disk_reservation,
             flag_decision=flags,
+            preflight_notes=notes,
         )
         if disk_reservation:
             self._orchestrator.disk_ledger = self.disk_ledger()
@@ -1537,11 +1623,19 @@ class BuildService:
                                          "one of your builds, then call start_build again.") from None
         return BuildHandle(request_id=request_id, status=OrchestrationStatus.QUEUED.value)
 
-    def continue_interrupted(self, configuration: Any, *, description: str = "") -> BuildHandle:
+    def continue_interrupted(self, configuration: Any, *, description: str = "",
+                             ignore_preflight: bool = False) -> BuildHandle:
         """The person's "continue" of an interrupted build (Core/interrupted_build.py continue_build): its kept
         configuration as a new build request, on its own build id and work folder (the stage runner resumes every
         finished stage). Returns the request, which is followed, cancelled and reported exactly like a started build.
-        Only the person's own channels reach this (interrupted_build.decide refuses an AI caller first)."""
+        Only the person's own channels reach this (interrupted_build.decide refuses an AI caller first). The pre-flight
+        check runs again (a driver can change in between); `ignore_preflight` is the person's override of a stop."""
+        fmt = getattr(configuration, "target_format", None)
+        notes = self._preflight_gate(configuration.target_arch, getattr(fmt, "value", fmt),
+                                     getattr(configuration, "target_board", None),
+                                     getattr(configuration, "hardware_probe", None),
+                                     bool(getattr(configuration, "use_gpu", False)), local_paths=True,
+                                     ignore=ignore_preflight)
         quantization = getattr(configuration, "quantization", None)
         branch = getattr(configuration, "model_branch", None)
         build_request = BuildRequest(
@@ -1562,6 +1656,7 @@ class BuildService:
             hardware_probe=getattr(configuration, "hardware_probe", None),
             max_context_length=getattr(configuration, "max_context_length", None),
             resume=configuration,
+            preflight_notes=notes,
         )
         handle = self._submit(build_request)
         self.logger.info(f"Build {configuration.build_id} continues as request {handle.request_id}")
