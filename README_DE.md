@@ -187,7 +187,9 @@ sudo ./install.sh
 Der Installer:
 
 1. prüft die Internetverbindung (HTTPS zum Paketindex `pypi.org` oder zu `PIP_INDEX_URL`, wenn du einen Spiegel
-   setzt; hinter einem Proxy startest du ihn mit `sudo -E`, damit `https_proxy` erhalten bleibt), erkennt die
+   setzt; hinter einem Proxy startest du ihn mit `sudo -E`, damit `https_proxy` erhalten bleibt; eine falsche Uhr
+   nennt er und stellt sie mit deinem Ja: siehe [Wenn HTTPS scheitert](#wenn-https-scheitert-eine-falsche-uhr);
+   offline prüft er nichts), erkennt die
    Linux-Familie aus `/etc/os-release` (`ID`, dann `ID_LIKE`, mit derselben Tabelle wie die Hardware-Untersuchung)
    und ihre Paketverwaltung und prüft Python: Gibt es kein Python 3.11 bis 3.14, installiert er das Paket der
    Distribution (`python3`; unter RHEL 8/9 und ihren Nachbauten und unter openSUSE Leap 15, deren `python3` älter
@@ -265,7 +267,8 @@ Der Installer:
    Gruppe ist, steuert den Docker-Dienst, und der läuft als root; jedes Programm, das als dein Benutzer läuft, kann
    damit Root-Rechte auf diesem Rechner bekommen (`sudo gpasswd -d BENUTZER docker` macht es rückgängig),
 3. kopiert die Dateien, die das Repository ausliefert, nach `/opt/llm-cross-compiler-framework` (Eigentümer ist dein
-   Benutzer; fehlt `rsync`, kommt es aus der Paketverwaltung, ebenso 7-Zip, das die Übernahme eines Harness für 7z,
+   Benutzer, bis das Framework dort nichts mehr schreibt: siehe [Mehrere Personen an einem
+   Rechner](#mehrere-personen-an-einem-rechner); fehlt `rsync`, kommt es aus der Paketverwaltung, ebenso 7-Zip, das die Übernahme eines Harness für 7z,
    rar, iso und Disk-Images braucht: das Paket `7zip`, unter apt und dnf sonst `p7zip`; lässt es sich nicht
    installieren, geht die Installation weiter) und führt sie in `.lcf-installed-files` auf. Ein erneuter
    Aufruf aktualisiert diese Dateien und entfernt nur Dateien, die ein früherer Aufruf kopiert hat und die das
@@ -281,7 +284,8 @@ Der Installer:
    `requirements-gui.txt`: alles aus `requirements.txt` plus PySide6 für die GUI; mit `--headless` nur
    `requirements.txt`), und sagt, warum. Deine bisherige `.venv` wartet daneben, bis die neue die Prüfung bestanden
    hat; scheitert sogar der getestete Stand, kommt sie unverändert zurück, und der Installer hält an. `--offline`
-   (oder `LCF_OFFLINE=1`) installiert den getesteten Stand ohne neue Auflösung. pip ist das, das mit Python kommt (es
+   (oder `LCF_OFFLINE=1`) installiert den getesteten Stand ohne neue Auflösung, aus einem Preload (siehe
+   [Ein Rechner ganz ohne Netz](#ein-rechner-ganz-ohne-netz-das-preload)). pip ist das, das mit Python kommt (es
    wird nicht aktualisiert: Das lüde es ohne Prüfsumme),
 5. legt den Starter `/usr/local/bin/llm-framework` an, der die GUI startet,
 6. richtet Dittos lokalen Modellserver ein (`llm-cli ditto runtime ensure`, als du, nie als root): standardmäßig
@@ -321,7 +325,7 @@ Der Installer sucht Python (installiert Python 3.13 mit `winget`, wenn keines ge
 den neuesten verträglichen Versionen an, wie unter Linux (frisch aufgelöst, mindestens 5 Tage alt, geprüft,
 selbstgeprüft; sonst der getestete Stand `requirements-gui.txt`, mit der GUI; `install.bat --offline` oder
 `LCF_OFFLINE=1` nimmt gleich den getesteten Stand; die bisherige `.venv` kommt zurück, wenn nichts geht) und legt eine Verknüpfung **LLM-Cross-Compiler-Framework** auf
-den Desktop. Die
+den öffentlichen Desktop (jedes Konto des Rechners sieht sie). Die
 Verknüpfung startet `start_framework.bat` und damit die GUI. Findet er kein 7-Zip (`7z` oder `7zz` im PATH oder
 `C:\Program Files\7-Zip\7z.exe`), installiert er es mit `winget install -e --id 7zip.7zip` für die Übernahme einer
 Harness (7z, rar, iso und Disk-Images); ein Fehlschlag ist eine Warnung, die Installation geht weiter. Der Ditto-Schritt ist derselbe wie unter Linux
@@ -330,6 +334,56 @@ noch keinen selbst gebauten Server und keinen Docker-Modus für Ditto, also sagt
 Installation geht weiter.
 
 Konvertierungen auf einem Windows-Host sind noch nicht geprüft (siehe [Bekannte Lücken](#bekannte-lücken)).
+
+### Wenn HTTPS scheitert: eine falsche Uhr
+
+Scheitert die Prüfung des Paketindex (oder das Laden von Dockers Schlüssel) am Zertifikat oder am TLS-Handshake,
+vergleicht der Installer die Uhr dieses Rechners mit dem `Date`-Header des Servers (nur dafür gelesen). Eine Uhr, die
+um mehr als fünf Minuten falsch geht, nennt er mit beiden Zeiten und der Behebung (`sudo timedatectl set-ntp true`;
+auf einem Rechner, der auch Windows startet, `sudo timedatectl set-local-rtc 1` oder Windows auf UTC), und er bietet
+an, sie für dich zu stellen (`timedatectl set-ntp true`), nur nach deinem Ja; danach prüft er noch einmal. Erst wenn
+die Uhr stimmt, verweist er auf einen Proxy oder einen Spiegel. `install.bat` macht dasselbe mit dem Zeitdienst von
+Windows (`w32tm /resync`).
+
+### Ein Rechner ganz ohne Netz: das Preload
+
+`--offline` (oder `LCF_OFFLINE=1`) versucht das Netz nie: keine HTTPS-Prüfung, keine neue Auflösung, keine
+Paketverwaltung, und Dittos Laufzeit bleibt für später (`llm-cli ditto runtime import`). Die Python-Pakete kommen dann
+aus einem **Preload**, einem Archiv, das auf einem Rechner mit Netz entsteht:
+
+- Offline ohne Preload gestartet, schreibt der Installer `preload.sh` und `preload.ps1` für genau diesen Rechner
+  (Plattform, Python, glibc, mit oder ohne GUI) nach `llmcf-preload-scripts/` im Repository-Ordner, sagt, was sie
+  holen, und wartet auf den Pfad des Archivs. Kopiere eins der Skripte auf einen Rechner mit Netz (es braucht nur
+  Python 3 mit pip, nicht das Repository), führe `sh preload.sh` oder `powershell -ExecutionPolicy Bypass -File
+  preload.ps1` aus, trag das `llmcf-preload-....tar.gz` zurück (ein USB-Stick) und gib seinen Pfad ein. Ohne Terminal
+  hält der Installer mit diesen Schritten an, statt zu warten.
+- Oder mach es vorab im Repository auf dem Rechner mit Netz: `./preload.sh` (dieser Rechner), oder für einen anderen
+  `./preload.sh --target linux-aarch64 --python 3.12 --glibc 2.36 [--headless] [--os-release DATEI]`; unter Windows
+  `preload.ps1 [-Target windows-amd64] [-Python 3.13] [-Headless]`. Dann
+  `sudo ./install.sh --offline --preload DATEI [--preload-sha256 HEX]` (Windows: `install.bat --offline
+  --preload=DATEI`, oder `LCF_PRELOAD` für einen Pfad mit Leerzeichen).
+
+Das Archiv enthält die Pakete des Locks für das Ziel (ein Wheel, wo es eins gibt, sonst das Quellarchiv des Pakets mit
+setuptools und wheel, um es offline zu bauen), uv, die Liste der Systempakete, die der Installer dort installieren
+würde (`system-packages.txt`), und `SHA256SUMS`. Der Installer lehnt ein Archiv mit einem Link, einem Pfad außerhalb
+seines Ordners oder einer Datei, die nicht zu `SHA256SUMS` passt, ab, nennt eine Plattform, ein Python oder ein Lock,
+das nicht passt, mit dem Befehl für ein passendes, und installiert jedes Paket gegen die Hashes des Locks selbst, ohne
+Paketindex. Er gibt das sha256 des Archivs aus, damit du es mit dem vergleichst, das `preload.sh` ausgab (oder prüft es
+mit `--preload-sha256`). Was er offline nicht installieren kann (Python oder rsync, wenn sie fehlen, eine
+Container-Engine, 7-Zip), nennt er; eine fehlende Container-Engine oder ein fehlendes 7-Zip hält die Installation nicht
+an. Mit einem eigenen Spiegel (`PIP_INDEX_URL` oder `PIP_FIND_LINKS`) braucht `--offline` kein Preload.
+
+### Mehrere Personen an einem Rechner
+
+Eine Installation dient allen auf dem Rechner. Startet ein anderes Konto `sudo ./install.sh` und hat die Installation
+in `/opt` dieselbe Version und dieselben Dateien wie sein Repository-Ordner, kopiert der Installer nichts und baut
+keine `.venv`: Er nimmt nur dieses Konto in die Gruppe `llmcf` auf (einmal ab- und wieder anmelden), legt sein eigenes
+`~/.llm-framework` an und richtet die Container-Engine, den Framework-Modus und Ditto für diese Person ein. Eine andere
+Version ist ein Update des gemeinsamen Teils, und die eigenen Ordner aller bleiben, wie sie sind. Der Installer hält
+fest, wer installiert hat (`.lcf-installed-by`) und was (`.lcf-installed-state`). Sobald das Framework nichts mehr nach
+`/opt` schreibt (ein kommendes Release), gehört der gemeinsame Teil root und ist für die Gruppe `llmcf` nur lesbar; bis
+dahin bekommt ihn wie bisher das installierende Konto. Unter Windows ist der Programmordner ohnehin für jedes Konto
+lesbar; ein zweites Konto bekommt keine neue Kopie, und die Verknüpfung liegt auf dem öffentlichen Desktop.
 
 ### Eine Installation von vor der Umbenennung
 

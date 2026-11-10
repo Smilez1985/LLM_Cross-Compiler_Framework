@@ -296,7 +296,7 @@ it runs from.
 | Option | Meaning |
 |---|---|
 | `--check` | Only say how many new commits the checkout's upstream has; nothing changes. |
-| `--offline` | Passed to the installer: install the tested dependency set (`uv.lock`) without resolving anew. |
+| `--offline` | Passed to the installer: install the tested dependency set (`uv.lock`) without resolving anew and without trying the network: from your own mirror (`PIP_INDEX_URL`, `PIP_FIND_LINKS`) or a preload, which the installer writes and then waits for ([README](../README.md#a-computer-without-any-network-the-preload)). |
 | `--yes` | Do not ask before the update starts (the default answer is no). The installer still asks its own questions. |
 
 ```bash

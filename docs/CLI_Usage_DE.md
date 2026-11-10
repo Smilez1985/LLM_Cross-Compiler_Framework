@@ -301,7 +301,7 @@ endet sofort, weil der Installer die Umgebung ersetzt, aus der er läuft.
 | Option | Bedeutung |
 |---|---|
 | `--check` | Sagt nur, wie viele neue Commits der Upstream des Checkouts hat; nichts wird verändert. |
-| `--offline` | Geht an den Installer: installiert den getesteten Stand (`uv.lock`), ohne neu aufzulösen. |
+| `--offline` | Geht an den Installer: installiert den getesteten Stand (`uv.lock`), ohne neu aufzulösen und ohne das Netz zu versuchen: aus deinem eigenen Spiegel (`PIP_INDEX_URL`, `PIP_FIND_LINKS`) oder aus einem Preload, das der Installer schreibt und auf das er dann wartet ([README](../README_DE.md#ein-rechner-ganz-ohne-netz-das-preload)). |
 | `--yes` | Fragt nicht, bevor das Update startet (die Vorgabe ist Nein). Der Installer stellt seine eigenen Fragen weiter. |
 
 ```bash

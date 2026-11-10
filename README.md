@@ -179,7 +179,8 @@ sudo ./install.sh
 The installer:
 
 1. checks the internet connection (HTTPS to the package index `pypi.org`, or `PIP_INDEX_URL` if you set a
-   mirror; behind a proxy start it with `sudo -E` so `https_proxy` is kept), finds the Linux family from
+   mirror; behind a proxy start it with `sudo -E` so `https_proxy` is kept; a wrong clock is named and, with your
+   yes, set: see [When HTTPS fails](#when-https-fails-a-wrong-clock); offline there is no check), finds the Linux family from
    `/etc/os-release` (`ID`, then `ID_LIKE`, with the same table as the hardware probe) and its package manager, and
    checks Python: if no Python 3.11 to 3.14 is there, it installs the distribution's own package (`python3`; on
    RHEL 8/9 and their rebuilds and on openSUSE Leap 15, whose `python3` is older, a numbered one such as
@@ -252,7 +253,8 @@ The installer:
    With `--rootful` it then adds your user to the `docker` group and says what that means: members of the group
    control the Docker service, which runs as root, so every program that runs as your user can get root rights on
    this computer (`sudo gpasswd -d USER docker` undoes it),
-3. copies the files the repository ships to `/opt/llm-cross-compiler-framework` (owned by your user; `rsync` comes from
+3. copies the files the repository ships to `/opt/llm-cross-compiler-framework` (owned by your user, until the framework writes nothing there: see
+   [Several people on one computer](#several-people-on-one-computer); `rsync` comes from
    the package manager if it is missing, and so does 7-Zip, which the harness take-in uses for 7z, rar, iso and disk
    images: the package `7zip`, on apt and dnf otherwise `p7zip`; when it cannot be installed the installation goes on)
    and lists them in `.lcf-installed-files`. Running it again updates those files
@@ -268,7 +270,7 @@ The installer:
    as `requirements-gui.txt`: everything in `requirements.txt` plus the GUI's PySide6; with `--headless` only
    `requirements.txt`) and says why. Your earlier `.venv` waits aside until the new one passed; if even the tested
    set fails, it comes back unchanged and the installer stops. `--offline` (or `LCF_OFFLINE=1`) installs the tested
-   set without resolving. pip is the one that comes with Python (it is not upgraded: that would download it without
+   set without resolving, from a preload (see [A computer without any network](#a-computer-without-any-network-the-preload)). pip is the one that comes with Python (it is not upgraded: that would download it without
    a checksum),
 5. creates the launcher `/usr/local/bin/llm-framework`, which starts the GUI,
 6. sets up Ditto's local model server (`llm-cli ditto runtime ensure`, run as you, never as root): bare metal by
@@ -304,7 +306,7 @@ The installer checks for Python (installs Python 3.13 with `winget` if none is f
 3.14), copies the framework to `C:\Program Files\LLM-Cross-Compiler-Framework`, creates `.venv` there with the
 newest compatible versions the same way as on Linux (resolved fresh, 5 days old at least, audited, checked; else the
 tested `requirements-gui.txt`, with the GUI; `install.bat --offline` or `LCF_OFFLINE=1` takes the tested set at
-once; the earlier `.venv` comes back when nothing works), and puts a **LLM-Cross-Compiler-Framework** shortcut on the desktop. The shortcut runs
+once; the earlier `.venv` comes back when nothing works), and puts a **LLM-Cross-Compiler-Framework** shortcut on the public desktop (every account on the computer sees it). The shortcut runs
 `start_framework.bat`, which starts the GUI. When no 7-Zip is found (`7z` or `7zz` on the PATH, or
 `C:\Program Files\7-Zip\7z.exe`), it installs it with `winget install -e --id 7zip.7zip` for the harness take-in
 (7z, rar, iso and disk images); a failure is a warning, the installation goes on. The Ditto step is the same as on Linux (`install.bat --ditto=...` or
@@ -312,6 +314,56 @@ once; the earlier `.venv` comes back when nothing works), and puts a **LLM-Cross
 no Docker mode for Ditto yet, so the step says so and the installation goes on.
 
 Conversions on a Windows host have not been verified yet (see [Known gaps](#known-gaps)).
+
+### When HTTPS fails: a wrong clock
+
+When the check of the package index (or the download of Docker's key) fails on the certificate or the TLS handshake,
+the installer compares this computer's clock with the `Date` header of the server (read for this purpose only). A
+clock that is off by more than five minutes is named with both times and the fix (`sudo timedatectl set-ntp true`; on
+a computer that also starts Windows, `sudo timedatectl set-local-rtc 1` or Windows set to UTC), and the installer
+offers to set it for you (`timedatectl set-ntp true`), only after your yes; it then checks again. Only when the clock
+is right does it point to a proxy or a mirror. `install.bat` does the same with Windows' time service (`w32tm
+/resync`).
+
+### A computer without any network: the preload
+
+`--offline` (or `LCF_OFFLINE=1`) never tries the network: no HTTPS check, no fresh resolve, no package manager, and
+Ditto's runtime is left for later (`llm-cli ditto runtime import`). The Python packages then come from a **preload**,
+one archive made on a computer with a network:
+
+- Started offline without one, the installer writes `preload.sh` and `preload.ps1` for exactly this computer
+  (platform, Python, glibc, with or without the GUI) into `llmcf-preload-scripts/` of the repository folder, says
+  what they fetch, and waits for the archive's path. Copy either script to a computer with a network (it needs only
+  Python 3 with pip, not the repository), run `sh preload.sh` or `powershell -ExecutionPolicy Bypass -File
+  preload.ps1`, carry the `llmcf-preload-....tar.gz` back (a USB stick) and type its path. Without a terminal the
+  installer stops with these steps instead of waiting.
+- Or make it beforehand in the repository on the computer with a network: `./preload.sh` (this computer), or for
+  another one `./preload.sh --target linux-aarch64 --python 3.12 --glibc 2.36 [--headless] [--os-release FILE]`;
+  on Windows `preload.ps1 [-Target windows-amd64] [-Python 3.13] [-Headless]`. Then
+  `sudo ./install.sh --offline --preload FILE [--preload-sha256 HEX]` (Windows: `install.bat --offline
+  --preload=FILE`, or `LCF_PRELOAD` for a path with spaces).
+
+The archive holds the lock's packages for the target (a wheel where there is one, else the package's source archive
+with setuptools and wheel to build it offline), uv, the list of system packages the installer would install there
+(`system-packages.txt`) and `SHA256SUMS`. The installer refuses an archive with a link, a path outside its folder or
+a file that does not match `SHA256SUMS`, names a platform, Python or lock that does not fit, with the command for one
+that does, and installs every package against the lock's own hashes with no package index. It prints the archive's
+sha256 for you to compare with the one `preload.sh` printed (or checks it with `--preload-sha256`). What it cannot
+install offline (Python or rsync if missing, a container engine, 7-Zip) is named; a missing container engine or 7-Zip
+does not stop the installation. With your own mirror (`PIP_INDEX_URL` or `PIP_FIND_LINKS`) `--offline` needs no
+preload.
+
+### Several people on one computer
+
+One installation serves everyone on the computer. When another account starts `sudo ./install.sh` and the
+installation in `/opt` has the same version and files as its repository folder, the installer copies nothing and
+builds no `.venv`: it only adds that account to the group `llmcf` (log out and back in once), creates its own
+`~/.llm-framework` and sets up the container engine, the framework mode and Ditto for that person. A different
+version is an update of the shared part, and everyone's own folders stay as they are. The installer records who
+installed (`.lcf-installed-by`) and what (`.lcf-installed-state`). Once the framework writes nothing into `/opt` any
+more (a coming release), the shared part belongs to root and is only readable for the group `llmcf`; until then it
+goes to the installing account as before. On Windows the program folder is readable for every account anyway; a
+second account gets no new copy, and the shortcut is on the public desktop.
 
 ### An installation from before the rename
 
