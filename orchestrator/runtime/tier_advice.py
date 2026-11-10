@@ -35,8 +35,10 @@ GIB = 1024 ** 3
 
 
 def measure_command(tier: str) -> str:
-    """The CLI's action for a tier to evaluate (the GUI's is "Evaluate first..." in Ditto > Local Models...)."""
-    return f"llm-cli ditto eval --measure --tier {tier}"
+    """The CLI's action for a tier to evaluate, from the next-step catalogue (the step models.evaluate; the GUI's is
+    "Evaluate first..." in the Local Models window)."""
+    from orchestrator.utils.next_steps import command_line, get
+    return command_line(get("models.evaluate"), {"tier": tier})
 
 
 # --- the verdict -----------------------------------------------------------------------------------------------------

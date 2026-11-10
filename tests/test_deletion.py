@@ -157,6 +157,10 @@ DELETION_SITES = {
     ("orchestrator/runtime/bench.py", "BenchRunner._pinned_link"): TEMP,
     ("orchestrator/runtime/bench.py", "BenchRunner._pinned_model"): TEMP,
     ("orchestrator/runtime/bench.py", "BenchRunner._sweep"): TEMP,
+    # the measurement on this computer: the logits, the evaluation text and the program's output in its own work
+    # folder, removed when the stage ends (evals/tier_check.py)
+    ("orchestrator/evals/tier_check.py", "measure"): STAGING,
+    ("orchestrator/evals/tier_check.py", "run_perplexity"): TEMP,
     ("orchestrator/runtime/device/board_move.py", "_File.finish"): BOARD_MOVED,
     ("orchestrator/runtime/device/board_move.py", "_File.undo"): BOARD_MOVED,
     ("orchestrator/runtime/device/board_move.py", "_Folder.finish"): BOARD_MOVED,

@@ -116,7 +116,7 @@ def test_three_gib_names_the_two_bit_model_only_as_a_candidate_and_a_plain_start
     assert advice.model.tier == "small-q2" and advice.state == "candidate" and not advice.offered
     model, why = rt.choose_tier()
     assert model.tier == "small-q2" and "only a candidate to evaluate" in why
-    assert "llm-cli ditto eval --measure --tier small-q2" in why and "cloud provider" in why
+    assert "llmcf ditto eval --measure --tier small-q2" in why and "cloud provider" in why
     with pytest.raises(LocalRuntimeError, match="No model was started: small-q2 is only a candidate"):
         rt.resolve_model(None, for_start=True)
     assert rt.resolve_model("small-q2", for_start=True)[0].tier == "small-q2", "by name the person may start it"

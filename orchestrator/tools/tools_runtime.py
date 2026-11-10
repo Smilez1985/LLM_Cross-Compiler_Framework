@@ -516,9 +516,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                         if record.verdict == "failed" else "it has not passed the measurement on this computer")
                 raise ToolError(f"The tier {model.tier} is a 2-bit model, and {said}; it is not offered to Ditto "
                                 "before it passed.", code="needs_person", field="tier",
-                                next="Ask the person to measure it (llm-cli ditto eval --measure --tier "
-                                     f"{model.tier}, or \"Evaluate first...\" in Ditto > Local Models...), or start "
-                                     "another tier.")
+                                next="Ask the person to measure it on this computer (the next step), or start "
+                                     "another tier.", steps=(("models.evaluate", {"tier": model.tier}),))
             if not rt.model_path(model).is_file():
                 raise blocked("model_not_downloaded", f"The model of tier {model.tier} is not downloaded.",
                               f"Fetch it with build_local_runtime(model_tier='{model.tier}').", field="tier")

@@ -118,7 +118,7 @@ class HostSection(BaseModel):
                                             "computer; see recommended_tier_state")
     recommended_tier_state: Optional[str] = Field(
         default=None, description="recommended | usable (offered with that word) | candidate (a 2-bit tier not "
-        "measured on this computer yet: not offered; the person evaluates it with 'llm-cli ditto eval --measure') | "
+        "measured on this computer yet: not offered; only the person measures it, the step models.evaluate) | "
         "failed (measured here and failed: not offered). Only the person's measurement changes it")
     tier_check: Optional[Dict[str, Any]] = Field(default=None, description="The measurement of the recommended tier "
                                                  "on this computer, when it is a 2-bit tier: verdict, tokens_s, kld, "

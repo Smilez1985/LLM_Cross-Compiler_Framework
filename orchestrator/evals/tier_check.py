@@ -114,6 +114,12 @@ class StagePlan:
         return out + list(self.notes)
 
 
+def _command(step_id: str, **values: Any) -> str:
+    """A step's command from the next-step catalogue (the measurement's messages name no command of their own)."""
+    from orchestrator.utils.next_steps import command_line, get
+    return command_line(get(step_id), values)
+
+
 def _vocab_guess(model: Any) -> int:
     """The vocabulary for the logits size: Qwen3.5's 248,320 tokens for its tiers, else the largest common one."""
     return 248320 if "qwen3.5" in str(model.repo).lower() else 152064
@@ -138,8 +144,8 @@ def plan(rt: Any, tiers: Sequence[str], *, chunks: int = tuning.CHUNKS_DEFAULT, 
         except KeyError as e:
             raise TierCheckError(str(e.args[0]), code="invalid_value") from None
         if rt.model_state(model) == "missing":
-            raise TierCheckError(f"{model.tier} is not downloaded; download it first: llm-cli ditto models download "
-                                 f"{model.tier}", code="needs_person")
+            raise TierCheckError(f"{model.tier} is not downloaded; download it first: "
+                                 f"{_command('models.download', tier=model.tier)}", code="needs_person")
         if not model.reference:
             raise TierCheckError(f"The catalogue pins no reference for {model.tier}, so its KLD cannot be measured.",
                                  code="not_supported")
@@ -226,7 +232,7 @@ def find_perplexity(rt: Any):
     found = find_program_build(rt.store, rt.catalog, rt.platform(), PERPLEXITY, cpu_problem=rt._cpu_problem)
     if found is None:
         raise TierCheckError("There is no self-built llama-perplexity on this computer; build the local runtime "
-                             "first: llm-cli ditto runtime install", code="needs_person")
+                             f"first: {_command('runtime.install')}", code="needs_person")
     return found
 
 
@@ -362,7 +368,10 @@ def measure(rt: Any, stage: StagePlan, *, cache_dir: Optional[Path] = None, stop
                     results[t.tier] = record
                     say(f"{t.tier}: {record['verdict']} ({tier_advice.numbers_text(record)})")
             finally:
-                shutil.rmtree(work, ignore_errors=True)
+                from orchestrator.utils.atomic import remove_tree
+                left = remove_tree(work, label="the measurement's work folder")
+                if left:
+                    say(f"The measurement's work folder could not be removed completely ({len(left)} items left).")
     return [results[t.tier] for t in stage.tiers if t.tier in results]
 
 

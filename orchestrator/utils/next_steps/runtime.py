@@ -31,6 +31,8 @@ MOUSE_LABELS = {
     "cb_ditto_runtime_backend": (_RT, "ditto_runtime.options.backend"),
     "cb_ditto_runtime_tier": (_RT, "ditto_runtime.server.tier"),
     "btn_ditto_models_download": ("act_ditto_models_open", "ditto_models.download"),
+    "btn_ditto_models_evaluate": ("act_ditto_models_open", "ditto_models.evaluate"),
+    "btn_ditto_eval_run": ("act_ditto_eval_open", "ditto_eval.run"),
     "btn_prompt_cache_apply": ("act_ditto_models_open", "prompt_cache.apply"),
 }
 
@@ -83,6 +85,10 @@ STEPS = (
     Step("models.download", cli="ditto models download", cli_args=("{tier}", "--yes"),
          params={"tier": Param("choice", _tiers)}, tool="build_local_runtime", window="ditto_models",
          target="btn_ditto_models_download", runnable=True),
+    # the measurement on this computer that offers a 2-bit tier to Ditto (evals/tier_check.py): the person's alone,
+    # no tool runs it, so an AI can never mark a tier as passed
+    Step("models.evaluate", cli="ditto eval", cli_args=("--measure", "--tier", "{tier}"),
+         params={"tier": Param("choice", _tiers)}, person_only="permission", target="btn_ditto_eval_run"),
     Step("models.show", cli="ditto models list", tool="get_status", window="ditto_models",
          target="act_ditto_models_open", runnable=True),
     # the local server's memory budget: only the person raises it (an AI may lower it with update_settings)
@@ -137,6 +143,10 @@ TEXTS = {
         "step.models.download.what": "Downloads the pinned model of the tier {tier} (several GB) and checks its "
                                      "checksum; its licence, listed in {path:act_ditto_models_open}, applies to you.",
         "step.models.download.why": "The model is not downloaded yet.",
+        "step.models.evaluate": "Measure a model on this computer",
+        "step.models.evaluate.what": "Measures the tier {tier} here: its speed and how close it stays to its original "
+                                     "model ({path:btn_ditto_models_evaluate}).",
+        "step.models.evaluate.why": "A 2-bit model is offered to Ditto only after it passed this measurement.",
         "step.models.show": "Look at Ditto's local models",
         "step.models.show.what": "Lists the model tiers with file, size, licence and whether each is downloaded.",
         "step.cache.auto": "Let the local server's memory follow this computer",
@@ -191,6 +201,10 @@ TEXTS = {
                                      "seine Prüfsumme; seine Lizenz, aufgeführt unter {path:act_ditto_models_open}, "
                                      "gilt für dich.",
         "step.models.download.why": "Das Modell ist noch nicht heruntergeladen.",
+        "step.models.evaluate": "Ein Modell auf diesem Computer messen",
+        "step.models.evaluate.what": "Misst die Stufe {tier} hier: ihre Geschwindigkeit und wie nah sie an ihrem "
+                                     "Originalmodell bleibt ({path:btn_ditto_models_evaluate}).",
+        "step.models.evaluate.why": "Ein 2-Bit-Modell wird Ditto erst angeboten, wenn es diese Messung bestanden hat.",
         "step.models.show": "Dittos lokale Modelle ansehen",
         "step.models.show.what": "Listet die Modellstufen mit Datei, Größe, Lizenz und ob jede heruntergeladen ist.",
         "step.cache.auto": "Den Speicher des lokalen Servers diesem Computer folgen lassen",
