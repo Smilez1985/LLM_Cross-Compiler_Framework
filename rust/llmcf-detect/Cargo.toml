@@ -1,0 +1,31 @@
+[package]
+name = "llmcf-detect"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+publish = false
+description = "The LLM Cross-Compiler Framework's vision engine on the board: RKNN vision models through a model card"
+
+[features]
+# Compiled only for the tests (cargo test/build --features sim-npu): the simulated NPU (--sim-npu FOLDER) in place of
+# Rockchip's runtime. A release build refuses it twice: it does not compile with the feature, and without the feature
+# the program answers --sim-npu with "no simulated NPU" (CI checks both).
+sim-npu = []
+
+# The gateway's HTTP stack (tokio current-thread and hyper 1, HTTP/1.1 only), exact pins as there; libc only for
+# dlopen of Rockchip's runtime by its absolute path; sha2 as llmcf-install has it (the model checked against its card
+# at every start); serde for the strict JSON reader (a key twice is refused); pure Rust JPEG and PNG decoders, so the
+# board needs no image library for posted images and image files.
+[dependencies]
+tokio = { version = "=1.53.3", default-features = false, features = ["rt", "net", "time", "sync", "io-util", "macros"] }
+hyper = { version = "=1.11.1", default-features = false, features = ["http1", "server"] }
+hyper-util = { version = "=0.1.21", default-features = false, features = ["tokio"] }
+http-body-util = { version = "=0.1.5", default-features = false }
+bytes = { version = "=1.12.1", default-features = false, features = ["std"] }
+serde = { version = "=1.0.229", default-features = false, features = ["std"] }
+serde_json = { version = "=1.0.128", default-features = false, features = ["std"] }
+sha2 = { version = "=0.10.8", default-features = false, features = ["std"] }
+libc = { version = "=0.2.191", default-features = false }
+jpeg-decoder = { version = "=0.3.2", default-features = false }
+png = { version = "=0.17.16", default-features = false }

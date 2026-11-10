@@ -1,0 +1,1488 @@
+{
+ "comment": "The model card llmcf-model-card/1: the vectors orchestrator/runtime/bundle/model_card.py (tests/test_model_card.py) and rust/llmcf-detect/src/card.rs are both tested with. Each case patches one of the bases: path (keys and list positions) and value, or no value to delete.",
+ "bases": {
+  "yolo": {
+   "schema": "llmcf-model-card/1",
+   "model": {
+    "name": "yolo-example",
+    "source": "example/detector",
+    "commit": "0123456789abcdef0123456789abcdef01234567",
+    "licence": "apache-2.0"
+   },
+   "rknn": {
+    "file": "yolo-example-rk3566-i8.rknn",
+    "sha256": "abababababababababababababababababababababababababababababababab",
+    "toolkit": "2.5.0",
+    "platform": "rk3566",
+    "quantisation": "w8a8"
+   },
+   "input": {
+    "width": 640,
+    "height": 640,
+    "layout": "nhwc",
+    "colour": "rgb",
+    "resize": "letterbox",
+    "pad": 114,
+    "mean": [
+     0,
+     0,
+     0
+    ],
+    "std": [
+     255,
+     255,
+     255
+    ],
+    "normalised_in_model": true,
+    "type": "uint8"
+   },
+   "task": "detect",
+   "postprocess": {
+    "kind": "yolo-dfl",
+    "strides": [
+     8,
+     16,
+     32
+    ],
+    "reg_max": 16
+   },
+   "labels": [
+    "person",
+    "bicycle",
+    "car"
+   ],
+   "thresholds": {
+    "score": 0.25,
+    "nms_iou": 0.45,
+    "max_results": 100
+   },
+   "score_activation": "model",
+   "outputs": [
+    {
+     "index": 0,
+     "role": "boxes",
+     "shape": [
+      1,
+      64,
+      80,
+      80
+     ],
+     "dims": [
+      "n",
+      "c",
+      "h",
+      "w"
+     ]
+    },
+    {
+     "index": 1,
+     "role": "scores",
+     "shape": [
+      1,
+      3,
+      80,
+      80
+     ]
+    },
+    {
+     "index": 2,
+     "role": "score_sum",
+     "shape": [
+      1,
+      1,
+      80,
+      80
+     ]
+    },
+    {
+     "index": 3,
+     "role": "auto"
+    },
+    {
+     "index": 4,
+     "role": "auto"
+    },
+    {
+     "index": 5,
+     "role": "auto"
+    }
+   ]
+  },
+  "face": {
+   "schema": "llmcf-model-card/1",
+   "model": {
+    "name": "face-example",
+    "licence": "mit"
+   },
+   "rknn": {
+    "file": "face.rknn",
+    "sha256": "abababababababababababababababababababababababababababababababab",
+    "toolkit": "2.3.0",
+    "platform": "rk3588",
+    "quantisation": "fp16"
+   },
+   "input": {
+    "width": 320,
+    "height": 320,
+    "layout": "nchw",
+    "colour": "bgr",
+    "resize": "stretch",
+    "mean": [
+     104,
+     117,
+     123
+    ],
+    "std": [
+     1,
+     1,
+     1
+    ],
+    "normalised_in_model": false,
+    "type": "float32"
+   },
+   "task": "detect",
+   "postprocess": {
+    "kind": "ssd-prior",
+    "encoding": "center-variance",
+    "steps": [
+     8,
+     16,
+     32
+    ],
+    "min_sizes": [
+     [
+      16,
+      32
+     ],
+     [
+      64,
+      128
+     ],
+     [
+      256,
+      512
+     ]
+    ],
+    "variances": [
+     0.1,
+     0.2
+    ],
+    "clip": false,
+    "background": true,
+    "keypoints": 5
+   },
+   "labels": [
+    "face"
+   ],
+   "thresholds": {
+    "score": 0.5,
+    "nms_iou": 0.4,
+    "max_results": 50
+   },
+   "score_activation": "model",
+   "outputs": [
+    {
+     "index": 0,
+     "role": "boxes"
+    },
+    {
+     "index": 1,
+     "role": "scores"
+    },
+    {
+     "index": 2,
+     "role": "keypoints"
+    }
+   ]
+  }
+ },
+ "accept": [
+  {
+   "why": "the YOLO card as it is",
+   "base": "yolo",
+   "patches": []
+  },
+  {
+   "why": "the face card as it is",
+   "base": "face",
+   "patches": []
+  },
+  {
+   "why": "no pad: 114 by default",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "input",
+      "pad"
+     ]
+    }
+   ]
+  },
+  {
+   "why": "no source or commit",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "model",
+      "source"
+     ]
+    },
+    {
+     "path": [
+      "model",
+      "commit"
+     ]
+    }
+   ]
+  },
+  {
+   "why": "YOLOv5 with anchors",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess"
+     ],
+     "value": {
+      "kind": "yolo-anchor",
+      "strides": [
+       8,
+       16,
+       32
+      ],
+      "anchors": [
+       [
+        [
+         10,
+         13
+        ],
+        [
+         16,
+         30
+        ],
+        [
+         33,
+         23
+        ]
+       ],
+       [
+        [
+         30,
+         61
+        ],
+        [
+         62,
+         45
+        ],
+        [
+         59,
+         119
+        ]
+       ],
+       [
+        [
+         116,
+         90
+        ],
+        [
+         156,
+         198
+        ],
+        [
+         373,
+         326
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "path": [
+      "outputs"
+     ],
+     "value": [
+      {
+       "index": 0,
+       "role": "boxes"
+      },
+      {
+       "index": 1,
+       "role": "boxes"
+      },
+      {
+       "index": 2,
+       "role": "auto"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "why": "YOLOX with the sigmoid on the board",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess"
+     ],
+     "value": {
+      "kind": "yolo-anchorfree-obj",
+      "strides": [
+       8,
+       16,
+       32
+      ]
+     }
+    },
+    {
+     "path": [
+      "score_activation"
+     ],
+     "value": "sigmoid"
+    },
+    {
+     "path": [
+      "outputs"
+     ],
+     "value": [
+      {
+       "index": 0,
+       "role": "boxes"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "why": "YOLO26 decoded boxes",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess"
+     ],
+     "value": {
+      "kind": "yolo-nms-free",
+      "box_format": "xyxy",
+      "top_k": 300
+     }
+    },
+    {
+     "path": [
+      "outputs"
+     ],
+     "value": [
+      {
+       "index": 0,
+       "role": "auto",
+       "shape": [
+        1,
+        4,
+        8400
+       ]
+      },
+      {
+       "index": 1,
+       "role": "auto"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "why": "YOLOv10 DFL branches",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess"
+     ],
+     "value": {
+      "kind": "yolo-nms-free",
+      "box_format": "dfl",
+      "strides": [
+       8,
+       16,
+       32
+      ],
+      "reg_max": 16,
+      "top_k": 100
+     }
+    }
+   ]
+  },
+  {
+   "why": "NMS in the model",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess"
+     ],
+     "value": {
+      "kind": "device-nms",
+      "box_format": "yxyx",
+      "box_units": "normalized"
+     }
+    },
+    {
+     "path": [
+      "outputs"
+     ],
+     "value": [
+      {
+       "index": 0,
+       "role": "boxes"
+      },
+      {
+       "index": 1,
+       "role": "scores"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "why": "SCRFD by distances without variances",
+   "base": "face",
+   "patches": [
+    {
+     "path": [
+      "postprocess",
+      "encoding"
+     ],
+     "value": "distance"
+    },
+    {
+     "path": [
+      "postprocess",
+      "variances"
+     ]
+    },
+    {
+     "path": [
+      "score_activation"
+     ],
+     "value": "sigmoid"
+    }
+   ]
+  },
+  {
+   "why": "softmax on the board for SSD",
+   "base": "face",
+   "patches": [
+    {
+     "path": [
+      "score_activation"
+     ],
+     "value": "softmax"
+    }
+   ]
+  },
+  {
+   "why": "a label of 64 bytes",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "labels",
+      0
+     ],
+     "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+   ]
+  },
+  {
+   "why": "the toolkit 2.3.2 for the RK3568",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "rknn",
+      "toolkit"
+     ],
+     "value": "2.3.2"
+    },
+    {
+     "path": [
+      "rknn",
+      "platform"
+     ],
+     "value": "rk3568"
+    }
+   ]
+  },
+  {
+   "why": "int8 input with the normalisation on the board",
+   "base": "face",
+   "patches": [
+    {
+     "path": [
+      "input",
+      "type"
+     ],
+     "value": "int8"
+    }
+   ]
+  },
+  {
+   "why": "centre crop",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "input",
+      "resize"
+     ],
+     "value": "centre-crop"
+    }
+   ]
+  }
+ ],
+ "reject": [
+  {
+   "why": "another schema",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "schema"
+     ],
+     "value": "llmcf-model-card/2"
+    }
+   ]
+  },
+  {
+   "why": "an unknown top-level key",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "extra"
+     ],
+     "value": 1
+    }
+   ]
+  },
+  {
+   "why": "a missing labels list",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "labels"
+     ]
+    }
+   ]
+  },
+  {
+   "why": "an unknown key in input",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "input",
+      "scale"
+     ],
+     "value": 1
+    }
+   ]
+  },
+  {
+   "why": "a size of 0",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "input",
+      "width"
+     ],
+     "value": 0
+    }
+   ]
+  },
+  {
+   "why": "a size above 4096",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "input",
+      "height"
+     ],
+     "value": 4097
+    }
+   ]
+  },
+  {
+   "why": "a size that is a float",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "input",
+      "width"
+     ],
+     "value": 640.5
+    }
+   ]
+  },
+  {
+   "why": "a layout of its own",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "input",
+      "layout"
+     ],
+     "value": "chw"
+    }
+   ]
+  },
+  {
+   "why": "a std of 0",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "input",
+      "std"
+     ],
+     "value": [
+      0,
+      1,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "why": "two numbers of mean",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "input",
+      "mean"
+     ],
+     "value": [
+      0,
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "why": "a pad above 255",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "input",
+      "pad"
+     ],
+     "value": 256
+    }
+   ]
+  },
+  {
+   "why": "normalised in the model but float input",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "input",
+      "type"
+     ],
+     "value": "float32"
+    }
+   ]
+  },
+  {
+   "why": "a short sha256",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "rknn",
+      "sha256"
+     ],
+     "value": "ababababababababababababababababababababababababababababababab"
+    }
+   ]
+  },
+  {
+   "why": "an upper-case sha256",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "rknn",
+      "sha256"
+     ],
+     "value": "ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB"
+    }
+   ]
+  },
+  {
+   "why": "a file not ending in .rknn",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "rknn",
+      "file"
+     ],
+     "value": "model.onnx"
+    }
+   ]
+  },
+  {
+   "why": "a file with a path",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "rknn",
+      "file"
+     ],
+     "value": "../m.rknn"
+    }
+   ]
+  },
+  {
+   "why": "a toolkit that is no version",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "rknn",
+      "toolkit"
+     ],
+     "value": "2.5"
+    }
+   ]
+  },
+  {
+   "why": "an unknown platform",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "rknn",
+      "platform"
+     ],
+     "value": "bcm2712"
+    }
+   ]
+  },
+  {
+   "why": "an unknown quantisation",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "rknn",
+      "quantisation"
+     ],
+     "value": "w4a16"
+    }
+   ]
+  },
+  {
+   "why": "a commit that is not 40 hex digits",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "model",
+      "commit"
+     ],
+     "value": "main"
+    }
+   ]
+  },
+  {
+   "why": "a licence with a space",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "model",
+      "licence"
+     ],
+     "value": "my licence"
+    }
+   ]
+  },
+  {
+   "why": "a name with a newline",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "model",
+      "name"
+     ],
+     "value": "a\nb"
+    }
+   ]
+  },
+  {
+   "why": "an unknown task",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "task"
+     ],
+     "value": "track"
+    }
+   ]
+  },
+  {
+   "why": "a kind of another task",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "task"
+     ],
+     "value": "segment"
+    }
+   ]
+  },
+  {
+   "why": "an unknown kind",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess",
+      "kind"
+     ],
+     "value": "yolo-magic"
+    }
+   ]
+  },
+  {
+   "why": "a kind of a later step",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "task"
+     ],
+     "value": "classify"
+    },
+    {
+     "path": [
+      "postprocess"
+     ],
+     "value": {
+      "kind": "classification"
+     }
+    }
+   ]
+  },
+  {
+   "why": "a stride twice",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess",
+      "strides"
+     ],
+     "value": [
+      8,
+      8,
+      32
+     ]
+    }
+   ]
+  },
+  {
+   "why": "a stride above 256",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess",
+      "strides"
+     ],
+     "value": [
+      8,
+      16,
+      512
+     ]
+    }
+   ]
+  },
+  {
+   "why": "reg_max of 0",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess",
+      "reg_max"
+     ],
+     "value": 0
+    }
+   ]
+  },
+  {
+   "why": "an unknown parameter of the kind",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess",
+      "anchors"
+     ],
+     "value": [
+      [
+       [
+        1,
+        1
+       ]
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "why": "anchors not one list per stride",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess"
+     ],
+     "value": {
+      "kind": "yolo-anchor",
+      "strides": [
+       8,
+       16
+      ],
+      "anchors": [
+       [
+        [
+         10,
+         13
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "path": [
+      "outputs"
+     ],
+     "value": [
+      {
+       "index": 0,
+       "role": "boxes"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "why": "an anchor of three numbers",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess"
+     ],
+     "value": {
+      "kind": "yolo-anchor",
+      "strides": [
+       8
+      ],
+      "anchors": [
+       [
+        [
+         10,
+         13,
+         1
+        ]
+       ]
+      ]
+     }
+    },
+    {
+     "path": [
+      "outputs"
+     ],
+     "value": [
+      {
+       "index": 0,
+       "role": "boxes"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "why": "decoded boxes with strides",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess"
+     ],
+     "value": {
+      "kind": "yolo-nms-free",
+      "box_format": "xyxy",
+      "strides": [
+       8
+      ],
+      "top_k": 10
+     }
+    }
+   ]
+  },
+  {
+   "why": "DFL boxes without reg_max",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess"
+     ],
+     "value": {
+      "kind": "yolo-nms-free",
+      "box_format": "dfl",
+      "strides": [
+       8
+      ],
+      "top_k": 10
+     }
+    }
+   ]
+  },
+  {
+   "why": "top_k above 1000",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess"
+     ],
+     "value": {
+      "kind": "yolo-nms-free",
+      "box_format": "xyxy",
+      "top_k": 1001
+     }
+    }
+   ]
+  },
+  {
+   "why": "NMS in the model with a sigmoid on the board",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess"
+     ],
+     "value": {
+      "kind": "device-nms",
+      "box_format": "xyxy",
+      "box_units": "pixels"
+     }
+    },
+    {
+     "path": [
+      "outputs"
+     ],
+     "value": [
+      {
+       "index": 0,
+       "role": "boxes"
+      },
+      {
+       "index": 1,
+       "role": "scores"
+      }
+     ]
+    },
+    {
+     "path": [
+      "score_activation"
+     ],
+     "value": "sigmoid"
+    }
+   ]
+  },
+  {
+   "why": "NMS in the model without scores",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "postprocess"
+     ],
+     "value": {
+      "kind": "device-nms",
+      "box_format": "xyxy",
+      "box_units": "pixels"
+     }
+    },
+    {
+     "path": [
+      "outputs"
+     ],
+     "value": [
+      {
+       "index": 0,
+       "role": "boxes"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "why": "softmax for a YOLO kind",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "score_activation"
+     ],
+     "value": "softmax"
+    }
+   ]
+  },
+  {
+   "why": "an unknown activation",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "score_activation"
+     ],
+     "value": "relu"
+    }
+   ]
+  },
+  {
+   "why": "a role the kind does not have",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "outputs",
+      0,
+      "role"
+     ],
+     "value": "protos"
+    }
+   ]
+  },
+  {
+   "why": "an unknown role",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "outputs",
+      0,
+      "role"
+     ],
+     "value": "logits"
+    }
+   ]
+  },
+  {
+   "why": "an output index twice",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "outputs",
+      1,
+      "index"
+     ],
+     "value": 0
+    }
+   ]
+  },
+  {
+   "why": "an output index above 31",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "outputs",
+      1,
+      "index"
+     ],
+     "value": 32
+    }
+   ]
+  },
+  {
+   "why": "dims without a shape",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "outputs",
+      3,
+      "dims"
+     ],
+     "value": [
+      "n"
+     ]
+    }
+   ]
+  },
+  {
+   "why": "dims of another length than the shape",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "outputs",
+      0,
+      "dims"
+     ],
+     "value": [
+      "n",
+      "c",
+      "h"
+     ]
+    }
+   ]
+  },
+  {
+   "why": "a shape of seven dimensions",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "outputs",
+      0,
+      "shape"
+     ],
+     "value": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "why": "no outputs",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "outputs"
+     ],
+     "value": []
+    }
+   ]
+  },
+  {
+   "why": "an empty label",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "labels",
+      0
+     ],
+     "value": ""
+    }
+   ]
+  },
+  {
+   "why": "a label of 65 bytes",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "labels",
+      0
+     ],
+     "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+   ]
+  },
+  {
+   "why": "no labels",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "labels"
+     ],
+     "value": []
+    }
+   ]
+  },
+  {
+   "why": "a score threshold of 0",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "thresholds",
+      "score"
+     ],
+     "value": 0
+    }
+   ]
+  },
+  {
+   "why": "an IoU above 1",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "thresholds",
+      "nms_iou"
+     ],
+     "value": 1.5
+    }
+   ]
+  },
+  {
+   "why": "max_results above 1000",
+   "base": "yolo",
+   "patches": [
+    {
+     "path": [
+      "thresholds",
+      "max_results"
+     ],
+     "value": 1001
+    }
+   ]
+  },
+  {
+   "why": "SSD without variances for center-variance",
+   "base": "face",
+   "patches": [
+    {
+     "path": [
+      "postprocess",
+      "variances"
+     ]
+    }
+   ]
+  },
+  {
+   "why": "SSD with keypoints but no keypoints output",
+   "base": "face",
+   "patches": [
+    {
+     "path": [
+      "outputs"
+     ],
+     "value": [
+      {
+       "index": 0,
+       "role": "boxes"
+      },
+      {
+       "index": 1,
+       "role": "scores"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "why": "SSD with a keypoints output but no keypoints",
+   "base": "face",
+   "patches": [
+    {
+     "path": [
+      "postprocess",
+      "keypoints"
+     ],
+     "value": 0
+    }
+   ]
+  },
+  {
+   "why": "min_sizes not one list per step",
+   "base": "face",
+   "patches": [
+    {
+     "path": [
+      "postprocess",
+      "min_sizes"
+     ],
+     "value": [
+      [
+       16,
+       32
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "why": "an unknown encoding",
+   "base": "face",
+   "patches": [
+    {
+     "path": [
+      "postprocess",
+      "encoding"
+     ],
+     "value": "corner"
+    }
+   ]
+  },
+  {
+   "why": "background that is no yes or no",
+   "base": "face",
+   "patches": [
+    {
+     "path": [
+      "postprocess",
+      "background"
+     ],
+     "value": "yes"
+    }
+   ]
+  }
+ ],
+ "raw_reject": [
+  {
+   "why": "a key twice",
+   "text": "{\"schema\":\"llmcf-model-card/1\",\"schema\":\"llmcf-model-card/1\"}"
+  },
+  {
+   "why": "NaN",
+   "text": "{\"schema\": NaN}"
+  },
+  {
+   "why": "text after the object",
+   "text": "{\"schema\": \"llmcf-model-card/1\", \"model\": {\"name\": \"yolo-example\", \"source\": \"example/detector\", \"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"licence\": \"apache-2.0\"}, \"rknn\": {\"file\": \"yolo-example-rk3566-i8.rknn\", \"sha256\": \"abababababababababababababababababababababababababababababababab\", \"toolkit\": \"2.5.0\", \"platform\": \"rk3566\", \"quantisation\": \"w8a8\"}, \"input\": {\"width\": 640, \"height\": 640, \"layout\": \"nhwc\", \"colour\": \"rgb\", \"resize\": \"letterbox\", \"pad\": 114, \"mean\": [0, 0, 0], \"std\": [255, 255, 255], \"normalised_in_model\": true, \"type\": \"uint8\"}, \"task\": \"detect\", \"postprocess\": {\"kind\": \"yolo-dfl\", \"strides\": [8, 16, 32], \"reg_max\": 16}, \"labels\": [\"person\", \"bicycle\", \"car\"], \"thresholds\": {\"score\": 0.25, \"nms_iou\": 0.45, \"max_results\": 100}, \"score_activation\": \"model\", \"outputs\": [{\"index\": 0, \"role\": \"boxes\", \"shape\": [1, 64, 80, 80], \"dims\": [\"n\", \"c\", \"h\", \"w\"]}, {\"index\": 1, \"role\": \"scores\", \"shape\": [1, 3, 80, 80]}, {\"index\": 2, \"role\": \"score_sum\", \"shape\": [1, 1, 80, 80]}, {\"index\": 3, \"role\": \"auto\"}, {\"index\": 4, \"role\": \"auto\"}, {\"index\": 5, \"role\": \"auto\"}]} x"
+  },
+  {
+   "why": "a list, not an object",
+   "text": "[]"
+  },
+  {
+   "why": "a key twice deep inside",
+   "text": "{\"schema\": \"llmcf-model-card/1\", \"model\": {\"name\": \"yolo-example\", \"source\": \"example/detector\", \"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"licence\": \"apache-2.0\"}, \"rknn\": {\"file\": \"yolo-example-rk3566-i8.rknn\", \"sha256\": \"abababababababababababababababababababababababababababababababab\", \"toolkit\": \"2.5.0\", \"platform\": \"rk3566\", \"quantisation\": \"w8a8\"}, \"input\": {\"width\": 640, \"height\": 640, \"layout\": \"nhwc\", \"colour\": \"rgb\", \"resize\": \"letterbox\", \"pad\": 114, \"mean\": [0, 0, 0], \"std\": [255, 255, 255], \"normalised_in_model\": true, \"type\": \"uint8\"}, \"task\": \"detect\", \"task\": \"detect\", \"postprocess\": {\"kind\": \"yolo-dfl\", \"strides\": [8, 16, 32], \"reg_max\": 16}, \"labels\": [\"person\", \"bicycle\", \"car\"], \"thresholds\": {\"score\": 0.25, \"nms_iou\": 0.45, \"max_results\": 100}, \"score_activation\": \"model\", \"outputs\": [{\"index\": 0, \"role\": \"boxes\", \"shape\": [1, 64, 80, 80], \"dims\": [\"n\", \"c\", \"h\", \"w\"]}, {\"index\": 1, \"role\": \"scores\", \"shape\": [1, 3, 80, 80]}, {\"index\": 2, \"role\": \"score_sum\", \"shape\": [1, 1, 80, 80]}, {\"index\": 3, \"role\": \"auto\"}, {\"index\": 4, \"role\": \"auto\"}, {\"index\": 5, \"role\": \"auto\"}]}"
+  }
+ ]
+}
