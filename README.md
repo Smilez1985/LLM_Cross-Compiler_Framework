@@ -57,10 +57,12 @@ The GUI, the CLI, Ditto and the MCP server offer exactly these options and rejec
 | `rk3566` | 4× Cortex-A55 | 1 TOPS | 8 GB | Radxa ZERO 3W, Radxa CM3, ROCK 3C, Orange Pi 3B |
 | `rk3568` | 4× Cortex-A55 | 1 TOPS | 8 GB | ROCK 3A, Radxa E25, Banana Pi BPI-R2 Pro |
 | `rk3576` | 4× Cortex-A72 + 4× Cortex-A53 | 6 TOPS | 16 GB | Radxa ROCK 4D, Banana Pi BPI-M5 Pro, BPI-CM5 Pro |
-| `rk3588` | 4× Cortex-A76 + 4× Cortex-A55 | 6 TOPS | 32 GB | Radxa ROCK 5B, Radxa ROCK 5ITX, Orange Pi 5, 5B, 5 Pro, CM5 (RK3588S), Orange Pi 5 Plus, 5 Max, 5 Ultra, Banana Pi BPI-M7, BPI-W3, BPI-M7S (RK3588S) |
+| `rk3588` | 4× Cortex-A76 + 4× Cortex-A55 | 6 TOPS | 32 GB | Radxa ROCK 5B, 5B+, 5T, 5 ITX, ROCK 5A, 5C, CM5 (RK3588S), ROCK 5C Lite, E52C, E54C (RK3582), Orange Pi 5, 5B, 5 Pro, CM5 (RK3588S), Orange Pi 5 Plus, 5 Max, 5 Ultra, Banana Pi BPI-M7, BPI-W3, BPI-M7S (RK3588S) |
 
 A board with an RK3588S is an `rk3588`: its probe finds that board whether its kernel names the SoC `rk3588s`
-(mainline Linux) or `rk3588` (Orange Pi's own kernel).
+(mainline Linux) or `rk3588` (Orange Pi's own kernel). An RK3582 (two Cortex-A76, four Cortex-A55, an NPU of up to
+5 TOPS) is an `rk3588` too: its device tree names the RK3588S last, and Radxa names the rk3588 platform for RKNN and
+RKLLM on it.
 
 | Format (`--format`) | Runs on | Input | Boards | Quantizations | Default |
 |---|---|---|---|---|---|
@@ -113,7 +115,11 @@ hardware probe reports, so a probed board finds its board by itself.
   the Cortex-A72 and Cortex-A53 have no dot product, so nothing is repacked there and quality per bit decides.
 - The Raspberry Pi Zero 2 W has 512 MB for the system and the model: the smallest types come first, a model of about
   1B is at the board's limit even at 2 to 3 bits, and the board measurement (the board test's benchmark) decides
-  the context and refuses a model that does not fit.
+  the context.
+- A profile recommends, it never caps: a larger model is built and deployed when you want it. After the build a
+  warning names its memory against the board's (it will swap and run much slower); the board's start script runs a
+  model its measurement says does not fit only with the context you give (`-c`), and the board bundle only after
+  your own `--accept-memory-risk` (or the checkbox in the Board bundle window; never an AI).
 - Orange Pi and Banana Pi boards with a Rockchip SoC are boards of the Rockchip target (see above). Not served yet:
   the Orange Pi 4A (its maker's kernel names no SoC the probe can tell apart), boards with an RK3399, Allwinner H6,
   A64 or H5 or Amlogic G12B, and RISC-V boards.

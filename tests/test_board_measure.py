@@ -390,3 +390,27 @@ def test_the_persons_choice_first_and_a_plain_reason_when_it_does_not_fit(tmp_pa
     off_board = _bundle_plan(tmp_path, selection=selection)
     assert off_board.ok, off_board.problems
     assert any("no language model on the board (your choice)" in n for n in off_board.notes)
+
+
+def test_the_persons_memory_risk_turns_the_memory_refusal_into_a_warning(tmp_path):
+    """A bundle the board's memory does not hold is refused only until the person accepts the memory risk (never an
+    AI): then the plan is built with the warning and its numbers, the language model with its block's context."""
+    huge = LOAD.replace("rss_kib=921600 hwm_kib=921600", "rss_kib=2900000 hwm_kib=2900000") \
+               .replace("rss_kib=1036288 hwm_kib=1036288", "rss_kib=3014688 hwm_kib=3014688")
+    limits = measure.derive(record(load=huge))
+    refused = _bundle_plan(tmp_path, limits=limits)
+    assert not refused.ok and any("accept the memory risk yourself" in p for p in refused.problems)
+    accepted = _bundle_plan(tmp_path, limits=limits, memory_risk_ok=True)
+    assert accepted.ok, accepted.problems
+    assert any("does not fit" in w and "you accepted the memory risk" in w for w in accepted.warnings)
+    assert next(c for c in accepted.checks if c["check"] == "memory")["result"] == "warning"
+    llm = next(c for c in accepted.manifest.components if c.kind == "llm")
+    assert llm.variables["ctx_size"] > 0, "the block's context: the start script gets -c and starts it"
+
+
+def test_an_ai_s_bundle_plan_has_no_memory_risk_switch():
+    """The memory risk is the person's yes only: the AI's bundle tool plans without it (its plan stays refused)."""
+    import inspect
+
+    from orchestrator.tools import tools_bundle
+    assert "memory_risk_ok" not in inspect.getsource(tools_bundle)

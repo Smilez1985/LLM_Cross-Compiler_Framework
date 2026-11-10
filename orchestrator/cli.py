@@ -7764,6 +7764,9 @@ def bundle_choice_options(func):
         click.option('--without-measurement', is_flag=True,
                      help="Your yes to plan a language model on a board that was not measured yet (the probe's "
                           "declared memory is used then; the benchmark on the board measures it)"),
+        click.option('--accept-memory-risk', 'accept_memory_risk', is_flag=True,
+                     help="Your yes to a bundle the board's memory does not hold: it is built with a warning, and "
+                          "the board swaps and runs much slower"),
         click.option('--engines', type=click.Choice(['together', 'in-turn']), default='together',
                      show_default=True,
                      help="The engines (language model, speech, vision) all together, or in turn: the gateway "
@@ -7791,12 +7794,14 @@ def _bundle_plan(ctx: FrameworkContext, device_name: str, choice: Dict[str, Any]
     choice = dict(choice)
     terms = list(choice.pop("accept_terms", ()) or ()) + list(accepted)
     unmeasured_ok = bool(choice.pop("without_measurement", False))
+    memory_risk_ok = bool(choice.pop("accept_memory_risk", False))
     try:
         selection = service.selection_from(**choice)
         service.accept_terms(blk.load_catalog(app_root, index=index), selection, terms)
         plan = service.plan_for_device(state_dir, device_id, selection, config=config, app_root=app_root,
                                        mode=framework_mode(config), allow_own=allow_own, profile=profile,
-                                       index=index, framework=framework, unmeasured_ok=unmeasured_ok)
+                                       index=index, framework=framework, unmeasured_ok=unmeasured_ok,
+                                       memory_risk_ok=memory_risk_ok)
     except BundleError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)

@@ -2704,7 +2704,8 @@ Baustein...**; dieselben Schritte und Fragen wie hier, jeder Lauf auf dem Board 
 llm-cli bundle plan GERÄT [--preset llm|voice|stt] [--block ID]... [--set KOMPONENTE.NAME=WERT]...
                     [--file KOMPONENTE.ROLLE=PFAD]... [--online KOMPONENTE.ROLLE=URL --sha256 KOMPONENTE.ROLLE=HEX
                     --size KOMPONENTE.ROLLE=BYTES]... [--licence KOMPONENTE.ROLLE=ID]... [--unprivileged-only]
-                    [--accept-terms BAUSTEIN]... [--without-measurement] [--engines together|in-turn] [--json]
+                    [--accept-terms BAUSTEIN]... [--without-measurement] [--accept-memory-risk]
+                    [--engines together|in-turn] [--json]
 llm-cli bundle build GERÄT (dieselbe Auswahl) [--allow-own]
 llm-cli bundle list [--json]
 llm-cli bundle deploy BUNDLE [--dry-run] [--skip-root]
@@ -2760,6 +2761,13 @@ braucht das Gateway und jedes Programm mit Autostart (ihre Units); der Plan lehn
 Programm allein nicht passt, und nennt `in-turn`, wenn alle zusammen nicht passen, eines nach dem anderen aber schon.
 Bisher gehen nur die Anfragen an das Sprachmodell durch das Gateway, nacheinander bleibt ein Sprach- oder Bildprogramm
 also gestoppt, während das Modell läuft. Der Plan einer KI wählt das nie.
+
+Ein Bundle, das der Speicher des Boards nicht fasst (nach seiner Messung oder mit `--without-measurement` nach dem
+angegebenen Speicher der Probe), wird mit den Zahlen abgelehnt, nie nur wegen seiner Größe: `--accept-memory-risk`
+ist dein Ja dazu. Der Plan trägt die Lücke dann als Warnung, und das Bundle wird gebaut; das Board lagert aus (wenn
+es Swap hat) und läuft viel langsamer, und ein Sprachmodell, das laut Messung nicht passt, startet mit dem Kontext
+seines Bausteins (`--set llm.ctx_size=N` für einen anderen). Das Profil eines Boards empfiehlt nur; was du deinem
+Board zumutest, entscheidest du. Der Plan einer KI nimmt das Speicherrisiko nie an.
 
 ### bundle build
 

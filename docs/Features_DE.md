@@ -98,7 +98,10 @@ von selbst. Jedes `ARM64`-Board hat sein Optimierungsprofil: `-march=armv8-a` au
 und `-march=armv8.2-a+dotprod+fp16` auf denen mit Cortex-A55 und A76 (der Plan des Build-Rezepts, `GGML_NATIVE`
 OFF), die zuerst angebotenen Quantisierungen in der Reihenfolge, die zum Speicher des Boards und zu den ARM-Kerneln
 von llama.cpp passt (auf den 512 MB des Zero 2 W die kleinsten Typen zuerst: `IQ4_XS`, `IQ3_M`, `IQ2_M`, `Q4_0`;
-was dort passt, entscheidet die Board-Messung), und die Optimierungsstufe. Jeder `ARM64`-Build
+was dort passt, entscheidet die Board-Messung), und die Optimierungsstufe. Ein Profil empfiehlt, es begrenzt nie:
+Ein Modell, das größer als der Speicher des Boards ist, bekommt nach dem Build eine Warnung mit den Zahlen, und das
+Board-Bundle nimmt es nach deinem eigenen `--accept-memory-risk`. Radxas ROCK-5-Boards (RK3588, RK3588S und der
+RK3582 des ROCK 5C Lite, E52C und E54C) sind `rk3588`, der ROCK 4D ist `rk3576`. Jeder `ARM64`-Build
 macht auch das Board-Paket mit `llama-cli` und `llama-server`, aus der gespeicherten Probe des Boards oder, ohne
 eine, aus den CPU-Features, die jeder Chip des Boards hat. `llm-cli targets boards ARM64` und **Build > Targets... >
 Boards...** zeigen die Profile.

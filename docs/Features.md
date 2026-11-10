@@ -96,7 +96,10 @@ and the Builder's probe import pick the target and the board by themselves. Each
 profile: `-march=armv8-a` on the Cortex-A53 and A72 boards and `-march=armv8.2-a+dotprod+fp16` on the Cortex-A55 and
 A76 boards (the build recipe's plan, `GGML_NATIVE` OFF), the quantizations offered first in the order that suits the
 board's memory and llama.cpp's ARM kernels (on the Zero 2 W's 512 MB the smallest types first: `IQ4_XS`, `IQ3_M`,
-`IQ2_M`, `Q4_0`; what fits there is decided by the board measurement), and the optimization level. Every `ARM64` build also makes the board package with
+`IQ2_M`, `Q4_0`; what fits there is decided by the board measurement), and the optimization level. A profile
+recommends, it never caps: a model larger than the board's memory gets a warning with the numbers after the build,
+and the board bundle takes it after your own `--accept-memory-risk`. Radxa's ROCK 5 boards (RK3588, RK3588S, and
+the RK3582 of the ROCK 5C Lite, E52C and E54C) are `rk3588`, the ROCK 4D is `rk3576`. Every `ARM64` build also makes the board package with
 `llama-cli` and `llama-server`, from the board's stored probe or, without one, from the CPU features every chip of
 the board has. `llm-cli targets boards ARM64` and **Build > Targets... > Boards...** show the profiles.
 

@@ -258,7 +258,7 @@ run_server() {
       done
       size=$(wc -c < "$model" | tr -d ' ')
       [ "$size" = "$L_SIZE" ] || unmeasured "this board was measured with another model: run the benchmark on the board in the framework again with this model, or give -c"
-      [ "$L_CTX" -gt 0 ] || unmeasured "the board's measurement says this model does not fit on it (no context is left next to it): use a smaller model or quantization"
+      [ "$L_CTX" -gt 0 ] || unmeasured "the board's measurement says this model does not fit on it (no context is left next to it): use a smaller model or quantization, or give -c to start it anyway (your choice: the board swaps and runs much slower)"
       avail=$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || true)
       case $avail in
         ''|*[!0-9]*) ;;

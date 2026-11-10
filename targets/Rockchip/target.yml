@@ -68,7 +68,8 @@ supported_boards:
       gpu: "Mali-G610"
       npu: "6 TOPS"
       memory_max: "32GB LPDDR5"
-      typical_boards: ["ROCK 5B", "Radxa CM5", "Orange Pi 5", "Orange Pi 5B", "Orange Pi 5 Pro", "Orange Pi CM5",
+      typical_boards: ["ROCK 5B", "ROCK 5B+", "ROCK 5T", "ROCK 5 ITX", "ROCK 5A", "ROCK 5C", "ROCK 5C Lite",
+                       "Radxa CM5", "Radxa E52C", "Radxa E54C", "Orange Pi 5", "Orange Pi 5B", "Orange Pi 5 Pro", "Orange Pi CM5",
                        "Orange Pi 5 Plus", "Orange Pi 5 Max", "Orange Pi 5 Ultra", "Banana Pi BPI-M7",
                        "Banana Pi BPI-M7S", "Banana Pi BPI-W3"]
 
@@ -263,9 +264,11 @@ capabilities:
       ram_max_gb: 32
       npu: "6 TOPS"
       gpu: "Mali-G610"
-      # RK3588 and RK3588S boards (mainline Linux names an RK3588S rockchip,rk3588s, the probe's letter variant of
-      # this board); Orange Pi's and Banana Pi's from their makers' pages (orangepi.org, docs.banana-pi.org).
-      examples: ["Radxa ROCK 5B", "Radxa ROCK 5ITX", "Orange Pi 5", "Orange Pi 5B", "Orange Pi 5 Pro", "Orange Pi CM5",
+      # RK3588, RK3588S and RK3582 boards (mainline Linux names an RK3588S rockchip,rk3588s, the probe's letter
+      # variant of this board, and an RK3582 rockchip,rk3582, rockchip,rk3588s; Radxa names the rk3588 platform for
+      # RKNN and RKLLM on the RK3582); from the makers' pages (docs.radxa.com, orangepi.org, docs.banana-pi.org).
+      examples: ["Radxa ROCK 5B", "Radxa ROCK 5B+", "Radxa ROCK 5T", "Radxa ROCK 5ITX", "Radxa ROCK 5A",
+                 "Radxa ROCK 5C", "Radxa ROCK 5C Lite", "Radxa CM5", "Radxa E52C", "Radxa E54C", "Orange Pi 5", "Orange Pi 5B", "Orange Pi 5 Pro", "Orange Pi CM5",
                  "Orange Pi 5 Plus", "Orange Pi 5 Max", "Orange Pi 5 Ultra", "Banana Pi BPI-M7", "Banana Pi BPI-M7S",
                  "Banana Pi BPI-W3"]
   formats:

@@ -119,6 +119,10 @@ class BundleWindow(BoardSteps, QDialog):
         self.chk_unmeasured = QCheckBox(self._t("bundle.unmeasured"), self)
         self.chk_unmeasured.setObjectName("chk_bundle_unmeasured")
         top.addWidget(self.chk_unmeasured)
+        # the person's yes to a bundle the board's memory does not hold: a warning instead of a refusal (never an AI's)
+        self.chk_memory_risk = QCheckBox(self._t("bundle.memory_risk"), self)
+        self.chk_memory_risk.setObjectName("chk_bundle_memory_risk")
+        top.addWidget(self.chk_memory_risk)
         # the engines in turn: the person's choice (never an AI's); the plan always shows whether all together fits
         self.chk_in_turn = QCheckBox(self._t("bundle.in_turn"), self)
         self.chk_in_turn.setObjectName("chk_bundle_in_turn")
@@ -441,11 +445,13 @@ class BundleWindow(BoardSteps, QDialog):
         state, config, framework = self.state_dir, getattr(self.framework, "config", None), self.framework
         app_root, index = self._sources()
         unmeasured_ok = self.chk_unmeasured.isChecked()
+        memory_risk_ok = self.chk_memory_risk.isChecked()
 
         def work():
             plan = service.plan_for_device(state, device_id, selection, config=config, app_root=app_root,
                                            mode=framework_mode(config), allow_own=allow_own, index=index,
-                                           framework=framework, unmeasured_ok=unmeasured_ok)
+                                           framework=framework, unmeasured_ok=unmeasured_ok,
+                                           memory_risk_ok=memory_risk_ok)
             self._check_cancel()
             return plan
         return work

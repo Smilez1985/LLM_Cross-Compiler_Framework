@@ -2588,7 +2588,8 @@ and questions as here, each board run in the background with **Cancel**.
 llm-cli bundle plan DEVICE [--preset llm|voice|stt] [--block ID]... [--set COMPONENT.NAME=VALUE]...
                     [--file COMPONENT.ROLE=PATH]... [--online COMPONENT.ROLE=URL --sha256 COMPONENT.ROLE=HEX
                     --size COMPONENT.ROLE=BYTES]... [--licence COMPONENT.ROLE=ID]... [--unprivileged-only]
-                    [--accept-terms BLOCK]... [--without-measurement] [--engines together|in-turn] [--json]
+                    [--accept-terms BLOCK]... [--without-measurement] [--accept-memory-risk]
+                    [--engines together|in-turn] [--json]
 llm-cli bundle build DEVICE (the same choice) [--allow-own]
 llm-cli bundle list [--json]
 llm-cli bundle deploy BUNDLE [--dry-run] [--skip-root]
@@ -2642,6 +2643,13 @@ others finish their requests and are stopped, then that engine is started. It ne
 autostart (their units); the plan refuses `in-turn` when even the largest engine alone does not fit, and names
 `in-turn` when all together does not fit but one at a time does. Only the language model's requests pass the gateway
 so far, so in turn a speech or vision engine stays stopped while the model runs. An AI's plan never chooses this.
+
+A bundle the board's memory does not hold (by its measurement, or by the probe's declared memory with
+`--without-measurement`) is refused with the numbers, never only because of its size: `--accept-memory-risk` is your
+yes to it. The plan then carries the shortfall as a warning and the bundle is built; the board swaps (if it has swap)
+and runs much slower, and a language model the measurement says does not fit starts with its block's context
+(`--set llm.ctx_size=N` for another). A board's profile only recommends; what you ask of your board is your choice.
+An AI's plan never accepts the memory risk.
 
 ### bundle build
 

@@ -152,12 +152,15 @@ def plan_for_device(state_dir: Path, device_id: str, selection: gen.Selection, *
                     app_root: Optional[Path] = None, mode: str = "private", allow_own: bool = False,
                     runtime: Optional[gen.RuntimePackage] = None, profile: Any = None,
                     index: Any = None, programs: Any = None, framework: Any = None,
-                    unmeasured_ok: bool = False, repack: bool = True) -> gen.BundlePlan:
+                    unmeasured_ok: bool = False, repack: bool = True,
+                    memory_risk_ok: bool = False) -> gen.BundlePlan:
     """plan_bundle for a stored board: its probe, the block catalog of this framework (`index`: the verified cached
     community index, CommunityManager.cached_index(revocations=True), so a revoked block is not used), its runtime
     package. `programs`: the resolver of a block's program "from: framework"; None builds it for the person
     (framework_programs over `framework`'s container engine when cargo is not here). `repack` False (an AI's
-    read-only plan): a runtime package with an older start script is never packed again here; the plan names it."""
+    read-only plan): a runtime package with an older start script is never packed again here; the plan names it.
+    `unmeasured_ok` and `memory_risk_ok` are the person's own yes (the CLI's flags, the window's checkboxes), never an
+    AI's: an AI's plan leaves them False."""
     profile = profile or device_profile(state_dir, device_id)
     catalog = blk.load_catalog(app_root, index=index)
     projects = needed_projects(catalog, selection)
@@ -170,7 +173,7 @@ def plan_for_device(state_dir: Path, device_id: str, selection: gen.Selection, *
                            runtime=runtime, config=config, mode=mode, allow_own=allow_own, runtimes=others,
                            programs=programs or framework_programs(config, client=engine_client(framework)),
                            limits=board_limits_of(state_dir, device_id), unmeasured_ok=unmeasured_ok,
-                           state_dir=state_dir, pack_harness=repack)
+                           state_dir=state_dir, pack_harness=repack, memory_risk_ok=memory_risk_ok)
 
 
 KEPT_ONLY = ("{name} for the board's architecture is not built on this computer yet; the person's plan in the "

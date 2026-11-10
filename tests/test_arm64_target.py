@@ -360,7 +360,19 @@ def probe_of(soc: str, board_model: str, vendor: str = ""):
     ("rockchip", "rk3588", "Xunlong Orange Pi 5 Plus", "Rockchip", "rk3588"),
     ("rockchip", "rk3588s", "Xunlong Orange Pi CM5 Base", "Rockchip", "rk3588"),
     ("rockchip", "rk3566", "Xunlong Orange Pi 3B v2.1", "Rockchip", "rk3566"),
-    ("rockchip", "rk3568", "Bananapi-R2 Pro (RK3568) DDR4 Board", "Rockchip", "rk3568")])
+    ("rockchip", "rk3568", "Bananapi-R2 Pro (RK3568) DDR4 Board", "Rockchip", "rk3568"),
+    # Radxa's ROCK 5 family and the RK3582 boards (mainline: rk3588-rock-5b-plus.dts, rk3588-rock-5t.dts,
+    # rk3588-rock-5-itx.dts, rk3588s-rock-5a.dts, rk3588s-rock-5c.dts, rk3582-radxa-e52c.dts and -e54c.dts: the last
+    # entry rockchip,rk3588s), the ROCK 4D (rk3576-rock-4d.dts) and an RK3588J, the industrial RK3588
+    ("rockchip", "rk3588", "Radxa ROCK 5B+", "Rockchip", "rk3588"),
+    ("rockchip", "rk3588", "Radxa ROCK 5T", "Rockchip", "rk3588"),
+    ("rockchip", "rk3588", "Radxa ROCK 5 ITX", "Rockchip", "rk3588"),
+    ("rockchip", "rk3588j", "Radxa ROCK 5 ITX", "Rockchip", "rk3588"),
+    ("rockchip", "rk3588s", "Radxa ROCK 5A", "Rockchip", "rk3588"),
+    ("rockchip", "rk3588s", "Radxa ROCK 5C", "Rockchip", "rk3588"),
+    ("rockchip", "rk3588s", "Radxa E52C", "Rockchip", "rk3588"),
+    ("rockchip", "rk3588s", "Radxa E54C", "Rockchip", "rk3588"),
+    ("rockchip", "rk3576", "Radxa ROCK 4D", "Rockchip", "rk3576")])
 def test_a_probe_of_an_orange_pi_or_banana_pi_board_maps_to_the_board_of_its_soc(vendor, soc, model, target, board):
     from orchestrator.runtime.board_recommendation import recommend_board
     from orchestrator.runtime.probe_service import match_target
@@ -382,6 +394,22 @@ def test_a_kernel_that_names_no_known_soc_finds_the_board_by_its_name_only_when_
     by_name = match_target(probe_of("g12a", "Banana Pi BPI-M5", "amlogic"), tm)
     assert (by_name.target, by_name.board) == ("ARM64", "sm1") and "known board" in by_name.reason
     assert match_target(probe_of("sun55iw3p1", "sun55iw3", "arm"), tm) is None, "the Orange Pi 4A is left out"
+
+
+def test_an_rk3582_board_is_the_board_rk3588_also_when_its_kernel_names_the_rk3582():
+    """Radxa names the rk3588 platform for RKNN and RKLLM on the RK3582 (ROCK 5C Lite, E52C, E54C), and mainline's
+    last entry is rockchip,rk3588s; a kernel that names rockchip,rk3582 last still finds the board by its name."""
+    from orchestrator.runtime.board_recommendation import recommend_board
+    from orchestrator.runtime.probe_service import match_target
+    tm = targets_manager()
+    tm.initialize()
+    profile = probe_of("rk3582", "Radxa E54C", "rockchip")
+    found = match_target(profile, tm)
+    assert (found.target, found.board) == ("Rockchip", "rk3588")
+    rec = recommend_board(profile, tm, "Rockchip")
+    assert rec.sure and rec.board == "rk3588" and rec.source == "list"
+    caps_rk = yaml.safe_load((REPO_ROOT / "targets" / "Rockchip" / "target.yml").read_text(encoding="utf-8"))
+    assert "rk3582" not in caps_rk["capabilities"]["boards"] and "rk3688" not in caps_rk["capabilities"]["boards"]
 
 
 def test_a_stored_probe_of_an_rk3588s_board_is_taken_for_an_rk3588_build(tmp_path):
@@ -557,3 +585,36 @@ def test_the_builder_offers_the_target_its_boards_and_the_board_s_order(booted_f
         assert req is not None and (req.targets, req.target_board) == (["ARM64"], "bcm2712")
     finally:
         tab._build_timer.stop()
+
+
+# --- a model too large for the board: a warning after the build, the person decides ----------------------------
+
+@pytest.mark.parametrize("model_mb, ram, words", [
+    (2400, 416, "it will run only with swap and much slower"),     # a 4B model at 4 bits on a Zero 2 W
+    (340, 416, "little room is left"),                             # a 1B model at IQ2_M
+    (120, 416, None)])                                              # a small model fits with room
+def test_a_model_too_large_for_the_board_is_a_warning_never_a_refusal(model_mb, ram, words):
+    text = bp.memory_warning(model_mb * 1024 * 1024, ram, "bcm2837", "the board's probe")
+    if words is None:
+        assert text is None
+    else:
+        assert words in text and "416 MB" in text and "the board's probe" in text
+
+
+def test_the_build_warns_with_the_board_s_probe_or_its_largest_memory(tmp_path):
+    from orchestrator.Core.builder import BuildEngine, BuildProgress, BuildStatus
+    from orchestrator.runtime.profile import ProfileStore, read_profile
+    state = tmp_path / "state"
+    ProfileStore(state).save_device("00000000000000e2", read_profile(ZERO2W_PROBE), label="zero")
+    engine = BuildEngine.__new__(BuildEngine)
+    engine.config = SimpleNamespace(user_state_dir=str(state))
+    engine.target_manager = targets_manager()
+    engine.target_manager.initialize()
+    manifest = {"primary": "m.gguf", "artifacts": [{"file": "m.gguf", "bytes": 2400 * 1024 * 1024}]}
+    for probe, ram in (("00000000000000e2", "416 MB (the board's probe)"),
+                       (None, "1024 MB (the most memory a bcm2837 comes with)")):
+        progress = BuildProgress("b", BuildStatus.COMPLETED, "done")
+        config = SimpleNamespace(hardware_probe=probe, target_board="bcm2837", target_arch="ARM64")
+        engine._board_memory_warning(config, manifest, progress)
+        (warning,) = progress.warnings
+        assert ram in warning and "swap" in warning and "Your choice" in warning

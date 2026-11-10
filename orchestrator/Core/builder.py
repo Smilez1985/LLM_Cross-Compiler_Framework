@@ -2931,6 +2931,45 @@ class BuildEngine:
                         self._check_cancelled(progress)
                         dst.write(chunk)
 
+    def _board_ram(self, config: BuildConfiguration) -> Tuple[Optional[float], str]:
+        """(MiB, where it comes from) of the build's board: its probe's RAM_TOTAL_MB when the build has a probe,
+        else the most memory the board comes with (ram_max_gb of the target's capabilities); (None, "") when
+        neither says."""
+        if config.hardware_probe:
+            try:
+                from orchestrator.runtime.probe_service import HardwareProbes
+                state = getattr(self.config, "user_state_dir", None)
+                probes = HardwareProbes(Path(state)) if isinstance(state, (str, Path)) else HardwareProbes()
+                ram = probes.get(config.hardware_probe).int_value("RAM_TOTAL_MB")
+                if ram:
+                    return float(ram), "the board's probe"
+            except Exception:  # noqa: BLE001 - a probe that cannot be read: the capabilities' value
+                pass
+        board = config.target_board
+        tm = self.target_manager
+        if not board or tm is None or not hasattr(tm, "get_capabilities"):
+            return None, ""
+        try:
+            caps = tm.get_capabilities(config.target_arch)
+            name = caps.canonical_board(board) if caps is not None else None
+            gb = caps.boards[name].ram_max_gb if name else None
+        except Exception:  # noqa: BLE001 - no capabilities: nothing to compare with
+            return None, ""
+        return (float(gb) * 1024, f"the most memory a {name} comes with") if gb else (None, "")
+
+    def _board_memory_warning(self, config: BuildConfiguration, manifest: Dict[str, Any],
+                              progress: BuildProgress) -> None:
+        """A warning when the build's model is large for its board's memory (board_profiles.memory_warning): the
+        build is never stopped for it, the person decides what they ask of their board."""
+        primary = next((a for a in manifest.get("artifacts", []) if a["file"] == manifest.get("primary")), None)
+        if primary is None or not config.target_board:
+            return
+        from orchestrator.Core.board_profiles import memory_warning
+        ram, source = self._board_ram(config)
+        text = memory_warning(int(primary.get("bytes") or 0), ram, str(config.target_board), source)
+        if text:
+            progress.add_warning(text)
+
     def _create_golden_artifact(self, config: BuildConfiguration, progress: BuildProgress):
         progress.current_stage = "Archiving"
         progress.progress_percent = 95
@@ -2945,6 +2984,8 @@ class BuildEngine:
         manifest = self._write_build_manifest(config, staged, progress=progress)
         if not manifest.get("primary"):
             progress.add_warning("The build produced no model file.")
+        else:
+            self._board_memory_warning(config, manifest, progress)
         self._generate_model_card(config, staged, manifest)
         
         archive = self._staging_root(config) / f"{output_dir.name}.zip"

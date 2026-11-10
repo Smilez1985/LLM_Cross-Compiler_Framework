@@ -21,7 +21,11 @@ plan_bundle (nothing is written):
   their base plus model factor, and all of it must fit into the measured usable memory (free at rest less the
   measured reserve). A board without a measurement is refused for an llm block (nothing is guessed) unless the person
   says yes to planning without it (`unmeasured_ok`, never an AI): then, and for bundles without an llm block, the
-  declared check of the probe's RAM_TOTAL_MB with a reserve (MEMORY_RESERVE_MB or a tenth, the larger) applies;
+  declared check of the probe's RAM_TOTAL_MB with a reserve (MEMORY_RESERVE_MB or a tenth, the larger) applies.
+  A bundle the memory does not hold (the measured or the declared one, a component, the engines in turn, a context
+  larger than the measured one, a model the measurement says does not fit) is refused only until the person accepts
+  the memory risk themselves (`memory_risk_ok`, never an AI): then each shortfall is a warning with its numbers
+  (the board will swap and run much slower), since what the person asks of their board is theirs to decide;
 - autostart needs a unit, so the root actions create_user, install_unit and set_cgroup (llmcf-install), and a board
   whose access facts name another init system than systemd cannot take it; a board without sudo gets the plain note
   that llmcf-install cannot run there (the unprivileged-only variant still works).
@@ -56,6 +60,9 @@ PRESETS: Dict[str, Tuple[str, ...]] = {
     "stt": ("stt-whisper-cpp",),
 }
 MEMORY_RESERVE_MB = 384
+# What the person can do when the board's memory is short: their own yes, never an AI's (the AI's plan has no switch).
+MEMORY_RISK_NEXT = ("or accept the memory risk yourself (llm-cli bundle plan|build --accept-memory-risk, or the "
+                    "checkbox in the Board bundle window): the board then swaps and runs much slower")
 # How the bundle's engines (llm, stt, vision) share the board's memory: the person's choice, never an AI's. "together":
 # they all run at once and must fit together; "in-turn": the gateway loads them one after another (llmcf-gateway
 # --engines in-turn), so only the largest one must fit next to the rest. The plan always shows both numbers.
@@ -165,6 +172,18 @@ class BundlePlan:
     engines: Dict[str, Any] = field(default_factory=dict)
     # the gateway's route table made from the chosen blocks' reach (reach.Table; None without a gateway)
     routes: Optional[rc.Table] = None
+    # the person accepted the memory risk (plan_bundle memory_risk_ok): a memory shortfall is a warning, not a problem
+    memory_risk_ok: bool = False
+
+    def memory_short(self, text: str) -> str:
+        """A shortfall of the board's memory: a problem until the person accepts the memory risk, then a warning
+        with the same numbers. The check's result ("failed" or "warning")."""
+        if self.memory_risk_ok:
+            self.warnings.append(f"{text}; you accepted the memory risk: the board will swap (if it has swap) and "
+                                 "run much slower, or the system may stop the server")
+            return "warning"
+        self.problems.append(f"{text}; {MEMORY_RISK_NEXT}")
+        return "failed"
 
     @property
     def ok(self) -> bool:
@@ -355,7 +374,7 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
                 programs: Optional[Callable[[str, Optional[str]], Tuple[Path, str]]] = None,
                 runtimes: Optional[Dict[str, RuntimePackage]] = None, limits: Any = None,
                 unmeasured_ok: bool = False, state_dir: Optional[Path] = None,
-                pack_harness: bool = True) -> BundlePlan:
+                pack_harness: bool = True, memory_risk_ok: bool = False) -> BundlePlan:
     """The plan of `selection` for the board of `profile` (see the module text). `offline` None reads the setting
     from `config` (utils/locality.offline_mode); `locality` stands in for utils/locality.check_reach in tests.
     `runtime` is llama.cpp's board package, `runtimes` every project's (runtime/build/projects.py: whisper.cpp for
@@ -375,7 +394,7 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         offline = loc.offline_mode(config)
     check_reach = locality or loc.check_reach
     bid = bundle_id or new_bundle_id(device_id, selection.preset, now)
-    plan = BundlePlan(bundle_id=bid, device_id=device_id, selection=selection)
+    plan = BundlePlan(bundle_id=bid, device_id=device_id, selection=selection, memory_risk_ok=bool(memory_risk_ok))
     if not RE_ID.fullmatch(bid):
         plan.problems.append("the bundle id is lower-case letters, digits, '.', '_' and '-'")
         return plan
@@ -607,8 +626,8 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         if block.kind == "llm" and limits is not None and getattr(limits, "fits", False):
             ctx = int(values.get("ctx_size") or limits.ctx)
             if ctx > limits.ctx:
-                plan.problems.append(f"{comp_id}: a context of {ctx} tokens does not fit: the board's measurement "
-                                     f"leaves room for {limits.ctx} tokens with this model")
+                plan.memory_short(f"{comp_id}: a context of {ctx} tokens does not fit: the board's measurement "
+                                  f"leaves room for {limits.ctx} tokens with this model")
             comp_memory = limits.need_for(model_bytes or limits.model_bytes, ctx,
                                           values.get("kv_cache") or limits.kv_cache)
             measured_llm += comp_memory
@@ -677,37 +696,37 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         plan.notes.append("no language model on the board (your choice): the bundle's parts use a model off the "
                           "board")
     if has_llm and limits is not None and not getattr(limits, "fits", False):
-        plan.problems.append(f"the language model does not fit on this board by its measurement: {limits.reason}; "
-                             "leave the llm block out to run the model off the board")
-        plan.checks.append({"check": "memory", "result": "failed", "detail": f"measured: {limits.reason}"})
+        result = plan.memory_short(f"the language model does not fit on this board by its measurement: "
+                                   f"{limits.reason}; leave the llm block out to run the model off the board")
+        plan.checks.append({"check": "memory", "result": result, "detail": f"measured: {limits.reason}"})
     elif limits is not None and has_llm:
         usable = int(limits.usable_mib)
         plan.board_memory_mb = usable
+        result = "warning" if need > usable * 0.9 else "passed"
         if need > usable:
-            plan.problems.append(f"the bundle needs about {need} MB of memory, the board's measurement leaves "
-                                 f"{usable} MB for it ({limits.available_mib} MB free at rest less the measured "
-                                 f"reserve of {limits.reserve_mib} MB); leave the llm block out to run the model off "
-                                 "the board, or choose a smaller model")
+            result = plan.memory_short(f"the bundle needs about {need} MB of memory, the board's measurement leaves "
+                                       f"{usable} MB for it ({limits.available_mib} MB free at rest less the measured "
+                                       f"reserve of {limits.reserve_mib} MB); leave the llm block out to run the "
+                                       "model off the board, or choose a smaller model")
         elif need > usable * 0.9:
             plan.warnings.append(f"the bundle takes about {need} of the {usable} MB the board's measurement leaves: "
                                  "little room is left")
-        plan.checks.append({"check": "memory", "result": "failed" if need > usable else
-                            ("warning" if need > usable * 0.9 else "passed"),
+        plan.checks.append({"check": "memory", "result": result,
                             "detail": f"measured: about {need} MB needed ({measured_llm} MB for the language "
                                       f"model as measured on the board), {usable} MB usable"})
     elif limits is not None:
         # no language model on the board: the components fit by the board's measured memory all the same
         usable = int(limits.usable_mib)
         plan.board_memory_mb = usable
+        result = "warning" if need > usable * 0.9 else "passed"
         if need > usable:
-            plan.problems.append(f"the bundle needs about {need} MB of memory, the board's measurement leaves "
-                                 f"{usable} MB for it ({limits.available_mib} MB free at rest less the measured "
-                                 f"reserve of {limits.reserve_mib} MB)")
+            result = plan.memory_short(f"the bundle needs about {need} MB of memory, the board's measurement leaves "
+                                       f"{usable} MB for it ({limits.available_mib} MB free at rest less the measured "
+                                       f"reserve of {limits.reserve_mib} MB)")
         elif need > usable * 0.9:
             plan.warnings.append(f"the bundle takes about {need} of the {usable} MB the board's measurement leaves: "
                                  "little room is left")
-        plan.checks.append({"check": "memory", "result": "failed" if need > usable else
-                            ("warning" if need > usable * 0.9 else "passed"),
+        plan.checks.append({"check": "memory", "result": result,
                             "detail": f"measured: about {need} MB needed, {usable} MB usable"})
     elif has_llm and not unmeasured_ok:
         from orchestrator.runtime.device.measure import NOT_MEASURED
@@ -720,13 +739,13 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
                                  "probe's declared RAM")
         usable = ram - max(MEMORY_RESERVE_MB, ram // 10)
         plan.board_memory_mb = usable
+        result = "warning" if need > usable * 0.8 else "passed"
         if need > usable:
-            plan.problems.append(f"the bundle needs about {need} MB of memory, the board has {usable} MB for it "
-                                 f"({ram} MB with a reserve for the system)")
+            result = plan.memory_short(f"the bundle needs about {need} MB of memory, the board has {usable} MB for "
+                                       f"it ({ram} MB with a reserve for the system)")
         elif need > usable * 0.8:
             plan.warnings.append(f"the bundle takes about {need} of {usable} MB: little room is left")
-        plan.checks.append({"check": "memory", "result": "failed" if need > usable else
-                            ("warning" if need > usable * 0.8 else "passed"),
+        plan.checks.append({"check": "memory", "result": result,
                             "detail": f"about {need} MB needed, {usable} MB usable ({ram} MB on the board)"})
     else:
         plan.warnings.append("the board's probe does not say its memory; probe it again to check the bundle fits")
@@ -1026,11 +1045,12 @@ def engines_check(plan: BundlePlan, engine_mem: Dict[str, int], rest: int, limit
               + f"; in turn: the largest engine {largest} {engine_mem[largest]} MB + {rest} + {reserve} = {one} MB: "
               + ("fits" if fits_one else "does not fit") + f"; your choice: {choice}")
     ok = fits_one if in_turn else fits_together
-    plan.checks.append({"check": "engines", "result": "passed" if ok else "failed", "detail": detail})
+    result = "passed" if ok else "warning" if plan.memory_risk_ok else "failed"
+    plan.checks.append({"check": "engines", "result": result, "detail": detail})
     if in_turn and not fits_one:
-        plan.problems.append(f"in turn does not fit either: the largest engine, {largest}, needs about "
-                             f"{engine_mem[largest]} MB, with the rest of the bundle ({rest} MB) and the reserve "
-                             f"({reserve} MB) {one} MB of the board's {available} MB; choose a smaller model")
+        plan.memory_short(f"in turn does not fit either: the largest engine, {largest}, needs about "
+                          f"{engine_mem[largest]} MB, with the rest of the bundle ({rest} MB) and the reserve "
+                          f"({reserve} MB) {one} MB of the board's {available} MB; choose a smaller model")
     elif not in_turn and not fits_together and fits_one and len(engine_mem) > 1:
         plan.notes.append(f"the engines do not fit all together, but one after another they do ({one} of "
                           f"{available} MB): choose to load the engines in turn")
@@ -1224,9 +1244,8 @@ def _component_check(plan: BundlePlan, comp_id: str, block: Block, pkg: Optional
         # the component fits by the board's measurement (its memory free at rest less the measured reserve)
         parts.append(f"of the {measured_usable} MB the board's measurement leaves")
         if memory_mb > measured_usable:
-            plan.problems.append(f"{comp_id}: it needs about {memory_mb} MB, the board's measurement leaves "
-                                 f"{measured_usable} MB")
-            result = "failed"
+            result = plan.memory_short(f"{comp_id}: it needs about {memory_mb} MB, the board's measurement leaves "
+                                       f"{measured_usable} MB")
     if pkg is not None and pkg.path is not None:
         built_for = pkg.arch or "an architecture its record does not name"
         if pkg.arch and board_arch and not arch_matches(pkg.arch, board_arch):

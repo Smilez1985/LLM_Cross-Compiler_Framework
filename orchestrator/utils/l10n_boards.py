@@ -45,6 +45,7 @@ TEXTS = {
         "bundle.var.ok": "{component}.{name} = {value}",
         "bundle.unprivileged": "Unprivileged only (no autostart unit, no root action)",
         "bundle.unmeasured": "Plan the language model without the board's measurement",
+        "bundle.memory_risk": "Accept the memory risk (the board swaps and runs much slower)",
         # the engines all together or in turn (the person's choice; the plan always shows both numbers)
         "bundle.in_turn": "Load the engines in turn (one after another when they do not fit together)",
         "bundle.engines.together": "All engines together: {engines} MB for the engines + {rest} MB for the rest + "
@@ -653,6 +654,7 @@ TEXTS = {
         "bundle.var.ok": "{component}.{name} = {value}",
         "bundle.unprivileged": "Nur ohne Sonderrechte (keine Autostart-Unit, keine Root-Aktion)",
         "bundle.unmeasured": "Sprachmodell ohne Vermessung des Boards planen",
+        "bundle.memory_risk": "Speicherrisiko annehmen (das Board lagert aus und läuft viel langsamer)",
         "bundle.in_turn": "Programme nacheinander laden (eines nach dem anderen, wenn sie nicht zusammen passen)",
         "bundle.engines.together": "Alle Programme zusammen: {engines} MB für die Programme + {rest} MB für den Rest + "
                                    "{reserve} MB Reserve = {need} MB von {available} MB frei: {verdict}.",

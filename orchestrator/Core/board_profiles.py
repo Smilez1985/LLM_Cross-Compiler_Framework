@@ -216,6 +216,34 @@ def ordered_quantizations(offered: Sequence[str], profile: Optional[Optimization
     return list(dict.fromkeys(first + offered))
 
 
+# --- the board's memory: a warning, the person decides ---------------------------------------------------------
+
+# The server's buffers next to the weights (compute buffers, a small context) as a share of the model file: an
+# estimate for the warning only; the board measurement says the real need.
+SERVER_SHARE = 0.10
+TIGHT_SHARE = 0.75
+
+
+def memory_warning(model_bytes: int, ram_mib: Optional[float], board: str, source: str) -> Optional[str]:
+    """The warning when a model file is large for the board's memory (`ram_mib`, from `source`: "the board's probe"
+    or "the most memory a <board> comes with"), None when it fits with room. Never a refusal: a profile recommends,
+    the person decides what they ask of their board (the board measurement then says the real need)."""
+    if not model_bytes or not ram_mib or ram_mib <= 0:
+        return None
+    need = int(model_bytes * (1 + SERVER_SHARE) / 1048576 + 0.5)
+    ram = int(ram_mib)
+    if need > ram:
+        return (f"The model needs about {need} MB of memory on the board (the file and about a tenth for the "
+                f"server), and {board} has {ram} MB ({source}): it will run only with swap and much slower, if at "
+                "all. Your choice: deploy it anyway, or pick a smaller model or quantization (the board's profile "
+                "lists the ones that suit it); the benchmark on the board measures what really fits.")
+    if need > ram * TIGHT_SHARE:
+        return (f"The model needs about {need} MB of memory on the board, of the {ram} MB of {board} ({source}): "
+                "little room is left for the system and the context; the benchmark on the board measures what "
+                "really fits.")
+    return None
+
+
 # --- benchmarks ---------------------------------------------------------------------------------------------------
 
 def rows_for(data: Optional[BoardData], board: Optional[str] = None) -> List[BenchmarkEntry]:
