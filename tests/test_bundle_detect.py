@@ -27,6 +27,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import missing_rust_toolchain
 from orchestrator.runtime.bundle import blocks as blk
 from orchestrator.runtime.bundle import generator as gen
 
@@ -45,6 +46,9 @@ def _build(crate, features, env_name):
     cargo = shutil.which("cargo")
     if cargo is None:
         pytest.skip(f"cargo is not on this computer: this test builds {crate}'s test binary with it")
+    missing = missing_rust_toolchain()
+    if missing:
+        pytest.skip(missing)
     argv = [cargo, "build", "--locked", "-p", crate] + (["--features", features] if features else [])
     done = subprocess.run(argv, cwd=RUST_DIR, capture_output=True, text=True, timeout=1800)
     if done.returncode != 0:

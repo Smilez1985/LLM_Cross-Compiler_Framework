@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import missing_rust_toolchain
 from orchestrator.runtime.bundle import installer as inst
 from orchestrator.runtime.bundle.manifest import (RE_ARG, RE_FILE, RE_ID, RE_LICENCE, RE_SHA, RE_URL, RE_VERSION,
                                                   RE_WORD, ManifestError, check_value, load_manifest)
@@ -243,12 +244,9 @@ def helper_binary():
     cargo = shutil.which("cargo")
     if cargo is None:
         pytest.skip("cargo is not on this computer: these tests build llmcf-install's test binary with it")
-    if not os.environ.get("RUSTUP_TOOLCHAIN") and shutil.which("rustup"):
-        listed = subprocess.run(["rustup", "toolchain", "list"], capture_output=True, text=True).stdout
-        pinned = next((line.split('"')[1] for line in (RUST_DIR / "rust-toolchain.toml").read_text().splitlines()
-                       if line.startswith("channel")), "")
-        if pinned and pinned not in listed:
-            pytest.skip(f"the pinned Rust toolchain {pinned} (rust/rust-toolchain.toml) is not installed")
+    missing = missing_rust_toolchain()
+    if missing:
+        pytest.skip(missing)
     done = subprocess.run([cargo, "build", "--locked", "-p", "llmcf-install", "--features", "test-root"],
                           cwd=RUST_DIR, capture_output=True, text=True, timeout=1800)
     if done.returncode != 0:

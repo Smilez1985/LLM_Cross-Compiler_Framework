@@ -422,6 +422,20 @@ def isolated_environment(tmp_path, monkeypatch):
         monkeypatch.delenv(var, raising=False)
 
 
+def missing_rust_toolchain():
+    """Why the pinned Rust toolchain (rust/rust-toolchain.toml) cannot build here, or "" when it can. A test that
+    builds a board program with cargo skips with this reason instead of letting rustup download the toolchain into
+    the test's own home (the tests redirect HOME; CI's Rust job builds the programs and passes their paths)."""
+    if os.environ.get("RUSTUP_TOOLCHAIN") or not shutil.which("rustup"):
+        return ""
+    listed = subprocess.run(["rustup", "toolchain", "list"], capture_output=True, text=True).stdout
+    pinned = next((line.split('"')[1] for line in (REPO_ROOT / "rust" / "rust-toolchain.toml").read_text(
+        encoding="utf-8").splitlines() if line.startswith("channel")), "")
+    if pinned and pinned not in listed:
+        return f"the pinned Rust toolchain {pinned} (rust/rust-toolchain.toml) is not installed"
+    return ""
+
+
 @pytest.fixture(autouse=True)
 def fresh_cli_console(monkeypatch):
     """Each test gets the CLI's shared console new, made at its first print: rich fixes a console's width when it
