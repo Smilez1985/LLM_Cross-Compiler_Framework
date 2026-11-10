@@ -231,6 +231,10 @@ configs/known_hosts
 /models/
 /logs/
 
+# Written by install.sh --offline and install.bat --offline without a preload: the preload scripts for this
+# computer (they hold its recipe, nothing secret, but they belong to this computer, not to the repository).
+/llmcf-preload-scripts/
+
 # Written by install.bat for the Windows uninstaller (the installation folder) and the uninstaller's backups of
 # your data (scripts/Uninstall-LLM-Cross-Compiler-Framework.bat)
 /.install_complete

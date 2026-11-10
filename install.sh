@@ -1,9 +1,12 @@
 #!/bin/bash
 # install.sh - LLM Framework Enterprise Installer
 # DIREKTIVE: Goldstandard. Vereint System-Checks, Docker-Setup und App-Deployment.
-# Code und Python-Umgebung landen in /opt/llm-cross-compiler-framework (dem aufrufenden Benutzer übergeben). Das
-# Framework legt Builds, Cache und Modelle dort an, wenn sie gebraucht werden (Einstellungen output_dir,
-# cache_dir, models_dir); persönlicher Zustand liegt in ~/.llm-framework des Benutzers.
+# Code und Python-Umgebung landen in /opt/llm-cross-compiler-framework. Schreibt das Framework des Checkouts nichts
+# mehr dorthin (INSTALL_READ_ONLY = True in orchestrator/__init__.py), gehört der Ordner danach root und ist für die
+# Gruppe llmcf nur lesbar (share_installation): eine Installation für mehrere Personen, jede mit ihrem eigenen Ordner
+# ~/.llm-framework; eine zweite Person bekommt nur ihren eigenen Teil (install_role, person_install). Sonst wird er wie
+# bisher dem aufrufenden Benutzer übergeben, und das Framework legt Builds, Cache und Modelle dort an.
+# --offline versucht das Netz nicht; mit --preload DATEI (ein Archiv von preload.sh) kommen die Python-Pakete daraus.
 # Ein erneuter Aufruf aktualisiert die Dateien, die das Repository ausliefert, und entfernt nur Dateien, die ein
 # früheres install.sh kopiert hat und die nicht mehr ausgeliefert werden (Liste in .lcf-installed-files). Alles
 # andere bleibt: eigene Targets, installierte Community-Packs, Einstellungen, Builds, Cache und Modelle.
@@ -45,6 +48,13 @@ DITTO_CHOICE="${LCF_DITTO:-auto}"
 # Installer am Terminal (Enter: der jetzige Modus einer Aktualisierung, neu: privat). Ohne Angabe und ohne Terminal
 # bleibt der Modus, wie er ist (neu: privat).
 MODE_CHOICE="${LCF_MODE:-}"
+# Offline (--offline oder LCF_OFFLINE=1): keine Prüfung des Netzes, keine neue Auflösung, keine Paketverwaltung
+# (sie bräuchte ihre Paketquellen im Netz) und Ditto erst später. Mit --preload DATEI (oder LCF_PRELOAD; ein Archiv von
+# preload.sh, auf einem Rechner mit Netz gemacht) kommen die Python-Pakete aus dem Archiv, ohne jeden Paketindex;
+# --preload-sha256 HEX (LCF_PRELOAD_SHA256) prüft das Archiv gegen die Zahl, die preload.sh ausgab.
+OFFLINE="${LCF_OFFLINE:-0}"
+PRELOAD_FILE="${LCF_PRELOAD:-}"
+PRELOAD_SHA256="${LCF_PRELOAD_SHA256:-}"
 
 # Die Container-Engine läuft standardmäßig ohne Root-Rechte (rootless Podman; --engine=docker: rootless Docker);
 # --rootful: Docker als root mit der Gruppe docker, nur auf den ausdrücklichen Wunsch der Person und nach einer Warnung
@@ -140,24 +150,138 @@ check_root() {
 # Die URL ohne benutzer:passwort@ (PIP_INDEX_URL eines Spiegels kann Zugangsdaten enthalten).
 redact_url() { echo "$1" | sed -E 's#://[^/@]*@#://***@#'; }
 
+# --- WARUM HTTPS SCHEITERTE ---
+# Scheitert eine HTTPS-Anfrage am Zertifikat oder am TLS-Handshake, ist die Ursache oft die Uhr dieses Rechners, nicht
+# ein Proxy: Geht sie falsch (ein Klassiker auf Rechnern, die auch Windows starten), ist jedes Zertifikat "noch nicht
+# gültig" oder "abgelaufen". Dann wird die Systemzeit mit dem Date-Header des Servers verglichen. Der Header wird nur
+# für diese Diagnose noch einmal ohne Zertifikatsprüfung geholt (curl -k -I, nur der Kopf), und nur sein Datum wird
+# gelesen; vertraut wird ihm für nichts sonst. Erst wenn die Uhr stimmt, nennt die Meldung einen Proxy oder Spiegel.
+# Die Exit-Codes von curl, die ein Problem mit Zertifikat oder TLS sind (curl(1), EXIT CODES); wget meldet sie mit 5.
+TLS_CURL_CODES=" 35 51 53 54 58 59 60 64 66 77 80 82 83 90 91 "
+# Ab dieser Abweichung (Sekunden) gilt die Uhr als falsch.
+CLOCK_TOLERANCE=300
+
+# Ist der Exit-Code $2 des Werkzeugs $1 (curl, wget) ein Fehler von Zertifikat oder TLS?
+https_tls_failure() {
+    case "$1" in
+        curl) [[ "$TLS_CURL_CODES" == *" $2 "* ]] ;;
+        wget) [ "$2" = "5" ] ;;
+        *) return 1 ;;
+    esac
+}
+
+# Der Date-Header der Adresse $1 in Sekunden seit 1970 (UTC); 1, wenn keiner kam oder er sich nicht lesen lässt. Die
+# Adresse geht wie in wait_for_internet über stdin, nie auf die Kommandozeile (sie kann Zugangsdaten enthalten).
+server_date() {
+    local header=""
+    if command -v curl &> /dev/null; then
+        header="$(printf 'url = "%s"\n' "$1" | curl -k -sS -I --max-time 10 -K - 2> /dev/null | tr -d '\r' \
+            | awk 'tolower($1) == "date:" { sub(/^[^:]*:[ \t]*/, ""); print; exit }')"
+    elif command -v wget &> /dev/null; then
+        header="$(printf '%s\n' "$1" | wget -q -S --spider --no-check-certificate --timeout=10 --tries=1 -i - 2>&1 \
+            | tr -d '\r' | awk 'tolower($1) == "date:" { sub(/^[ \t]*[^:]*:[ \t]*/, ""); print; exit }')"
+    fi
+    [ -n "$header" ] || return 1
+    date -u -d "$header" +%s 2> /dev/null
+}
+
+# Ein Zeitpunkt (Sekunden seit 1970) lesbar, in UTC.
+utc_text() { date -u -d "@$1" '+%Y-%m-%d %H:%M:%S UTC'; }
+
+# Ein Unterschied von $1 Sekunden in Minuten, Stunden oder Tagen (gerundet).
+span_text() {
+    local s="$1"
+    if [ "$s" -lt 7200 ]; then echo "$(( (s + 30) / 60 )) Minuten"
+    elif [ "$s" -lt 172800 ]; then echo "$(( (s + 1800) / 3600 )) Stunden"
+    else echo "$(( (s + 43200) / 86400 )) Tage"; fi
+}
+
+# Warum die HTTPS-Anfrage an $1 mit dem Exit-Code $3 des Werkzeugs $2 scheiterte, in klaren Worten, mit dem nächsten
+# Schritt: bei einem Fehler von Zertifikat oder TLS zuerst die Uhr, dann ein Proxy oder Spiegel; sonst der Proxy.
+# Setzt HTTPS_PROBLEM (der Text) und CLOCK_OFF (1: die Uhr geht um mehr als CLOCK_TOLERANCE Sekunden falsch).
+HTTPS_PROBLEM="" CLOCK_OFF=0
+https_diagnose() {
+    local url="$1" tool="$2" rc="$3" now server diff
+    local proxy="Proxy? Dann mit 'sudo -E ./install.sh' starten, damit https_proxy erhalten bleibt (oder PIP_INDEX_URL auf einen erreichbaren Spiegel setzen)."
+    HTTPS_PROBLEM="$proxy" CLOCK_OFF=0
+    https_tls_failure "$tool" "$rc" || return 0
+    now="$(date -u +%s)"
+    if ! server="$(server_date "$url")" || [ -z "$server" ]; then
+        HTTPS_PROBLEM="Das Zertifikat oder der TLS-Handshake scheiterte ($tool, Code $rc), und die Uhrzeit des Servers ließ sich nicht lesen. Prüfe zuerst die Uhr dieses Rechners (jetzt: $(utc_text "$now")); geht sie falsch: sudo timedatectl set-ntp true (startet dieser Rechner auch Windows: sudo timedatectl set-local-rtc 1 oder Windows auf UTC stellen). Stimmt sie: Ein Proxy oder Spiegel mit eigenem Zertifikat? Dann mit 'sudo -E ./install.sh' starten (oder PIP_INDEX_URL auf einen Spiegel setzen, dem dieses System vertraut)."
+        return 0
+    fi
+    diff=$(( now - server ))
+    if [ "${diff#-}" -gt "$CLOCK_TOLERANCE" ]; then
+        CLOCK_OFF=1
+        HTTPS_PROBLEM="Die Uhr dieses Rechners geht falsch: Sie zeigt $(utc_text "$now"), der Server sagt $(utc_text "$server") (etwa $(span_text "${diff#-}") Unterschied). Mit einer falschen Uhr scheitert jede Zertifikatsprüfung; ein Proxy ist hier nicht die Ursache. Behebung: sudo timedatectl set-ntp true (stellt die Uhr über das Netz). Startet dieser Rechner auch Windows, hält Windows die Hardware-Uhr in Ortszeit: entweder hier sudo timedatectl set-local-rtc 1 oder Windows auf UTC stellen (RealTimeIsUniversal). Danach 'sudo ./install.sh' erneut."
+        return 0
+    fi
+    HTTPS_PROBLEM="Das Zertifikat oder der TLS-Handshake scheiterte ($tool, Code $rc); die Uhr dieses Rechners stimmt ($(utc_text "$now")). Ein Proxy oder Spiegel mit eigenem Zertifikat? Dann mit 'sudo -E ./install.sh' starten (oder PIP_INDEX_URL auf einen Spiegel setzen, dem dieses System vertraut)."
+}
+
+# Derselbe Text auf stdout (für Meldungen, die ihn einbetten).
+https_problem() {
+    https_diagnose "$@"
+    echo "$HTTPS_PROBLEM"
+}
+
+# Geht die Uhr falsch und hat der Rechner Netz (der Server hat ja geantwortet), bietet der Installer an, sie zu stellen:
+# timedatectl set-ntp true schaltet die Zeitsynchronisierung des Systems ein. Nur mit dem Ja der Person (es ändert eine
+# Einstellung des Systems), nie still. Danach wartet er bis CLOCK_SYNC_WAIT Sekunden, bis systemd die Uhr gestellt
+# meldet. 0: gestellt (ein neuer Versuch lohnt), 1: nicht.
+CLOCK_SYNC_WAIT=30
+clock_offer() {
+    local waited=0
+    command -v timedatectl &> /dev/null || return 1
+    log_warn "$HTTPS_PROBLEM"
+    if ! ask_person "Die Uhr jetzt über das Netz stellen lassen (sudo timedatectl set-ntp true: schaltet die Zeitsynchronisierung dieses Systems ein)?"; then
+        return 1
+    fi
+    if ! timedatectl set-ntp true; then
+        log_warn "timedatectl set-ntp true ging nicht (Meldungen oben)."
+        return 1
+    fi
+    while [ "$(timedatectl show -p NTPSynchronized --value 2> /dev/null)" != "yes" ] && [ "$waited" -lt "$CLOCK_SYNC_WAIT" ]; do
+        sleep 1
+        waited=$(( waited + 1 ))
+    done
+    log_info "Die Uhr zeigt jetzt $(utc_text "$(date -u +%s)"). Startet dieser Rechner auch Windows: sudo timedatectl set-local-rtc 1 (oder Windows auf UTC), sonst geht sie nach dem nächsten Windows-Start wieder falsch."
+    return 0
+}
+
 wait_for_internet() {
     # HTTPS zum Paketindex statt ping: ICMP ist in vielen Netzen gesperrt, und pip braucht genau diesen Weg.
     # Geladen wird die kleine Projektseite von pip (<index>/pip/, etwa 100 KB), nicht die Startseite des Index
     # (bei pypi.org über 40 MB, in 10 s nur mit schneller Leitung). Die URL geht über stdin an curl/wget statt auf
-    # die Kommandozeile, die jeder Benutzer mit ps sieht.
-    local probe shown
+    # die Kommandozeile, die jeder Benutzer mit ps sieht. Offline (--offline) prüft der Installer nichts: Er versucht
+    # das Netz dann gar nicht.
+    local probe shown tool rc=0
+    if [ "$OFFLINE" = "1" ]; then
+        log_info "Offline (--offline): keine Prüfung der Internetverbindung."
+        return 0
+    fi
     probe="${PACKAGE_INDEX_URL%/}/pip/"
     shown="$(redact_url "$PACKAGE_INDEX_URL")"
     log_info "Prüfe Internetverbindung (HTTPS zu $shown)..."
     if command -v curl &> /dev/null; then
+        tool=curl
         printf 'url = "%s"\n' "$probe" | curl -fsS --max-time 10 -o /dev/null -K - && return 0
+        rc=$?
     elif command -v wget &> /dev/null; then
+        tool=wget
         printf '%s\n' "$probe" | wget -q --timeout=10 --tries=1 -O /dev/null -i - && return 0
+        rc=$?
     else
         log_warn "Weder curl noch wget gefunden; die Internetprüfung wird übersprungen."
         return 0
     fi
-    log_error "$shown ist per HTTPS nicht erreichbar. Proxy? Dann mit 'sudo -E ./install.sh' starten, damit https_proxy erhalten bleibt (oder PIP_INDEX_URL auf einen erreichbaren Spiegel setzen)."
+    https_diagnose "$probe" "$tool" "$rc"
+    if [ "$CLOCK_OFF" = "1" ] && [ "${CLOCK_RETRIED:-0}" = "0" ] && clock_offer; then
+        CLOCK_RETRIED=1
+        wait_for_internet
+        return 0
+    fi
+    log_error "$shown ist per HTTPS nicht erreichbar. $HTTPS_PROBLEM"
 }
 
 # --- LINUX-FAMILIE UND PAKETVERWALTUNG ---
@@ -325,7 +449,14 @@ pacman_database_text() {
 # Installiert Pakete mit PKG. Vor der ersten Installation lesen apt und apk ihre Paketlisten neu; pacman nie
 # (pacman -Sy allein wäre ein Teil-Upgrade, das Arch nicht unterstützt), dnf und zypper tun es selbst.
 PKG_LISTS_READ=0
+# Offline ruft der Installer keine Paketverwaltung auf: Er nennt, was fehlt (OFFLINE_MISSING, am Ende noch einmal).
+OFFLINE_MISSING=()
 pkg_install() {
+    if [ "$OFFLINE" = "1" ]; then
+        OFFLINE_MISSING+=("$*")
+        log_warn "Offline (--offline): $* wird nicht installiert; die Paketverwaltung bräuchte ihre Paketquellen im Netz. Installiere es von einem lokalen Medium (dem Installationsmedium oder einem lokalen Spiegel der Distribution; system-packages.txt im Preload nennt, was der Installer braucht)."
+        return 1
+    fi
     pkg_argv
     [ "${#PKG_ARGV[@]}" -gt 0 ] || return 1
     if [ "$PKG_LISTS_READ" = "0" ]; then
@@ -603,11 +734,15 @@ docker_apt_repo() {
 # enthalten, und der festgelegte Fingerabdruck muss der seines Hauptschlüssels sein (nicht der eines Unterschlüssels).
 # Vor der Prüfung wird nichts außerhalb eines eigenen temporären Ordners geschrieben. gpg läuft mit --no-autostart: Es
 # startet keinen gpg-agent, der als root nach dem Installer weiterliefe. Rückgabe 0 geschrieben, 1 nicht Dockers
-# Schlüssel, 2 nicht geladen, 3 nicht geschrieben; außer bei 0 bleibt $2, wie es war.
+# Schlüssel, 2 nicht geladen (DOCKER_KEY_CURL_RC ist dann der Exit-Code von curl), 3 nicht geschrieben; außer bei 0
+# bleibt $2, wie es war.
+DOCKER_KEY_CURL_RC=0
 fetch_docker_key() {
     local repo="$1" dest="$2" want="${3:-$DOCKER_KEY_FINGERPRINT}" home primary rc=0
+    DOCKER_KEY_CURL_RC=0
     home="$(mktemp -d)" || return 3
     if ! curl -fsSL --proto '=https' --tlsv1.2 "$DOCKER_DOWNLOAD_URL/$repo/gpg" -o "$home/download.key"; then
+        DOCKER_KEY_CURL_RC=$?
         rc=2
     else
         # Was danach im Schlüsselbund steht, entscheidet, nicht der Rückgabewert des Einlesens: Ohne gpg-agent meldet
@@ -665,7 +800,7 @@ docker_source_exists() {
 docker_key_problem() {
     case "$2" in
         1) echo "Der Schlüssel von $DOCKER_DOWNLOAD_URL/$1/gpg hat nicht den Fingerabdruck aus Dockers Anleitung ($3) oder enthält mehr als diesen einen Schlüssel; ihm wird nicht vertraut, und nichts wurde eingetragen." ;;
-        2) echo "Dockers Signaturschlüssel ließ sich nicht von $DOCKER_DOWNLOAD_URL/$1/gpg laden (Proxy? Dann mit 'sudo -E ./install.sh')." ;;
+        2) echo "Dockers Signaturschlüssel ließ sich nicht von $DOCKER_DOWNLOAD_URL/$1/gpg laden. $(https_problem "$DOCKER_DOWNLOAD_URL/$1/gpg" curl "$DOCKER_KEY_CURL_RC")" ;;
         *) echo "Der geprüfte Schlüssel ließ sich nicht nach $4 schreiben." ;;
     esac
 }
@@ -1475,7 +1610,7 @@ setup_system() {
     # Alpine (musl): nur Docker und die Werkzeuge für das Framework-Image, dann der Weg, der hier geht (alpine_stop).
     if [ "$OS_FAMILY" = "alpine" ]; then
         if [ "$CONTAINER_BUILD" != "1" ]; then
-            setup_engine
+            setup_engine_or_name
             alpine_image_tools
         fi
         alpine_stop
@@ -1491,6 +1626,24 @@ setup_system() {
         return 0
     fi
 
+    setup_engine_or_name
+}
+
+# Offline wird eine Container-Engine nur eingerichtet, wenn sie schon da ist (rootless: podman oder rootless Docker der
+# Person; --rootful: docker); sonst nennt der Installer sie und geht weiter: Bauen braucht sie, das Framework nicht.
+offline_engine_there() {
+    if [ "$ROOTFUL" = "1" ]; then command -v docker &> /dev/null; return; fi
+    engine_user
+    command -v podman &> /dev/null || rootless_docker_there
+}
+
+setup_engine_or_name() {
+    if [ "$OFFLINE" = "1" ] && ! offline_engine_there; then
+        podman_plan
+        OFFLINE_MISSING+=("Container-Engine (${PODMAN_PACKAGES[*]:-podman})")
+        log_warn "Offline (--offline): Es gibt noch keine Container-Engine, und ohne Netz installiert der Installer keine (rootless Podman: ${PODMAN_PACKAGES[*]:-podman}). Die Installation geht weiter; Builds brauchen sie. Danach, mit den Paketen von einem lokalen Medium installiert: 'sudo ./install.sh --offline' erneut."
+        return 0
+    fi
     setup_engine
 }
 
@@ -1593,7 +1746,7 @@ shipped_files() {
     else
         # build/ und dist/ nur auf oberster Ebene: orchestrator/runtime/build/ ist ein Paket des Frameworks.
         (cd "$REPO_ROOT" && find . \( -name .git -o -name .venv -o -name __pycache__ -o -path ./build -o -path ./dist \
-            -o -path ./output -o -path ./cache -o -path ./models -o -path ./logs \) -prune \
+            -o -path ./output -o -path ./cache -o -path ./models -o -path ./logs -o -path ./llmcf-preload-scripts \) -prune \
             -o -type f ! -path ./configs/config.yml -printf '%P\0')
     fi
 }
@@ -1662,10 +1815,18 @@ deploy_files() {
         if [ -d "$REPO_ROOT/.git" ]; then printf '%s\n' "$REPO_ROOT" > "$INSTALL_DIR/.install_source"; fi
     fi
 
-    # Rechte anpassen (Der normale User soll den Code besitzen, um ohne sudo auszuführen)
+    # Rechte: Die .venv baut die Person, die installiert, mit ihren Rechten (setup_venv). Schreibt das Framework nichts
+    # mehr in den Installationsordner, bekommt sie dafür nur den Ordner selbst (rsync hat die ausgelieferten Dateien
+    # mit den Rechten des Checkouts kopiert), und share_installation gibt danach alles root und der Gruppe llmcf;
+    # persönliche Dateien einer früheren Version bleiben, wem sie gehören. Sonst besitzt sie wie bisher den ganzen
+    # Ordner, um ohne sudo zu laufen.
     REAL_USER="${SUDO_USER:-$USER}"
     REAL_GROUP=$(id -gn "$REAL_USER")
-    chown -R "$REAL_USER:$REAL_GROUP" "$INSTALL_DIR"
+    if install_read_only_ready; then
+        chown "$REAL_USER:$REAL_GROUP" "$INSTALL_DIR"
+    else
+        chown -R "$REAL_USER:$REAL_GROUP" "$INSTALL_DIR"
+    fi
 }
 
 # --- INSTALLATION UNTER DEM FRÜHEREN NAMEN ---
@@ -1738,6 +1899,392 @@ old_installation_note() {
     echo "   dann selbst: sudo rm -rf $OLD_INSTALL_DIR"
 }
 
+# --- PRELOAD: DIE PYTHON-PAKETE FÜR EINEN RECHNER OHNE NETZ ---
+# Ein Archiv von preload.sh (auf einem Rechner mit Netz gemacht): llmcf-preload/ mit manifest.txt, wheels/, tools/,
+# system-packages.txt und SHA256SUMS. Keine Signatur: Die Hashes, auf die es ankommt, sind die des Locks in diesem
+# Checkout, gegen die pip jedes Wheel prüft (--require-hashes). SHA256SUMS nennt eine beschädigte Datei; das sha256
+# des Archivs selbst steht zum Vergleich mit dem, was preload.sh ausgab (geprüft mit --preload-sha256).
+PRELOAD_FORMAT="1"
+PRELOAD_TOP="llmcf-preload"
+PRELOAD_WORK="" PRELOAD_DIR=""
+
+# Ein Wert aus manifest.txt des Preloads (Zeilen NAME=WERT).
+preload_value() {
+    awk -F= -v key="$1" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$PRELOAD_DIR/manifest.txt"
+}
+
+# Das Ziel dieses Rechners in den Namen von preload.sh (linux-x86_64, linux-aarch64).
+this_target() {
+    case "$(uname -m)" in
+        x86_64|amd64) echo linux-x86_64 ;;
+        aarch64|arm64) echo linux-aarch64 ;;
+        *) echo "linux-$(uname -m)" ;;
+    esac
+}
+
+# Die glibc dieses Rechners als 2.NN (leer ohne glibc, etwa unter musl).
+this_glibc() {
+    getconf GNU_LIBC_VERSION 2> /dev/null | awk '$1 == "glibc" { print $2 }'
+}
+
+# Prüft das Preload PRELOAD_FILE, bevor irgendetwas verändert wird, und packt es in einen eigenen temporären Ordner aus
+# (PRELOAD_DIR). Abgelehnt wird ein Archiv mit einem Pfad außerhalb von llmcf-preload/, mit einem Link oder einem
+# anderen Eintrag als Datei und Ordner, mit einer Datei, die SHA256SUMS nicht oder anders nennt, oder für eine andere
+# Plattform. Nichts darin wird ausgeführt.
+preload_open() {
+    local sum listing names line name want mine
+    [ -n "$PRELOAD_FILE" ] || return 0
+    if [ ! -f "$PRELOAD_FILE" ]; then log_error "Das Preload $PRELOAD_FILE gibt es nicht (oder es ist keine Datei)."; fi
+    sum="$(sha256sum -- "$PRELOAD_FILE" | awk '{ print $1 }')"
+    log_info "Preload: $PRELOAD_FILE"
+    log_info "sha256 des Archivs: $sum (vergleiche mit der Zahl, die preload.sh auf dem Rechner mit Netz ausgab)"
+    if [ -n "$PRELOAD_SHA256" ] && [ "${PRELOAD_SHA256,,}" != "$sum" ]; then
+        log_error "Das Preload ist nicht das Archiv, das preload.sh schrieb: sha256 $sum, erwartet ${PRELOAD_SHA256,,} (--preload-sha256). Kopiere es noch einmal."
+    fi
+    if ! listing="$(tar -tvzf "$PRELOAD_FILE" 2> /dev/null)" || ! names="$(tar -tzf "$PRELOAD_FILE" 2> /dev/null)"; then
+        log_error "$PRELOAD_FILE ist kein lesbares .tar.gz (preload.sh schreibt eins)."
+    fi
+    while IFS= read -r line; do
+        case "${line:0:1}" in -|d) ;; *) log_error "Das Preload enthält einen Eintrag, der weder Datei noch Ordner ist (ein Link?): $line" ;; esac
+    done <<< "$listing"
+    while IFS= read -r name; do
+        case "/$name/" in
+            */../*|//*) log_error "Das Preload enthält einen Pfad außerhalb seines Ordners: $name" ;;
+        esac
+        case "$name" in
+            "$PRELOAD_TOP"|"$PRELOAD_TOP"/*) ;;
+            *) log_error "Das Preload enthält etwas außerhalb von $PRELOAD_TOP/: $name" ;;
+        esac
+    done <<< "$names"
+    PRELOAD_WORK="$(mktemp -d)" || log_error "Kein temporärer Ordner für das Preload."
+    trap 'rm -rf "$PRELOAD_WORK"' EXIT
+    # Für die Person lesbar, die die .venv baut (sie läuft mit ihren Rechten).
+    chmod 0755 "$PRELOAD_WORK"
+    if ! tar -xzf "$PRELOAD_FILE" -C "$PRELOAD_WORK" --no-same-owner --no-same-permissions; then
+        log_error "Das Preload ließ sich nicht auspacken (Meldungen oben)."
+    fi
+    PRELOAD_DIR="$PRELOAD_WORK/$PRELOAD_TOP"
+    if [ ! -f "$PRELOAD_DIR/SHA256SUMS" ] || [ ! -f "$PRELOAD_DIR/manifest.txt" ] || [ ! -d "$PRELOAD_DIR/wheels" ]; then
+        log_error "Das Preload ist unvollständig (SHA256SUMS, manifest.txt und wheels/ gehören hinein); mach es mit preload.sh neu."
+    fi
+    if grep -v -q -E '^[0-9a-f]{64}  [^/ ][^ ]*$' "$PRELOAD_DIR/SHA256SUMS" \
+        || grep -q -E '(^|/)\.\.(/|$)' "$PRELOAD_DIR/SHA256SUMS"; then
+        log_error "SHA256SUMS im Preload hat eine Zeile, die nicht 'sha256  pfad' innerhalb des Preloads ist."
+    fi
+    want="$(awk '{ print $2 }' "$PRELOAD_DIR/SHA256SUMS" | LC_ALL=C sort)"
+    mine="$(cd "$PRELOAD_DIR" && find . -type f ! -path ./SHA256SUMS -printf '%P\n' | LC_ALL=C sort)"
+    if [ "$want" != "$mine" ]; then
+        log_error "Die Dateien im Preload sind nicht die, die SHA256SUMS nennt (fehlend oder dazugekommen): $(diff <(echo "$want") <(echo "$mine") | grep '^[<>]' | tr '\n' ' ')"
+    fi
+    if ! (cd "$PRELOAD_DIR" && sha256sum --quiet --strict -c SHA256SUMS); then
+        log_error "Eine Datei im Preload hat nicht das sha256, das SHA256SUMS nennt (oben): Das Archiv ist beschädigt; kopiere es noch einmal oder mach es neu."
+    fi
+    if [ "$(preload_value format)" != "$PRELOAD_FORMAT" ]; then
+        log_error "Das Preload hat das Format '$(preload_value format)', dieser Installer liest $PRELOAD_FORMAT; mach es mit preload.sh aus diesem Checkout neu."
+    fi
+    preload_matches_computer
+    log_success "Preload geprüft: $(find "$PRELOAD_DIR/wheels" -type f | wc -l) Pakete für $(preload_value target), Python $(preload_value python) (llmcf $(preload_value version))."
+}
+
+# Die Systempakete, die der Installer auf dem Ziel $1 installieren würde, wenn sie fehlen (system-packages.txt des
+# Preloads), in der Sprache der Paketverwaltung des Systems in OS_RELEASE_FILE; für Windows die Pakete von install.bat.
+system_packages_text() {
+    local sets=() pkgs
+    echo "# Systempakete, die der Installer auf dem Zielrechner installieren würde, wenn sie fehlen."
+    echo "# Offline ruft er keine Paketverwaltung auf: Bring sie von einem lokalen Medium mit (Installationsmedium"
+    echo "# oder lokaler Spiegel der Distribution), ein Satz je Zeile; nach | stehen Ersatzpakete."
+    case "$1" in
+        windows-*)
+            echo "# Ziel: Windows (install.bat installiert sie mit Netz über winget)"
+            echo "python: winget install -e --id Python.Python.3.13"
+            echo "7zip: winget install -e --id 7zip.7zip"
+            echo "container-engine: winget install -e --id RedHat.Podman (mit --rootful: Docker.DockerDesktop)"
+            return 0 ;;
+    esac
+    detect_system
+    echo "# Ziel: $(system_label), Paketverwaltung: ${PKG:-keine, die der Installer kennt}"
+    if [ -z "$PKG" ]; then
+        echo "# Für dieses System installiert der Installer keine Pakete; was das Framework braucht: $MANUAL_URL"
+        return 0
+    fi
+    echo "python: $(python_packages)"
+    mapfile -t sets < <(python_versioned_packages)
+    if [ "${#sets[@]}" -gt 0 ]; then echo "python (wenn python3 nicht 3.11 bis 3.14 ist): $(printf '%s | ' "${sets[@]}" | sed 's/ | $//')"; fi
+    echo "rsync: rsync"
+    mapfile -t sets < <(sevenzip_packages)
+    echo "7zip: $(printf '%s | ' "${sets[@]}" | sed 's/ | $//')"
+    podman_plan
+    pkgs="${PODMAN_PACKAGES[*]}${PODMAN_OPTIONAL[*]:+ (dazu, wenn es das gibt: ${PODMAN_OPTIONAL[*]})}"
+    echo "container-engine: ${pkgs:-keine Pakete für $(system_label)}"
+}
+
+# Das Rezept des Preloads (preload_lock.py spec) für das Ziel $2, Python $3, glibc $4 in den Ordner $1, mit dem Python
+# $5 (die Lock-Datei nach HEADLESS); gibt die Zahl der Pakete aus.
+preload_spec() {
+    local out="$1" target="$2" python="$3" glibc="$4" py="$5" lock="requirements-gui.txt" packages
+    if [ "$HEADLESS" = "1" ]; then lock="requirements.txt"; fi
+    packages="$(mktemp)" || return 1
+    system_packages_text "$target" > "$packages"
+    "$py" -I "$REPO_ROOT/scripts/preload_lock.py" spec --requirements "$REPO_ROOT/$lock" \
+        --resolve "$REPO_ROOT/requirements-resolve.txt" --target "$target" --python "$python" --glibc "$glibc" \
+        --version "$(version_in "$REPO_ROOT")" --system-packages "$packages" --out "$out"
+    local rc=$?
+    rm -f "$packages"
+    return "$rc"
+}
+
+# Offline ohne Preload (und ohne eigenen Spiegel für pip): Der Installer schreibt preload.sh und preload.ps1 für genau
+# diesen Rechner (Plattform, Python, glibc, mit oder ohne grafische Oberfläche) in PRELOAD_SCRIPTS_DIR, sagt, wo sie
+# liegen und was sie holen, und wartet am Terminal auf den Pfad des Archivs, das die Person auf einem Rechner mit Netz
+# damit macht und herüberträgt. Ohne Terminal hält er mit diesen Schritten an, statt zu warten.
+PRELOAD_SCRIPTS_DIR_NAME="llmcf-preload-scripts"
+preload_wanted() {
+    [ "$OFFLINE" = "1" ] && [ -z "$PRELOAD_FILE" ] && [ -z "${PIP_INDEX_URL:-}${PIP_FIND_LINKS:-}" ]
+}
+
+preload_request() {
+    local dir="$REPO_ROOT/$PRELOAD_SCRIPTS_DIR_NAME" spec python glibc written=() count answer="" person="${SUDO_USER:-${USER:-}}"
+    preload_wanted || return 0
+    find_python || log_error "Offline (--offline) ohne Preload: Für das Preload braucht der Installer hier ein Python 3.11 bis 3.14, und offline installiert er keins. Installiere es von einem lokalen Medium ($(python_packages)) und starte 'sudo ./install.sh --offline' erneut."
+    python="$("$PYTHON" -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])')"
+    glibc="$(this_glibc)"
+    spec="$(mktemp -d)" || log_error "Kein temporärer Ordner für das Rezept des Preloads."
+    if ! count="$(preload_spec "$spec" "$(this_target)" "$python" "${glibc:-2.17}" "$PYTHON")"; then
+        rm -rf "$spec"
+        log_error "Das Rezept des Preloads ließ sich nicht schreiben (oben)."
+    fi
+    mkdir -p "$dir" || log_error "$dir ließ sich nicht anlegen."
+    mapfile -t written < <("$PYTHON" -I "$REPO_ROOT/scripts/preload_lock.py" write-scripts --spec "$spec" --out "$dir")
+    rm -rf "$spec"
+    if [ "${#written[@]}" -lt 3 ]; then log_error "preload.sh und preload.ps1 ließen sich nicht schreiben (oben)."; fi
+    if [ -n "$person" ] && [ "$person" != "root" ]; then chown -R "$person:$(id -gn "$person" 2> /dev/null || echo "$person")" "$dir" 2> /dev/null || true; fi
+    echo ""
+    log_warn "Offline (--offline): Die Python-Pakete von llmcf fehlen hier, und ohne Netz holt der Installer sie nicht."
+    echo "   Er hat das Preload für genau diesen Rechner geschrieben:"
+    echo "     ${written[0]}   (Linux, macOS: sh preload.sh)"
+    echo "     ${written[1]}   (Windows: powershell -ExecutionPolicy Bypass -File preload.ps1)"
+    echo "   Es holt: ${written[2]} ($count Pakete)."
+    echo "   Führe eins davon auf einem Rechner mit Netz aus (Python 3 mit pip genügt), trag das Archiv"
+    echo "   ($PRELOAD_TOP-...tar.gz) hierher (etwa auf einem USB-Stick) und gib hier seinen Pfad an."
+    while :; do
+        printf '%s ' "Pfad des Preload-Archivs (leer: abbrechen):"
+        if ! { IFS= read -r answer < "$ASK_TTY"; } 2> /dev/null; then
+            echo ""
+            log_error "Kein Terminal zum Warten (ein unbeaufsichtigter Lauf). Mach das Archiv mit dem Preload oben und starte dann: sudo ./install.sh --offline --preload DATEI"
+        fi
+        answer="${answer#"${answer%%[![:space:]]*}"}"
+        answer="${answer%"${answer##*[![:space:]]}"}"
+        if [ -z "$answer" ]; then
+            log_error "Abgebrochen, nichts verändert. Später: sudo ./install.sh --offline --preload DATEI"
+        fi
+        if [ -f "$answer" ]; then break; fi
+        log_warn "$answer gibt es nicht (oder es ist keine Datei); noch einmal."
+    done
+    PRELOAD_FILE="$answer"
+    preload_open
+}
+
+# Passt das Preload zu diesem Rechner und Checkout? Die Plattform, die glibc und die Lock-Datei, die diese Installation
+# nimmt (preload_open, bevor etwas verändert wird), und das Python der .venv (preload_fits, sobald es feststeht); sonst
+# hält der Installer mit dem, was nicht passt, und dem Befehl an, der ein passendes Preload macht.
+preload_matches_computer() {
+    local target glibc mine lock requirements="requirements-gui.txt" headless=""
+    if [ "$HEADLESS" = "1" ]; then requirements="requirements.txt"; headless=" --headless"; fi
+    target="$(preload_value target)"
+    if [ "$target" != "$(this_target)" ]; then
+        log_error "Das Preload ist für $target, dieser Rechner ist $(this_target). Auf dem Rechner mit Netz: ./preload.sh --target $(this_target)$headless"
+    fi
+    glibc="$(preload_value glibc)"
+    mine="$(this_glibc)"
+    if [ -n "$glibc" ] && { [ -z "$mine" ] || [ "$(printf '%s\n%s\n' "$glibc" "$mine" | sort -V | head -n 1)" != "$glibc" ]; }; then
+        log_error "Die Wheels des Preloads brauchen glibc $glibc, dieser Rechner hat ${mine:-keine}. Auf dem Rechner mit Netz: ./preload.sh --target $(this_target) --glibc ${mine:-2.17}$headless"
+    fi
+    lock="$(preload_value lock)"
+    if [ "$lock" != "$requirements" ]; then
+        log_error "Das Preload enthält die Pakete von $lock, diese Installation nimmt $requirements. Mach es passend (preload.sh$headless) oder starte den Installer mit der anderen Wahl (--headless installiert requirements.txt, ohne es requirements-gui.txt)."
+    fi
+    if [ "$(preload_value lock_sha256)" != "$(sha256sum -- "$REPO_ROOT/$requirements" | awk '{ print $1 }')" ]; then
+        log_error "Das Preload wurde aus einem anderen Stand von $requirements gemacht als diesem Checkout (Preload: llmcf $(preload_value version), hier: $(version_in "$REPO_ROOT")). Mach es mit preload.sh aus genau diesem Checkout neu."
+    fi
+}
+
+preload_fits() {
+    local python have
+    [ -n "$PRELOAD_DIR" ] || return 0
+    python="$(preload_value python)"
+    have="$("$VENV_PYTHON" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2> /dev/null)"
+    if [ "${python%.*}" != "$have" ] && [ "$python" != "$have" ]; then
+        log_error "Das Preload ist für Python $python, hier wird die .venv mit Python ${have:-?} ($VENV_PYTHON) gebaut. Auf dem Rechner mit Netz: ./preload.sh --target $(this_target) --python $have"
+    fi
+}
+
+# --- EINE INSTALLATION FÜR MEHRERE PERSONEN ---
+# Schreibt das Framework des Checkouts nichts in den Installationsordner (INSTALL_READ_ONLY = True in
+# orchestrator/__init__.py, gesetzt zusammen mit dem Umzug jener Stellen in die Ordner der Person), gehört der
+# gemeinsame Teil root und ist für die Gruppe llmcf nur lesbar und ausführbar (share_installation). Vorher bekommt der
+# aufrufende Benutzer den Ordner wie bisher: Ein nur lesbarer Ordner bräche ein Framework, das dort noch schreibt.
+SHARED_GROUP="llmcf"
+INSTALLED_BY_NAME=".lcf-installed-by"
+INSTALLED_STATE_NAME=".lcf-installed-state"
+PERSON_DIR_NAME=".llm-framework"
+# Persönliche Dateien einer früheren Version im Installationsordner: Sie bleiben, wem sie gehören, und werden nie für
+# die Gruppe lesbar (der Tresor einer Version vor 3.0.0, Einstellungen, Builds, Cache, Modelle, Logs).
+PERSONAL_LEFTOVERS=(configs/config.yml configs/framework.yml configs/secrets.store output cache models logs)
+
+install_read_only_ready() {
+    grep -q -E '^INSTALL_READ_ONLY[[:space:]]*=[[:space:]]*True\b' "$REPO_ROOT/orchestrator/__init__.py" 2> /dev/null
+}
+
+# Die Version in orchestrator/__init__.py unter $1.
+version_in() {
+    sed -n -E "s/^__version__[[:space:]]*=[[:space:]]*[\"']([^\"']+)[\"'].*/\1/p" "$1/orchestrator/__init__.py" 2> /dev/null | head -n 1
+}
+
+# Der Stand dieses Checkouts: die Version und ein sha256 über Pfad und Inhalt jeder ausgelieferten Datei.
+checkout_state() {
+    local list sum
+    list="$(mktemp)" || return 1
+    if ! shipped_files > "$list" || [ ! -s "$list" ]; then rm -f "$list"; return 1; fi
+    sum="$(cd "$REPO_ROOT" && LC_ALL=C sort -z "$list" | xargs -0 sha256sum -- | sha256sum | awk '{ print $1 }')"
+    rm -f "$list"
+    [ -n "$sum" ] || return 1
+    echo "$(version_in "$REPO_ROOT") $sum"
+}
+
+# Gibt es hier schon eine Installation (Code und .venv)?
+installation_present() {
+    [ -d "$INSTALL_DIR/orchestrator" ] && [ -x "$INSTALL_DIR/.venv/bin/python" ]
+}
+
+# Das Konto, das die Installation eingerichtet oder zuletzt aktualisiert hat: aus $INSTALLED_BY_NAME, bei einer
+# Installation von vor dieser Datei der Besitzer des Ordners.
+installed_by() {
+    local file="$INSTALL_DIR/$INSTALLED_BY_NAME" who=""
+    if [ -f "$file" ] && [ ! -L "$file" ]; then IFS= read -r who < "$file" || true; fi
+    if [ -z "$who" ]; then who="$(stat -c %U -- "$INSTALL_DIR" 2> /dev/null)"; fi
+    echo "${who//[^A-Za-z0-9._@-]/}"
+}
+
+# Was dieser Lauf tut (INSTALL_ROLE):
+#   full    wie bisher: keine Installation da, dasselbe Konto, root ohne sudo, oder das Framework schreibt noch dorthin
+#   person  ein anderes Konto, und Version und Dateien sind die dieses Checkouts: nur der Teil dieser Person
+#   update  ein anderes Konto mit einer anderen Version oder anderen Dateien: ein Update des gemeinsamen Teils
+# INSTALL_OWNER nennt das Konto, das sie eingerichtet hat.
+INSTALL_ROLE="full" INSTALL_OWNER=""
+install_role() {
+    local real_user="${SUDO_USER:-${USER:-}}" state="" recorded=""
+    INSTALL_ROLE=full INSTALL_OWNER=""
+    install_read_only_ready || return 0
+    installation_present || return 0
+    if [ -z "$real_user" ] || [ "$real_user" = "root" ]; then return 0; fi
+    INSTALL_OWNER="$(installed_by)"
+    if [ -z "$INSTALL_OWNER" ] || [ "$INSTALL_OWNER" = "$real_user" ]; then return 0; fi
+    state="$(checkout_state)" || state=""
+    if [ -f "$INSTALL_DIR/$INSTALLED_STATE_NAME" ]; then IFS= read -r recorded < "$INSTALL_DIR/$INSTALLED_STATE_NAME" || true; fi
+    if [ -n "$state" ] && [ "$state" = "$recorded" ]; then
+        INSTALL_ROLE=person
+    else
+        INSTALL_ROLE=update
+        log_info "llmcf ist hier schon installiert (von '$INSTALL_OWNER', Version $(version_in "$INSTALL_DIR")); dieser Checkout hat Version $(version_in "$REPO_ROOT") oder andere Dateien: Der gemeinsame Teil wird aktualisiert, die Ordner jeder Person bleiben, wie sie sind."
+    fi
+}
+
+# Die Gruppe llmcf (angelegt, wenn sie fehlt) mit der Person darin. Die Mitgliedschaft gilt ab der nächsten Anmeldung.
+ensure_shared_group() {
+    local person="${SUDO_USER:-${USER:-}}"
+    if ! getent group "$SHARED_GROUP" > /dev/null 2>&1; then
+        if command -v groupadd &> /dev/null; then
+            groupadd --system "$SHARED_GROUP" || log_error "Die Gruppe $SHARED_GROUP ließ sich nicht anlegen (Meldungen oben)."
+        else
+            addgroup -S "$SHARED_GROUP" || log_error "Die Gruppe $SHARED_GROUP ließ sich nicht anlegen (Meldungen oben)."
+        fi
+        log_info "Gruppe $SHARED_GROUP angelegt: Wer darin ist, darf die gemeinsame Installation in $INSTALL_DIR nutzen."
+    fi
+    if [ -z "$person" ] || [ "$person" = "root" ]; then return 0; fi
+    if id -nG "$person" 2> /dev/null | tr ' ' '\n' | grep -q -x "$SHARED_GROUP"; then return 0; fi
+    if command -v usermod &> /dev/null; then
+        usermod -aG "$SHARED_GROUP" "$person" || log_error "'$person' ließ sich nicht in die Gruppe $SHARED_GROUP aufnehmen (Meldungen oben)."
+    else
+        addgroup "$person" "$SHARED_GROUP" || log_error "'$person' ließ sich nicht in die Gruppe $SHARED_GROUP aufnehmen (Meldungen oben)."
+    fi
+    SHARED_GROUP_ADDED=1
+    log_info "'$person' ist jetzt in der Gruppe $SHARED_GROUP (wirksam ab der nächsten Anmeldung; sofort in einem Terminal: newgrp $SHARED_GROUP). Herausnehmen: sudo gpasswd -d $person $SHARED_GROUP"
+}
+SHARED_GROUP_ADDED=0
+
+# Der eigene Ordner der Person (~/.llm-framework), angelegt als sie selbst und nur für sie lesbar.
+person_folder() {
+    local person="${SUDO_USER:-${USER:-}}" run=()
+    if [ -z "$person" ] || [ "$person" = "root" ]; then return 0; fi
+    run=(sudo -H -u "$person")
+    if ! command -v sudo &> /dev/null; then run=(runuser -u "$person" --); fi
+    # shellcheck disable=SC2016 # the inner sh expands $HOME and $1, its own
+    if ! "${run[@]}" sh -c 'mkdir -p "$HOME/$1" && chmod 0700 "$HOME/$1"' person "$PERSON_DIR_NAME"; then
+        log_warn "Dein eigener Ordner ~/$PERSON_DIR_NAME ließ sich nicht anlegen (Meldungen oben); das Framework legt ihn beim ersten Start an."
+    fi
+}
+
+# Der gemeinsame Teil an root und die Gruppe llmcf: lesbar und ausführbar für die Gruppe, beschreibbar für keinen
+# ihrer Mitglieder, nichts für andere Konten. Persönliche Dateien einer früheren Version (PERSONAL_LEFTOVERS) bleiben,
+# wem sie gehören. Ohne INSTALL_READ_ONLY im Checkout tut der Schritt nichts (deploy_files hat den Ordner wie bisher
+# dem aufrufenden Benutzer gegeben).
+share_installation() {
+    local prune=() name
+    install_read_only_ready || return 0
+    ensure_shared_group
+    for name in "${PERSONAL_LEFTOVERS[@]}"; do prune+=(-path "$INSTALL_DIR/$name" -o); done
+    log_info "Gemeinsamer Teil: $INSTALL_DIR gehört root, die Gruppe $SHARED_GROUP darf ihn lesen und ausführen, niemand darin schreiben."
+    if ! find "$INSTALL_DIR" \( "${prune[@]}" -false \) -prune -o -exec chown -h root:"$SHARED_GROUP" {} + \
+        || ! find "$INSTALL_DIR" \( "${prune[@]}" -false \) -prune -o ! -type l -exec chmod u+rwX,g+rX,g-w,o-rwx {} +; then
+        log_error "Die Rechte des gemeinsamen Teils ließen sich nicht setzen (Meldungen oben)."
+    fi
+}
+
+# Wer die Installation eingerichtet hat und welchen Stand sie hat (install_role liest es beim nächsten Lauf).
+record_installation() {
+    local person="${SUDO_USER:-${USER:-}}" state
+    [ -d "$INSTALL_DIR" ] || return 0
+    if [ "$(realpath -m -- "$REPO_ROOT")" = "$(realpath -m -- "$INSTALL_DIR")" ]; then return 0; fi
+    state="$(checkout_state)" || state=""
+    printf '%s\n' "${person:-root}" > "$INSTALL_DIR/$INSTALLED_BY_NAME"
+    if [ -n "$state" ]; then printf '%s\n' "$state" > "$INSTALL_DIR/$INSTALLED_STATE_NAME"; fi
+    if install_read_only_ready; then
+        chown root:"$SHARED_GROUP" "$INSTALL_DIR/$INSTALLED_BY_NAME" "$INSTALL_DIR/$INSTALLED_STATE_NAME" 2> /dev/null || true
+        chmod 0640 "$INSTALL_DIR/$INSTALLED_BY_NAME" "$INSTALL_DIR/$INSTALLED_STATE_NAME" 2> /dev/null || true
+    else
+        local group
+        group="$(id -gn "${person:-root}" 2> /dev/null)" || group=""
+        chown "${person:-root}${group:+:$group}" "$INSTALL_DIR/$INSTALLED_BY_NAME" "$INSTALL_DIR/$INSTALLED_STATE_NAME" 2> /dev/null || true
+    fi
+}
+
+# Für eine zweite Person (INSTALL_ROLE person): nur ihr eigener Teil. Der gemeinsame Teil wird weder neu installiert
+# noch übernommen; kein Paketindex, keine .venv.
+person_install() {
+    local person="${SUDO_USER:-${USER:-}}"
+    log_info "llmcf ist auf diesem Rechner schon installiert (von '$INSTALL_OWNER', Version $(version_in "$INSTALL_DIR"), dieselben Dateien wie dieser Checkout). Für '$person' wird nur der eigene Teil eingerichtet; der gemeinsame Teil in $INSTALL_DIR bleibt, wie er ist."
+    ask_mode
+    detect_system
+    if [ "$CONTAINER_BUILD" != "1" ]; then setup_engine_or_name; fi
+    ensure_shared_group
+    person_folder
+    setup_mode
+    setup_ditto
+    log_success "Dein eigener Teil ist eingerichtet: die Gruppe $SHARED_GROUP, ~/$PERSON_DIR_NAME, die Container-Engine für dich, der Framework-Modus und Ditto."
+    if [ "$SHARED_GROUP_ADDED" = "1" ]; then
+        log_warn "Melde dich einmal ab und wieder an, damit die Gruppe $SHARED_GROUP gilt; dann startet 'llm-framework' (oder llm-cli) für dich."
+    fi
+    print_offline_missing
+}
+
+# Was offline nicht installiert wurde, noch einmal am Ende.
+print_offline_missing() {
+    if [ "${#OFFLINE_MISSING[@]}" -eq 0 ]; then return 0; fi
+    log_warn "Offline nicht installiert (bring die Pakete von einem lokalen Medium mit; danach den Installer erneut starten):"
+    local item
+    for item in "${OFFLINE_MISSING[@]}"; do echo "   - $item"; done
+}
+
 # --- SCHRITT 3: PYTHON VENV ---
 # Die Abhängigkeiten (DESIGN Runde 65): Jeder Lauf, auch jede Aktualisierung, löst die neuesten verträglichen
 # Versionen frisch auf (uv lock --upgrade in einer Kopie, in den Bereichen aus pyproject.toml und mit 5 Tagen
@@ -1747,17 +2294,18 @@ old_installation_note() {
 # requirements-gui.txt bzw. requirements.txt). Offline (--offline oder LCF_OFFLINE=1) oder ohne erreichbaren Index
 # gleich der getestete Stand. Die bisherige .venv bleibt beiseite (.venv.previous), bis die neue die Selbstprüfung
 # bestanden hat; scheitert auch der getestete Stand, kommt sie unverändert zurück.
-OFFLINE="${LCF_OFFLINE:-0}"
 FRESH_DIR_NAME=".deps-fresh"
 PREVIOUS_VENV_NAME=".venv.previous"
 
 # Baut $INSTALL_DIR/.venv als die Person, die installiert, aus der Datei $1 (mit Hashes, --no-deps) und prüft sie
 # selbst. Die Befehle laufen in einer eigenen bash; Pfade gehen als Argumente hinein, nie in den Befehlstext.
 venv_from() {
-    local file="$1" gui=""
+    local file="$1" gui="" wheels=""
     if [ "$HEADLESS" != "1" ]; then gui="--gui"; fi
+    # Aus einem Preload: nur seine Wheels, ohne jeden Paketindex (geprüft gegen die Hashes derselben Datei).
+    if [ -n "$PRELOAD_DIR" ]; then wheels="$PRELOAD_DIR"; fi
     rm -rf "$INSTALL_DIR/.venv"
-    # shellcheck disable=SC2016 # the inner bash expands $1 to $4, its own arguments
+    # shellcheck disable=SC2016 # the inner bash expands $1 to $5, its own arguments
     "${VENV_AS_USER[@]}" bash -c '
         set -e
         cd "$1"
@@ -1765,9 +2313,13 @@ venv_from() {
         # Das pip der Umgebung ist das, was mit Python kommt (ensurepip). Es wird nicht aktualisiert: Das lüde die
         # neueste Version von pip ohne Prüfsumme, und das mitgelieferte genügt für --require-hashes.
         # --no-deps: die Datei ist ein vollständiger Export (jedes Paket, jeder Hash); pip löst nicht neu auf.
-        ./.venv/bin/pip install --require-hashes --no-deps -r "$3" > /dev/null
+        # Aus einem Preload ($5): ohne Paketindex; build/ hat setuptools und wheel für Pakete, die es nur als
+        # Quellarchiv gibt (sie werden hier gebaut).
+        pipsrc=()
+        if [ -n "$5" ]; then pipsrc=(--no-index --find-links "$5/wheels" --find-links "$5/build"); fi
+        ./.venv/bin/pip install ${pipsrc[@]+"${pipsrc[@]}"} --require-hashes --no-deps -r "$3" > /dev/null
         ./.venv/bin/python scripts/fresh_deps.py selfcheck --root . $4
-    ' venv "$INSTALL_DIR" "$VENV_PYTHON" "$file" "$gui"
+    ' venv "$INSTALL_DIR" "$VENV_PYTHON" "$file" "$gui" "$wheels"
 }
 
 # Die neuesten verträglichen Versionen in $INSTALL_DIR/$FRESH_DIR_NAME/requirements-fresh.txt (geprüft); setzt
@@ -1821,6 +2373,7 @@ setup_venv() {
         log_error "$REQUIREMENTS fehlt in $INSTALL_DIR; ohne die festgelegten Versionen wird nichts installiert."
     fi
 
+    preload_fits
     resolve_fresh
 
     # Die bisherige Umgebung beiseite, bis die neue die Selbstprüfung bestanden hat (eine venv kennt ihren Pfad, darum
@@ -1848,6 +2401,9 @@ setup_venv() {
             rm -rf "$INSTALL_DIR/.venv" "$INSTALL_DIR/${FRESH_DIR_NAME:?}"
             if [ -d "$previous" ] && mv "$previous" "$INSTALL_DIR/.venv"; then
                 log_warn "Die bisherige Umgebung ist unverändert wieder da ($INSTALL_DIR/.venv)."
+            fi
+            if [ -n "$PRELOAD_DIR" ]; then
+                log_error "Die Python-Umgebung in $INSTALL_DIR/.venv ließ sich aus dem Preload nicht einrichten (Meldungen oben); die Installation ist nicht fertig. Passt das Preload zu diesem Rechner und Checkout (preload.sh --target, --python, --glibc)?"
             fi
             log_error "Die Python-Umgebung in $INSTALL_DIR/.venv ließ sich nicht einrichten (Meldungen oben); die Installation ist nicht fertig. Proxy oder eigener Spiegel: sudo -E ./install.sh bzw. PIP_INDEX_URL."
         fi
@@ -1878,9 +2434,18 @@ EOF
 # Liest --ditto=WERT aus den Argumenten des Installers (sonst LCF_DITTO, sonst auto). Ein unbekannter Wert bricht ab,
 # bevor irgendetwas installiert wird.
 ditto_option() {
-    local arg
+    local arg next=""
     for arg in "$@"; do
+        # --preload DATEI und --preload-sha256 HEX: der Wert im nächsten Argument
+        case "$next" in
+            preload) PRELOAD_FILE="$arg"; next=""; continue ;;
+            sha) PRELOAD_SHA256="$arg"; next=""; continue ;;
+        esac
         case "$arg" in
+            --preload) next=preload ;;
+            --preload=*) PRELOAD_FILE="${arg#--preload=}" ;;
+            --preload-sha256) next=sha ;;
+            --preload-sha256=*) PRELOAD_SHA256="${arg#--preload-sha256=}" ;;
             --ditto=*) DITTO_CHOICE="${arg#--ditto=}" ;;
             --headless) HEADLESS=1 ;;
             --dry-run) DRY_RUN=1 ;;
@@ -1890,6 +2455,12 @@ ditto_option() {
             --offline) OFFLINE=1 ;;
         esac
     done
+    if [ -n "$next" ]; then log_error "--preload und --preload-sha256 brauchen einen Wert (--preload DATEI)."; fi
+    # Ein Preload ist für einen Rechner ohne Netz: Mit ihm versucht der Installer das Netz nie.
+    if [ -n "$PRELOAD_FILE" ]; then OFFLINE=1; fi
+    if [ -n "$PRELOAD_SHA256" ] && ! [[ "$PRELOAD_SHA256" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+        log_error "--preload-sha256 erwartet die 64 Hexziffern, die preload.sh ausgab."
+    fi
     case "$MODE_CHOICE" in
         ""|private|enterprise) ;;
         *) log_error "Unbekannter Wert für --mode: '$MODE_CHOICE' (private oder enterprise)." ;;
@@ -1984,6 +2555,10 @@ setup_ditto() {
         log_info "Übersprungen (--ditto=skip). Später: llm-cli ditto runtime ensure"
         return 0
     fi
+    if [ "$OFFLINE" = "1" ]; then
+        log_info "Offline (--offline): Dittos Laufzeit wird nicht eingerichtet (sie lädt Quellcode und Modell). Später mit Netz: llm-cli ditto runtime ensure; ohne Netz aus einer Laufzeit, die ein anderer Rechner exportiert hat: llm-cli ditto runtime import"
+        return 0
+    fi
     if [ "$CONTAINER_BUILD" = "1" ]; then
         log_info "Container-Build: Ditto wird hier nicht eingerichtet. Der Docker-Modus ist im Framework-Container nicht verfügbar (darin gibt es keine Docker-Engine), und eine im Image gebaute Laufzeit passte nicht zur Hardware, auf der der Container später läuft. Nutze im Container einen Cloud-Anbieter oder einen lokalen Server in deinem Netz, oder installiere das Framework direkt auf dem Rechner, der Dittos Modell ausführen soll (docs/Container_Setup_DE.md)."
         return 0
@@ -2015,7 +2590,12 @@ finish() {
     echo ""
     echo "-----------------------------------------------------"
     echo "📂 Code:   $INSTALL_DIR"
-    echo "📂 Daten:  $INSTALL_DIR/output, cache, models (beim ersten Gebrauch angelegt)"
+    if install_read_only_ready; then
+        echo "📂 Daten:  ~/$PERSON_DIR_NAME je Person (der Code ist gemeinsam und nur lesbar, Gruppe $SHARED_GROUP)"
+        echo "👥 Weitere Personen auf diesem Rechner: jede startet einmal selbst 'sudo ./install.sh' (nur ihr eigener Teil)"
+    else
+        echo "📂 Daten:  $INSTALL_DIR/output, cache, models (beim ersten Gebrauch angelegt)"
+    fi
     if [ "$HEADLESS" = "1" ]; then
         echo "🚀 Start:  llm-cli bzw. llmcf (ohne grafische Oberfläche installiert, --headless)"
     else
@@ -2027,6 +2607,10 @@ finish() {
     esac
     echo "-----------------------------------------------------"
     old_installation_note
+    print_offline_missing
+    if [ "$SHARED_GROUP_ADDED" = "1" ]; then
+        log_warn "Du bist jetzt in der Gruppe $SHARED_GROUP: Melde dich einmal ab und wieder an, damit sie gilt."
+    fi
     
     # Hinweis zum Docker Group Refresh
     REAL_USER="${SUDO_USER:-$USER}"
@@ -2138,7 +2722,11 @@ plan_installation() {
     fi
     plan_sevenzip
     echo "   Danach: Programmdateien nach $INSTALL_DIR, .venv (${PYTHON:-dem eben installierten Python}) mit den neuesten verträglichen Versionen (uv, 5 Tage Wartezeit, pip-audit, Selbstprüfung; sonst $requirements, der getestete Stand), Starter /usr/local/bin/llm-framework, Ditto ($DITTO_CHOICE)"
-    if [ "$OFFLINE" = "1" ]; then echo "   Offline (--offline): ohne neue Auflösung, gleich $requirements"; fi
+    if [ -n "$PRELOAD_FILE" ]; then
+        echo "   Offline mit Preload $PRELOAD_FILE: geprüft (SHA256SUMS, Plattform, Python, Lock), Python-Pakete nur daraus (pip --no-index), keine Paketverwaltung, Ditto später"
+    elif [ "$OFFLINE" = "1" ]; then
+        echo "   Offline (--offline): ohne Prüfung des Netzes und ohne neue Auflösung, gleich $requirements; keine Paketverwaltung, Ditto später"
+    fi
     echo "   Framework-Modus: ${MODE_CHOICE:-wird gefragt (ohne Terminal: bleibt, wie er ist; neu: privat)}"
     log_success "Probelauf fertig: Die Installation liefe hier durch."
 }
@@ -2148,12 +2736,19 @@ main() {
     ditto_option "$@"
     if [ "$DRY_RUN" = "1" ]; then plan_installation; return 0; fi
     check_root
+    preload_open
+    install_role
+    if [ "$INSTALL_ROLE" = "person" ]; then person_install; return 0; fi
+    # Offline ohne Preload: das Preload für diesen Rechner schreiben und auf das Archiv warten, bevor etwas verändert wird.
+    if preload_wanted; then detect_system; preload_request; fi
     ask_mode
     setup_system
     deploy_files
     adopt_old_settings
     setup_venv
     configure
+    share_installation
+    record_installation
     setup_mode
     setup_ditto
     finish

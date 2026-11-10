@@ -85,8 +85,19 @@ if ($ModeChoice -notin @("", "private", "enterprise")) {
 # Dependencies (DESIGN round 65): every run resolves the newest compatible versions fresh (step [3/5]); --offline (for
 # unattended runs also LCF_OFFLINE=1) installs the shipped tested lock without resolving.
 $Offline = ($env:LCF_OFFLINE -eq "1")
+# A preload (an archive written by preload.ps1 or preload.sh on a computer with a network) for a computer without one:
+# --preload=FILE (a path without spaces; else LCF_PRELOAD), checked against --preload-sha256=HEX (LCF_PRELOAD_SHA256)
+# when given. With a preload the installer never tries the network.
+$PreloadFile = "" + $env:LCF_PRELOAD
+$PreloadSha256 = "" + $env:LCF_PRELOAD_SHA256
 foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
     if ($InstallArg -eq "--offline") { $Offline = $true }
+    if ($InstallArg -like "--preload=*") { $PreloadFile = $InstallArg.Substring(10) }
+    if ($InstallArg -like "--preload-sha256=*") { $PreloadSha256 = $InstallArg.Substring(17) }
+}
+if ($PreloadFile) { $Offline = $true }
+if ($PreloadSha256 -and ($PreloadSha256 -notmatch '^[0-9A-Fa-f]{64}$')) {
+    Write-Error "--preload-sha256 erwartet die 64 Hexziffern, die preload.ps1 ausgab."
 }
 # On an update the default is the current mode (read like every setting, with the earlier installation's Python and
 # the mode's one reader, ConfigManager and framework_mode): Enter alone keeps it ([p/E] for enterprise); a fresh
@@ -124,8 +135,116 @@ Write-Host "Code Ziel: $InstallDir"
 Write-Host "Daten (je Benutzer, beim ersten Gebrauch angelegt): $UserDataHint"
 Write-Host ""
 
+# HTTPS CHECK: the package index over HTTPS before anything is installed (pip and winget need it). A failure of the
+# certificate or the TLS handshake is checked against the time first: this computer's clock against the Date header
+# of the server, fetched once more with a check that accepts the certificate of this one request only and read for its
+# date only. A clock off by more than five minutes is named with both times and the fix; with the person's yes the
+# installer starts Windows' time service and syncs it. Only when the clock is right does the message name a proxy.
+# Offline (--offline, a preload) nothing is checked: the installer does not try the network.
+$IndexUrl = if ($env:PIP_INDEX_URL) { $env:PIP_INDEX_URL } else { "https://pypi.org/simple/" }
+$IndexShown = $IndexUrl -replace '://[^/@]*@', '://***@'
+$IndexProbe = $IndexUrl.TrimEnd('/') + "/pip/"
+$ClockTolerance = 300
+# Windows PowerShell 5.1 may offer only old TLS versions by default; the package index needs TLS 1.2.
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+
+# $null when the URL answers over HTTPS, else the exception.
+function Test-Https ($Url) {
+    try {
+        $Request = [System.Net.HttpWebRequest]::Create($Url)
+        $Request.Timeout = 10000
+        $Response = $Request.GetResponse()
+        $Response.Close()
+        return $null
+    } catch {
+        return $_.Exception
+    }
+}
+
+# Is the exception (or one inside it) a failure of the certificate or the TLS handshake?
+function Test-TlsFailure ($Problem) {
+    $Inner = $Problem
+    while ($Inner) {
+        if ($Inner -is [System.Net.WebException] -and ($Inner.Status -in @([System.Net.WebExceptionStatus]::TrustFailure, [System.Net.WebExceptionStatus]::SecureChannelFailure))) { return $true }
+        if ($Inner -is [System.Security.Authentication.AuthenticationException]) { return $true }
+        $Inner = $Inner.InnerException
+    }
+    return $false
+}
+
+# The server's Date header (UTC), or $null. Only this one request accepts any certificate, and only its date is read.
+function Get-ServerDate ($Url) {
+    try {
+        $Request = [System.Net.HttpWebRequest]::Create($Url)
+        $Request.Method = "HEAD"
+        $Request.Timeout = 10000
+        $Request.ServerCertificateValidationCallback = { $true }
+        try { $Response = $Request.GetResponse() } catch [System.Net.WebException] { $Response = $_.Exception.Response }
+        if (-not $Response) { return $null }
+        $Header = $Response.Headers["Date"]
+        $Response.Close()
+        if (-not $Header) { return $null }
+        return [DateTime]::Parse($Header, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal)
+    } catch {
+        return $null
+    }
+}
+
+function Get-SpanText ($Seconds) {
+    if ($Seconds -lt 7200) { return "$([Math]::Round($Seconds / 60)) Minuten" }
+    if ($Seconds -lt 172800) { return "$([Math]::Round($Seconds / 3600)) Stunden" }
+    return "$([Math]::Round($Seconds / 86400)) Tage"
+}
+
+if (-not $Offline) {
+    Write-Host "Pruefe Internetverbindung (HTTPS zu $IndexShown)..."
+    $Problem = Test-Https $IndexProbe
+    if ($Problem) {
+        $Why = "Proxy? Dann den Proxy fuer dieses Konto einrichten oder PIP_INDEX_URL auf einen erreichbaren Spiegel setzen."
+        if (Test-TlsFailure $Problem) {
+            $Now = [DateTime]::UtcNow
+            $Server = Get-ServerDate $IndexProbe
+            if (-not $Server) {
+                $Why = "Das Zertifikat oder der TLS-Handshake scheiterte, und die Uhrzeit des Servers liess sich nicht lesen. Pruefe zuerst die Uhr dieses Rechners (jetzt: $($Now.ToString('yyyy-MM-dd HH:mm:ss')) UTC): Einstellungen > Zeit und Sprache > Datum und Uhrzeit, 'Uhrzeit automatisch festlegen' und 'Jetzt synchronisieren'. Stimmt sie: ein Proxy oder Spiegel mit eigenem Zertifikat?"
+            } else {
+                $Off = [Math]::Abs(($Now - $Server).TotalSeconds)
+                if ($Off -gt $ClockTolerance) {
+                    $Why = "Die Uhr dieses Rechners geht falsch: Sie zeigt $($Now.ToString('yyyy-MM-dd HH:mm:ss')) UTC, der Server sagt $($Server.ToString('yyyy-MM-dd HH:mm:ss')) UTC (etwa $(Get-SpanText $Off) Unterschied). Mit einer falschen Uhr scheitert jede Zertifikatspruefung; ein Proxy ist hier nicht die Ursache. Behebung: Einstellungen > Zeit und Sprache > Datum und Uhrzeit: 'Uhrzeit automatisch festlegen' einschalten und 'Jetzt synchronisieren' (oder in einem Terminal als Administrator: w32tm /resync). Startet dieser Rechner auch Linux, haelt Linux die Hardware-Uhr in UTC und Windows in Ortszeit: entweder Windows auf UTC stellen (HKLM\SYSTEM\CurrentControlSet\Control\TimeZoneInformation, RealTimeIsUniversal = 1 als DWORD) oder unter Linux: sudo timedatectl set-local-rtc 1."
+                    # The offer: only with the person's yes, never silently (it changes a setting of the system).
+                    $Fixed = $false
+                    if ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+                        Write-Warning $Why
+                        $ClockAnswer = Read-Host "Die Uhr jetzt ueber das Netz stellen lassen (startet den Windows-Zeitdienst und synchronisiert: w32tm /resync)? [j/N]"
+                        if ("$ClockAnswer".Trim().ToLower() -in @("j", "ja", "y", "yes")) {
+                            try {
+                                Set-Service -Name w32time -StartupType Automatic
+                                Start-Service -Name w32time
+                                & w32tm /resync /force | Out-Host
+                                Start-Sleep -Seconds 3
+                                Write-Host "Die Uhr zeigt jetzt $([DateTime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss')) UTC."
+                                $Fixed = -not (Test-Https $IndexProbe)
+                            } catch {
+                                Write-Warning "Der Zeitdienst liess sich nicht stellen: $_"
+                            }
+                        }
+                    }
+                    if ($Fixed) { $Problem = $null }
+                } else {
+                    $Why = "Das Zertifikat oder der TLS-Handshake scheiterte; die Uhr dieses Rechners stimmt ($($Now.ToString('yyyy-MM-dd HH:mm:ss')) UTC). Ein Proxy oder Spiegel mit eigenem Zertifikat? Dann PIP_INDEX_URL auf einen Spiegel setzen, dem dieser Rechner vertraut."
+                }
+            }
+        }
+        if ($Problem) { Write-Error "$IndexShown ist per HTTPS nicht erreichbar. $Why" }
+    }
+} else {
+    Write-Host "Offline: keine Pruefung der Internetverbindung."
+}
+
 # 2. PYTHON PRÜFUNG & INSTALLATION
 Write-Host "[1/5] Pruefe Python Umgebung..." -ForegroundColor Yellow
+if ($Offline -and -not (Get-Command "python" -ErrorAction SilentlyContinue)) {
+    Write-Error "Offline: Python fehlt, und ohne Netz installiert der Installer keins (winget braucht das Netz). Installiere Python 3.11 bis 3.14 von einem lokalen Installer (python.org, fuer alle Benutzer) und starte install.bat erneut."
+}
 if (-not (Get-Command "python" -ErrorAction SilentlyContinue)) {
     Write-Host "Python nicht gefunden. Versuche Installation via Winget..."
     try {
@@ -144,6 +263,122 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Python ist nicht korrekt im PATH." }
 & python -c "import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)"
 if ($LASTEXITCODE -ne 0) { Write-Error "Python 3.11 bis 3.14 wird benoetigt. Bitte z. B. 'winget install Python.Python.3.13' ausfuehren." }
 
+# SEVERAL PEOPLE, ONE INSTALLATION: the program folder keeps the rights Program Files gives (administrators full
+# control, every account read and run), so every account may use it; there is no group of its own on Windows. The
+# account that installed or last updated it is written in .lcf-installed-by, what it holds in .lcf-installed-state (the
+# version and one sha256 over the copied files). Run by another account while both are the checkout's, the installer
+# copies nothing and builds no .venv: only that person's part (the shortcut, the container engine, Ditto and the mode
+# for the signed-in person). Another version or other files: an update of the shared part, as before.
+$SignedInAccount = $null
+try { $SignedInAccount = (Get-CimInstance Win32_ComputerSystem).UserName } catch { $SignedInAccount = $null }
+if (-not $SignedInAccount) { $SignedInAccount = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name }
+$CopyExcludes = @(".git", ".venv", "__pycache__", "build", "dist", ".installer_venv", "output", "cache", "models", "logs", "llmcf-preload-scripts")
+function Get-CheckoutState {
+    $Version = ""
+    $Init = Join-Path $ScriptPath "orchestrator\__init__.py"
+    if (Test-Path $Init) {
+        $Match = Select-String -Path $Init -Pattern '^__version__\s*=\s*["'']([^"'']+)["'']' | Select-Object -First 1
+        if ($Match) { $Version = $Match.Matches[0].Groups[1].Value }
+    }
+    $Root = (Resolve-Path $ScriptPath).Path.TrimEnd('\')
+    $Lines = Get-ChildItem -LiteralPath $Root -Recurse -File -Force -ErrorAction SilentlyContinue | Where-Object {
+        $Rel = $_.FullName.Substring($Root.Length + 1)
+        -not ($Rel.Split('\') | Where-Object { $CopyExcludes -contains $_ })
+    } | ForEach-Object {
+        $_.FullName.Substring($Root.Length + 1).Replace('\', '/') + " " + (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower()
+    } | Sort-Object
+    $Bytes = [Text.Encoding]::UTF8.GetBytes(($Lines -join "`n"))
+    $Sha = [Security.Cryptography.SHA256]::Create()
+    $Sum = ([BitConverter]::ToString($Sha.ComputeHash($Bytes))).Replace("-", "").ToLower()
+    return "$Version $Sum"
+}
+$InstalledByFile = Join-Path $InstallDir ".lcf-installed-by"
+$InstalledStateFile = Join-Path $InstallDir ".lcf-installed-state"
+$CheckoutState = ""
+try { $CheckoutState = Get-CheckoutState } catch { $CheckoutState = "" }
+$PersonOnly = $false
+$InstalledBy = ""
+if ((Test-Path (Join-Path $InstallDir ".venv\Scripts\python.exe")) -and (Test-Path $InstalledByFile)) {
+    $InstalledBy = ("" + (Get-Content -LiteralPath $InstalledByFile -TotalCount 1)).Trim()
+    $RecordedState = if (Test-Path $InstalledStateFile) { ("" + (Get-Content -LiteralPath $InstalledStateFile -TotalCount 1)).Trim() } else { "" }
+    if ($InstalledBy -and ($InstalledBy -ne $SignedInAccount)) {
+        if ($CheckoutState -and ($CheckoutState -eq $RecordedState)) {
+            $PersonOnly = $true
+            Write-Host "llmcf ist auf diesem Rechner schon installiert (von $InstalledBy, dieselbe Version und dieselben Dateien wie dieser Checkout). Fuer $SignedInAccount wird nur der eigene Teil eingerichtet; der gemeinsame Teil in $InstallDir bleibt, wie er ist." -ForegroundColor Cyan
+        } else {
+            Write-Host "llmcf ist hier schon installiert (von $InstalledBy); dieser Checkout hat eine andere Version oder andere Dateien: Der gemeinsame Teil wird aktualisiert, die Ordner jeder Person bleiben, wie sie sind." -ForegroundColor Cyan
+        }
+    }
+}
+
+# THE PRELOAD (offline): the Python packages from an archive made on a computer with a network, without any package
+# index. Without one (and without an own mirror for pip, PIP_INDEX_URL or PIP_FIND_LINKS), the installer writes
+# preload.ps1 and preload.sh for exactly this computer into llmcf-preload-scripts next to install.bat, says what they
+# fetch and waits for the archive's path; a run without a console stops with these steps instead of waiting. The
+# archive is checked by scripts\preload_lock.py open (only folders and files under llmcf-preload\, every file with the
+# sha256 that SHA256SUMS names); the lock's own hashes are checked by pip as with a network.
+$PreloadDir = ""
+$PreloadWork = ""
+$PreloadTool = Join-Path $ScriptPath "scripts\preload_lock.py"
+$PythonVersionFull = ("" + (& python -c "import sys; print('%d.%d.%d' % sys.version_info[:3])")).Trim()
+$PythonVersion = ($PythonVersionFull -split '\.')[0..1] -join '.'
+$ThisTarget = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "windows-arm64" } else { "windows-amd64" }
+if ((-not $PersonOnly) -and $Offline -and (-not $PreloadFile) -and (-not $env:PIP_INDEX_URL) -and (-not $env:PIP_FIND_LINKS)) {
+    $ScriptsDir = Join-Path $ScriptPath "llmcf-preload-scripts"
+    $SpecDir = Join-Path ([IO.Path]::GetTempPath()) ("llmcf-spec-" + [Guid]::NewGuid().ToString("N"))
+    $PackagesFile = Join-Path ([IO.Path]::GetTempPath()) ("llmcf-packages-" + [Guid]::NewGuid().ToString("N") + ".txt")
+    $PackagesText = @(
+        "# Systempakete, die install.bat auf dem Zielrechner installieren wuerde, wenn sie fehlen (mit Netz ueber winget).",
+        "# Offline installiert er keine: Bring die Installer von einem Rechner mit Netz mit.",
+        "python: winget install -e --id Python.Python.3.13",
+        "7zip: winget install -e --id 7zip.7zip",
+        "container-engine: winget install -e --id RedHat.Podman (mit --rootful: Docker.DockerDesktop)") -join "`n"
+    [IO.File]::WriteAllText($PackagesFile, $PackagesText + "`n", (New-Object System.Text.UTF8Encoding $false))
+    $Version = if ($CheckoutState) { $CheckoutState.Split(' ')[0] } else { "" }
+    & python -I $PreloadTool spec --requirements (Join-Path $ScriptPath "requirements-gui.txt") --resolve (Join-Path $ScriptPath "requirements-resolve.txt") --target $ThisTarget --python $PythonVersionFull --version $Version --system-packages $PackagesFile --out $SpecDir | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Error "Das Rezept des Preloads liess sich nicht schreiben (oben)." }
+    $Written = @(& python -I $PreloadTool write-scripts --spec $SpecDir --out $ScriptsDir)
+    if (($LASTEXITCODE -ne 0) -or ($Written.Count -lt 3)) { Write-Error "preload.ps1 und preload.sh liessen sich nicht schreiben (oben)." }
+    Remove-Item -Recurse -Force $SpecDir -ErrorAction SilentlyContinue
+    Remove-Item -Force $PackagesFile -ErrorAction SilentlyContinue
+    Write-Host ""
+    Write-Warning "Offline: Die Python-Pakete von llmcf fehlen hier, und ohne Netz holt der Installer sie nicht."
+    Write-Host "Er hat das Preload fuer genau diesen Rechner geschrieben:"
+    Write-Host "  $($Written[1])   (Windows: powershell -ExecutionPolicy Bypass -File preload.ps1)"
+    Write-Host "  $($Written[0])   (Linux, macOS: sh preload.sh)"
+    Write-Host "Es holt: $($Written[2])."
+    Write-Host "Fuehre eins davon auf einem Rechner mit Netz aus (Python 3 mit pip genuegt), trag das Archiv (llmcf-preload-...tar.gz)"
+    Write-Host "hierher (etwa auf einem USB-Stick) und gib hier seinen Pfad an."
+    if (-not ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected)) {
+        Write-Error "Keine Konsole zum Warten (ein unbeaufsichtigter Lauf). Mach das Archiv mit dem Preload oben und starte dann: install.bat --offline --preload=DATEI (oder LCF_PRELOAD=DATEI)"
+    }
+    while (-not $PreloadFile) {
+        $Answer = ("" + (Read-Host "Pfad des Preload-Archivs (leer: abbrechen)")).Trim().Trim('"')
+        if (-not $Answer) { Write-Error "Abgebrochen, nichts veraendert. Spaeter: install.bat --offline --preload=DATEI" }
+        if (Test-Path -LiteralPath $Answer -PathType Leaf) { $PreloadFile = $Answer } else { Write-Warning "$Answer gibt es nicht (oder es ist keine Datei); noch einmal." }
+    }
+}
+if ((-not $PersonOnly) -and $PreloadFile) {
+    if (-not (Test-Path -LiteralPath $PreloadFile -PathType Leaf)) { Write-Error "Das Preload $PreloadFile gibt es nicht (oder es ist keine Datei)." }
+    $PreloadWork = Join-Path ([IO.Path]::GetTempPath()) ("llmcf-preload-" + [Guid]::NewGuid().ToString("N"))
+    $OpenArgs = @("-I", $PreloadTool, "open", "--archive", $PreloadFile, "--out", $PreloadWork)
+    if ($PreloadSha256) { $OpenArgs += @("--sha256", $PreloadSha256) }
+    $Manifest = @{}
+    foreach ($Line in @(& python @OpenArgs)) { $Pair = "$Line" -split '=', 2; if ($Pair.Count -eq 2) { $Manifest[$Pair[0]] = $Pair[1] } }
+    if ($LASTEXITCODE -ne 0) { Write-Error "Das Preload $PreloadFile wurde abgelehnt (der Grund steht oben); nichts veraendert." }
+    Write-Host "Preload: $PreloadFile"
+    Write-Host "sha256 des Archivs: $($Manifest['archive_sha256']) (vergleiche mit der Zahl, die preload.ps1 auf dem Rechner mit Netz ausgab)"
+    if ($Manifest["target"] -ne $ThisTarget) { Write-Error "Das Preload ist fuer $($Manifest['target']), dieser Rechner ist $ThisTarget. Auf dem Rechner mit Netz: preload.ps1 -Target $ThisTarget" }
+    $PreloadPython = (("" + $Manifest["python"]) -split '\.')[0..1] -join '.'
+    if ($PreloadPython -ne $PythonVersion) { Write-Error "Das Preload ist fuer Python $($Manifest['python']), hier ist Python $PythonVersionFull. Auf dem Rechner mit Netz: preload.ps1 -Python $PythonVersion" }
+    if ($Manifest["lock"] -ne "requirements-gui.txt") { Write-Error "Das Preload enthaelt die Pakete von $($Manifest['lock']); install.bat installiert requirements-gui.txt. Mach es mit preload.ps1 (ohne -Headless) neu." }
+    $LockSha = (Get-FileHash -LiteralPath (Join-Path $ScriptPath "requirements-gui.txt") -Algorithm SHA256).Hash.ToLower()
+    if ($Manifest["lock_sha256"] -ne $LockSha) { Write-Error "Das Preload wurde aus einem anderen Stand von requirements-gui.txt gemacht als diesem Checkout (Preload: llmcf $($Manifest['version'])). Mach es mit preload.ps1 aus genau diesem Checkout neu." }
+    $PreloadDir = $Manifest["folder"]
+    Write-Host "Preload geprueft: Pakete fuer $ThisTarget, Python $($Manifest['python']) (llmcf $($Manifest['version']))." -ForegroundColor Green
+}
+
+if (-not $PersonOnly) {
 # 3. DATEIEN KOPIEREN
 Write-Host "[2/5] Installiere Dateien (Robocopy)..." -ForegroundColor Yellow
 
@@ -164,7 +399,7 @@ function Copy-Robust ($Src, $Dst, $Exclude) {
 }
 
 # Code kopieren (ohne git, venv, cache und ohne Build-Ergebnisse oder Modelle einer Entwicklungskopie)
-Copy-Robust $ScriptPath $InstallDir -Exclude ".git", ".venv", "__pycache__", "build", "dist", ".installer_venv", "output", "cache", "models", "logs"
+Copy-Robust $ScriptPath $InstallDir -Exclude ".git", ".venv", "__pycache__", "build", "dist", ".installer_venv", "output", "cache", "models", "logs", "llmcf-preload-scripts"
 # Fuer den Updater (orchestrator/utils/updater.py, llm-cli update): der Checkout, aus dem installiert wurde
 if (Test-Path (Join-Path $ScriptPath ".git")) { Set-Content -LiteralPath (Join-Path $InstallDir ".install_source") -Value $ScriptPath -Encoding UTF8 }
 
@@ -198,8 +433,16 @@ function Install-Venv ($ReqFile) {
     & python -m venv .venv | Out-Host
     if ($LASTEXITCODE -ne 0) { Write-Host "Konnte VENV nicht erstellen."; return $false }
     # --no-deps: the file is the complete export (every package, every hash); pip installs exactly that set.
-    & $Pip install --require-hashes --no-deps -r $ReqFile | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Host "Die Pakete aus $ReqFile liessen sich nicht installieren (Proxy oder eigener Spiegel: PIP_INDEX_URL)."; return $false }
+    # From a preload: only its packages, without any package index; build\ has setuptools and wheel for a package that
+    # is published only as a source archive.
+    $PipSource = @()
+    if ($PreloadDir) { $PipSource = @("--no-index", "--find-links", (Join-Path $PreloadDir "wheels"), "--find-links", (Join-Path $PreloadDir "build")) }
+    & $Pip install @PipSource --require-hashes --no-deps -r $ReqFile | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        if ($PreloadDir) { Write-Host "Die Pakete aus $ReqFile liessen sich aus dem Preload nicht installieren (passt es zu diesem Rechner und Checkout?)." }
+        else { Write-Host "Die Pakete aus $ReqFile liessen sich nicht installieren (Proxy oder eigener Spiegel: PIP_INDEX_URL)." }
+        return $false
+    }
     & $PythonVenv scripts\fresh_deps.py selfcheck --root . --gui | Out-Host
     return ($LASTEXITCODE -eq 0)
 }
@@ -261,6 +504,7 @@ if (-not $Installed) {
 }
 if (Test-Path $PreviousVenv) { Remove-Item -Recurse -Force $PreviousVenv }
 if (Test-Path $FreshDir) { Remove-Item -Recurse -Force $FreshDir }
+if ($PreloadWork) { Remove-Item -Recurse -Force $PreloadWork -ErrorAction SilentlyContinue }
 if ($Installed -eq "fresh") {
     Write-Host "Die neuesten vertraeglichen Versionen sind installiert, mit pip-audit geprueft und selbstgeprueft." -ForegroundColor Green
 } else {
@@ -280,10 +524,27 @@ pause
 "@
 Set-Content $LauncherBat $BatContent
 
-# 6. SHORTCUT
+# Who installed this and what it holds, for the next installer run of another account.
+try {
+    Set-Content -LiteralPath $InstalledByFile -Value $SignedInAccount -Encoding UTF8
+    if ($CheckoutState) { Set-Content -LiteralPath $InstalledStateFile -Value $CheckoutState -Encoding UTF8 }
+} catch {
+    Write-Warning "Konnte nicht festhalten, wer installiert hat ($_); ein zweites Konto installiert dann den gemeinsamen Teil noch einmal."
+}
+}
+$LauncherBat = Join-Path $InstallDir "start_framework.bat"
+$PythonVenv = Join-Path $InstallDir ".venv\Scripts\python.exe"
+Set-Location $InstallDir
+
+# 6. SHORTCUT: on the public desktop, so every account on this computer has it (one shared installation).
 Write-Host "[5/5] Erstelle Desktop Verknuepfung..." -ForegroundColor Yellow
 $WshShell = New-Object -comObject WScript.Shell
-$Desktop = [Environment]::GetFolderPath("Desktop")
+$Desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
+# An earlier installer put it on the desktop of the account that ran it; that one would now be there twice.
+$OwnShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "$AppName.lnk"
+try {
+    if ((Test-Path -LiteralPath $OwnShortcut) -and ($WshShell.CreateShortcut($OwnShortcut).TargetPath -eq $LauncherBat)) { Remove-Item -LiteralPath $OwnShortcut -Force }
+} catch { }
 
 # App Shortcut
 $Shortcut = $WshShell.CreateShortcut((Join-Path $Desktop "$AppName.lnk"))
@@ -325,7 +586,9 @@ Write-Host "[7-Zip] Pruefe 7-Zip (fuer Harness-Archive wie rar, 7z, iso und Disk
 try {
     $SevenZipExe = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
     $SevenZipThere = (Get-Command "7z" -ErrorAction SilentlyContinue) -or (Get-Command "7zz" -ErrorAction SilentlyContinue) -or (Test-Path $SevenZipExe)
-    if (-not $SevenZipThere) {
+    if ((-not $SevenZipThere) -and $Offline) {
+        Write-Warning "Offline: 7-Zip fehlt, und ohne Netz installiert der Installer es nicht (winget). Die Installation geht weiter; rar, 7z, iso und Disk-Images brauchen 7-Zip (spaeter: winget install -e --id 7zip.7zip, oder sein Installer von einem Rechner mit Netz)."
+    } elseif (-not $SevenZipThere) {
         Write-Host "7-Zip fehlt. Installiere es ueber winget (7zip.7zip)..."
         winget install -e --id 7zip.7zip --accept-source-agreements --accept-package-agreements
         if ($LASTEXITCODE -ne 0) { Write-Warning "7-Zip liess sich nicht mit winget installieren; selbst: 7-Zip fuer Windows installieren (winget install -e --id 7zip.7zip). Ohne 7-Zip nimmt das Framework einen Harness als zip, tar oder Ordner an; rar, 7z, iso und Disk-Images brauchen 7-Zip." }
@@ -355,6 +618,8 @@ try {
             winget install -e --id Docker.DockerDesktop --accept-source-agreements --accept-package-agreements
             if ($LASTEXITCODE -ne 0) { Write-Warning "Docker Desktop liess sich nicht mit winget installieren; selbst: https://docs.docker.com/desktop/setup/install/windows-install/" }
         }
+    } elseif ($Offline -and -not (Get-Command "podman" -ErrorAction SilentlyContinue)) {
+        Write-Warning "Offline: Es gibt noch keine Container-Engine, und ohne Netz installiert der Installer keine (Podman: winget install -e --id RedHat.Podman, oder sein Installer von einem Rechner mit Netz). Die Installation geht weiter; Builds brauchen sie."
     } else {
         if (-not (Get-Command "podman" -ErrorAction SilentlyContinue)) {
             Write-Host "Podman fehlt. Installiere es ueber winget (RedHat.Podman)..."
@@ -389,6 +654,8 @@ try {
     $Elevated = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     if ($DittoChoice -eq "skip") {
         Write-Host "Uebersprungen (--ditto=skip). Spaeter: llm-cli ditto runtime ensure"
+    } elseif ($Offline) {
+        Write-Host "Offline: Dittos Laufzeit wird nicht eingerichtet (sie laedt Quellcode und Modell). Spaeter mit Netz: llm-cli ditto runtime ensure; ohne Netz aus einer Laufzeit, die ein anderer Rechner exportiert hat: llm-cli ditto runtime import"
     } elseif ($SignedIn -and ($SignedIn -ne $Elevated)) {
         Write-Warning "Ditto wird fuer $SignedIn eingerichtet, nicht fuer das Administratorkonto. Spaeter als du selbst (normales Terminal, im Ordner $InstallDir): .venv\Scripts\python.exe -m orchestrator.cli ditto runtime ensure"
     } else {
