@@ -442,6 +442,8 @@ def test_install_bat_takes_a_preload_and_writes_one_when_it_has_none():
 def test_preload_ps1_parses():  # pragma: no cover - only where PowerShell is installed
     for path in (REPO_ROOT / "preload.ps1",):
         result = subprocess.run(["pwsh", "-NoProfile", "-Command",
-                                 f"$null = [System.Management.Automation.Language.Parser]::ParseFile('{path}', "
-                                 "[ref]$null, [ref]$e); if ($e) { $e; exit 1 }"], capture_output=True, text=True)
-        assert result.returncode == 0, result.stdout
+                                 # [ref] needs variables that exist: the tokens and the errors are made first
+                                 f"$tokens = $null; $e = $null; $null = [System.Management.Automation.Language.Parser]"
+                                 f"::ParseFile('{path}', [ref]$tokens, [ref]$e); if ($e) {{ $e; exit 1 }}"],
+                                capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout + result.stderr
