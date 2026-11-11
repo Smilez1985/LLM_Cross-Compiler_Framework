@@ -133,6 +133,8 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `trash list` / `restore` / `empty` | What deletions moved to the trash; put entries back; delete the ones you pick for good |
 | `models suggestions` | The model suggestions of the source catalogue: exact Hugging Face ids that need no token, small models first |
 | `models take-over` | Copy what earlier versions of the Hugging Face browser saved in the Hugging Face cache into the models folder, each file checked, then offer to remove the old copies |
+| `models list` / `models delete` | Every downloaded model and every build in one list (the Models tab) / delete rows of it, each through its own deletion |
+| `models bench` / `models bench-results` | Measure a GGUF model with llama-bench on this computer (the Benchmark window) / the kept runs |
 | `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
 | `targets boards` | Each board of a target with its optimization profile and its benchmark rows (measured, published or unmeasured) |
 | `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
@@ -3808,6 +3810,48 @@ does this.
 
 ```bash
 llm-cli models take-over
+```
+
+```
+llm-cli models list [--kind KIND] [--search TEXT] [--json]
+```
+
+Every model on this computer and every build made from them, in one table, as the GUI's **Models** tab shows it: the
+downloads in the models folder and the folders the AI may use, Ditto's models, the Builder's copies of Hugging Face
+models, the inputs of earlier builds, the kept F16 intermediates and the finished builds. Each row has its name, kind,
+format, quantization type (a GGUF file's own type from its header), size, place, date, target and board, the boards a
+build was tested on, its tokenizer check and the newest benchmark here, and the full path. `--kind` is one of
+`download`, `ditto`, `copy`, `input`, `f16`, `build`; `--search` keeps the rows whose name, type, target, board or path
+contain the text; `--json` prints the rows for scripts.
+
+```
+llm-cli models delete NAME...
+```
+
+Deletes rows of the list, each through its own deletion, as **Delete...** in the Models tab: a build (its folder and
+golden ZIP), a download in the models folder, a kept F16 intermediate. NAME is the full path, the label or the name
+`models list` shows. The full list comes first (full path, file name, size, what it is), then trash or for good, then
+"Delete exactly N items? [y/N]" ("No" is the default), audited first; without a terminal nothing is deleted. Ditto's
+models (`ditto models list`), files in your own folders, the Builder's copies and the inputs of earlier builds are not
+deleted here. No AI tool does this.
+
+```
+llm-cli models bench NAME [--threads N] [--json]
+llm-cli models bench-results [--json]
+```
+
+`bench` measures a GGUF model of the list with llama-bench on this computer, as **Build > Benchmark...**: prompt
+processing (pp512) and generation (tg128) in tokens per second, three repetitions each, with the threads and the
+backend. Ditto's catalogue models run natively; every other model only in the Docker sandbox with the llama-bench
+built in the builder container (`ditto runtime install --placement container`), because a model made for a board,
+measured here, says how fast this computer is, not the board. `--threads` sets llama-bench's threads (0: its own
+choice). Ctrl+C stops it. The run is kept; `bench-results` lists the kept runs, newest first. A board is measured with
+`device runtime verify DEVICE --bench-model PATH`.
+
+```bash
+llm-cli models list --kind build
+llm-cli models bench ~/llmcf/models/hf/owner--model-GGUF/0123456789ab/model-q8_0.gguf --threads 4
+llm-cli models bench-results
 ```
 
 ---

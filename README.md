@@ -503,8 +503,10 @@ after a network error). Suggestions from an AI are only shown as advice.
 **AI chat panel on the right:** talk to Ditto (see [Ditto](#ditto-the-built-in-assistant)); questions that wait for
 you and what AI apps did for you arrive there too. F9 or **View > AI Chat Panel** shows or hides it. **Deployment
 tab:** copy a finished build to a board. **Auto-Tuning tab:** measure which quantization of a model gives the best
-quality that fits a board ([Features](docs/Features.md#auto-tuning-the-best-quantization-for-a-board-measured)). The
-**Models** tab is a placeholder.
+quality that fits a board ([Features](docs/Features.md#auto-tuning-the-best-quantization-for-a-board-measured)).
+**Models tab:** every downloaded model and every build in one list, with Open Folder, Build Info..., Deploy...,
+Benchmark... and Delete... ([Features](docs/Features.md#the-models-tab-every-model-and-build-in-one-list)); **Build >
+Benchmark...** measures a model with llama-bench ([Features](docs/Features.md#the-benchmark-window)).
 
 Menus: **Security > Set OpenAI API Key**, **Tools > Configure AI Agent (Ditto)...**, **Tools > Create Hardware
 Module...** (wizard for a new target, including "Deep Ingest" to add documentation to the knowledge base),

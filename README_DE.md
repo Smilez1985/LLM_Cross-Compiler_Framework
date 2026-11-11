@@ -529,8 +529,10 @@ Platte voll ist, ein erneuter Versuch nach einem Netzwerkfehler). Vorschläge ei
 auf dich warten, und was KI-Apps für dich getan haben, kommen dort an. F9 oder **Ansicht > KI-Chat-Bereich** zeigt
 oder verbirgt ihn. **Reiter „Deployment“:** einen fertigen Build auf ein Board kopieren. **Reiter „Auto-Tuning“:**
 messen, welche Quantisierung eines Modells die beste Qualität ergibt, die auf ein Board passt
-([Features](docs/Features_DE.md#auto-tuning-die-beste-quantisierung-für-ein-board-gemessen)). Der Reiter **Models**
-ist ein Platzhalter.
+([Features](docs/Features_DE.md#auto-tuning-die-beste-quantisierung-für-ein-board-gemessen)). **Reiter „Modelle“:**
+jedes heruntergeladene Modell und jeder Build in einer Liste, mit Ordner öffnen, Build-Info…, Ausrollen…, Benchmark…
+und Löschen… ([Features](docs/Features_DE.md#der-reiter-modelle-jedes-modell-und-jeder-build-in-einer-liste));
+**Build > Benchmark…** misst ein Modell mit llama-bench ([Features](docs/Features_DE.md#das-benchmark-fenster)).
 
 Menüs: **Security > Set OpenAI API Key**, **Tools > Configure AI Agent (Ditto)...**, **Tools > Create Hardware
 Module...** (Assistent für ein neues Target, mit „Deep Ingest“, um Dokumentation in die Wissensbasis aufzunehmen),

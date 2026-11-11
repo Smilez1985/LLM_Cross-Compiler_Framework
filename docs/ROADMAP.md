@@ -139,7 +139,6 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 | **Periodic board backups next to the fleet image**: the PC pulls each board's backup on a schedule, only when something changed, through the same container; the board only reads and streams (no `dd`, the Rockchip bootloader area copied raw, one exact sudo line for a fixed read script); a NAS login from the vault, never a config file; the catalog versions kept by the update orchestrator's modules in CI. | planned |
 | **Starting without a terminal**: a Linux application-menu entry, a Windows shortcut without a console window (today it starts a batch file with one), and a crash dialog with "Open log folder" and "Copy details". | planned |
 | **The Ditto console beside the chat**: one window with the chat and a separate console that shows what Ditto and external AI apps type and do, each area shown or hidden and resized by dragging, the sizes remembered; the existing feed and activity rows wired into it. | planned |
-| **The Models tab as a real list** of downloaded models and builds (today a placeholder in `gui/main_window.py`). | planned |
 | **Guided install of vendor toolchains**: the vendor's licence text shown, the person's own yes is the licence acceptance, never an AI's. | planned |
 
 ### Device runtime and more hardware
@@ -166,7 +165,6 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 | **GPU acceleration** for the importance matrix and the RKLLM export. | planned |
 | **AMD RDNA3 APU target** for the Ryzen Z1 Extreme: llama.cpp with Vulkan and HIP, Linux container and native Windows deployment; ROCm also where AMD does not support the GPU officially, through the known workarounds (such as `HSA_OVERRIDE_GFX_VERSION`), the person deciding whether it is useful. | planned |
 | **The pre-flight check on real hardware** (waits for hardware; the check itself is built, [design](DESIGN.md#build-pipeline-and-target-modules)): its verdicts confirmed on a PC whose NVIDIA driver supports an older CUDA major version than the GPU image's and on an RK3588 whose NPU driver is below 0.9.2, and RKLLM's NPU driver minimum added to the Rockchip target's `sdk:` entry once a Rockchip source names one. | planned |
-| **Benchmark window** (`orchestrator/gui/benchmark_window.py`, in development): run llama-bench and show the results as a table; still to be finished on top of the runtime on the device and made reachable from the GUI. | planned |
 | **One SSH connection shared by a board step's commands** (OpenSSH `ControlMaster`, as an option): the OpenSSH fallback logs in once per step instead of once per command; connection sharing stays off until then, and the framework's own SSH settings refuse it. | planned |
 | **NPU converters for voice models on Rockchip** (piper, vosk, whisper), the next numbered step after the RK3566 template's slot for NPU voice models. | planned |
 | **The Hailo line in the GUI's scan**: the same "Hailo:" line `llm-cli scan` prints, with the Hailo wave. | planned |

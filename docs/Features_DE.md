@@ -422,6 +422,49 @@ oder das optionale KI-Werkzeug `start_tuning` (jeden Lauf beantwortest du).
   warnt, es lässt nie einen Build scheitern. Gemessen: SmolLM2-135M-Instruct in F16 und Q4_K_M bestand (146 Tokens des
   festen Texts gleich denen des Tokenizers der Quelle).
 
+### Der Reiter Modelle: jedes Modell und jeder Build in einer Liste
+
+Der Reiter **Modelle** listet alles, was auf diesem Rechner ein Modell ist, in einer Tabelle: die in den Modellordner
+(die Downloads des Hugging-Face-Browsers) oder in einen Ordner, den die KI nutzen darf, heruntergeladenen Modelle,
+Dittos eigene Modelle, die Kopien des Builders von Hugging-Face-Modellen, die lokalen Eingaben früherer Builds, die
+aufbewahrten F16-Zwischenstufen und jeden fertigen Build. Jede Zeile zeigt Name, Art, Format, Quantisierungstyp (bei
+einer GGUF-Datei ihr eigener Typ aus ihrem Kopf, bei einem Build aus seiner `build_info.json`), Größe, wo sie liegt,
+Datum, Target und Board eines Builds und was über sie bekannt ist: „getestet auf“ den Boards, auf denen sie einen
+Board-Benchmark bestanden hat, ihre Tokenizer-Prüfung und der neueste Benchmark derselben Datei auf diesem Rechner.
+**Zeigen:** filtert nach Art, **Suchen:** nach Name, Typ, Target oder Board, **Aktualisieren** liest die Platte neu (der
+Reiter liest sie beim ersten Öffnen, nie beim Start des Programms). Ist nichts gelistet, sagt der Reiter das und bietet
+**Modell herunterladen…** an (den Hugging-Face-Browser).
+
+Die Knöpfe wirken auf die gewählte Zeile: **Ordner öffnen** (ihr Ordner im Dateimanager), **Build-Info…** (Manifest
+und Modellkarte eines Builds, als reiner Text), **Ausrollen…** (der Reiter Deployment mit diesem Build gewählt),
+**Benchmark…** (das Benchmark-Fenster mit diesem Modell) und **Löschen…**. Gelöscht wird immer über das Löschen dessen,
+dem das Ding gehört, mit der genauen Liste (voller Pfad, Dateiname, Größe), dem Papierkorb oder endgültig und „Nein“
+als Vorgabe: ein Build (sein Ordner und sein goldenes ZIP), ein Download im Modellordner, eine aufbewahrte
+F16-Zwischenstufe. Dittos Modelle werden in **Ditto > Erweitert > Lokale Modelle…** verwaltet; Dateien in deinen
+eigenen Ordnern, die Kopien des Builders und die Eingaben früherer Builds werden hier nie gelöscht. Dieselbe Liste auf
+der Kommandozeile: `llm-cli models list` (`--kind`, `--search`, `--json`), `llm-cli models delete NAME`. Eine KI liest
+dieselben Zeilen nur lesend über `list_artifacts` und `list_local_files`.
+
+### Das Benchmark-Fenster
+
+**Build > Benchmark…** (oder **Benchmark…** im Reiter Modelle) misst ein GGUF-Modell mit llama-bench: wie schnell es
+einen Prompt verarbeitet (pp512) und Text erzeugt (tg128), je drei Wiederholungen. Modell, Ort und auf diesem Rechner
+die Zahl der Threads wählen (leer: die Wahl von llama-bench), dann **Benchmark starten**; **Abbrechen** stoppt den
+Lauf. Auf **diesem Rechner** laufen Dittos eigene Modelle nativ; jedes andere Modell läuft nur in der Docker-Sandbox
+mit dem im Builder-Container gebauten llama-bench (`llm-cli ditto runtime install --placement container`), weil ein für
+ein Board gemachtes Modell, hier gemessen, sagt, wie schnell dieser Rechner ist, nicht das Board; das Fenster sagt das
+neben der Wahl. Auf **einem gekoppelten Board** den Pfad des Modells auf dem Board angeben: Die Laufzeit des Boards
+führt die Prüfungen und den kurzen llama-bench-Lauf aus, fragt vorher (Nein vorgewählt), ob ein Modell, das kein
+Katalogmodell ist, geladen werden darf, und ein bestandener Lauf wird als „getestet auf“ diesem Board eingetragen. Die
+Ergebnisse sind eine Tabelle: Test, Tokens pro Sekunde mit ihrer Abweichung, Threads, Backend, Ort, Modell und Zeit;
+die Läufe auf diesem Rechner werden aufbewahrt und darunter gelistet. Auf der Kommandozeile: `llm-cli models bench
+NAME [--threads N] [--json]` und `llm-cli models bench-results [--json]`; auf einem Board `llm-cli device runtime
+verify DEVICE --bench-model PATH`. Gemessen am 2026-11-11 auf einer Cloud-Maschine mit 4 Kernen mit dem festgelegten
+llama.cpp (b11429, CPU, aus dem Quellcode gebaut), SmolLM2-135M-Instruct in Q8_0 (145 MB) über das Fenster und die
+Kommandozeile: pp512 1.814 bis 2.348 Tokens/s und tg128 167 bis 201 Tokens/s mit 4 Threads, pp512 739 bis 773 und
+tg128 71 bis 88 mit 1 Thread (eine geteilte Maschine streut); Abbrechen beendete eine laufende Messung nach etwa einer
+Sekunde.
+
 ## Build-Sandbox
 
 Konvertierungs-Container führen nicht vertrauenswürdigen Modellcode aus (zum Beispiel eigene Tokenizer), deshalb
@@ -4242,7 +4285,9 @@ Was noch nicht funktioniert, damit dich nichts überrascht:
 - **Laufzeit auf dem Gerät:** Die selbst gebaute llama.cpp-Laufzeit auf einem Board funktioniert über die
   Kommandozeile und ist mit einem nachgebildeten SSH-Kanal getestet, noch nicht auf einem echten Board; eine GUI oder
   ein MCP-Werkzeug dafür gibt es noch nicht.
-- **GUI:** Der Reiter Models ist ein Platzhalter (die lokale Laufzeit steht in **Ditto > Lokale Laufzeit...**).
+- **Benchmark-Fenster:** echt gemessen auf diesem Rechner nur mit einem von Hand aus dem festgelegten Commit
+  gebauten llama-bench statt dem des Build-Speichers; die Docker-Sandbox und ein Board sind mit Nachbildungen
+  getestet.
 - **Deep Ingest** läuft nur aus dem Modul-Assistenten in der GUI; einen CLI-Befehl dafür gibt es nicht. Einen
   Schnappschuss der Wissensbasis wiederherstellen kann man über GUI oder CLI nicht.
 - **Reranking** läuft nur bei Build-Empfehlungen; `rag_rerank_default` nimmt den Chat und das MCP-Tool

@@ -394,6 +394,46 @@ the optional AI tool `start_tuning` (you answer every run).
   it never fails a build. Measured: SmolLM2-135M-Instruct at F16 and Q4_K_M passed (146 tokens of the fixed text
   equal to the source tokenizer's).
 
+### The Models tab: every model and build in one list
+
+The **Models** tab lists everything model-shaped on this computer in one table: the models downloaded into the models
+folder (the Hugging Face browser's downloads) or into a folder the AI may use, Ditto's own models, the Builder's copies
+of Hugging Face models, the local inputs of earlier builds, the kept F16 intermediates and every finished build. Each
+row shows the name, the kind, the format, the quantization type (a GGUF file's own type, read from its header; a
+build's from its `build_info.json`), the size, where it lies, the date, a build's target and board, and what is known
+about it: "tested on" the boards it passed a board benchmark on, its tokenizer check, and the newest benchmark of the
+same file on this computer. **Show:** filters by kind, **Search:** by name, type, target or board, **Refresh** reads
+the disk again (the tab reads it the first time you open it, never at the program's start). With nothing listed, the
+tab says so and offers **Download a Model...** (the Hugging Face browser).
+
+The buttons act on the selected row: **Open Folder** (its folder in your file manager), **Build Info...** (a build's
+manifest and model card, as plain text), **Deploy...** (the Deployment tab with this build selected), **Benchmark...**
+(the Benchmark window with this model) and **Delete...**. Deleting always goes through the deletion of the thing's
+owner, with the exact list (full path, file name, size), the trash or for good, and "No" as the default: a build (its
+folder and its golden ZIP), a download in the models folder, a kept F16 intermediate. Ditto's models are managed in
+**Ditto > Advanced > Local Models...**; files in your own folders, the Builder's copies and the inputs of earlier
+builds are never deleted here. The same list at the command line: `llm-cli models list` (`--kind`, `--search`,
+`--json`), `llm-cli models delete NAME`. An AI reads the same rows, read-only, through `list_artifacts` and
+`list_local_files`.
+
+### The Benchmark window
+
+**Build > Benchmark...** (or **Benchmark...** in the Models tab) measures a GGUF model with llama-bench: how fast it
+processes a prompt (pp512) and generates text (tg128), three repetitions each. Choose the model, where it runs and,
+on this computer, the number of threads (empty: llama-bench's own choice), then **Run Benchmark**; **Cancel** stops
+the run. On **this computer**, Ditto's own models run natively; every other model runs only in the Docker sandbox with
+the llama-bench built in the builder container (`llm-cli ditto runtime install --placement container`), because a
+model made for a board, measured here, says how fast this computer is, not the board; the window says so next to the
+choice. On **a paired board**, give the model's path on the board: the board's runtime runs the checks and the short
+llama-bench run, asks first (No preselected) whether a model that is not a catalog model may be loaded, and a passed
+run is recorded as "tested on" that board. The results are a table: test, tokens per second with their deviation,
+threads, backend, where, model and time; the runs on this computer are kept and listed under it. At the command line:
+`llm-cli models bench NAME [--threads N] [--json]` and `llm-cli models bench-results [--json]`; on a board `llm-cli
+device runtime verify DEVICE --bench-model PATH`. Measured on 2026-11-11 on a 4-core cloud machine with the pinned
+llama.cpp (b11429, CPU, built from source), SmolLM2-135M-Instruct at Q8_0 (145 MB) through the window and the command
+line: pp512 1,814 to 2,348 tokens/s and tg128 167 to 201 tokens/s on 4 threads, pp512 739 to 773 and tg128 71 to 88
+on 1 thread (a shared machine spreads); Cancel ended a running measurement within about a second.
+
 ## Build sandbox
 
 Conversion containers run untrusted model code (for example custom tokenizers), so they are locked down
@@ -3825,7 +3865,8 @@ What does not work yet, so you are not surprised:
   available yet; Ditto signs in with API keys, and local engines need none.
 - **Device runtime:** the self-built llama.cpp runtime on a board works from the command line and is tested with a
   fake SSH channel, not yet on a real board; there is no GUI or MCP tool for it yet.
-- **GUI:** the Models tab is a placeholder (the local runtime is in **Ditto > Local Runtime...**).
+- **Benchmark window:** measured for real on this computer only with a llama-bench built by hand from the pinned
+  commit in place of the build store's; the Docker sandbox and a board are tested with stand-ins.
 - **Deep Ingest** runs only from the module wizard in the GUI; there is no CLI command for it. Restoring a
   knowledge-base snapshot is not available from the GUI or the CLI.
 - **Reranking** runs only for build recommendations; `rag_rerank_default` adds the chat and the MCP tool

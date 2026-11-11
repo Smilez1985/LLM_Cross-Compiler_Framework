@@ -134,6 +134,8 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `trash list` / `restore` / `empty` | Was Löschungen in den Papierkorb verschoben haben; Einträge zurücklegen; die ausgewählten endgültig löschen |
 | `models suggestions` | Die Modellvorschläge des Quellenkatalogs: genaue Hugging-Face-IDs, die kein Token brauchen, kleine Modelle zuerst |
 | `models take-over` | Was frühere Versionen des Hugging-Face-Browsers im Hugging-Face-Cache gespeichert haben, in den Modellordner kopieren, jede Datei geprüft, und danach das Entfernen der alten Kopien anbieten |
+| `models list` / `models delete` | Jedes heruntergeladene Modell und jeden Build in einer Liste (der Reiter Modelle) / Zeilen daraus löschen, jede über ihr eigenes Löschen |
+| `models bench` / `models bench-results` | Ein GGUF-Modell mit llama-bench auf diesem Rechner messen (das Benchmark-Fenster) / die aufbewahrten Läufe |
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
 | `targets boards` | Jedes Board eines Targets mit seinem Optimierungsprofil und seinen Benchmark-Zeilen (gemessen, veröffentlicht oder ungemessen) |
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
@@ -3995,6 +3997,49 @@ wird nichts kopiert und nichts gelöscht. Kein KI-Tool macht das.
 
 ```bash
 llm-cli models take-over
+```
+
+```
+llm-cli models list [--kind KIND] [--search TEXT] [--json]
+```
+
+Jedes Modell auf diesem Rechner und jeder Build daraus in einer Tabelle, wie sie der Reiter **Modelle** der GUI zeigt:
+die Downloads im Modellordner und in den Ordnern, die die KI nutzen darf, Dittos Modelle, die Kopien des Builders von
+Hugging-Face-Modellen, die Eingaben früherer Builds, die aufbewahrten F16-Zwischenstufen und die fertigen Builds. Jede
+Zeile hat Name, Art, Format, Quantisierungstyp (bei einer GGUF-Datei ihr eigener Typ aus ihrem Kopf), Größe, Ort,
+Datum, Target und Board, die Boards, auf denen ein Build getestet wurde, seine Tokenizer-Prüfung und den neuesten
+Benchmark hier sowie den vollen Pfad. `--kind` ist eines von `download`, `ditto`, `copy`, `input`, `f16`, `build`;
+`--search` behält die Zeilen, deren Name, Typ, Target, Board oder Pfad den Text enthält; `--json` gibt die Zeilen für
+Skripte aus.
+
+```
+llm-cli models delete NAME...
+```
+
+Löscht Zeilen der Liste, jede über ihr eigenes Löschen, wie **Löschen…** im Reiter Modelle: einen Build (sein Ordner
+und sein goldenes ZIP), einen Download im Modellordner, eine aufbewahrte F16-Zwischenstufe. NAME ist der volle Pfad,
+das Label oder der Name, den `models list` zeigt. Zuerst kommt die volle Liste (voller Pfad, Dateiname, Größe, was es
+ist), dann Papierkorb oder endgültig, dann „Delete exactly N items? [y/N]“ („No“ ist die Vorgabe), vorher
+protokolliert; ohne Terminal wird nichts gelöscht. Dittos Modelle (`ditto models list`), Dateien in deinen eigenen
+Ordnern, die Kopien des Builders und die Eingaben früherer Builds werden hier nicht gelöscht. Kein KI-Werkzeug tut das.
+
+```
+llm-cli models bench NAME [--threads N] [--json]
+llm-cli models bench-results [--json]
+```
+
+`bench` misst ein GGUF-Modell der Liste mit llama-bench auf diesem Rechner, wie **Build > Benchmark…**:
+Prompt-Verarbeitung (pp512) und Erzeugung (tg128) in Tokens pro Sekunde, je drei Wiederholungen, mit Threads und
+Backend. Dittos Katalogmodelle laufen nativ; jedes andere Modell nur in der Docker-Sandbox mit dem im Builder-Container
+gebauten llama-bench (`ditto runtime install --placement container`), weil ein für ein Board gemachtes Modell, hier
+gemessen, sagt, wie schnell dieser Rechner ist, nicht das Board. `--threads` setzt die Threads von llama-bench (0:
+seine eigene Wahl). Strg+C stoppt ihn. Der Lauf wird aufbewahrt; `bench-results` listet die aufbewahrten Läufe, die
+neuesten zuerst. Ein Board wird mit `device runtime verify DEVICE --bench-model PATH` gemessen.
+
+```bash
+llm-cli models list --kind build
+llm-cli models bench ~/llmcf/models/hf/owner--model-GGUF/0123456789ab/model-q8_0.gguf --threads 4
+llm-cli models bench-results
 ```
 
 ---
