@@ -440,6 +440,8 @@ for i, piece in ((5, 'Hello'), (6, ' world'), (2, '</s>')):
 """
 
 
+@pytest.mark.skipif(os.name == "nt", reason="the stand-in llama-completion is a script with a shebang line, which "
+                    "Windows cannot start; model_check.py runs only inside the Linux build image")
 def test_the_tokenizer_check_compares_with_the_source_and_says_what_it_could_not_check(tmp_path):
     tools = tmp_path / "bin"
     _script(tools / "llama-completion", COMPLETION_TOKENS_STUB)
