@@ -99,11 +99,10 @@ jobs:
           # pip cache off for now: the account's cache and egress quota ran out and a job hung at the cache restore
 
       - name: Install Qt runtime libraries
+        # Only what the image lacks; the runner's own sources first, then official Ubuntu mirrors on other hosts
+        # (apt checks them against the same archive keyring) when *.ubuntu.com cannot be reached.
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libglib2.0-0
+        run: bash scripts/ci_qt_libraries.sh
 
       - name: Install dependencies (with the GUI extra, as the desktop installers do)
         # --no-deps: the exports are complete (every package, every hash), so pip installs exactly that set and does
