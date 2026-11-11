@@ -150,18 +150,29 @@ def test_the_security_menu_opens_the_three_windows(qapp, tmp_path, monkeypatch, 
         expected = {menu_module.ACT_SECRETS: ("Secrets...", SecretsWindow),
                     menu_module.ACT_OVERVIEW: ("Sign-in Overview...", SignInOverviewWindow),
                     menu_module.ACT_KEY_STORAGE: ("Key Storage...", KeyStorageWindow)}
+        # The one settings window (File > Settings...): each entry opens it at its page Language model, where the
+        # window is a page; the settings window is modal (shown here without waiting) and each click opens it anew.
+        from PySide6.QtWidgets import QDialog
+        from orchestrator.gui.settings_window import SettingsDialog
+        shown = []
+        monkeypatch.setattr(QDialog, "exec", lambda self: (self.show(), shown.append(self), 0)[2])
+        sections = {menu_module.ACT_SECRETS: "secrets", menu_module.ACT_OVERVIEW: "sign_in",
+                    menu_module.ACT_KEY_STORAGE: "key_storage"}
         windows = {}
         for name, (text, cls) in expected.items():
             action = win.findChild(type(actions[name]), name)
             assert action is actions[name] and action.text() == text and getattr(win, name) is action
             action.trigger()
-            dialog = next(d for d in win.findChildren(cls))
-            assert dialog.isVisible()
+            settings = shown[-1]
+            assert isinstance(settings, SettingsDialog) and settings.isVisible()
+            assert (settings.page_name(), settings.section_name("language_model")) == ("language_model",
+                                                                                        sections[name])
+            found = settings.findChildren(cls)
+            assert len(found) == 1, "the window moved there as a page, built once"
+            dialog = found[0]
+            assert dialog.isVisible() and not dialog.isWindow()
             assert wait_for(qapp, lambda: not dialog.busy)
             windows[name] = dialog
-            action.trigger()
-            assert len(win.findChildren(cls)) == 1, "a second click shows the same window"
-            assert wait_for(qapp, lambda: not dialog.busy)
         overview = windows[menu_module.ACT_OVERVIEW]
         for name, action_name in menu_module.WINDOW_OBJECTS.items():
             dialog = windows[action_name]
@@ -170,8 +181,8 @@ def test_the_security_menu_opens_the_three_windows(qapp, tmp_path, monkeypatch, 
                 assert wait_for(qapp, lambda: not dialog.panel.busy)
             assert dialog.findChild(object, name) is not None, name
         assert overview.panel is not None
-        for dialog in windows.values():
-            dialog.close()
+        for settings in shown:
+            settings.close()
     finally:
         win.close()
 

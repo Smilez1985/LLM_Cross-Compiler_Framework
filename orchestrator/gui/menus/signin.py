@@ -4,9 +4,10 @@ The sign-in entries of the Security menu (W1' of 2026-10-16: every action of `ll
 logout|auth` also by mouse).
 
 Security > Secrets... (act_signin_secrets), Security > Sign-in Overview... (act_signin_overview) and Security > Key
-Storage... (act_signin_key_storage) open the windows of orchestrator/gui/signin_windows.py; they load when an entry is
-first used (lazy loading, RG1). The existing Security > Set OpenAI API Key gets its object name here
-(act_signin_openai_key). The Security menu is found by its object name or its title; it is created only when the main
+Storage... (act_signin_key_storage) open File > Settings... at its page Language model, sections Secrets, Sign-in and
+Key storage: the windows of orchestrator/gui/signin_windows.py moved there as pages, built when a section is first
+shown (lazy loading, RG1). The existing Security > Set OpenAI API Key gets its object name here
+(act_signin_openai_key); it opens the Sign-in section with OpenAI selected. The Security menu is found by its object name or its title; it is created only when the main
 window has none.
 
 CLI_PATHS names, for each `llmcf` command path of this area, the object that does it by mouse; WINDOW_OBJECTS names,
@@ -103,18 +104,21 @@ def install(window, menubar) -> None:
 
 
 def open_secrets_window(window):
-    from orchestrator.gui.signin_windows import open_secrets
-    return open_secrets(window)
+    """Security > Secrets...: File > Settings... > Language model > Secrets."""
+    from orchestrator.gui.menus.build import open_settings
+    return open_settings(window, "language_model", "secrets")
 
 
 def open_overview_window(window):
-    from orchestrator.gui.signin_windows import open_overview
-    return open_overview(window)
+    """Security > Sign-in Overview...: File > Settings... > Language model > Sign-in (Ditto's provider selected)."""
+    from orchestrator.gui.menus.build import open_settings
+    return open_settings(window, "language_model", "sign_in")
 
 
 def open_key_storage_window(window):
-    from orchestrator.gui.signin_windows import open_key_storage
-    return open_key_storage(window)
+    """Security > Key Storage...: File > Settings... > Language model > Key storage."""
+    from orchestrator.gui.menus.build import open_settings
+    return open_settings(window, "language_model", "key_storage")
 
 
 __all__ = ["ACT_KEY_STORAGE", "ACT_OPENAI_KEY", "ACT_OVERVIEW", "ACT_SECRETS", "CLI_PATHS", "MACHINE_ONLY",

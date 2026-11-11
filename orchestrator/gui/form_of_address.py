@@ -143,10 +143,13 @@ def apply_language_and_form(config: Any, language: str, form: str, *, save: bool
     language = language if language in LANGUAGES else "en"
     form = set_form_of_address(form)
     ok = True
-    if config is not None:
-        ok = bool(config.set("language", language)) and bool(config.set("form_of_address", form))
-        if ok and save:
-            ok = bool(config.save_user_config())
+    if config is not None:   # the one writer of both settings (also `llmcf config set language|form_of_address`)
+        from orchestrator.Core.config_manager import set_person_setting
+        try:
+            ok = set_person_setting(config, "language", language, save=False) and \
+                set_person_setting(config, "form_of_address", form, save=save)
+        except ValueError:   # a settings object that refuses the value: it applies until the program ends
+            ok = False
     get_instance(language).set_language(language)
     return ok
 
@@ -158,9 +161,11 @@ def apply_form(config: Any, form: str, *, save: bool = True) -> bool:
     form = set_form_of_address(form)
     ok = True
     if config is not None:
-        ok = bool(config.set("form_of_address", form))
-        if ok and save:
-            ok = bool(config.save_user_config())
+        from orchestrator.Core.config_manager import set_person_setting
+        try:
+            ok = set_person_setting(config, "form_of_address", form, save=save)
+        except ValueError:
+            ok = False
     from orchestrator.utils import localization
     if localization._instance is not None:   # the GUI's texts follow at once
         localization._instance.language_changed.emit(localization._instance.current_lang)

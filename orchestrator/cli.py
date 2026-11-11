@@ -10039,8 +10039,13 @@ def show_config(ctx: FrameworkContext):
 
 
 # The settings `config set` takes: the person's own settings without a command of their own (an AI may read them with
-# get_settings, never change them), and the build defaults (Core/build_defaults.py; File > Settings... too).
-CONFIG_SET_KEYS = ("framework_mode", "default_enable_imatrix", "default_calibration_dataset", "calibration_language")
+# get_settings, never change them), the build defaults (Core/build_defaults.py), the language and the German form of
+# address, and Ditto's AI settings (checked by the rules of the AI settings window, llm/settings_change.py); each is
+# also set in File > Settings.... A key is never set here: llm-cli ditto login.
+CONFIG_SET_AI_KEYS = ("ai_provider", "ai_model", "ai_base_url", "ai_anthropic_workspace_id", "ai_effort",
+                      "ai_security_level", "ai_fallback_chain", "offline_mode", "enable_rag_knowledge")
+CONFIG_SET_KEYS = ("framework_mode", "default_enable_imatrix", "default_calibration_dataset", "calibration_language",
+                   "language", "form_of_address") + CONFIG_SET_AI_KEYS
 
 
 @config.command('set')
@@ -10056,11 +10061,26 @@ def config_set(ctx: FrameworkContext, key: str, value: str):
     The build defaults, used when a build names none (also in File > Settings..., General): default_enable_imatrix
     true or false (an importance matrix for GGUF types below 5 bits per weight); default_calibration_dataset a text
     file, a name inside the datasets folder or an absolute path, '' for the shipped calibration text;
-    calibration_language mixed, de or en (the shipped text's languages)"""
-    from orchestrator.Core.config_manager import BUILD_DEFAULT_SETTINGS, framework_mode, set_framework_mode
+    calibration_language mixed, de or en (the shipped text's languages)
+
+    The language of the program (File > Settings..., General): language en or de; form_of_address du or sie (the
+    German form of address).
+
+    Ditto's AI settings (File > Settings..., Ditto), checked by the same rules as the window: ai_provider (a provider
+    id; sign in first with llm-cli ditto login PROVIDER), ai_model, ai_base_url, ai_anthropic_workspace_id, ai_effort
+    (low, medium, high, max or ''), ai_security_level, ai_fallback_chain ('provider[:model], ...' or ''),
+    offline_mode and enable_rag_knowledge (true or false). A key never goes on the command line."""
+    from orchestrator.Core.config_manager import (BUILD_DEFAULT_SETTINGS, PERSON_LANGUAGE_SETTINGS, framework_mode,
+                                                  set_framework_mode)
+    if key in CONFIG_SET_AI_KEYS:
+        _config_set_ai(ctx, key, value)
+        return
     config, resolve = _settings(ctx)
     if key in BUILD_DEFAULT_SETTINGS:
         _config_set_build_default(config, resolve, key, value)
+        return
+    if key in PERSON_LANGUAGE_SETTINGS:
+        _config_set_language(config, key, value)
         return
     before = framework_mode(config)
     try:
@@ -10075,6 +10095,70 @@ def config_set(ctx: FrameworkContext, key: str, value: str):
     if now == "enterprise":
         console.print("Enterprise mode refuses boards whose framework key sits on the Dropbear tier or the home "
                       "gate; 'llm-cli deploy devices list' shows each board's key tier.")
+
+
+def _config_set_language(config, key: str, value: str) -> None:
+    """`config set language|form_of_address` through the one writer (config_manager.set_person_setting), as File >
+    Settings..., General; the GUI takes it at its next start (a running window switches in its settings)."""
+    from orchestrator.Core.config_manager import set_person_setting
+    before = config.get(key)
+    try:
+        saved = set_person_setting(config, key, value)
+    except ValueError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+    if not saved:
+        console.print(f"[red]{key} could not be saved to config.yml.[/red]")
+        sys.exit(1)
+    now = config.get(key)
+    console.print(f"[green]{key}: {escape(str(now))}[/green]" + ("" if now != before else " (unchanged)"))
+
+
+def _config_set_ai(ctx: FrameworkContext, key: str, value: str) -> None:
+    """`config set` for one of Ditto's AI settings: the saved settings with this one replaced, refused for what the
+    AI settings window refuses (AISettingsChange: problems the saved settings already have do not count), then
+    applied and saved the way the window's Save does. No key is read or written here."""
+    from orchestrator.llm.auth.store import display_origin
+    from orchestrator.llm.settings_change import AISettingsChange, SettingsChangeError
+    service = _auth_service(ctx)
+    config, secrets = service.config, service.secrets
+    parsed: Any = value
+    if key in ("offline_mode", "enable_rag_knowledge"):
+        word = str(value).strip().lower()
+        if word not in ("1", "true", "yes", "on", "0", "false", "no", "off"):
+            console.print(f"[red]{escape(key)} is true or false (yes/no, on/off, 1/0), not '{escape(value)}'.[/red]")
+            sys.exit(2)
+        parsed = word in ("1", "true", "yes", "on")
+    try:
+        saved = AISettingsChange.current(config, service.catalog)
+        changed = saved.with_setting(key, parsed, config)
+    except PermissionError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(6)
+    except (KeyError, ValueError) as e:
+        console.print(f"[red]{escape(str(e.args[0] if isinstance(e, KeyError) else e))}[/red]")
+        sys.exit(2)
+    known = {problem.code for problem in saved.problems(config, secrets)}
+    problems = [problem for problem in changed.problems(config, secrets) if problem.code not in known]
+    if problems:
+        console.print(f"[red]{escape(problems[0].title)}: {escape(problems[0].message)}[/red]")
+        sys.exit(2)
+    url = changed.plain_http_url()
+    if url and not click.confirm(f"{display_origin(url)} uses plain http://, so the key travels unencrypted to "
+                                 "another computer. Save it for this address anyway?", default=False):
+        console.print("Nothing was changed.")
+        return
+    try:
+        applied = changed.apply(config, secrets, ctx.framework_manager)
+    except SettingsChangeError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    now = config.get(key)
+    shown = json.dumps(now, ensure_ascii=False) if isinstance(now, (list, bool)) else str(now)
+    console.print(f"[green]{key}: {escape(shown)}[/green]")
+    if applied.saved is False:
+        console.print("[red]The settings could not be saved to config.yml.[/red]")
+        sys.exit(1)
 
 
 def _config_set_build_default(config, resolve, key: str, value: str) -> None:

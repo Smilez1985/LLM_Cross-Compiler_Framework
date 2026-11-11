@@ -226,6 +226,14 @@ TEXTS = {
                                    "config.yml. See the log.",
         "words.lang.en": "English",
         "words.lang.de": "Deutsch",
+        "words.language.at_once": "A new language applies at once to the menus, the tab titles, the chat panel, the "
+                                  "standard buttons, this window (it opens again) and every window opened from then "
+                                  "on. The contents of the Builder, Deployment and Auto-Tuning tabs and the status bar "
+                                  "change at the next start; a window that is open keeps its texts until you open it "
+                                  "again.",
+        "words.language.saved": "Saved. The menus, this window and every window you open now use the new language; "
+                                "the contents of the Builder, Deployment and Auto-Tuning tabs follow at the next "
+                                "start.",
 
         # --- explanations of the glossary terms ("term.<id>") -----------------------------------------------------
         "term.llm": "Large language model: a neural network trained on very much text that continues and answers "
@@ -406,6 +414,14 @@ TEXTS = {
                                    "gespeichert werden. Siehe Protokoll.",
         "words.lang.en": "English",
         "words.lang.de": "Deutsch",
+        "words.language.at_once": "Eine neue Sprache gilt sofort für die Menüs, die Reitertitel, das Chat-Panel, "
+                                  "die Standardknöpfe, dieses Fenster (es öffnet sich neu) und jedes Fenster, das "
+                                  "danach geöffnet wird. Die Inhalte der Reiter Builder, Deployment und Auto-Tuning "
+                                  "und die Statusleiste wechseln beim nächsten Start; ein offenes Fenster behält "
+                                  "seine Texte, bis du es neu öffnest.",
+        "words.language.saved": "Gespeichert. Die Menüs, dieses Fenster und jedes Fenster, das du jetzt öffnest, "
+                                "nutzen die neue Sprache; die Inhalte der Reiter Builder, Deployment und Auto-Tuning "
+                                "folgen beim nächsten Start.",
 
         "term.llm": "Large Language Model (großes Sprachmodell): ein neuronales Netz, das mit sehr viel Text "
                     "trainiert wurde und Texte fortsetzt und beantwortet. Ditto spricht mit einem.",
@@ -570,6 +586,14 @@ FORMAL = {
                                "Fachbegriffe bleiben in beiden Sprachen Englisch.",
         "words.address.saved": "Gespeichert. Fenster, die Sie ab jetzt öffnen, nutzen sie; ein offenes Fenster "
                                "behält seine Texte, bis Sie es neu öffnen.",
+        "words.language.at_once": "Eine neue Sprache gilt sofort für die Menüs, die Reitertitel, das Chat-Panel, "
+                                  "die Standardknöpfe, dieses Fenster (es öffnet sich neu) und jedes Fenster, das "
+                                  "danach geöffnet wird. Die Inhalte der Reiter Builder, Deployment und Auto-Tuning "
+                                  "und die Statusleiste wechseln beim nächsten Start; ein offenes Fenster behält "
+                                  "seine Texte, bis Sie es neu öffnen.",
+        "words.language.saved": "Gespeichert. Die Menüs, dieses Fenster und jedes Fenster, das Sie jetzt öffnen, "
+                                "nutzen die neue Sprache; die Inhalte der Reiter Builder, Deployment und Auto-Tuning "
+                                "folgen beim nächsten Start.",
         "term.calibration_dataset": "Beispieltext, den das Modell bei der Umwandlung einmal liest; daraus wird die "
                                     "Importance Matrix (GGUF) oder die NPU-Quantization (RKLLM, RKNN) berechnet. "
                                     "Text, der Ihrer späteren Nutzung ähnelt, wirkt am besten.",

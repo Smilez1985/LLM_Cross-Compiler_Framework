@@ -250,6 +250,23 @@ TEXTS = {
 
         # File > Settings... (llm-cli config show / config repos)
         "bld.settings.title": "Settings",
+        "bld.settings.tab.ditto": "Ditto",
+        "bld.settings.tab.model": "Language model",
+        "bld.settings.tab.update": "Update",
+        "bld.settings.section.ai": "AI settings",
+        "bld.settings.section.permissions": "Tool permissions",
+        "bld.settings.section.folders": "Folders the AI may use",
+        "bld.settings.section.runtime": "Local runtime",
+        "bld.settings.section.sign_in": "Sign-in",
+        "bld.settings.section.secrets": "Secrets",
+        "bld.settings.section.key_storage": "Key storage",
+        "bld.settings.model.intro": "Ditto's language model: the local runtime on this computer, the cloud providers "
+                                    "with their keys and the sign-in. Keys stay in the encrypted vault and are never "
+                                    "shown.",
+        "bld.settings.ai_saved": "Ditto's AI settings are saved: {provider}, model {model}.",
+        "bld.settings.permissions_saved": "The tool permissions are saved.",
+        "bld.settings.no_registry": "The tool registry is not available, so the permissions and folders cannot be "
+                                    "shown here.",
         "bld.settings.tab.effective": "Effective settings",
         "bld.settings.effective.intro": "Every setting with its value and where the value comes from: the defaults, "
                                         "a settings file, an LLM_FRAMEWORK_* variable, or changed while the program "
@@ -709,6 +726,23 @@ TEXTS = {
         "bld.field.error": "Fehler",
 
         "bld.settings.title": "Einstellungen",
+        "bld.settings.tab.ditto": "Ditto",
+        "bld.settings.tab.model": "Sprachmodell",
+        "bld.settings.tab.update": "Update",
+        "bld.settings.section.ai": "KI-Einstellungen",
+        "bld.settings.section.permissions": "Tool-Berechtigungen",
+        "bld.settings.section.folders": "Ordner, die die KI nutzen darf",
+        "bld.settings.section.runtime": "Lokale Laufzeit",
+        "bld.settings.section.sign_in": "Anmeldung",
+        "bld.settings.section.secrets": "Geheimnisse",
+        "bld.settings.section.key_storage": "Schlüsselspeicher",
+        "bld.settings.model.intro": "Dittos Sprachmodell: die lokale Laufzeit auf diesem Rechner, die Cloud-Anbieter "
+                                    "mit ihren Schlüsseln und die Anmeldung. Schlüssel bleiben im verschlüsselten "
+                                    "Tresor und werden nie gezeigt.",
+        "bld.settings.ai_saved": "Dittos KI-Einstellungen sind gespeichert: {provider}, Modell {model}.",
+        "bld.settings.permissions_saved": "Die Tool-Berechtigungen sind gespeichert.",
+        "bld.settings.no_registry": "Die Tool-Registry ist nicht verfügbar, darum können die Berechtigungen und Ordner "
+                                    "hier nicht gezeigt werden.",
         "bld.settings.tab.effective": "Wirksame Einstellungen",
         "bld.settings.effective.intro": "Jede Einstellung mit ihrem Wert und woher der Wert kommt: die Vorgaben, eine "
                                         "Einstellungsdatei, eine Variable LLM_FRAMEWORK_* oder während des Laufs "

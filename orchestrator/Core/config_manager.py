@@ -1040,5 +1040,27 @@ def set_build_default(config: Any, key: str, value: Any) -> Any:
     return config.get(key)
 
 
+# The language of the program and the German form of address: File > Settings..., General, the first-run question
+# and `llmcf config set language|form_of_address` (the one writer below).
+PERSON_LANGUAGE_SETTINGS = {"language": ("en", "de"), "form_of_address": ("du", "sie")}
+
+
+def set_person_setting(config: Any, key: str, value: Any, *, save: bool = True) -> bool:
+    """Sets the language (`en` or `de`) or the German form of address (`du` or `sie`), any case, surrounding spaces
+    ignored (ValueError otherwise, nothing changes), and saves config.yml with `save`. Returns False when it could not
+    be saved: the value is set for this run all the same (the GUI uses it until the program ends; the command line
+    reports the failure)."""
+    choices = PERSON_LANGUAGE_SETTINGS.get(key)
+    if choices is None:
+        raise ValueError(f"{key} is not one of {', '.join(PERSON_LANGUAGE_SETTINGS)}.")
+    word = str(value if value is not None else "").strip().lower()
+    if word not in choices:
+        raise ValueError(f"{key} is {' or '.join(choices)}, not '{value}'.")
+    if config.set(key, word) is False:
+        raise ValueError(f"{key} cannot be '{value}'.")
+    saver = getattr(config, "save_user_config", None)
+    return bool(saver()) if save and callable(saver) else True
+
+
 if __name__ == "__main__":
     print("ConfigManager module loaded.")

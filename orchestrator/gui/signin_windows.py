@@ -20,6 +20,9 @@ four characters of a key.
   (insecure only after the CLI's warning, "No" is the default; `--use`, SignIn.choose_storage), and Rotate key...
   (`llmcf ditto auth rotate-key`, SignIn.rotate_key; asks first, "No" is the default).
 
+The three are pages of File > Settings... > Language model (settings_window.py, settings_pages.embed); the Security
+menu's entries open that page. open_secrets / open_overview / open_key_storage still show one as a window of its own.
+
 The framework never reads, stores or forwards Claude subscription credentials and never starts the claude command.
 """
 
@@ -33,6 +36,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogBut
 from orchestrator.Core.secret_entries import (KIND_KNOWN, KIND_PROVIDER, KNOWN_SECRETS, SecretNotStored,
                                               SecretsUnavailable, secret_entries, store_secret)
 from orchestrator.gui.plain import ask, button_text, one_line, plain_label
+from orchestrator.gui.settings_pages import page_done
 from orchestrator.gui.sign_in import (ERROR_STYLE, OK_STYLE, KeyForm, SignInPanel, StorageChooser, Worker,
                                       error_text)
 from orchestrator.llm.auth.signin import STORAGE, SignIn, method_infos, status_line
@@ -108,7 +112,10 @@ class _Window(QDialog):
 
     def done(self, result: int) -> None:
         """Close, Escape or the window's X: what was typed into a secret field and not stored is forgotten, so the
-        window (kept for the next click on its menu entry) never holds it while it is hidden."""
+        window (kept for the next click on its menu entry) never holds it while it is hidden. As a page of File >
+        Settings... (settings_pages.embed) the settings window decides; it ends the page this way when it closes."""
+        if page_done(self, result):
+            return
         for edit in self._secret_fields():
             edit.clear()
         super().done(result)
@@ -617,6 +624,15 @@ def _open(window: Any, which: str):
     return dialog
 
 
+def select_primary(dialog: "SignInOverviewWindow") -> None:
+    """The overview as it opens: Ditto's provider selected the first time, the shown provider read again later."""
+    if dialog.selected_provider() is None and dialog.presets:
+        primary = next((p.id for p in dialog.presets if dialog.service.client.is_primary(p)), dialog.presets[0].id)
+        dialog.select_provider(primary)
+    elif dialog.panel is not None and not dialog.panel.busy:
+        dialog.panel.refresh()  # the provider shown since the last time: its sign-in may have changed meanwhile
+
+
 def open_secrets(window: Any) -> SecretsWindow:
     """Security > Secrets...: the window of `window` (the main window)."""
     return _open(window, "secrets")
@@ -625,11 +641,7 @@ def open_secrets(window: Any) -> SecretsWindow:
 def open_overview(window: Any) -> SignInOverviewWindow:
     """Security > Sign-in Overview...: the window of `window`, Ditto's provider selected."""
     dialog = _open(window, "overview")
-    if dialog.selected_provider() is None and dialog.presets:
-        primary = next((p.id for p in dialog.presets if dialog.service.client.is_primary(p)), dialog.presets[0].id)
-        dialog.select_provider(primary)
-    elif dialog.panel is not None and not dialog.panel.busy:
-        dialog.panel.refresh()  # the provider shown since the last time: its sign-in may have changed meanwhile
+    select_primary(dialog)
     return dialog
 
 
@@ -639,4 +651,4 @@ def open_key_storage(window: Any) -> KeyStorageWindow:
 
 
 __all__ = ["KeyStorageWindow", "METHOD_COLUMNS", "SECRET_COLUMNS", "STATUS_COLUMNS", "SecretsWindow",
-           "SignInOverviewWindow", "open_key_storage", "open_overview", "open_secrets"]
+           "SignInOverviewWindow", "open_key_storage", "open_overview", "open_secrets", "select_primary"]

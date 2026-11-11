@@ -24,6 +24,7 @@ from PySide6.QtCore import Qt, QTimer
 from orchestrator.Core.self_healing_manager import AUTOMATIC_STRATEGIES
 from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_label, plain_tooltip
 from orchestrator.gui.worker_relay import worker_relay
+from orchestrator.gui.settings_pages import embedded, page_done
 from orchestrator.llm.auth.store import display_origin
 from orchestrator.llm.providers.anthropic import takes_workspace_id
 # The AI settings rules (one service for the dialog, sign-in, MCP and `llmcf config set`); SettingsOverlay lived here.
@@ -239,7 +240,9 @@ class AIConfigurationDialog(QDialog):
     # Returns model ids for (settings, secrets, provider id); replaced in tests.
     model_lister = staticmethod(list_provider_models)
 
-    def __init__(self, framework=None, parent=None):
+    def __init__(self, framework=None, parent=None, *, local_runtime: bool = True):
+        """`local_runtime`: with the boxes of Ditto's local server (where it runs, its memory budget); the settings
+        window's Ditto page leaves them out, its Language model page has them."""
         super().__init__(parent)
         from orchestrator.llm import load_catalog
         self.framework = framework
@@ -343,8 +346,9 @@ class AIConfigurationDialog(QDialog):
         form.addRow("", self.chk_offline)
 
         layout.addLayout(form)
-        layout.addWidget(self._runtime_mode_section())
-        layout.addWidget(self._prompt_cache_section())
+        if local_runtime:
+            layout.addWidget(self._runtime_mode_section())
+            layout.addWidget(self._prompt_cache_section())
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._save_config)
@@ -546,8 +550,11 @@ class AIConfigurationDialog(QDialog):
 
     def done(self, result: int) -> None:
         """Closing the dialog (Save, Cancel, Escape, the window's close button) drops an address check that is still
-        running: its answer, arriving later, saves nothing."""
+        running: its answer, arriving later, saves nothing. As a page of File > Settings... (settings_pages.embed) Save
+        keeps the page open and the window decides."""
         self._address_check = None
+        if page_done(self, result):
+            return
         super().done(result)
 
     def _on_models_listed(self, request: object, ids, message: str):
@@ -681,11 +688,17 @@ class AIConfigurationDialog(QDialog):
                 check=lambda old, new: direction_problem("offline_mode", old, new) or "")
 
         def show():
+            owner = self.window()   # a page of File > Settings...: its page and section come forward first
+            if owner is not self and hasattr(owner, "show_section"):
+                owner.show_section(self)
             self.show()
             self.raise_()
             self.activateWindow()
 
-        form = b.finish(self, show=show, is_open=self.isVisible)
+        def is_open() -> bool:
+            return self.isVisible() or (embedded(self) and self.window().isVisible())
+
+        form = b.finish(self, show=show, is_open=is_open)
         b.close_with(self)
         layout.insertWidget(max(0, layout.count() - 1),
                             b.banner(self, audit=person_audit(getattr(self.framework, "tool_registry", None))))
@@ -1506,7 +1519,15 @@ class ToolPermissionsDialog(QDialog, TokenListMixin):
         except Exception as e:
             QMessageBox.critical(self, "Tool permissions", f"Could not save the permissions:\n{e}")
             return
+        if embedded(self):   # a page of File > Settings... stays open: what it shows next is what was saved
+            self._reload()
         self.accept()
+
+    def done(self, result: int) -> None:
+        """As a page of File > Settings... (settings_pages.embed) Save keeps the page open and the window decides."""
+        if page_done(self, result):
+            return
+        super().done(result)
 
     # --- resets: `llm-cli tools permissions --reset [--caller C | --token NAME]` --------------------------------------
 
@@ -1594,8 +1615,15 @@ class AIFoldersDialog(QDialog):
         close = QDialogButtonBox(QDialogButtonBox.Close)
         close.rejected.connect(self.reject)
         row.addWidget(close)
+        self.close_buttons = close
         layout.addLayout(row)
         self.refresh()
+
+    def done(self, result: int) -> None:
+        """As a page of File > Settings... (settings_pages.embed) the window decides."""
+        if page_done(self, result):
+            return
+        super().done(result)
 
     def refresh(self) -> None:
         folders = self.files.folders()

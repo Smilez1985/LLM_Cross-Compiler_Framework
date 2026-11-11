@@ -5,7 +5,8 @@ startable with the mouse):
 
   Build > Targets...        llm-cli targets list / targets validate   (orchestrator/gui/targets_window.py)
   Build > Build History...  llm-cli build status [--all] [REQUEST_ID] (orchestrator/gui/build_history_window.py)
-  File > Settings...        llm-cli config show / config repos / config local-network (orchestrator/gui/settings_window.py)
+  File > Settings...        llm-cli config show / config set / config repos / config local-network / config doorbell
+                            (orchestrator/gui/settings_window.py; also the pages Ditto, Language model and Update)
 
 The Build menu sits right after File; Settings... sits above File > Exit. Every window calls the same core function
 as the CLI. CLI_PATHS names, for every command of this area, the QAction or button that starts it by mouse (its
@@ -276,16 +277,35 @@ def open_build_f16(window):
     return dialog
 
 
-def open_settings(window):
-    """File > Settings...: the effective settings and the source repository overrides (settings_view)."""
+def open_settings(window, page: Optional[str] = None, section: Optional[str] = None,
+                  provider: Optional[str] = None):
+    """File > Settings...: the one settings window (orchestrator/gui/settings_window.py), at `page` and `section`
+    when given (the old entries open their page this way), with `provider` selected on Language model > Sign-in. It
+    is modal and freed when it closes; after a change of the language or the form of address it opens again at the
+    same page in the new texts. The main window's settings_closed() runs afterwards (the chat reads Ditto's access
+    again)."""
+    from PySide6.QtCore import Qt
     from orchestrator.gui.settings_window import SettingsDialog
-    try:
-        dialog = SettingsDialog(window.framework, window,
-                                choose_output_folder=getattr(window, "_choose_output_folder", None))
-    except Exception as e:  # noqa: BLE001 - plain text (SEC-M2)
-        plain_box(window, "critical", ui_text("bld.settings.title"), one_line(str(e)))
-        return None
-    dialog.exec()
+    notice, dialog = "", None
+    while True:
+        try:
+            dialog = SettingsDialog(window.framework, window,
+                                    choose_output_folder=getattr(window, "_choose_output_folder", None),
+                                    page=page, section=section, notice=notice)
+            if provider:
+                dialog.select_provider(provider)
+        except Exception as e:  # noqa: BLE001 - plain text (SEC-M2)
+            plain_box(window, "critical", ui_text("bld.settings.title"), one_line(str(e)))
+            return None
+        dialog.setAttribute(Qt.WA_DeleteOnClose)
+        dialog.exec()
+        if not dialog.reopen:
+            break
+        page, section, notice = dialog.reopen
+        provider = None
+    closed = getattr(window, "settings_closed", None)
+    if callable(closed):
+        closed()
     return dialog
 
 

@@ -20,6 +20,16 @@ TEXTS = {
         "update.no_terminal": "No terminal program was found to run the update in. Run this yourself at a command prompt:\n\n{command}",
         "update.started": "The update runs in its own window. Start the framework again when it has finished.",
         "update.failed": "The update could not start: {reason}",
+        "update.page.intro": "Updates come from the git checkout the framework was installed from: the checkout moves "
+                             "forward (fast-forward only) and its installer runs again, which installs the newest "
+                             "compatible dependencies, checks them and keeps a way back.",
+        "update.page.source": "Checkout: {source}",
+        "update.page.check": "Check for Updates",
+        "update.page.checking": "Checking...",
+        "update.page.new": "{new} new commit(s) upstream.",
+        "update.page.none": "No new commits upstream; an update still installs the newest compatible dependencies.",
+        "update.page.offline": "Only the tested dependency set (uv.lock, no new resolve)",
+        "update.page.run": "Update Framework...",
         # What an earlier version wrote into the installation folder (Core/install_migration.py), asked at start
         "takeover.title": "Your data in the installation folder",
         "takeover.ask_mine": "An earlier version kept these items of yours in the installation folder, which is now "
@@ -51,6 +61,17 @@ TEXTS = {
                               "selbst an einer Kommandozeile:\n\n{command}",
         "update.started": "Das Update läuft in einem eigenen Fenster. Starte das Framework neu, wenn es fertig ist.",
         "update.failed": "Das Update konnte nicht starten: {reason}",
+        "update.page.intro": "Updates kommen aus dem Git-Checkout, aus dem das Framework installiert wurde: Der "
+                             "Checkout wird vorgespult (nur Fast-Forward) und sein Installer läuft erneut; er "
+                             "installiert die neuesten passenden Abhängigkeiten, prüft sie und behält einen Weg zurück.",
+        "update.page.source": "Checkout: {source}",
+        "update.page.check": "Nach Updates suchen",
+        "update.page.checking": "Wird geprüft...",
+        "update.page.new": "{new} neue(r) Commit(s) im Upstream.",
+        "update.page.none": "Keine neuen Commits im Upstream; ein Update installiert trotzdem die neuesten passenden "
+                            "Abhängigkeiten.",
+        "update.page.offline": "Nur den getesteten Abhängigkeitsstand (uv.lock, ohne neue Auflösung)",
+        "update.page.run": "Framework aktualisieren...",
         "takeover.title": "Deine Daten im Installationsordner",
         "takeover.ask_mine": "Eine frühere Version hat diese Dinge von dir im Installationsordner abgelegt. Er wird "
                              "jetzt von allen geteilt, die das Framework auf diesem Computer nutzen, und nicht mehr "

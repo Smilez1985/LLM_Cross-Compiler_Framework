@@ -1,7 +1,23 @@
 #!/usr/bin/env python3
 """
-File > Settings... (GUI parity W1': `llm-cli config show` and `llm-cli config repos [--add NAME URL] [--remove NAME]`
-by mouse).
+File > Settings...: the one settings window (docs/DESIGN.md "GUI and the person's path"). Its pages, in a list on the
+left (settings_pages.PageList): General, Ditto, Language model, Update, Local network, Build doorbell, Ditto in
+editors, Source repositories, Effective settings. menus/build.open_settings(window, page, section) opens it at a page;
+the old menu entries (Ditto > AI Settings..., Tool Permissions..., Folders the AI May Use..., Security > Secrets...,
+Sign-in Overview..., Key Storage..., Set OpenAI API Key..., Tools > Maintenance > Update Framework...) open their page.
+
+General: the language (`llmcf config set language`) beside the German form of address (`config set
+form_of_address`), saved and applied the moment they are chosen (form_of_address.apply_language_and_form /
+apply_form); the window then opens again at the same page in the new texts (`reopen`), and the page says what else
+switches at once and what waits for the next start. Also the framework mode and the build defaults.
+
+Ditto (sections AI settings, Tool permissions, Folders the AI may use) and Language model (Local runtime, Sign-in,
+Secrets, Key storage) are the existing dialogs moved here as pages (settings_pages.embed: AIConfigurationDialog without
+its local-runtime boxes, ToolPermissionsDialog, AIFoldersDialog, RuntimeModeBox and PromptCacheBox,
+SignInOverviewWindow, SecretsWindow, KeyStorageWindow), each built when first shown. Update is gui/update_page.py
+(`llm-cli update [--check] [--offline]`).
+
+Also (GUI parity W1': `llm-cli config show` and `llm-cli config repos [--add NAME URL] [--remove NAME]` by mouse):
 
 Effective settings: every setting with its value and where the value comes from (settings_view.effective_settings,
 the same view as `config show`: secrets redacted). Read-only. The output folder is set with its own entry
@@ -29,11 +45,18 @@ from typing import Any, Callable, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout,
-                               QHeaderView, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget,
-                               QVBoxLayout, QWidget)
+                               QHeaderView, QLineEdit, QPushButton, QScrollArea, QTableWidget, QTableWidgetItem,
+                               QTabWidget, QVBoxLayout, QWidget)
 
+from orchestrator.gui import settings_pages
 from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_label, plain_tooltip
+from orchestrator.gui.settings_pages import LazyPage, PageList
 from orchestrator.utils.localization import current_language, ui_text
+
+# The pages by name (open_settings(window, page, section)) and the sections of the pages that have some.
+PAGES = ("general", "ditto", "language_model", "update", "local_network", "doorbell", "acp", "repos", "effective")
+SECTIONS = {"ditto": ("ai", "permissions", "folders"),
+            "language_model": ("runtime", "sign_in", "secrets", "key_storage")}
 
 
 def source_text(source: str, lang: Optional[str] = None) -> str:
@@ -62,40 +85,264 @@ def _variable(name: str) -> str:
 
 
 class SettingsDialog(QDialog):
-    """The effective settings (read-only) and the source repository overrides of `framework`.
-    `choose_output_folder`: the main window's File > Output Folder... (offered here too)."""
+    """Every setting of `framework` on its pages (see the module text). `choose_output_folder`: the main window's
+    File > Output Folder... (offered here too). `page` and `section` name where it opens (PAGES, SECTIONS); `window`
+    is the main window (the update closes it on Windows; it hears about saved AI settings), by default `parent`;
+    `notice` is shown on the General page (what a language change did). After a language change `reopen` holds
+    (page, section, notice) and the window closes: open_settings opens it again in the new language."""
 
     def __init__(self, framework: Any, parent: Optional[QWidget] = None, lang: Optional[str] = None,
-                 choose_output_folder: Optional[Callable[[], None]] = None):
+                 choose_output_folder: Optional[Callable[[], None]] = None, *, page: Optional[str] = None,
+                 section: Optional[str] = None, window: Any = None, notice: str = ""):
         super().__init__(parent)
         self.framework = framework
         self.config = framework.config
         self.lang = lang or current_language()
+        self.main_window = window if window is not None else parent
         self._choose_output_folder = choose_output_folder
+        self.reopen: Optional[tuple] = None
+        self.embedded: list = []          # the dialogs moved here as pages (released when the window closes)
+        self.sections: dict = {}          # (page, section) -> LazyPage
+        self.section_tabs: dict = {}      # page -> its QTabWidget of sections
         self.setWindowTitle(self._t("bld.settings.title"))
-        self.resize(1100, 560)
+        self.resize(1180, 760)
         layout = QVBoxLayout(self)
-        self.tabs = QTabWidget(self)
-        self.tabs.addTab(self._general_tab(), self._t("words.settings.tab.general"))
-        self.tabs.addTab(self._effective_tab(), self._t("bld.settings.tab.effective"))
-        self.tabs.addTab(self._repos_tab(), self._t("bld.settings.tab.repos"))
+        self.tabs = PageList(self)
+        self.page_general = self._general_tab()
+        self.page_ditto = LazyPage("tab_settings_ditto", lambda page: self._sections_page(page, "ditto"), self)
+        self.page_model = LazyPage("tab_settings_language_model",
+                                   lambda page: self._sections_page(page, "language_model"), self)
+        self.page_update = LazyPage("tab_settings_update", self._update_page, self)
         self.page_net = self._network_tab()
-        self.tabs.addTab(self.page_net, self._t("net.tab"))
         from orchestrator.gui.doorbell_settings import DoorbellSettings
         self.page_bell = DoorbellSettings(framework, self, self.lang)
-        self.tabs.addTab(self.page_bell, self._t("bell.tab"))
         from orchestrator.gui.acp_settings import AcpSettings
         self.page_acp = AcpSettings(framework, self, self.lang)   # Ditto in editors (`llm-cli acp`)
-        self.tabs.addTab(self.page_acp, self._t("acp.tab"))
+        self.page_repos = self._repos_tab()
+        self.page_effective = self._effective_tab()
+        self.pages = {"general": self.page_general, "ditto": self.page_ditto, "language_model": self.page_model,
+                      "update": self.page_update, "local_network": self.page_net, "doorbell": self.page_bell,
+                      "acp": self.page_acp, "repos": self.page_repos, "effective": self.page_effective}
+        titles = {"general": "words.settings.tab.general", "ditto": "bld.settings.tab.ditto",
+                  "language_model": "bld.settings.tab.model", "update": "bld.settings.tab.update",
+                  "local_network": "net.tab", "doorbell": "bell.tab", "acp": "acp.tab", "repos": "bld.settings.tab.repos",
+                  "effective": "bld.settings.tab.effective"}
+        for name in PAGES:
+            self.tabs.addTab(self.pages[name], self._t(titles[name]))
         self.tabs.currentChanged.connect(self._tab_changed)
-        layout.addWidget(self.tabs)
+        layout.addWidget(self.tabs, 1)
+        bottom = QHBoxLayout()
+        self.lbl_status = plain_label("", self)
+        self.lbl_status.setObjectName("lbl_settings_status")
+        self.lbl_status.setWordWrap(True)
+        bottom.addWidget(self.lbl_status, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.Close, self)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        bottom.addWidget(buttons)
+        layout.addLayout(bottom)
         self.refresh()
+        if notice:
+            self.lbl_general_result.setText(notice)
+        if page:
+            self.show_page(page, section)
 
     def _t(self, key: str, **values) -> str:
         return ui_text(key, self.lang, **values)
+
+    # --- pages and sections -------------------------------------------------------------------------------------
+
+    def page_name(self, widget: Optional[QWidget] = None) -> str:
+        widget = widget if widget is not None else self.tabs.currentWidget()
+        return next((name for name, page in self.pages.items() if page is widget), "general")
+
+    def section_name(self, page: str) -> Optional[str]:
+        tabs = self.section_tabs.get(page)
+        if tabs is None:
+            return None
+        current = tabs.currentWidget()
+        return next((section for (p, section), lazy in self.sections.items() if p == page and lazy is current), None)
+
+    def show_page(self, page: str, section: Optional[str] = None) -> QWidget:
+        """Shows `page` (PAGES), and on a page with sections `section` (SECTIONS); returns the shown widget (built)."""
+        widget = self.pages.get(page)
+        if widget is None:
+            raise KeyError(f"no settings page {page!r} (pages: {', '.join(PAGES)})")
+        self.tabs.setCurrentWidget(widget)
+        if isinstance(widget, LazyPage):
+            widget.ensure()
+        if section is not None and page in self.section_tabs:
+            lazy = self.sections.get((page, section))
+            if lazy is None:
+                raise KeyError(f"no section {section!r} on the page {page!r} ({', '.join(SECTIONS[page])})")
+            self.section_tabs[page].setCurrentWidget(lazy)
+            return lazy.ensure()
+        return widget
+
+    def show_section(self, widget: QWidget) -> bool:
+        """Shows the page and section that hold `widget` (an AI's request to show the AI settings form)."""
+        for (page, section), lazy in self.sections.items():
+            if lazy.content is not None and (lazy.content is widget or lazy.content.isAncestorOf(widget)):
+                self.show_page(page, section)
+                return True
+        return False
+
+    def _sections_page(self, page: LazyPage, name: str) -> QWidget:
+        """The Ditto or Language model page: its sections as tabs, each built when first shown."""
+        content = QWidget(page)
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 0, 0)
+        if name == "language_model":
+            intro = plain_label(self._t("bld.settings.model.intro"), content)
+            intro.setWordWrap(True)
+            layout.addWidget(intro)
+        tabs = QTabWidget(content)
+        tabs.setObjectName(f"tabs_settings_{name}")
+        builders = {"ai": self._ai_section, "permissions": self._permissions_section,
+                    "folders": self._folders_section, "runtime": self._runtime_section,
+                    "sign_in": self._sign_in_section, "secrets": self._secrets_section,
+                    "key_storage": self._key_storage_section}
+        for section in SECTIONS[name]:
+            lazy = LazyPage(f"section_settings_{section}", builders[section], tabs)
+            self.sections[(name, section)] = lazy
+            tabs.addTab(lazy, self._t(f"bld.settings.section.{section}"))
+        tabs.currentChanged.connect(lambda index: self._ensure(tabs.widget(index)))
+        self.section_tabs[name] = tabs
+        layout.addWidget(tabs, 1)
+        self._ensure(tabs.currentWidget())
+        return content
+
+    @staticmethod
+    def _ensure(widget: Optional[QWidget]) -> None:
+        if isinstance(widget, LazyPage):
+            widget.ensure()
+
+    def _scrolled(self, page: QWidget, inner: QWidget) -> QScrollArea:
+        scroll = QScrollArea(page)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(inner)
+        return scroll
+
+    def _embed(self, page: QWidget, dialog: QDialog, name: str) -> QScrollArea:
+        """An existing dialog as this section (settings_pages.embed), in a scroll area."""
+        settings_pages.embed(dialog, lambda result, d=dialog, n=name: self._page_done(n, d, result))
+        self.embedded.append(dialog)
+        inner = QWidget(page)   # the page keeps its own height; the rest of the section stays empty below it
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(dialog)
+        layout.addStretch(1)
+        return self._scrolled(page, inner)
+
+    def _registry(self) -> Any:
+        registry = getattr(self.framework, "tool_registry", None)
+        if registry is None:
+            raise RuntimeError(self._t("bld.settings.no_registry"))
+        return registry
+
+    def _ai_section(self, page: QWidget) -> QWidget:
+        """Ditto > AI Settings...: provider, model, key, address, effort, privacy, fallback chain, knowledge base,
+        offline mode (the local server's boxes are on Language model > Local runtime)."""
+        from orchestrator.gui.dialogs import AIConfigurationDialog
+        self.ai_settings = AIConfigurationDialog(self.framework, page, local_runtime=False)
+        return self._embed(page, self.ai_settings, "ai")
+
+    def _permissions_section(self, page: QWidget) -> QWidget:
+        """Ditto > Tool Permissions... (`llm-cli tools permissions`)."""
+        from orchestrator.gui.dialogs import ToolPermissionsDialog
+        self.tool_permissions = ToolPermissionsDialog(self._registry(), page, lang=self.lang)
+        return self._embed(page, self.tool_permissions, "permissions")
+
+    def _folders_section(self, page: QWidget) -> QWidget:
+        """Ditto > Folders the AI May Use... (`llm-cli tools folders`)."""
+        from orchestrator.gui.dialogs import AIFoldersDialog
+        self.ai_folders = AIFoldersDialog(self.framework, self._registry(), page)
+        return self._embed(page, self.ai_folders, "folders")
+
+    def _runtime_section(self, page: QWidget) -> QWidget:
+        """Where Ditto's local server runs and its memory budget (`llm-cli ditto runtime ensure`, `ditto cache`)."""
+        from orchestrator.gui.prompt_cache_box import PromptCacheBox
+        from orchestrator.gui.runtime_mode_box import RuntimeModeBox
+        inner = QWidget(page)
+        layout = QVBoxLayout(inner)
+        self.runtime_mode_box = RuntimeModeBox(self.framework, inner)
+        self.prompt_cache_box = PromptCacheBox(self.framework, inner, lang=self.lang)
+        layout.addWidget(self.runtime_mode_box)
+        layout.addWidget(self.prompt_cache_box)
+        layout.addStretch(1)
+        return self._scrolled(page, inner)
+
+    def _sign_in_section(self, page: QWidget) -> QWidget:
+        """Security > Sign-in Overview... (`llm-cli ditto auth`, `ditto login`, `ditto logout`)."""
+        from orchestrator.gui.signin_windows import SignInOverviewWindow, select_primary
+        self.sign_in = SignInOverviewWindow(self.framework, page, self.lang)
+        scroll = self._embed(page, self.sign_in, "sign_in")
+        self.sign_in.reload()
+        select_primary(self.sign_in)
+        return scroll
+
+    def _secrets_section(self, page: QWidget) -> QWidget:
+        """Security > Secrets... (`llm-cli secrets`)."""
+        from orchestrator.gui.signin_windows import SecretsWindow
+        self.secrets = SecretsWindow(self.framework, page, self.lang)
+        scroll = self._embed(page, self.secrets, "secrets")
+        self.secrets.reload()
+        return scroll
+
+    def _key_storage_section(self, page: QWidget) -> QWidget:
+        """Security > Key Storage... (`llm-cli ditto auth storage`, `ditto auth rotate-key`)."""
+        from orchestrator.gui.signin_windows import KeyStorageWindow
+        self.key_storage = KeyStorageWindow(self.framework, page, self.lang)
+        scroll = self._embed(page, self.key_storage, "key_storage")
+        self.key_storage.reload()
+        return scroll
+
+    def _update_page(self, page: QWidget) -> QWidget:
+        """Tools > Maintenance > Update Framework... (`llm-cli update`)."""
+        from orchestrator.gui.update_page import UpdatePage
+        self.update_page = UpdatePage(self.main_window, page, self.lang)
+        return self.update_page
+
+    def _page_done(self, name: str, dialog: QDialog, result: int) -> None:
+        """An embedded page finished: Save keeps it open and says so on the status line; Escape closes the window."""
+        if result != QDialog.Accepted:
+            self.reject()
+            return
+        if name == "ai":
+            config = dialog.get_config()
+            self.lbl_status.setText(self._t("bld.settings.ai_saved", provider=one_line(
+                str(config.get("provider_label") or config.get("provider") or "-")),
+                model=one_line(str(config.get("model") or "-"))))
+            saved = getattr(self.main_window, "ai_settings_saved", None)
+            if callable(saved):
+                saved(config)
+        elif name == "permissions":
+            self.lbl_status.setText(self._t("bld.settings.permissions_saved"))
+        self.refresh_effective()
+
+    def select_provider(self, provider: str) -> None:
+        """Language model > Sign-in with `provider` selected (Security > Set OpenAI API Key... selects openai)."""
+        self.show_page("language_model", "sign_in")
+        self.sign_in.select_provider(provider)
+
+    @property
+    def panel(self) -> Any:
+        """The sign-in panel of the selected provider (None before the Sign-in section was shown)."""
+        sign_in = getattr(self, "sign_in", None)
+        return getattr(sign_in, "panel", None)
+
+    def done(self, result: int) -> None:
+        """Closing the window ends every moved page as its dialog ended (typed secrets forgotten, forms released)."""
+        for dialog in self.embedded:
+            settings_pages.release(dialog)
+        self.embedded = []
+        super().done(result)
+
+    def _reopen_at(self, notice: str) -> None:
+        """The texts changed (language or form of address): the window closes and open_settings opens it again at
+        the same page in the new texts, with `notice` on the General page."""
+        page = self.page_name()
+        self.reopen = (page, self.section_name(page), notice)
+        self.accept()
 
     def _config_file(self) -> str:
         return str(Path(getattr(self.config, "config_dir", ".")) / "config.yml")
@@ -107,12 +354,29 @@ class SettingsDialog(QDialog):
         page = QWidget(self)
         page.setObjectName("tab_settings_general")
         layout = QVBoxLayout(page)
+        from orchestrator.gui.form_of_address import LANGUAGES
+        from PySide6.QtWidgets import QLabel
+        rows = QFormLayout()
+        self.cmb_language = QComboBox(page)
+        self.cmb_language.setObjectName("cmb_settings_language")
+        for code in LANGUAGES:
+            self.cmb_language.addItem(ui_text(f"words.lang.{code}", code), code)
+        self.cmb_language.setCurrentIndex(max(0, self.cmb_language.findData(self.lang)))
+        self.cmb_language.currentIndexChanged.connect(self._language_changed)
+        label = QLabel(self._t("words.address.language"), page)
+        label.setBuddy(self.cmb_language)
+        self.cmb_language.setAccessibleName(self._t("words.address.language").replace("&", "").rstrip(":"))
+        rows.addRow(label, self.cmb_language)
+        layout.addLayout(rows)
         self.chooser_form = FormOfAddressChooser(str(self.config.get("form_of_address", "du") or "du"), page,
                                                  self.lang)
         self.chooser_form.changed.connect(self._form_changed)
         layout.addWidget(self.chooser_form)
+        self.lbl_language_note = plain_label(self._t("words.language.at_once"), page)
+        self.lbl_language_note.setObjectName("lbl_settings_language_note")
+        self.lbl_language_note.setWordWrap(True)
+        layout.addWidget(self.lbl_language_note)
         # the framework mode (llmcf config set framework_mode): the person's alone; an AI may read it, never change it
-        from PySide6.QtWidgets import QComboBox
         from orchestrator.Core.config_manager import FRAMEWORK_MODES, framework_mode
         layout.addWidget(plain_label(self._t("deploy.mode.title"), page))
         self.cmb_mode = QComboBox(page)
@@ -251,11 +515,28 @@ class SettingsDialog(QDialog):
         self.refresh_effective()
 
     def _form_changed(self, form: str) -> None:
-        """The person picked du or Sie: saved in config.yml and used at once (windows that retranslate follow)."""
+        """The person picked du or Sie: saved in config.yml and used at once (windows that retranslate follow); a
+        German window opens again in the chosen form."""
         from orchestrator.gui.form_of_address import apply_form
         saved = apply_form(self.config, form)
         self.lbl_general_result.setText(self._t("words.address.saved" if saved else "words.address.not_saved"))
         self.refresh_effective()
+        if self.lang == "de":
+            self._reopen_at(self.lbl_general_result.text())
+
+    def _language_changed(self, _index: int) -> None:
+        """The person picked a language: saved in config.yml and applied at once (form_of_address.
+        apply_language_and_form: the menus, tab titles, chat panel and Qt's buttons follow language_changed); this
+        window opens again in it, the note says what waits for the next start."""
+        from orchestrator.gui.form_of_address import apply_language_and_form
+        language = str(self.cmb_language.currentData() or "en")
+        if language == self.lang:
+            return
+        saved = apply_language_and_form(self.config, language, self.chooser_form.form())
+        self.lbl_general_result.setText(ui_text("words.language.saved" if saved else "words.address.not_saved",
+                                                language))
+        self.refresh_effective()
+        self._reopen_at(self.lbl_general_result.text())
 
     # --- effective settings (config show) -------------------------------------------------------------------
 
@@ -480,7 +761,10 @@ class SettingsDialog(QDialog):
         return page
 
     def _tab_changed(self, index: int) -> None:
-        if self.tabs.widget(index) is getattr(self, "page_net", None) and not self._vpn_checked:
+        widget = self.tabs.widget(index)
+        if isinstance(widget, LazyPage):
+            widget.ensure()
+        if widget is getattr(self, "page_net", None) and not self._vpn_checked:
             self._start_vpn_check()
 
     def _net_kind_changed(self) -> None:
@@ -609,4 +893,4 @@ class SettingsDialog(QDialog):
         self.refresh_network()
 
 
-__all__ = ["SettingsDialog", "source_text", "value_text"]
+__all__ = ["PAGES", "SECTIONS", "SettingsDialog", "source_text", "value_text"]

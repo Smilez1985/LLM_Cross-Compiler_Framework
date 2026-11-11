@@ -36,7 +36,7 @@ from orchestrator.utils.localization import get_instance as get_i18n
 from orchestrator.utils.localization import ui_text
 
 # GUI Components
-from orchestrator.gui.dialogs import SecretInputDialog, HealingConfirmDialog, AIConfigurationDialog, ToolPermissionsDialog
+from orchestrator.gui.dialogs import SecretInputDialog, HealingConfirmDialog, ToolPermissionsDialog
 from orchestrator.gui.wizards import ModuleCreationWizard
 from orchestrator.gui.builder_tab import BuilderTab
 from orchestrator.gui.chat_window import ChatWindow
@@ -211,9 +211,10 @@ class MainOrchestrator(QMainWindow):
         advanced.setObjectName("menu_ditto_advanced")   # Local Runtime..., Local Models..., Evaluation... (menus/)
 
         sec_menu = self._menu(menubar, menu_place.MENU_SECURITY, "main.menu.security")
+        # File > Settings... > Language model > Sign-in with OpenAI selected: the key card there stores the key
         self.act_signin_openai_key = self._entry(
             sec_menu, "act_signin_openai_key", "main.security.openai",
-            lambda: self._open_secret_dialog("openai_api_key", "OpenAI API Key"))
+            lambda: menu_build.open_settings(self, "language_model", "sign_in", provider="openai"))
 
         self.view_menu = self._menu(menubar, menu_place.MENU_VIEW, "main.menu.view")  # filled by _setup_chat_dock
 
@@ -643,17 +644,28 @@ class MainOrchestrator(QMainWindow):
         dlg.exec()
 
     def _open_ai_config(self):
-        dlg = AIConfigurationDialog(self.framework, self)
-        if dlg.exec():
-            cfg = dlg.get_config()
-            provider = f"{cfg.get('provider_label') or cfg.get('provider')} / {cfg.get('model')}"
-            mode = f"Offline, {provider}" if offline_mode(cfg) else provider   # the dialog's result
-            self.status.showMessage(f"AI Agent configured: {mode}", 5000)
+        """Ditto > AI Settings...: File > Settings... at Ditto > AI settings."""
+        menu_build.open_settings(self, "ditto", "ai")
+
+    def ai_settings_saved(self, cfg):
+        """The AI settings page saved (File > Settings... > Ditto): the result on the status bar."""
+        provider = f"{cfg.get('provider_label') or cfg.get('provider')} / {cfg.get('model')}"
+        mode = f"Offline, {provider}" if offline_mode(cfg) else provider   # the page's result
+        self.status.showMessage(f"AI Agent configured: {mode}", 5000)
+
+    def settings_closed(self):
+        """File > Settings... closed: the chat reads Ditto's provider and sign-in again (also after a sign-in that
+        was cancelled with the settings)."""
         chat = getattr(self, "chat_window", None)
         if chat is not None:
-            chat.refresh_access()  # also after a sign-in that was cancelled with the settings
+            chat.refresh_access()
 
     def _open_tool_permissions(self, first_run: bool = False):
+        """Ditto > Tool Permissions...: File > Settings... at Ditto > Tool permissions; at the first start the
+        question is a window of its own."""
+        if not first_run:
+            menu_build.open_settings(self, "ditto", "permissions")
+            return
         registry = getattr(self.framework, "tool_registry", None)
         if registry is None:
             QMessageBox.critical(self, "Error", "Tool registry not available.")
@@ -740,11 +752,8 @@ class MainOrchestrator(QMainWindow):
             plain_box(self, "critical", "Framework Build Images", str(e))
 
     def _open_ai_folders(self):
-        from orchestrator.gui.dialogs import AIFoldersDialog
-        try:
-            AIFoldersDialog(self.framework, getattr(self.framework, "tool_registry", None), self).exec()
-        except Exception as e:  # e.g. no per-user folder
-            plain_box(self, "critical", "Folders the AI may use", str(e))
+        """Ditto > Folders the AI May Use...: File > Settings... at Ditto > Folders the AI may use."""
+        menu_build.open_settings(self, "ditto", "folders")
 
     def _set_audio_announcements(self, enabled: bool):
         cfg = self.framework.config
