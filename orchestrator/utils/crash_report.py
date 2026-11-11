@@ -17,6 +17,7 @@ a terminal).
   on Windows without a console, into a native message box.
 """
 
+import io
 import logging
 import logging.handlers
 import os
@@ -46,21 +47,28 @@ def guard_streams() -> list:
     replaced = []
     for name in ("stdout", "stderr"):
         if getattr(sys, name, None) is None:
-            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
+            setattr(sys, name, _NullWriter(open(os.devnull, "wb"), encoding="utf-8", write_through=True))
             replaced.append(name)
     return replaced
 
 
+class _NullWriter(io.TextIOWrapper):
+    """A writer to the null device that never claims to be a terminal: on Windows the device NUL answers isatty()
+    with True, and Rich or a progress bar would then draw for a console that does not exist."""
+
+    def isatty(self) -> bool:
+        return False
+
+
 def has_console() -> bool:
-    """Whether this process has a console window (always True outside Windows: there a terminal is no window that
-    a child could open)."""
-    if os.name != "nt":
+    """Whether this process was started with a console (always True outside Windows: there a terminal is no window
+    that a child could open). Without one means started by pythonw.exe, which Python marks by giving the process no
+    standard streams at all (sys.__stdout__ and sys.__stderr__ are None, whatever guard_streams put in their place).
+    A process that merely has no console window, such as one started with pipes by a CI runner or a service, has its
+    streams and counts as having a console: it must never get a message box that nobody can close."""
+    if not WINDOWS:
         return True
-    try:
-        import ctypes
-        return bool(ctypes.windll.kernel32.GetConsoleWindow())   # type: ignore[attr-defined]
-    except (AttributeError, OSError):
-        return True
+    return sys.__stdout__ is not None or sys.__stderr__ is not None
 
 
 def windowless_flags(creationflags: int) -> int:

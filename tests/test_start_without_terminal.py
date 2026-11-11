@@ -258,6 +258,27 @@ class TestWithoutConsole:
         subprocess.Popen(["installer"], creationflags=crash_report.CREATE_NEW_CONSOLE)
         assert seen == [crash_report.CREATE_NO_WINDOW, crash_report.CREATE_NEW_CONSOLE]
 
+    def test_without_a_console_means_started_without_standard_streams(self, monkeypatch):
+        """pythonw.exe gives a process no standard streams; a process started with pipes but no console window (a CI
+        runner, a service) has them and must never get a message box nobody can close, nor windowless children."""
+        monkeypatch.setattr(crash_report, "WINDOWS", True)
+        assert crash_report.has_console() is True, "this test process has its standard streams"
+        monkeypatch.setattr(sys, "__stdout__", None)
+        monkeypatch.setattr(sys, "__stderr__", None)
+        assert crash_report.has_console() is False
+        monkeypatch.setattr(crash_report, "WINDOWS", False)
+        assert crash_report.has_console() is True, "outside Windows a terminal is no window a child could open"
+
+    def test_the_null_writer_is_never_a_terminal(self, monkeypatch):
+        monkeypatch.setattr(sys, "stdout", None)
+        monkeypatch.setattr(sys, "stderr", None)
+        crash_report.guard_streams()
+        try:
+            assert sys.stdout.isatty() is False and sys.stderr.isatty() is False
+        finally:
+            sys.stdout.close()
+            sys.stderr.close()
+
     def test_nothing_changes_with_a_console_or_outside_windows(self, monkeypatch):
         monkeypatch.setattr(crash_report, "_PATCHED", False)
         if os.name != "nt":
