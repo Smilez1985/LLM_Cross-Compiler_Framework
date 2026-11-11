@@ -8657,6 +8657,214 @@ def device_clock(ctx: FrameworkContext, device_name: str, set_now: bool, assume_
     warning = board_clock.clock_state(state_dir, device_id)["warning"]
     if warning and not set_now:
         console.print(f"[yellow]{escape(warning)}[/yellow]")
+    from orchestrator.runtime.device import board_packages
+    if board_packages.keeper_proposal(state_dir, device_id):
+        console.print("[yellow]This board keeps no time across a restart (no working RTC, no time keeper): install "
+                      "the clock keeper fake-hwclock, from its own sources or a board preload.[/yellow]")
+        _package_next("board.packages", device_id)
+
+
+def _package_session(ctx: FrameworkContext, state_dir: Path, store, device_id: str, step: str):
+    """The session of a package step on the stored board (exits when it cannot be reached)."""
+    from orchestrator.runtime.device import person_steps
+    settings = _deploy_settings(store, device_id)
+    try:
+        host, port = person_steps.board_address(store, device_id)
+    except ValueError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    if not settings.ssh_user:
+        console.print(f"[red]No SSH user is set for {device_id}: llm-cli device settings {device_id} --user NAME.[/red]")
+        sys.exit(1)
+    session, _key = _open_device(state_dir, device_id, host, port, settings.ssh_user, None, ctx=ctx, step=step)
+    return session
+
+
+def _package_next(step: str, device_id: str, **values: str) -> None:
+    """A next step of the board's packages (the catalogue's command line, utils/next_steps/boards.py)."""
+    from orchestrator.utils.next_steps import NextStep, render
+    for line in render([NextStep(step, dict(values, device=device_id))], "cli", "en", channel="cli").splitlines():
+        console.print(escape(line))
+
+
+def _package_scope(bundle: Optional[str]) -> str:
+    from orchestrator.runtime.device import board_packages
+    return bundle or board_packages.BOARD_SCOPE
+
+
+@device.group('package')
+def device_package():
+    """System packages on a board: the packages a bundle names and the clock keeper fake-hwclock, through
+    llmcf-install's install_package (apt and dpkg), from the board's own sources or a board preload"""
+    pass
+
+
+@device_package.command('show')
+@click.argument('device_name', metavar='DEVICE')
+@click.option('--bundle', 'bundle_ids', multiple=True, metavar='BUNDLE', help="Also show what this bundle needs")
+@click.option('--read', 'read_now', is_flag=True, help="Read the board's package facts now (over SSH; changes nothing)")
+@pass_context
+def device_package_show(ctx: FrameworkContext, device_name: str, bundle_ids: Tuple[str, ...], read_now: bool):
+    """Show the board's distribution, release and architecture, its package sources, the packages its bundles and
+    its clock need, what was missing at the last reading, the board preloads taken in and the last install."""
+    from orchestrator.runtime.device import board_packages
+    state_dir, store, device_id, _profile = _device_context(ctx, device_name)
+    if read_now:
+        session = _package_session(ctx, state_dir, store, device_id, "package-facts")
+        try:
+            board_packages.record_facts(state_dir, device_id, board_packages.read_facts(session.run))
+        except board_packages.PackageError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
+        finally:
+            session.close()
+    for line in board_packages.state_lines(state_dir, device_id, bundle_ids):
+        console.print(escape(line))
+
+
+@device_package.command('install')
+@click.argument('device_name', metavar='DEVICE')
+@click.argument('packages', nargs=-1, metavar='[PACKAGE]...')
+@click.option('--bundle', default=None, metavar='BUNDLE',
+              help="The packages of this bundle (all of them without PACKAGE); without it only the clock keeper "
+                   "fake-hwclock")
+@click.option('--yes', 'assume_yes', is_flag=True, help="No question after the plan")
+@pass_context
+def device_package_install(ctx: FrameworkContext, device_name: str, packages: Tuple[str, ...], bundle: Optional[str],
+                           assume_yes: bool):
+    """Install packages of the board's distribution through llmcf-install's install_package: the plan (a dry run)
+    first, then your yes. From the board preload taken in for it, else from the board's own sources (in enterprise
+    mode only when they are the internal mirror). Needs the board's root readiness."""
+    from orchestrator.runtime.device import board_packages
+    state_dir, store, device_id, _profile = _device_context(ctx, device_name)
+    try:
+        scope, words = board_packages.scope_words(state_dir, _package_scope(bundle), packages)
+    except (board_packages.PackageError, ValueError, OSError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    session = _package_session(ctx, state_dir, store, device_id, "package-install")
+    try:
+        try:
+            _facts, plan = board_packages.plan_install(session, state_dir, device_id, scope, words,
+                                                       config=getattr(ctx, "settings", None))
+        except board_packages.PackageError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            _package_next("board.packages_preload", device_id)
+            sys.exit(1)
+        for line in board_packages.plan_lines(plan):
+            console.print(escape(line))
+        if plan.result != "planned":
+            sys.exit(1)
+        if not plan.listed("would") and plan.values.get("pending") == "0":
+            console.print("[green]Everything is in place; nothing to install.[/green]")
+            return
+        source = ("from the board preload taken in for it" if plan.values.get("source") == "preload"
+                  else "from the board's own package sources")
+        question = board_packages.INSTALL_QUESTION.format(packages=", ".join(words), board=device_id, source=source)
+        if not assume_yes and not (_interactive() and click.confirm(question, default=False)):
+            console.print("Nothing was installed" + ("" if _interactive() else
+                                                     " (it needs your answer at a terminal, or --yes)") + ".")
+            sys.exit(1)
+        done = board_packages.apply_install(session, state_dir, device_id, scope, words, via="cli",
+                                            audit=_device_audit(ctx, state_dir))
+    finally:
+        session.close()
+    for line in board_packages.plan_lines(done):
+        console.print(escape(line))
+    if done.result != "ok":
+        sys.exit(1)
+    console.print("[green]The packages are installed.[/green]")
+
+
+@device_package.group('preload')
+def device_package_preload():
+    """The board preload: the packages with their dependencies for a board without a network, fetched on a computer
+    with one and checked against the distribution's signed package lists"""
+    pass
+
+
+@device_package_preload.command('write')
+@click.argument('device_name', metavar='DEVICE')
+@click.argument('packages', nargs=-1, metavar='[PACKAGE]...')
+@click.option('--bundle', default=None, metavar='BUNDLE',
+              help="The packages of this bundle (all of them without PACKAGE); without it the clock keeper")
+@click.option('--out', 'out_dir', type=click.Path(file_okay=False, path_type=Path), required=True,
+              help="The folder for preload.sh and preload.ps1")
+@click.option('--distribution', type=click.Choice(['debian', 'ubuntu', 'raspbian']), default=None,
+              help="For a board whose packages were never read: its distribution")
+@click.option('--release', default=None, metavar='CODENAME', help="... its release (bookworm, noble, ...)")
+@click.option('--arch', default=None, metavar='ARCH', help="... its architecture (arm64, armhf, amd64)")
+@click.option('--archive', 'archives', multiple=True, type=click.Choice(['raspberrypi', 'armbian']),
+              help="... the more archives it uses (Raspberry Pi OS, Armbian)")
+@pass_context
+def device_package_preload_write(ctx: FrameworkContext, device_name: str, packages: Tuple[str, ...],
+                                 bundle: Optional[str], out_dir: Path, distribution: Optional[str],
+                                 release: Optional[str], arch: Optional[str], archives: Tuple[str, ...]):
+    """Write preload.sh and preload.ps1 for exactly these packages on the board's distribution, release and
+    architecture (as its last package reading found them). Run one on a computer with a network and Python 3, then
+    give llmcf the archive: llm-cli device package preload take DEVICE FILE."""
+    from orchestrator.runtime.device import board_packages
+    state_dir, _store, device_id, _profile = _device_context(ctx, device_name)
+    try:
+        scope, words = board_packages.scope_words(state_dir, _package_scope(bundle), packages)
+        recipe = board_packages.recipe_for(state_dir, device_id, scope, words, distribution=distribution or "",
+                                           release=release or "", arch=arch or "", archives=archives)
+        sh, ps, what = board_packages.write_preload(recipe, out_dir)
+    except (board_packages.PackageError, ValueError, OSError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"Written: {escape(str(sh))}")
+    console.print(f"Written: {escape(str(ps))}")
+    console.print(f"It fetches: {escape(what)}.")
+    console.print("Run one on a computer with a network (sh preload.sh, or powershell -ExecutionPolicy Bypass -File "
+                  "preload.ps1) and bring the archive back" + (f"; it is for bundle {bundle} (--bundle)" if bundle
+                                                               else "") + ".")
+    _package_next("board.packages_take", device_id)
+
+
+@device_package_preload.command('take')
+@click.argument('device_name', metavar='DEVICE')
+@click.argument('archive', metavar='FILE')
+@click.option('--bundle', default=None, metavar='BUNDLE', help="The bundle the preload is for (without it: the board's "
+                                                               "own packages, the clock keeper)")
+@click.option('--on-board', 'on_board', is_flag=True,
+              help="FILE is on the board already (brought by USB into the board account's home): taken in there")
+@pass_context
+def device_package_preload_take(ctx: FrameworkContext, device_name: str, archive: str, bundle: Optional[str],
+                                on_board: bool):
+    """Check a board preload (its files, the distribution's signatures with the pinned keys, every package) and copy
+    it to the board over SSH, where llmcf-install takes it for the next install; or take one the person brought to the
+    board by USB (--on-board)."""
+    from orchestrator.runtime.device import board_packages
+    state_dir, store, device_id, _profile = _device_context(ctx, device_name)
+    scope = _package_scope(bundle)
+    if not on_board:
+        path = Path(archive)
+        if not path.is_file():
+            console.print(f"[red]{escape(archive)} is not a file.[/red]")
+            sys.exit(1)
+        try:   # checked before any connection: a damaged or foreign archive never reaches the board
+            board_packages.check_preload(path)
+        except board_packages.PackageError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
+    session = _package_session(ctx, state_dir, store, device_id, "package-take")
+    try:
+        if on_board:
+            manifest = board_packages.take_on_board(session, state_dir, device_id, archive, scope, via="cli",
+                                                    audit=_device_audit(ctx, state_dir))
+        else:
+            manifest = board_packages.take_preload(session, state_dir, device_id, Path(archive), scope, via="cli",
+                                                   audit=_device_audit(ctx, state_dir),
+                                                   say=lambda text: console.print(escape(text)))
+    except (board_packages.PackageError, OSError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    finally:
+        session.close()
+    console.print(f"[green]The board preload is taken in for {escape(scope)}"
+                  + (f" ({escape(manifest.get('debs', ''))})" if manifest.get("debs") else "") + ".[/green]")
+    _package_next("board.packages", device_id)
 
 
 @device.group('runtime')

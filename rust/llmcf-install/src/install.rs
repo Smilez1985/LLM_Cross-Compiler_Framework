@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::harness;
-use crate::manifest::{self, is_id, is_root_file, is_unit, is_user, Component, Manifest, RootAction};
+use crate::manifest::{self, is_id, is_package, is_root_file, is_unit, is_user, Component, Manifest, RootAction};
+use crate::package;
 use crate::sig;
 use crate::sys::{self, Account, Env};
 
@@ -125,6 +126,7 @@ fn parse_entry(line: &str) -> Option<Entry> {
         ("tree-made", [comp, backup]) => is_id(comp) && is_backup(backup),
         ("file-made" | "file-gone", [rel, backup]) => is_rel(rel) && is_backup(backup),
         ("unit-enabled" | "unit-disabled", [unit]) => is_unit(unit),
+        ("package-installed", [word]) => is_package(word),
         _ => false,
     };
     ok.then(|| Entry { run, kind: f[1].into(), args })
@@ -162,7 +164,7 @@ impl Drop for Lock {
     }
 }
 
-fn mkdirs(env: &Env, dir: &Path, mode: u32) -> Result<(), String> {
+pub(crate) fn mkdirs(env: &Env, dir: &Path, mode: u32) -> Result<(), String> {
     if dir.is_dir() {
         return Ok(());
     }
@@ -467,6 +469,11 @@ fn copy_file_checked(from: &Path, to: &Path, uid: u32, want_sha: Option<&str>) -
     let modified = after.modified().map_err(|e| e.to_string())?;
     dst.set_modified(modified).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// copy_file_checked for a board preload's files (package.rs): `from` owned by `uid`, checked later at the copy.
+pub(crate) fn copy_plain(from: &Path, to: &Path, uid: u32) -> Result<(), String> {
+    copy_file_checked(from, to, uid, None)
 }
 
 /// copy_file_checked for the harness's files (harness.rs): `from` owned by `uid`, its sha256 `want`.
@@ -901,6 +908,13 @@ impl<'a> Ctx<'a> {
                 Some(comp) if harness::is_current(env, &self.bid, comp) => State::Done,
                 _ => State::Pending,
             },
+            "install_package" => {
+                if a.packages.iter().all(|w| package::in_place(env, w)) {
+                    State::Done
+                } else {
+                    State::Pending
+                }
+            }
             "allow_unit_control" => {
                 let user = a.user.as_deref().unwrap_or("");
                 let at = |rel: &str| env.path(&format!("/{rel}"));
@@ -977,6 +991,9 @@ impl<'a> Ctx<'a> {
             return Err(
                 "the board has neither useradd nor adduser to make the bundle's account; nothing was changed".into()
             );
+        }
+        if pending("install_package") {
+            package::manager(self.env)?;
         }
         if pending("remove_user")
             && self.env.tool(&["/usr/sbin/userdel", "/sbin/userdel"]).is_none()
@@ -1196,6 +1213,24 @@ impl<'a> Ctx<'a> {
 
     fn perform(&mut self, m: &Manifest, a: &RootAction) -> Result<(), String> {
         match a.action.as_str() {
+            "install_package" => {
+                let bid = self.bid.clone();
+                let account = self.account.clone();
+                let result = package::install(self.env, &account, &bid, &a.packages, true);
+                match result {
+                    Ok(out) => {
+                        package::log(self.env, &bid, &out.source, "ok", &out.installed);
+                        for w in &out.installed {
+                            self.note("package-installed", &[w])?;
+                        }
+                        Ok(())
+                    }
+                    Err(e) => {
+                        package::log(self.env, &bid, "-", "failed", &a.packages);
+                        Err(e)
+                    }
+                }
+            }
             "allow_unit_control" => self.allow_control(m, a),
             "create_user" => self.make_user(a.user.as_deref().unwrap_or("")),
             "remove_user" => {
@@ -1289,6 +1324,11 @@ impl<'a> Ctx<'a> {
         let what = e.args.join(" ");
         match e.kind.as_str() {
             "user-used" => return Ok(()),
+            "package-installed" => {
+                // the system's own from now on (like the clock keeper): never removed with the bundle
+                say("kept", "package", &what);
+                return Ok(());
+            }
             "user-created" => {
                 let user = &e.args[0];
                 if let Some(other) = used_elsewhere(env, &self.bid, user) {
@@ -1427,7 +1467,9 @@ fn undo_action(ctx: &mut Ctx, action: &str) -> Done {
     }
     if action == "plan-uninstall" {
         for e in ctx.journal.iter().rev() {
-            if e.kind != "user-used" {
+            if e.kind == "package-installed" {
+                say("would-keep", "package", &e.args.join(" "));
+            } else if e.kind != "user-used" {
                 say("would-remove", &e.kind, &e.args.join(" "));
             }
         }
@@ -1703,6 +1745,7 @@ mod tests {
             file: None,
             units: Vec::new(),
             on_demand: false,
+            packages: Vec::new(),
         };
         // the text of a drop-in without the newer values stays byte for byte what earlier bundles wrote
         assert_eq!(

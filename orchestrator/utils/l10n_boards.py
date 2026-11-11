@@ -533,11 +533,51 @@ TEXTS = {
                                   "not set up, or its sudo rule is an older one. Set it up with Prepare root in "
                                   "{path:act_boards_bundle}.",
         "boards.clock.set_failed": "The clock of {label} was not set: {reason}",
+        "boards.clock.keeper_proposal": "This board keeps no time across a restart (no working RTC, no time "
+                                        "keeper): install the clock keeper fake-hwclock with Install in "
+                                        "{path:btn_boards_packages}, from its own sources or a board preload.",
         "boards.clock.question": "May the framework set the clock of board {board} from this computer's time whenever "
                                  "it is off by more than a minute? A board without a battery-backed clock that is "
                                  "offline cannot know the time; the framework sets it as root through llmcf-install's clock action "
                                  "only (it needs the board's root readiness), and writes every set to the audit log. "
                                  "You can change this in the board's settings.",
+        # the board's system packages (runtime/device/board_packages.py; `llmcf device package`)
+        "boards.btn.packages": "Board packages...",
+        "boards.packages.title": "System packages of {label}",
+        "boards.packages.state": "Last package reading: {read_at}\nSystem: {system}\nPackage sources: {sources}\n"
+                                 "Board preloads taken in: {taken}\n{wanted}\nMissing at the last reading: "
+                                 "{missing}\nLast install: {last}",
+        "boards.packages.wanted_clock": "The clock keeper (no working RTC, no time keeper): {packages}",
+        "boards.packages.wanted_bundle": "Bundle {bundle}: {packages}",
+        "boards.packages.nothing": "nothing",
+        "boards.packages.scope": "Packages of:",
+        "boards.packages.scope_clock": "the board (the clock keeper fake-hwclock)",
+        "boards.packages.scope_bundle": "bundle {bundle}",
+        "boards.packages.action": "What to do:",
+        "boards.packages.do_install": "Install (the plan first, then your yes)",
+        "boards.packages.do_write": "Write a board preload (for a board without a network)",
+        "boards.packages.do_take": "Take in a board preload from this computer",
+        "boards.packages.do_take_board": "Take in a board preload already on the board (USB)",
+        "boards.packages.on_board": "Preload on the board:",
+        "boards.packages.on_board_hint": "its path in the board account's home",
+        "boards.packages.on_board_missing": "Name the path of the board preload on the board (in the board account's "
+                                            "home).",
+        "boards.packages.planning": "Planning the packages of {label} ...",
+        "boards.packages.installing": "Installing the packages of {label} ...",
+        "boards.packages.taking": "Taking in the board preload for {label} ...",
+        "boards.packages.source_preload": "from the board preload taken in for it",
+        "boards.packages.source_online": "from the board's own package sources",
+        "boards.packages.question": "Install {packages} on {label} as root through llmcf-install ({source})? The plan "
+                                    "above shows what comes with them; nothing is removed, and the install is written "
+                                    "to the audit log.",
+        "boards.packages.in_place": "Everything is in place on {label}; nothing to install.",
+        "boards.packages.done": "Installed on {label}: {packages}.",
+        "boards.packages.not_done": "The packages of {label}: not done: {reason}",
+        "boards.packages.write_title": "Folder for preload.sh and preload.ps1",
+        "boards.packages.written": "Written: {sh} and {ps}. They fetch {what}. Run one on a computer with a network "
+                                   "and Python 3, then take the archive in here.",
+        "boards.packages.take_title": "The board preload (.tar.gz)",
+        "boards.packages.taken": "The board preload is taken in on {label} for {scope}: {packages}.",
         "bundle.ask.root_keep_clock": "This board has no working clock of its own: llmcf-install also sets up keeping "
                                       "its time across a restart (fake-hwclock where it is installed, else "
                                       "systemd-timesyncd's clock file).",
@@ -1210,12 +1250,52 @@ TEXTS = {
                                   "llmcf-install ist nicht eingerichtet, oder ihre sudo-Regel ist eine ältere. Richte "
                                   "sie mit Root vorbereiten in {path:act_boards_bundle} ein.",
         "boards.clock.set_failed": "Die Uhr von {label} wurde nicht gestellt: {reason}",
+        "boards.clock.keeper_proposal": "Dieses Board behält keine Zeit über einen Neustart (keine funktionierende "
+                                        "RTC, kein Zeithalter): Installiere den Uhrhalter fake-hwclock mit "
+                                        "Installieren in {path:btn_boards_packages}, aus seinen eigenen Quellen oder "
+                                        "einem Board-Preload.",
         "boards.clock.question": "Darf das Framework die Uhr von Board {board} von der Zeit dieses Rechners stellen, "
                                  "wann immer sie um mehr als eine Minute abweicht? Ein Board ohne batteriegepufferte "
                                  "Uhr, das offline ist, kann die Zeit nicht kennen; das Framework stellt sie als root nur über die "
                                  "Uhr-Aktion von llmcf-install (sie braucht die Root-Bereitschaft des Boards) und "
                                  "schreibt jedes Stellen ins Audit-Log. Du kannst das in den Einstellungen des Boards "
                                  "ändern.",
+        "boards.btn.packages": "Pakete des Boards...",
+        "boards.packages.title": "Systempakete von {label}",
+        "boards.packages.state": "Letzte Paketlesung: {read_at}\nSystem: {system}\nPaketquellen: {sources}\n"
+                                 "Übernommene Board-Preloads: {taken}\n{wanted}\nBei der letzten Lesung fehlend: "
+                                 "{missing}\nLetzte Installation: {last}",
+        "boards.packages.wanted_clock": "Der Uhrhalter (keine funktionierende RTC, kein Zeithalter): {packages}",
+        "boards.packages.wanted_bundle": "Bündel {bundle}: {packages}",
+        "boards.packages.nothing": "nichts",
+        "boards.packages.scope": "Pakete von:",
+        "boards.packages.scope_clock": "dem Board (der Uhrhalter fake-hwclock)",
+        "boards.packages.scope_bundle": "Bündel {bundle}",
+        "boards.packages.action": "Was tun:",
+        "boards.packages.do_install": "Installieren (zuerst der Plan, dann dein Ja)",
+        "boards.packages.do_write": "Ein Board-Preload schreiben (für ein Board ohne Netz)",
+        "boards.packages.do_take": "Ein Board-Preload von diesem Rechner übernehmen",
+        "boards.packages.do_take_board": "Ein Board-Preload übernehmen, das schon auf dem Board liegt (USB)",
+        "boards.packages.on_board": "Preload auf dem Board:",
+        "boards.packages.on_board_hint": "sein Pfad im Home des Board-Kontos",
+        "boards.packages.on_board_missing": "Nenne den Pfad des Board-Preloads auf dem Board (im Home des "
+                                            "Board-Kontos).",
+        "boards.packages.planning": "Die Pakete von {label} werden geplant ...",
+        "boards.packages.installing": "Die Pakete von {label} werden installiert ...",
+        "boards.packages.taking": "Das Board-Preload für {label} wird übernommen ...",
+        "boards.packages.source_preload": "aus dem dafür übernommenen Board-Preload",
+        "boards.packages.source_online": "aus den eigenen Paketquellen des Boards",
+        "boards.packages.question": "{packages} auf {label} als root über llmcf-install installieren ({source})? Der "
+                                    "Plan oben zeigt, was mitkommt; nichts wird entfernt, und die Installation wird "
+                                    "ins Audit-Log geschrieben.",
+        "boards.packages.in_place": "Auf {label} ist alles da; nichts zu installieren.",
+        "boards.packages.done": "Auf {label} installiert: {packages}.",
+        "boards.packages.not_done": "Die Pakete von {label}: nicht erledigt: {reason}",
+        "boards.packages.write_title": "Ordner für preload.sh und preload.ps1",
+        "boards.packages.written": "Geschrieben: {sh} und {ps}. Sie holen {what}. Führe eines auf einem Rechner mit "
+                                   "Netz und Python 3 aus und übernimm das Archiv dann hier.",
+        "boards.packages.take_title": "Das Board-Preload (.tar.gz)",
+        "boards.packages.taken": "Das Board-Preload ist auf {label} für {scope} übernommen: {packages}.",
         "bundle.ask.root_keep_clock": "Dieses Board hat keine eigene funktionierende Uhr: llmcf-install richtet "
                                       "außerdem ein, dass es seine Zeit über einen Neustart behält (fake-hwclock, wo es "
                                       "installiert ist, sonst die Uhrdatei von systemd-timesyncd).",

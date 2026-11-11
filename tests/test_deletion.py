@@ -285,6 +285,8 @@ DELETION_SITES = {
     ("orchestrator/utils/launcher.py", "windows_remove"): START_ENTRY,
     # open, reported
     ("orchestrator/runtime/profile.py", "ProfileStore.remove_device"): UNUSED,
+    # the board preload unpacked once for its check at take-in (board_packages.check_preload)
+    ("orchestrator/runtime/device/board_packages.py", "check_preload"): STAGING,
 }
 
 _DELETING = {"rmtree", "unlink", "rmdir", "removedirs", "prune", "prune_builds", "prune_containers", "prune_volumes",

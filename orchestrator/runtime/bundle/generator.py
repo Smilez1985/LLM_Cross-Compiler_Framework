@@ -242,6 +242,8 @@ class BundlePlan:
                                + (f", assume yes {hp.assume_yes} (opt-in)" if hp.assume_yes else ""))
             for action in self.manifest.root_actions:
                 out.append(f"  root action: {action.action} for {action.component} (llmcf-install)"
+                           + (f": {', '.join(action.packages)} (the board's own sources, or a board preload taken "
+                              "in for the bundle)" if action.packages else "")
                            + (", skipped: unprivileged only" if self.manifest.mode == "unprivileged" else ""))
         if self.routes is not None:
             out.append("  the gateway's routes (from the blocks' reach):")
@@ -676,6 +678,8 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
                       _cgroup_action(plan, comp_id, block, unit, values, selection, limits, comp_memory)]
         if harness_part is not None:
             roots.append(RootAction(action="run_harness", component=comp_id))
+        if block.system_packages:
+            roots.append(RootAction(action="install_package", component=comp_id, packages=block.system_packages))
         if block.kind == "harness" and harness_part is None:
             continue   # its reason is a problem already
         try:
@@ -775,7 +779,8 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
                       **({"init_system": init} if init else {})},
             "mode": "unprivileged" if selection.unprivileged_only else "full",
             "components": [c.model_dump(by_alias=True) for c in components],
-            "root_actions": [r.model_dump() for r in roots]})
+            # the packages first: a unit's program may need them when it starts
+            "root_actions": [r.model_dump() for r in sorted(roots, key=lambda r: r.action != "install_package")]})
     except Exception as e:  # noqa: BLE001
         plan.problems.append(f"the manifest: {str(e).splitlines()[-1][:300]}")
     return plan

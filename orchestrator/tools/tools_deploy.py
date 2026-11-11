@@ -157,6 +157,10 @@ class DeviceOut(BaseModel):
         "The board's limits measured on the board with the benchmark (numbers and words only): context tokens, "
         "KV-cache type, prompt cache, what the server needs and the reserve; measured false when the board was "
         "not measured yet (then nothing is guessed: ask the person to run the benchmark on the board)"))
+    system_packages: Dict[str, Any] = Field(default_factory=dict, description=(
+        "The board's system packages at its last package reading (read only): distribution, release, architecture, "
+        "package manager, the packages its bundles and its clock need that were missing, and a proposal; only the "
+        "person installs them (you can never run an install or confirm one)"))
 
 
 class DevicesOut(ToolOutput):
@@ -311,6 +315,13 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         except Exception:  # noqa: BLE001 - a listing never fails for one board's record
             return {}
 
+    def system_packages(device_id: str) -> Dict[str, Any]:
+        from orchestrator.runtime.device.board_packages import ai_facts
+        try:
+            return ai_facts(devices().state_dir, device_id)
+        except Exception:  # noqa: BLE001 - a listing never fails for one board's record
+            return {}
+
     def list_devices(_inp: NoInput, ctx: ToolContext) -> DevicesOut:
         store = devices()
         last = store.last_deploys()
@@ -323,7 +334,8 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
                                   usable=not problem, problem=problem, trusted_via=d.trusted_via,
                                   last_deploy=str(seen["at"]) if seen.get("at") else None,
                                   last_deploy_ok=bool(seen["ok"]) if "ok" in seen else None,
-                                  board_limits=board_limits(d.device_id)))
+                                  board_limits=board_limits(d.device_id),
+                                  system_packages=system_packages(d.device_id)))
         if not rows:
             ctx.notes.append("No device is trusted and paired yet. " + PAIR_NEXT)
         ctx.notes.extend(probe_pairing_notes(store.state_dir, {r.device_id for r in rows}))

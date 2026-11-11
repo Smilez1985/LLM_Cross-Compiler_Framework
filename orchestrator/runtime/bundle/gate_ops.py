@@ -96,10 +96,11 @@ define("bundle-kept", ("word", "word"),
 FIXED_HELPER = gate.LIBEXEC_DIR + "/" + ROOT
 FIXED_DIR = gate.LIBEXEC_DIR
 DROPIN = gate.SUDOERS_DIR + "/llmcf-install"
-# the sudo rule names every action of llmcf-install: the bundle's root actions, the person's harness run and the clock
-_HELPER_ACTIONS = inst.ROOT_ACTIONS + inst.HARNESS_ACTIONS + (inst.CLOCK_ACTION,)
-# a drop-in written before the newest action (the clock) lacks it: the readiness reads it as old and sets it up again
-_DROPIN_CHECK = inst.CLOCK_ACTION
+# the sudo rule names every action of llmcf-install: the bundle's root actions, the person's harness run, the clock and
+# the packages
+_HELPER_ACTIONS = inst.ROOT_ACTIONS + inst.HARNESS_ACTIONS + (inst.CLOCK_ACTION, inst.PACKAGE_ACTION)
+# a drop-in written before the newest action (the packages) lacks it: the readiness reads it as old and sets it up again
+_DROPIN_CHECK = inst.PACKAGE_ACTION
 
 
 def places_sh(helper: str = FIXED_HELPER, dropin: str = DROPIN) -> str:

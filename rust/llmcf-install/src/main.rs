@@ -14,6 +14,11 @@
 //! [MODE|OFFSET|PART]` runs the person's harness of a harness component (manifest root action run_harness) through the
 //! framework's harness watch, detached, and reads it back (harness.rs).
 //!
+//! `sudo llmcf-install install_package plan|apply BUNDLE|- NAME...` installs packages of the board's distribution a
+//! signed list names (a bundle's install_package actions, or `-`: the clock keeper fake-hwclock) through apt and dpkg,
+//! from a board preload the framework took in for that scope (checked against the distribution's signed lists and the
+//! board's own archive keyring) or else from the board's own sources (package.rs).
+//!
 //! `sudo llmcf-install clock STAMP|keep` sets the board's time to the PC's (a checked UTC time stamp) and saves it
 //! for the next start, or sets up keeping the last known time across a restart on a board without a working RTC
 //! (clock.rs).
@@ -26,6 +31,7 @@ mod clock;
 mod harness;
 mod install;
 mod manifest;
+mod package;
 mod sig;
 mod sys;
 
@@ -65,7 +71,16 @@ fn main() -> ExitCode {
     };
     let harness_action = args.first().map(|a| harness::ACTIONS.contains(&a.as_str())).unwrap_or(false);
     let clock_action = args.first().map(String::as_str) == Some(clock::ACTION);
-    if clock_action {
+    let package_action = args.first().map(String::as_str) == Some(package::ACTION);
+    if package_action {
+        if !package::is_call(&args[1..]) {
+            return refuse(
+                install::EXIT_USAGE,
+                "usage: llmcf-install install_package plan|apply BUNDLE|- NAME[=VERSION]... (1 to 16 packages of the \
+                 distribution by its naming rules)",
+            );
+        }
+    } else if clock_action {
         if args.len() != 2 || !clock::is_arg(&args[1]) {
             return refuse(
                 install::EXIT_USAGE,
@@ -100,7 +115,7 @@ fn main() -> ExitCode {
         );
     }
     let (action, bid) = (args[0].as_str(), args[1].as_str());
-    if !clock_action && !manifest::is_id(bid) {
+    if !clock_action && !package_action && !manifest::is_id(bid) {
         return refuse(install::EXIT_USAGE, "not a bundle id");
     }
     println!("llmcf-bundle: helper llmcf-install {VERSION}");
@@ -124,6 +139,9 @@ fn main() -> ExitCode {
     };
     if clock_action {
         return ExitCode::from(clock::run(&env, bid) as u8);
+    }
+    if package_action {
+        return ExitCode::from(package::run(&env, &account, &args[1..]) as u8);
     }
     if harness_action {
         return ExitCode::from(harness::run(&env, action, bid, &account, &args[2..]) as u8);

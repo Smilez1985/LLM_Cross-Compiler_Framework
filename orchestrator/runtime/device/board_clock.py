@@ -400,7 +400,8 @@ def keep_line(done: ClockRun) -> str:
         return "The board has a working clock of its own; nothing to set up."
     if done.result == "unavailable":
         return ("The board cannot keep its time across a restart: neither fake-hwclock nor systemd-timesyncd is "
-                "there (install fake-hwclock through its package manager or the build's preload).")
+                "there (llmcf-install's install_package brings fake-hwclock after your yes: the board's packages, from "
+                "its own sources or a board preload).")
     return f"Keeping the board's time across a restart was not set up: {done.result or 'no answer'} {done.detail}"
 
 

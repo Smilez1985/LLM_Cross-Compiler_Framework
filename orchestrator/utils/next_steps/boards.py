@@ -19,6 +19,7 @@ MOUSE_LABELS = {
     "btn_boards_deploy": (_BOARDS, "boards.btn.deploy"),
     "btn_boards_verify": (_BOARDS, "boards.btn.verify"),
     "btn_boards_check": (_BOARDS, "boards.btn.check"),
+    "btn_boards_packages": (_BOARDS, "boards.btn.packages"),
 }
 
 STEPS = (
@@ -48,6 +49,16 @@ STEPS = (
          window="boards", target="btn_boards_verify"),
     Step("board.check", cli="mojo --board", cli_args=("--board", "{device}"), params={"device": _DEVICE},
          tool="run_mojo_oracle", window="mojo", target="btn_mojo_check_board", runnable=True),
+    # the board's system packages (runtime/device/board_packages.py): the person installs them after the plan; an AI
+    # only proposes it
+    Step("board.packages", cli="device package install", cli_args=("{device}",), params={"device": _DEVICE},
+         person_only="permission", window="boards", target="btn_boards_packages"),
+    Step("board.packages_preload", cli="device package preload write", cli_args=("{device}", "--out", "{folder}"),
+         params={"device": _DEVICE, "folder": Param("path")}, person_only="permission", window="boards",
+         target="btn_boards_packages"),
+    Step("board.packages_take", cli="device package preload take", cli_args=("{device}", "{file}"),
+         params={"device": _DEVICE, "file": Param("path")}, person_only="permission", window="boards",
+         target="btn_boards_packages"),
     Step("boards.list", cli="device list", tool="list_devices", window="boards", target=_BOARDS, runnable=True),
     # Q5 (chain boards): forget a board's old identity after a re-flashed card, old and new fingerprint shown
     Step("board.forget_key", person_only="host_key", window="boards", target="btn_boards_forget_key", planned=True),
@@ -81,6 +92,12 @@ TEXTS = {
                                "myboard.local try its IP address",
         "step.board.ssh_enable": "Switch the remote login (SSH) on",
         "step.board.login": "Check the board's user name and password",
+        "step.board.packages": "Install the board's system packages (the plan first, then your yes)",
+        "step.board.packages.what": "Shows which packages and dependencies would come on board {device} and from "
+                                    "where, and installs them as root through llmcf-install after your yes.",
+        "step.board.packages.why": "A package the board's bundle or its clock needs is missing.",
+        "step.board.packages_preload": "Write a board preload for a board without a network",
+        "step.board.packages_take": "Take in the board preload and copy it to the board",
     },
     "de": {
         "step.board.trust": "Dem Board vertrauen (seinen Fingerabdruck vergleichen)",
@@ -104,6 +121,12 @@ TEXTS = {
                                "myboard.local seine IP-Adresse versuchen",
         "step.board.ssh_enable": "Die Fernanmeldung (SSH) einschalten",
         "step.board.login": "Benutzernamen und Passwort des Boards prüfen",
+        "step.board.packages": "Die Systempakete des Boards installieren (zuerst der Plan, dann dein Ja)",
+        "step.board.packages.what": "Zeigt, welche Pakete und Abhängigkeiten auf das Board {device} kämen und woher, "
+                                    "und installiert sie nach deinem Ja als root über llmcf-install.",
+        "step.board.packages.why": "Ein Paket, das das Bündel oder die Uhr des Boards braucht, fehlt.",
+        "step.board.packages_preload": "Ein Board-Preload für ein Board ohne Netz schreiben",
+        "step.board.packages_take": "Das Board-Preload übernehmen und auf das Board kopieren",
     },
 }
 
@@ -111,5 +134,8 @@ TEXTS = {
 FORMAL = {
     "de": {
         "step.board.prune_on_device": "Ältere Builds auf dem Board entfernen (Sie haken an, was gelöscht wird)",
+        "step.board.packages": "Die Systempakete des Boards installieren (zuerst der Plan, dann Ihr Ja)",
+        "step.board.packages.what": "Zeigt, welche Pakete und Abhängigkeiten auf das Board {device} kämen und woher, "
+                                    "und installiert sie nach Ihrem Ja als root über llmcf-install.",
     },
 }

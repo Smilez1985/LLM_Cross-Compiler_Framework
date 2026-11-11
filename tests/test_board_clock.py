@@ -100,7 +100,9 @@ def test_the_gates_clock_kind_takes_exactly_keep_and_a_utc_stamp():
 def test_the_sudo_rule_names_the_clock_action_and_an_older_rule_is_old():
     from orchestrator.runtime.bundle import gate_ops
     assert "$llmcf_fx clock *" in gate_ops._setup_body("sudo", "apt", "b1", "a" * 64)
-    assert "llmcf_dropin_ok clock llmcf-check" in gate_ops._ready_body("a" * 64)
+    # the readiness checks for the newest action of the rule: since the packages that is install_package (a rule
+    # without it, written for the clock, reads as old and is written again with both)
+    assert "llmcf_dropin_ok install_package llmcf-check" in gate_ops._ready_body("a" * 64)
 
 
 # --- at a contact --------------------------------------------------------------------------------------------------

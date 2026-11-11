@@ -1000,3 +1000,297 @@ fn keeping_the_time_takes_fake_hwclock_then_timesyncd_and_nothing_with_a_working
     assert_eq!(code, 0, "{out}");
     assert!(last(&out).starts_with("llmcf-bundle: result=unavailable changed=0 keep=none"), "{out}");
 }
+
+// --- packages of the board's distribution (package.rs) ------------------------------------------------------------
+
+const FAKE_DPKG_QUERY: &str = r#"#!/bin/sh
+# fake dpkg-query -W -f=FORMAT NAME: a package is installed when the prefix's fake-dpkg/NAME holds its version
+name=""; for a; do name=$a; done
+f="$LLMCF_TEST_ROOT/fake-dpkg/$name"
+[ -f "$f" ] || { echo "dpkg-query: no packages found matching $name" >&2; exit 1; }
+printf 'install ok installed\t%s\n' "$(cat "$f")"
+"#;
+
+const FAKE_DPKG: &str = r#"#!/bin/sh
+echo "dpkg $*" >> "$LLMCF_TEST_ROOT/calls.log"
+case $1 in
+  --print-architecture) echo arm64 ;;
+  --compare-versions) [ "$2" \< "$4" ] ;;
+  *) exit 0 ;;
+esac
+"#;
+
+const FAKE_APT_GET: &str = r#"#!/bin/sh
+echo "apt-get $* frontend=$DEBIAN_FRONTEND" >> "$LLMCF_TEST_ROOT/calls.log"
+mkdir -p "$LLMCF_TEST_ROOT/fake-dpkg"
+sim=""; inst=""
+for a; do case $a in -s) sim=1 ;; install) inst=1 ;; update) [ -e "$LLMCF_TEST_ROOT/offline" ] && { echo "E: no network" >&2; exit 100; } ;; esac; done
+[ -n "$inst" ] || exit 0
+for a; do
+  case $a in
+    -*|install|*=*|Dir::*|APT::*|Dpkg::*) ;;
+    /*.deb) b=$(basename "$a" .deb); n=${b%%_*}; v=${b#*_}; v=${v%_*}
+            if [ -n "$sim" ]; then echo "Inst $n ($v Fake [all])"; else echo "$v" > "$LLMCF_TEST_ROOT/fake-dpkg/$n"; fi ;;
+    *) if [ -n "$sim" ]; then echo "Inst $a (1.0 Fake [all])"; echo "Inst libdep (2.0 Fake [arm64])";
+       else echo 1.0 > "$LLMCF_TEST_ROOT/fake-dpkg/$a"; echo 2.0 > "$LLMCF_TEST_ROOT/fake-dpkg/libdep"; fi ;;
+  esac
+done
+"#;
+
+const FAKE_GPGV: &str = r#"#!/bin/sh
+echo "gpgv $*" >> "$LLMCF_TEST_ROOT/calls.log"
+sig=""; data=""; for a; do sig=$data; data=$a; done
+[ "$(cat "$sig")" = "signed $(sha256sum "$data" | cut -d' ' -f1)" ] || { echo "[GNUPG:] BADSIG 0123"; exit 1; }
+echo "[GNUPG:] VALIDSIG 0123456789ABCDEF0123456789ABCDEF01234567"
+"#;
+
+impl Board {
+    fn apt_board(&self) {
+        write_mode(&self.p("usr/bin/dpkg-query"), FAKE_DPKG_QUERY.as_bytes(), 0o755);
+        write_mode(&self.p("usr/bin/dpkg"), FAKE_DPKG.as_bytes(), 0o755);
+        write_mode(&self.p("usr/bin/apt-get"), FAKE_APT_GET.as_bytes(), 0o755);
+        write_mode(&self.p("usr/bin/apt-mark"), FAKE_LOGGED.as_bytes(), 0o755);
+        write_mode(&self.p("usr/bin/gpgv"), FAKE_GPGV.as_bytes(), 0o755);
+        write_mode(&self.p("etc/os-release"), b"ID=debian\nVERSION_CODENAME=bookworm\n", 0o644);
+        write_mode(&self.p("usr/share/keyrings/debian-archive-keyring.gpg"), b"the board's own keyring", 0o644);
+    }
+
+    fn package(&self, args: &[&str]) -> (i32, String) {
+        let mut all = vec!["--root", self.root.to_str().unwrap(), "install_package"];
+        all.extend_from_slice(args);
+        let out = Command::new(env!("CARGO_BIN_EXE_llmcf-install"))
+            .args(&all)
+            .env_clear()
+            .env("SUDO_USER", "board")
+            .output()
+            .unwrap();
+        (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    fn has(&self, name: &str) -> Option<String> {
+        fs::read_to_string(self.p(&format!("fake-dpkg/{name}"))).ok().map(|v| v.trim().to_string())
+    }
+
+    fn preload_dir(&self, scope: &str) -> PathBuf {
+        self.p(&format!("home/board/.local/share/llm-framework/packages/{scope}/packages"))
+    }
+
+    /// A board preload as the framework takes it in: one suite with its signed Release, the list and two .debs.
+    fn preload(&self, scope: &str) {
+        let top = self.preload_dir(scope);
+        let deb = b"!<arch>\nfake-hwclock deb".to_vec();
+        let dep = b"!<arch>\nlibdep deb".to_vec();
+        let file1 = "pool/main/f/fake-hwclock/fake-hwclock_0.13_all.deb";
+        let file2 = "pool/main/libd/libdep/libdep_2.0_arm64.deb";
+        let list = format!(
+            "Package: fake-hwclock\nVersion: 0.13\nArchitecture: all\nDepends: libdep\nFilename: {file1}\nSize: {}\n\
+             SHA256: {}\n\nPackage: libdep\nVersion: 2.0\nArchitecture: arm64\nFilename: {file2}\nSize: {}\n\
+             SHA256: {}\n\nPackage: other\nVersion: 1\nFilename: pool/main/o/other/other_1_all.deb\nSize: 3\n\
+             SHA256: {}\n",
+            deb.len(),
+            sha(&deb),
+            dep.len(),
+            sha(&dep),
+            "0".repeat(64)
+        );
+        let release = format!(
+            "Origin: Debian\nSuite: oldstable\nCodename: bookworm\nArchitectures: amd64 arm64\nComponents: main\n\
+             SHA256:\n {} {} main/binary-arm64/Packages\n",
+            sha(list.as_bytes()),
+            list.len()
+        );
+        write_mode(&top.join("1/Release"), release.as_bytes(), 0o644);
+        write_mode(&top.join("1/Release.gpg"), format!("signed {}", sha(release.as_bytes())).as_bytes(), 0o644);
+        write_mode(&top.join("1/main/binary-arm64/Packages"), list.as_bytes(), 0o644);
+        write_mode(&top.join("1").join(file1), &deb, 0o644);
+        write_mode(&top.join("1").join(file2), &dep, 0o644);
+        write_mode(&top.join("sources.txt"), b"1 http://deb.debian.org/debian bookworm main\n", 0o644);
+        write_mode(&top.join("keys/debian-12.asc"), b"key", 0o644);
+        write_mode(&top.parent().unwrap().join("manifest.txt"), b"format=1\nkind=packages\n", 0o644);
+        chown_tree(&self.p("home/board"), self.uid);
+    }
+}
+
+#[test]
+fn the_clock_keeper_is_planned_then_installed_from_the_boards_own_sources() {
+    let b = Board::new();
+    b.apt_board();
+    let (code, out) = b.package(&["plan", "-", "fake-hwclock"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("llmcf-bundle: package fake-hwclock installed=no"), "{out}");
+    assert!(out.contains("llmcf-bundle: would-install fake-hwclock 1.0"), "{out}");
+    assert!(last(&out).starts_with("llmcf-bundle: result=planned changed=0 source=online"), "{out}");
+    assert!(last(&out).contains("would=fake-hwclock=1.0,libdep=2.0"), "{out}");
+    assert_eq!(b.has("fake-hwclock"), None);
+    assert!(!b.calls().contains("update"), "a plan reads nothing anew: {}", b.calls());
+    let (code, out) = b.package(&["apply", "-", "fake-hwclock"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(last(&out).starts_with("llmcf-bundle: result=ok changed=2 source=online"), "{out}");
+    assert_eq!(b.has("fake-hwclock").as_deref(), Some("1.0"));
+    let calls = b.calls();
+    assert!(calls.contains("apt-get update frontend=noninteractive"), "{calls}");
+    assert!(
+        calls.contains("--force-confold install -y --no-install-recommends fake-hwclock frontend=noninteractive"),
+        "{calls}"
+    );
+    let log = fs::read_to_string(b.p("var/lib/llmcf/packages/journal")).unwrap();
+    assert!(log.contains("\t-\tonline\tok\tfake-hwclock=1.0,libdep=2.0") || log.contains("\t-\tonline\tok\t"), "{log}");
+    assert_eq!(fs::metadata(b.p("var/lib/llmcf/packages/journal")).unwrap().mode() & 0o777, 0o600);
+    // a second run finds it in place and changes nothing
+    let (code, out) = b.package(&["apply", "-", "fake-hwclock"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(last(&out).starts_with("llmcf-bundle: result=ok changed=0"), "{out}");
+    // without a network the board's own sources do not answer: said, nothing installed
+    let b = Board::new();
+    b.apt_board();
+    write_mode(&b.p("offline"), b"", 0o644);
+    let (code, out) = b.package(&["apply", "-", "fake-hwclock"]);
+    assert_eq!(code, 5, "{out}");
+    assert!(last(&out).contains("result=failed") && last(&out).contains("board preload"), "{out}");
+}
+
+#[test]
+fn only_packages_a_signed_list_names_are_taken_and_only_with_apt() {
+    let b = Board::new();
+    b.apt_board();
+    for args in [&["apply", "-", "curl"][..], &["apply", "-", "fake-hwclock=0.13"], &["apply", BID, "fake-hwclock"]] {
+        let (code, out) = b.package(args);
+        assert_eq!(code, 3, "{args:?}: {out}");
+        assert!(last(&out).contains("result=refused changed=0"), "{out}");
+    }
+    for bad in
+        [&["apply", "-", "-y"][..], &["apply", "-", "/tmp/x.deb"], &["apply", "-"], &["remove", "-", "fake-hwclock"]]
+    {
+        let (code, out) = b.package(bad);
+        assert_eq!(code, 2, "{bad:?}: {out}");
+    }
+    assert!(!b.calls().contains("apt-get"), "{}", b.calls());
+    // a bundle's signed install_package names its packages
+    b.deploy(serde_json::json!([{"action": "install_package", "component": "llm", "packages": ["libgomp1"]}]));
+    let (code, out) = b.package(&["plan", BID, "libgomp1"]);
+    assert_eq!(code, 0, "{out}");
+    let (code, out) = b.package(&["plan", BID, "fake-hwclock"]);
+    assert_eq!(code, 3, "{out}");
+    // a board with another package manager is told so, and nothing runs
+    let b = Board::new();
+    write_mode(&b.p("usr/bin/dnf"), FAKE_LOGGED.as_bytes(), 0o755);
+    let (code, out) = b.package(&["apply", "-", "fake-hwclock"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(last(&out).contains("package manager is dnf"), "{out}");
+    assert_eq!(b.calls(), "");
+}
+
+#[test]
+fn a_bundle_apply_installs_its_packages_first_and_a_rollback_keeps_them() {
+    let b = Board::new();
+    b.apt_board();
+    let mut actions = vec![serde_json::json!({"action": "install_package", "component": "llm",
+                                               "packages": ["libgomp1"]})];
+    actions.extend(autostart().as_array().unwrap().iter().cloned());
+    b.deploy(serde_json::Value::Array(actions));
+    let (code, out) = b.run("plan");
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("llmcf-bundle: would install_package llm packages=libgomp1"), "{out}");
+    let (code, out) = b.run("apply");
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("llmcf-bundle: done install_package llm packages=libgomp1"), "{out}");
+    assert_eq!(b.has("libgomp1").as_deref(), Some("1.0"));
+    let journal = fs::read_to_string(b.p(&format!("var/lib/llmcf/install/{BID}/journal"))).unwrap();
+    assert!(journal.contains("\tpackage-installed\tlibgomp1=1.0"), "{journal}");
+    let (code, out) = b.run("status");
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("llmcf-bundle: already install_package"), "{out}");
+    let (code, out) = b.run("plan-uninstall");
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("llmcf-bundle: would-keep package libgomp1=1.0"), "{out}");
+    let (code, out) = b.run("uninstall");
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("llmcf-bundle: kept package libgomp1=1.0"), "{out}");
+    assert_eq!(b.has("libgomp1").as_deref(), Some("1.0"), "a package stays with the system");
+    assert!(!b.calls().contains(" remove"), "{}", b.calls());
+}
+
+#[test]
+fn a_board_preload_is_checked_against_the_signed_lists_and_installed_without_a_source() {
+    let b = Board::new();
+    b.apt_board();
+    b.preload("board");
+    let (code, out) = b.package(&["plan", "-", "fake-hwclock"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("llmcf-bundle: preload checked debs=2 source=preload"), "{out}");
+    assert!(
+        last(&out).contains("source=preload") && last(&out).contains("would=fake-hwclock=0.13,libdep=2.0"),
+        "{out}"
+    );
+    let (code, out) = b.package(&["apply", "-", "fake-hwclock"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(b.has("fake-hwclock").as_deref(), Some("0.13"));
+    assert_eq!(b.has("libdep").as_deref(), Some("2.0"));
+    let calls = b.calls();
+    let install = calls.lines().find(|l| l.starts_with("apt-get") && l.contains(" install ")).unwrap();
+    assert!(
+        install.contains("Dir::Etc::SourceList=/dev/null") && install.contains("Dir::Etc::SourceParts="),
+        "{install}"
+    );
+    assert!(
+        install.contains("/var/lib/llmcf/packages/preload/board/1/pool/main/f/fake-hwclock/fake-hwclock_0.13_all.deb"),
+        "{install}"
+    );
+    assert!(!calls.contains("apt-get update"), "{calls}");
+    assert!(calls.contains("apt-mark auto libdep"), "{calls}");
+    // the root copy is root-owned, the account's folder untouched
+    let copy = b.p("var/lib/llmcf/packages/preload/board/1/Release");
+    assert_eq!(fs::metadata(&copy).unwrap().uid(), euid());
+
+    // every tampering refuses the whole preload, and nothing is installed
+    type Tamper = fn(&Path);
+    let cases: [(&str, Tamper); 6] = [
+        ("a changed .deb", |top| {
+            write_mode(&top.join("1/pool/main/f/fake-hwclock/fake-hwclock_0.13_all.deb"), b"!<arch>\nevil", 0o644)
+        }),
+        ("a changed list", |top| {
+            let p = top.join("1/main/binary-arm64/Packages");
+            let t = fs::read_to_string(&p).unwrap().replace("Version: 0.13", "Version: 0.14");
+            write_mode(&p, t.as_bytes(), 0o644)
+        }),
+        ("a changed Release", |top| {
+            let p = top.join("1/Release");
+            let t = fs::read_to_string(&p).unwrap().replace("Origin: Debian", "Origin: Debiam");
+            write_mode(&p, t.as_bytes(), 0o644)
+        }),
+        ("a .deb no list names", |top| write_mode(&top.join("1/pool/main/e/evil/evil_1_all.deb"), b"x", 0o644)),
+        ("a file a preload never has", |top| write_mode(&top.join("1/install.sh"), b"#!/bin/sh\n", 0o755)),
+        ("a link", |top| {
+            symlink("/etc/shadow", top.join("1/pool/main/f/shadow.deb")).unwrap();
+        }),
+    ];
+    for (why, tamper) in cases {
+        let b = Board::new();
+        b.apt_board();
+        b.preload("board");
+        tamper(&b.preload_dir("board"));
+        chown_tree(&b.p("home/board"), b.uid);
+        let (code, out) = b.package(&["apply", "-", "fake-hwclock"]);
+        assert_eq!(code, 3, "{why}: {out}");
+        assert!(last(&out).contains("result=refused"), "{why}: {out}");
+        assert!(last(&out).contains("changed=0"), "{why}: {out}");
+        assert_eq!(b.has("fake-hwclock"), None, "{why}");
+        assert!(!b.calls().contains(" install "), "{why}: {}", b.calls());
+    }
+    // a preload of another release is refused
+    let b = Board::new();
+    b.apt_board();
+    write_mode(&b.p("etc/os-release"), b"ID=debian\nVERSION_CODENAME=trixie\n", 0o644);
+    b.preload("board");
+    let (code, out) = b.package(&["apply", "-", "fake-hwclock"]);
+    assert_ne!(code, 0, "{out}");
+    assert!(last(&out).contains("not of the board's release trixie"), "{out}");
+    // without the board's own archive keyring nothing is trusted
+    let b = Board::new();
+    b.apt_board();
+    fs::remove_file(b.p("usr/share/keyrings/debian-archive-keyring.gpg")).unwrap();
+    b.preload("board");
+    let (code, out) = b.package(&["apply", "-", "fake-hwclock"]);
+    assert_ne!(code, 0, "{out}");
+    assert!(last(&out).contains("archive keyrings"), "{out}");
+}

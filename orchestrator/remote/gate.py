@@ -101,6 +101,7 @@ class GateRefused(ValueError):
 _RE_PATH = re.compile(r"^/[A-Za-z0-9._+/-]{1,%d}$" % (PATH_MAX - 1), re.ASCII)
 _RE_ARG = re.compile(r"^[A-Za-z0-9._+/:=,-]{1,%d}$" % PATH_MAX, re.ASCII)
 _RE_CLOCK = re.compile(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", re.ASCII)
+_RE_PACKAGE = re.compile(r"[a-z0-9][a-z0-9+.-]{1,63}(?:=[0-9][A-Za-z0-9.+~:-]{0,63})?", re.ASCII)
 _RE_WORD = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._-]{0,63}$", re.ASCII)
 
 
@@ -193,6 +194,10 @@ KINDS: Dict[str, Kind] = {k.name: k for k in (
     Kind("clock", lambda v: v == "keep" or bool(_RE_CLOCK.fullmatch(v)),
          'case $1 in keep|20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) return 0 ;; esac; '
          'return 1'),
+    # a package of the board's distribution for llmcf-install's install_package (NAME or NAME=VERSION by Debian's rules;
+    # llmcf-install checks it again, and only a name its signed list names is installed)
+    Kind("package", lambda v: bool(_RE_PACKAGE.fullmatch(v)),
+         'case $1 in ""|-*|.*|+*|*[!A-Za-z0-9+.=:~-]*) return 1 ;; esac; [ ${#1} -le 129 ]'),
     # the base64 part and the comment of a public key line (pairing only: its operation never runs in the gate)
     Kind("b64", lambda v: bool(re.fullmatch(r"[A-Za-z0-9+/]{16,8192}={0,3}", v, re.ASCII)),
          'case $1 in ""|*[!A-Za-z0-9+/=]*) return 1 ;; esac'),

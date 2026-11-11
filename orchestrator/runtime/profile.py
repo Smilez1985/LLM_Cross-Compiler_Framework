@@ -1144,6 +1144,8 @@ _FINGERPRINT = FINGERPRINT   # the one fingerprint pattern (orchestrator/remote/
 _ADDRESS = re.compile(r"^(?:\[[0-9A-Fa-f:.]{2,45}\](?::\d{1,5})?|[0-9A-Fa-f:]{2,45}|"
                       r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(?::\d{1,5})?)$", re.ASCII)
 _META_MAX_BYTES = 16384
+# the package record holds the board's installed packages (a few thousand names and versions)
+_PACKAGES_MAX_BYTES = 1 << 20
 
 
 def stored_access(state_dir: Union[str, Path], device_id: str) -> Optional[AccessFacts]:
@@ -1374,6 +1376,32 @@ class ProfileStore:
         text = json.dumps(dict(record), indent=2, sort_keys=True, ensure_ascii=True) + "\n"
         if len(text.encode("ascii")) > _META_MAX_BYTES:
             raise ValueError("the clock record is too large")
+        self._prepare(path.parent)
+        write_private(path, text)
+        return path
+
+    # --- the board's package record (runtime/device/board_packages.py: its last package reading, its last run) ---
+
+    def _packages_path(self, device_id: str) -> Path:
+        return self.devices_dir / f"{_check_device_id(device_id)}.packages.json"
+
+    def load_packages(self, device_id: str) -> Dict[str, Any]:
+        """The board's package record ({} when there is none or it cannot be read: a record of what was seen)."""
+        try:
+            with open(self._packages_path(device_id), "rb") as f:
+                raw = f.read(_PACKAGES_MAX_BYTES + 1)
+            data = json.loads(raw) if len(raw) <= _PACKAGES_MAX_BYTES else None
+        except (OSError, ValueError, RecursionError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def save_packages(self, device_id: str, record: Mapping[str, Any]) -> Path:
+        """Stores the board's package record (a private file next to its profile; the installed packages of a board
+        make it larger than the other records)."""
+        path = self._packages_path(device_id)
+        text = json.dumps(dict(record), indent=1, sort_keys=True, ensure_ascii=True) + "\n"
+        if len(text.encode("ascii")) > _PACKAGES_MAX_BYTES:
+            raise ValueError("the package record is too large")
         self._prepare(path.parent)
         write_private(path, text)
         return path

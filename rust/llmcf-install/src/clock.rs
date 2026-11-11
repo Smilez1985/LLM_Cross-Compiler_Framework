@@ -6,7 +6,8 @@
 //!   start (`fake-hwclock save force`, or systemd-timesyncd's clock file touched).
 //! - `clock keep`: nothing when the board has a working RTC; else fake-hwclock when it is installed (its unit
 //!   enabled, the time saved), else systemd-timesyncd (enabled and started: it saves its clock file while it runs
-//!   and moves the clock forward to it at start); else it says that neither is there. It never installs a package.
+//!   and moves the clock forward to it at start); else it says that neither is there. It never installs a package
+//!   itself: `install_package plan|apply - fake-hwclock` (package.rs) does, after the person's yes.
 //!
 //! Report lines start with `llmcf-bundle: `; the last one is `result=ok|unavailable|refused|failed changed=N ...`.
 
@@ -182,8 +183,8 @@ fn keep(env: &Env) -> i32 {
     done(
         "unavailable",
         0,
-        "keep=none neither fake-hwclock nor systemd-timesyncd is on this board (its package manager or the build's \
-         preload brings fake-hwclock; llmcf-install installs no package)",
+        "keep=none neither fake-hwclock nor systemd-timesyncd is on this board (llmcf-install install_package \
+         brings fake-hwclock after the person's yes, from the board's own sources or a board preload)",
         EXIT_OK,
     )
 }

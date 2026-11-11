@@ -47,11 +47,16 @@ FILE_MODES = ("0600", "0644", "0700", "0755")
 # actions (harness_run.py), never by the apply itself.
 # allow_unit_control: the gateway's account may start, stop and restart exactly the bundle's engine units (a polkit
 # rule, or on a board without polkit's rules a sudoers drop-in with exactly those systemctl commands; llmcf-install).
+# install_package: packages of the board's distribution a component needs, installed by llmcf-install through apt and
+# dpkg before the accounts and units, from the board's own sources or a board preload taken in for the bundle
+# (runtime/device/board_packages.py); never removed with the bundle.
 ROOT_ACTIONS = ("create_user", "install_unit", "set_cgroup", "place_root_file",
                 "remove_user", "remove_unit", "remove_cgroup", "remove_root_file", "run_harness",
-                "allow_unit_control")
+                "allow_unit_control", "install_package")
 # The units the gateway may start and stop: one per engine component (every component of the bundle but itself).
 MAX_CONTROL_UNITS = 15
+# At most this many packages in one install_package.
+MAX_PACKAGES = 16
 # Where place_root_file may put a file (fixed places only; llmcf-install knows each one).
 ROOT_PLACES = ("unit-dropin", "tmpfiles", "sysctl")
 MODES = ("full", "unprivileged")
@@ -76,6 +81,14 @@ RE_URL = re.compile(r"^https?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~+
 RE_UNIT = re.compile(r"^llmcf-[a-z0-9-]{1,40}\.service$", re.ASCII)
 RE_ROOT_FILE = re.compile(r"^llmcf-[a-z0-9._-]{1,60}\.conf$", re.ASCII)
 RE_FACT = re.compile(r"^[a-z0-9_.-]{1,32}$", re.ASCII)
+# A package of the distribution by Debian's naming rules, optionally with the one version to install (NAME=VERSION):
+# never an option, a path, an architecture qualifier or anything a shell would read (llmcf-install is_package).
+RE_PACKAGE = re.compile(r"^[a-z0-9][a-z0-9+.-]{1,63}(?:=[0-9][A-Za-z0-9.+~:-]{0,63})?$", re.ASCII)
+
+
+def package_name(word: str) -> str:
+    """The name of a package word (NAME or NAME=VERSION)."""
+    return word.split("=", 1)[0]
 MAX_ROOT_ACTIONS = 64
 # A harness component (harness.py's rules, the same in llmcf-install): its harness id, its installer's path inside the
 # tree, one option of its dry run, its own "assume yes" switch, the pin (a commit or a sha256).
@@ -359,7 +372,7 @@ class RootAction(_Strict):
     ever exempt from the kernel's out-of-memory killer, the gateway only goes after the model)."""
     action: Literal["create_user", "install_unit", "set_cgroup", "place_root_file",
                     "remove_user", "remove_unit", "remove_cgroup", "remove_root_file", "run_harness",
-                    "allow_unit_control"]
+                    "allow_unit_control", "install_package"]
     component: str
     user: Optional[str] = None
     unit: Optional[str] = None
@@ -374,6 +387,8 @@ class RootAction(_Strict):
     # install_unit only: the unit is installed but not enabled at boot; the gateway starts it on demand (engines in
     # turn). Only true is written; without it the unit is enabled and started as before.
     on_demand: Optional[bool] = None
+    # install_package only: the distribution's packages the component needs (NAME or NAME=VERSION, RE_PACKAGE)
+    packages: Optional[Tuple[str, ...]] = None
 
     @field_validator("on_demand", mode="before")
     @classmethod
@@ -410,6 +425,16 @@ class RootAction(_Strict):
                 raise ValueError("a unit is named llmcf-<name>.service")
             if len(set(self.units)) != len(self.units):
                 raise ValueError("a unit twice")
+        if self.packages is not None:
+            if self.action != "install_package":
+                raise ValueError("only install_package names packages")
+            if not 1 <= len(self.packages) <= MAX_PACKAGES:
+                raise ValueError(f"1 to {MAX_PACKAGES} packages")
+            if any(not isinstance(p, str) or not RE_PACKAGE.fullmatch(p) for p in self.packages):
+                raise ValueError("a package is named by the distribution's rules (NAME or NAME=VERSION)")
+            names = [package_name(p) for p in self.packages]
+            if len(set(names)) != len(names):
+                raise ValueError("a package twice")
         if self.on_demand is not None and self.action != "install_unit":
             raise ValueError("only install_unit is on demand")
         if self.memory_high_mb is not None and self.memory_max_mb is not None \
@@ -418,7 +443,8 @@ class RootAction(_Strict):
         need = {"create_user": ("user",), "remove_user": ("user",), "install_unit": ("unit", "user"),
                 "remove_unit": ("unit",), "set_cgroup": ("unit", "memory_max_mb"), "remove_cgroup": ("unit",),
                 "place_root_file": ("place", "file"), "remove_root_file": ("place", "file"),
-                "run_harness": (), "allow_unit_control": ("user", "units")}[self.action]
+                "run_harness": (), "allow_unit_control": ("user", "units"),
+                "install_package": ("packages",)}[self.action]
         missing = [k for k in need if getattr(self, k) is None]
         if missing:
             raise ValueError(f"{self.action} needs {', '.join(missing)}")
@@ -561,7 +587,7 @@ def problems_of(data: Any) -> List[str]:
 
 __all__ = ["BoardFacts", "BundleManifest", "Component", "NOT_ENGINES", "RE_KIND", "FILE_MODES", "FileEntry", "HARNESS_ARCHIVE", "HARNESS_WATCH",
            "HarnessPart", "KINDS", "MODES", "ManifestError",
-           "MAX_ROOT_ACTIONS", "RE_ARG", "RE_FACT", "RE_FILE", "RE_ID", "RE_ROOT_FILE", "RE_SHA", "RE_UNIT", "RE_URL",
+           "MAX_PACKAGES", "MAX_ROOT_ACTIONS", "RE_ARG", "RE_PACKAGE", "package_name", "RE_FACT", "RE_FILE", "RE_ID", "RE_ROOT_FILE", "RE_SHA", "RE_UNIT", "RE_URL",
            "RE_WORD", "ROLES", "ROOT_ACTIONS", "ROOT_PLACES",
            "RootAction", "SCHEMA", "StartSpec", "VARIABLE_TYPES", "check_value", "dump_manifest", "load_manifest",
            "is_engine", "problems_of", "valid_kind"]

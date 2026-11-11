@@ -63,6 +63,11 @@ HARNESS_MODES = ("dry", "run", "run-yes")
 # board's time to a checked UTC time stamp and saves it for the next start, `clock keep` sets up keeping the time
 # across a restart on a board without a working RTC.
 CLOCK_ACTION = "clock"
+# llmcf-install's package action (rust/llmcf-install/src/package.rs; gate operation package-root): `install_package
+# plan|apply BUNDLE|- NAME...` installs packages of the board's distribution a signed list names (a bundle's
+# install_package actions, or `-`: the clock keeper fake-hwclock), from a board preload taken in for that scope or the
+# board's own sources.
+PACKAGE_ACTION = "install_package"
 SEP = "--"   # a staged file of the bundle is <component>--<file name> in the upload folder
 
 
@@ -498,7 +503,7 @@ def report(text: str) -> Report:
     return out
 
 
-__all__ = ["ACTIONS", "BUNDLE_REL", "CLOCK_ACTION", "EXIT_OK", "EXIT_REFUSED", "EXIT_ROOT", "EXIT_ROOT_FAILED",
+__all__ = ["ACTIONS", "BUNDLE_REL", "CLOCK_ACTION", "PACKAGE_ACTION", "EXIT_OK", "EXIT_REFUSED", "EXIT_ROOT", "EXIT_ROOT_FAILED",
            "HARNESS_ACTIONS", "HARNESS_MODES", "INSTALLER_SH",
            "KEPT_ACTIONS", "REPORT_PREFIX", "ROOT_ACTIONS", "ROOT_HELPER_FILE", "Report", "SIGNED_FILES", "STEPS_MAGIC",
            "installer_sh", "render_steps", "report", "staged_name"]

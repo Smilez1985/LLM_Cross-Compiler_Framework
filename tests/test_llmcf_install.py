@@ -45,6 +45,7 @@ def _rule(name):
         "url": lambda v: bool(RE_URL.fullmatch(v)), "user": by_check("user"),
         "unit": lambda v: bool(mf.RE_UNIT.fullmatch(v)), "root_file": lambda v: bool(mf.RE_ROOT_FILE.fullmatch(v)),
         "fact": lambda v: bool(mf.RE_FACT.fullmatch(v)),
+        "package": lambda v: bool(mf.RE_PACKAGE.fullmatch(v)),
     }
     assert RE_FILE.pattern
     return rules[name]

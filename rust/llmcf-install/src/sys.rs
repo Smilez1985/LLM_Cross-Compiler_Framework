@@ -71,8 +71,16 @@ impl Env {
 
     /// Runs `program` with `args` exactly (no shell, cleared environment, no stdin); (success, its output).
     pub fn run(&self, program: &Path, args: &[&str]) -> (bool, String) {
+        self.run_env(program, args, &[])
+    }
+
+    /// run() with a few fixed environment values more (apt's DEBIAN_FRONTEND), never one from the caller.
+    pub fn run_env(&self, program: &Path, args: &[&str], extra: &[(&str, &str)]) -> (bool, String) {
         let mut cmd = Command::new(program);
         cmd.args(args).env_clear().env("PATH", CLEARED_PATH).env("LC_ALL", "C").stdin(Stdio::null());
+        for (k, v) in extra {
+            cmd.env(k, v);
+        }
         if self.test {
             // the test build only: the harness watch looks at the prefix's own places, never this computer's
             cmd.env("LLMCF_TEST_ROOT", &self.root);

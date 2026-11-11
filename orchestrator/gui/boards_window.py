@@ -67,11 +67,12 @@ BUTTONS = (
     ("btn_boards_prune", "boards.btn.prune", "_on_prune", "stored"),
     ("btn_boards_prune_board", "boards.btn.prune_board", "_on_prune_board", "stored"),
     ("btn_boards_clock", "boards.btn.clock", "_on_clock", "stored"),
+    ("btn_boards_packages", "boards.btn.packages", "_on_packages", "stored"),
 )
 ROWS = (("btn_boards_add", "btn_boards_pair_code", "btn_boards_edit", "btn_boards_remove_trust", "btn_boards_settings", "btn_boards_ssh",
          "btn_boards_check", "btn_boards_refresh"),
         ("btn_boards_plan", "btn_boards_status", "btn_boards_build", "btn_boards_deploy", "btn_boards_verify"),
-        ("btn_boards_prune", "btn_boards_prune_board", "btn_boards_clock"))
+        ("btn_boards_prune", "btn_boards_prune_board", "btn_boards_clock", "btn_boards_packages"))
 
 
 # The refusals of Edit address or key... with their own text (boards.edit.err.<kind>); a pasted key: key_<detail>.
@@ -1549,6 +1550,9 @@ class BoardsWindow(BoardSteps, QDialog):
             return
         label = entry["label"]
         text = self.clock_text(entry["device_id"])
+        from orchestrator.runtime.device import board_packages
+        if board_packages.keeper_proposal(self.state_dir, entry["device_id"]):
+            text += "\n\n" + self._t("boards.clock.keeper_proposal")
         self._say(text)
         if not ask(self, self._t("boards.clock.title", label=label),
                    text + "\n\n" + self._t("boards.clock.set_question", label=label)):
@@ -1587,6 +1591,220 @@ class BoardsWindow(BoardSteps, QDialog):
         self._start(self._t("boards.clock.setting", label=label), work, done,
                     failed=lambda e: self._show_error(e, address=host, port=port, user=user,
                                                       device_id=device_id) or True)
+
+    # --- the board's system packages (runtime/device/board_packages.py) -----------------------------------------
+
+    def packages_text(self, device_id: str, bundle_ids: List[str]) -> str:
+        """The board's package state in the window's language."""
+        from orchestrator.runtime.device import board_packages
+        s = board_packages.state(self.state_dir, device_id, bundle_ids)
+        t = self._t
+        wanted = "\n".join(t("boards.packages.wanted_clock" if scope == board_packages.BOARD_SCOPE else
+                             "boards.packages.wanted_bundle", bundle=scope, packages=", ".join(words))
+                           for scope, words in s["wanted"].items()) or t("boards.packages.nothing")
+        run = s["last_run"]
+        last = (f"{run.get('at')} {run.get('result')} ({run.get('source') or '-'})" if run
+                else t("boards.clock.never"))
+        system = (f"{s['distribution']} {s['release']} {s['arch']} ({s['manager']})" if s["distribution"]
+                  else t("boards.clock.not_read"))
+        return t("boards.packages.state", read_at=s["read_at"] or t("boards.clock.never"), system=system,
+                 sources=", ".join(s["sources"]) or "-", taken=", ".join(s["taken"]) or "-", wanted=wanted,
+                 missing=", ".join(s["missing"]) or t("boards.packages.nothing"), last=last)
+
+    def _package_bundles(self, device_id: str) -> List[str]:
+        """The bundles built for this board that name system packages."""
+        from orchestrator.runtime.bundle.generator import BundleStore
+        out = []
+        try:
+            for built in BundleStore(self.state_dir).list():
+                manifest = built.manifest
+                if manifest.board.device_id == device_id and any(a.action == "install_package"
+                                                                 for a in manifest.root_actions):
+                    out.append(built.bundle_id)
+        except Exception:  # noqa: BLE001 - a store that cannot be read names no bundle
+            return []
+        return out
+
+    def _on_packages(self) -> None:
+        """Board packages...: the state, then what the person picks: install (the plan first, then the question),
+        write a board preload, take one in (a file here, or one already on the board)."""
+        entry = self._need("stored")
+        if entry is None:
+            return
+        device_id, label = entry["device_id"], entry["label"]
+        bundles = self._package_bundles(device_id)
+        dialog, form = _form_dialog(self, self._t("boards.packages.title", label=label),
+                                    self.packages_text(device_id, bundles))
+        scope = QComboBox(dialog)
+        scope.setObjectName("cmb_boards_packages_scope")
+        scope.addItem(self._t("boards.packages.scope_clock"), "board")
+        for bid in bundles:
+            scope.addItem(self._t("boards.packages.scope_bundle", bundle=bid), bid)
+        form.addRow(self._t("boards.packages.scope"), scope)
+        action = QComboBox(dialog)
+        action.setObjectName("cmb_boards_packages_action")
+        for key in ("install", "write", "take", "take_board"):
+            action.addItem(self._t(f"boards.packages.do_{key}"), key)
+        form.addRow(self._t("boards.packages.action"), action)
+        on_board = QLineEdit(dialog)
+        on_board.setObjectName("txt_boards_packages_on_board")
+        on_board.setPlaceholderText(self._t("boards.packages.on_board_hint"))
+        form.addRow(self._t("boards.packages.on_board"), on_board)
+        if not _exec(dialog):
+            dialog.deleteLater()
+            return
+        chosen, what, path = scope.currentData(), action.currentData(), on_board.text().strip()
+        dialog.deleteLater()
+        if what == "write":
+            self.write_package_preload(entry, chosen)
+            return
+        contact = self._board_contact(entry)
+        if contact is None:
+            return
+        if what == "install":
+            self.plan_packages(entry, contact, chosen)
+        elif what == "take":
+            from PySide6.QtWidgets import QFileDialog
+            file, _ = QFileDialog.getOpenFileName(self, self._t("boards.packages.take_title"), str(Path.home()),
+                                                  "llmcf-preload-packages-*.tar.gz (*.tar.gz)")
+            if file:
+                self.take_packages(entry, contact, chosen, file, on_board=False)
+        elif path:
+            self.take_packages(entry, contact, chosen, path, on_board=True)
+        else:
+            self._info(self._t("boards.packages.on_board_missing"), "warning")
+
+    def _package_session(self, entry: Dict[str, Any], contact: tuple):
+        from orchestrator.runtime.device import person_steps
+        host, port, _settings, user = contact
+        client, _key = person_steps.connect_stored(self.state_dir, entry["device_id"], host, port, user, None,
+                                                   on_client=self._keep_client, cancel=self._cancel,
+                                                   on_event=self._board_lines(host), signer=self._signer(),
+                                                   mode=self._mode(), via="gui", audit=self.audit)
+        return client
+
+    def plan_packages(self, entry: Dict[str, Any], contact: tuple, scope: str) -> None:
+        """The plan (a dry run) of an install; with the person's yes, the install (apply_packages)."""
+        from orchestrator.runtime.device import board_packages
+        state, device_id, label = self.state_dir, entry["device_id"], entry["label"]
+        config = getattr(self.framework, "config", None)
+        try:
+            scope, words = board_packages.scope_words(state, scope, ())
+        except (board_packages.PackageError, ValueError, OSError) as e:
+            self._info(self._t("boards.packages.not_done", label=label, reason=one_line(str(e))), "warning")
+            return
+
+        def work():
+            client = self._package_session(entry, contact)
+            try:
+                self._check_cancel()
+                return board_packages.plan_install(client, state, device_id, scope, words, config=config)[1]
+            finally:
+                client.close()
+
+        def done(plan: Any) -> None:
+            text = "\n".join(board_packages.plan_lines(plan))
+            self._say(text)
+            if plan.result != "planned":
+                self._info(self._t("boards.packages.not_done", label=label, reason=one_line(plan.detail or
+                                                                                         plan.result)), "warning")
+                return
+            if not plan.listed("would") and plan.values.get("pending") == "0":
+                self._info(self._t("boards.packages.in_place", label=label))
+                return
+            source = self._t("boards.packages.source_" + ("preload" if plan.values.get("source") == "preload"
+                                                          else "online"))
+            if ask(self, self._t("boards.packages.title", label=label),
+                   text + "\n\n" + self._t("boards.packages.question", label=label, packages=", ".join(words),
+                                            source=source)):
+                self.apply_packages(entry, contact, scope, words)
+
+        def failed(error: BaseException) -> bool:
+            if isinstance(error, board_packages.PackageError):
+                self._info(self._t("boards.packages.not_done", label=label, reason=one_line(str(error))), "warning")
+                return True
+            host, port, _s, user = contact
+            self._show_error(error, address=host, port=port, user=user, device_id=device_id)
+            return True
+
+        self._start(self._t("boards.packages.planning", label=label), work, done, failed=failed)
+
+    def apply_packages(self, entry: Dict[str, Any], contact: tuple, scope: str, words: tuple) -> None:
+        from orchestrator.runtime.device import board_packages
+        state, device_id, label, audit = self.state_dir, entry["device_id"], entry["label"], self.audit
+
+        def work():
+            client = self._package_session(entry, contact)
+            try:
+                self._check_cancel()
+                return board_packages.apply_install(client, state, device_id, scope, words, via="gui", audit=audit)
+            finally:
+                client.close()
+
+        def done(run: Any) -> None:
+            self._say("\n".join(board_packages.plan_lines(run)))
+            if run.result == "ok":
+                self._info(self._t("boards.packages.done", label=label,
+                                   packages=", ".join(run.listed("installed")) or "-"))
+            else:
+                self._info(self._t("boards.packages.not_done", label=label,
+                                   reason=one_line(f"{run.result or '-'} {run.detail}")), "warning")
+
+        host, port, _s, user = contact
+        self._start(self._t("boards.packages.installing", label=label), work, done,
+                    failed=lambda e: self._show_error(e, address=host, port=port, user=user,
+                                                      device_id=device_id) or True)
+
+    def write_package_preload(self, entry: Dict[str, Any], scope: str) -> None:
+        """preload.sh and preload.ps1 for the packages of `scope` on this board (no contact with the board)."""
+        from PySide6.QtWidgets import QFileDialog
+        from orchestrator.runtime.device import board_packages
+        label = entry["label"]
+        folder = QFileDialog.getExistingDirectory(self, self._t("boards.packages.write_title"), str(Path.home()))
+        if not folder:
+            return
+        try:
+            scope, words = board_packages.scope_words(self.state_dir, scope, ())
+            recipe = board_packages.recipe_for(self.state_dir, entry["device_id"], scope, words)
+            sh, ps, what = board_packages.write_preload(recipe, Path(folder))
+        except (board_packages.PackageError, ValueError, OSError) as e:
+            self._info(self._t("boards.packages.not_done", label=label, reason=one_line(str(e))), "warning")
+            return
+        text = self._t("boards.packages.written", sh=str(sh), ps=str(ps), what=what)
+        self._say(text)
+        self._info(text)
+
+    def take_packages(self, entry: Dict[str, Any], contact: tuple, scope: str, path: str, *, on_board: bool) -> None:
+        from orchestrator.runtime.device import board_packages
+        state, device_id, label, audit = self.state_dir, entry["device_id"], entry["label"], self.audit
+
+        def work():
+            if not on_board:   # checked before any connection: a damaged or foreign archive never reaches the board
+                board_packages.check_preload(Path(path))
+            client = self._package_session(entry, contact)
+            try:
+                self._check_cancel()
+                if on_board:
+                    return board_packages.take_on_board(client, state, device_id, path, scope, via="gui", audit=audit)
+                return board_packages.take_preload(client, state, device_id, Path(path), scope, via="gui",
+                                                   audit=audit, say=self._progress)
+            finally:
+                client.close()
+
+        def done(manifest: Any) -> None:
+            text = self._t("boards.packages.taken", label=label, scope=scope, packages=manifest.get("debs", "") or "-")
+            self._say(text)
+            self._info(text)
+
+        def failed(error: BaseException) -> bool:
+            if isinstance(error, (board_packages.PackageError, OSError)):
+                self._info(self._t("boards.packages.not_done", label=label, reason=one_line(str(error))), "warning")
+                return True
+            host, port, _s, user = contact
+            self._show_error(error, address=host, port=port, user=user, device_id=device_id)
+            return True
+
+        self._start(self._t("boards.packages.taking", label=label), work, done, failed=failed)
 
     # --- deploy and verify -----------------------------------------------------------------------------------------
 

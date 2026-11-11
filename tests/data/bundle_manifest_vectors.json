@@ -1339,6 +1339,43 @@
      }
     ],
     "why": "an engine of a kind of its own (detect): the gateway may start and stop its unit"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "install_package",
+        "component": "llm",
+        "packages": [
+         "fake-hwclock",
+         "libgomp1=12.2.0-14"
+        ]
+       },
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       }
+      ]
+     }
+    ],
+    "why": "an install_package with a package and a pinned one"
    }
   ],
   "base": {
@@ -7733,6 +7770,341 @@
      }
     ],
     "why": "a kind of 33 letters"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "install_package",
+        "component": "llm"
+       },
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       }
+      ]
+     }
+    ],
+    "why": "an install_package without packages"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf2",
+        "packages": [
+         "fake-hwclock"
+        ]
+       },
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       }
+      ]
+     }
+    ],
+    "why": "packages on another action"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "install_package",
+        "component": "llm",
+        "packages": [
+         "-y"
+        ]
+       },
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       }
+      ]
+     }
+    ],
+    "why": "an option as a package"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "install_package",
+        "component": "llm",
+        "packages": [
+         "/tmp/x.deb"
+        ]
+       },
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       }
+      ]
+     }
+    ],
+    "why": "a path as a package"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "install_package",
+        "component": "llm",
+        "packages": [
+         "fake-hwclock",
+         "fake-hwclock=0.13"
+        ]
+       },
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       }
+      ]
+     }
+    ],
+    "why": "a package twice"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "install_package",
+        "component": "llm",
+        "packages": [
+         "pkg0",
+         "pkg1",
+         "pkg2",
+         "pkg3",
+         "pkg4",
+         "pkg5",
+         "pkg6",
+         "pkg7",
+         "pkg8",
+         "pkg9",
+         "pkg10",
+         "pkg11",
+         "pkg12",
+         "pkg13",
+         "pkg14",
+         "pkg15",
+         "pkg16"
+        ]
+       },
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       }
+      ]
+     }
+    ],
+    "why": "17 packages"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "install_package",
+        "component": "llm",
+        "packages": []
+       },
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       }
+      ]
+     }
+    ],
+    "why": "an empty package list"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "install_package",
+        "component": "llm",
+        "packages": "fake-hwclock"
+       },
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       }
+      ]
+     }
+    ],
+    "why": "packages that are no list"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "install_package",
+        "component": "nope",
+        "packages": [
+         "fake-hwclock"
+        ]
+       },
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       }
+      ]
+     }
+    ],
+    "why": "install_package of a component the bundle lacks"
    }
   ]
  },
@@ -7930,6 +8302,41 @@
     ".x",
     "a b",
     "a$b",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   ]
+  },
+  "package": {
+   "accept": [
+    "fake-hwclock",
+    "libc6",
+    "g++",
+    "libstdc++6",
+    "python3.11",
+    "fake-hwclock=0.13",
+    "libc6=2.36-9+deb12u4",
+    "systemd=1:252.33-1~deb12u1",
+    "0ad"
+   ],
+   "reject": [
+    "",
+    "a",
+    "-y",
+    "--force",
+    "Fake-hwclock",
+    "fake hwclock",
+    "a;b",
+    "../x",
+    "/tmp/x.deb",
+    "./x.deb",
+    "fake-hwclock=",
+    "fake-hwclock=-1",
+    "fake-hwclock=a1",
+    "x=1 2",
+    "x=$(id)",
+    "fake-hwclock:arm64",
+    ".x",
+    "+x",
+    "fake_hwclock",
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
    ]
   }

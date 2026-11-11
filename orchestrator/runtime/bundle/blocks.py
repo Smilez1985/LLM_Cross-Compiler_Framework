@@ -138,6 +138,9 @@ class Block:
     terms: Tuple[Terms, ...] = field(default_factory=tuple)
     # how the gateway reaches its engine (reach.Reach; None: the routes its kind always had)
     reach: Optional[Reach] = None
+    # packages of the board's distribution the component needs (NAME or NAME=VERSION): the generator turns them into
+    # the bundle's typed root action install_package, which llmcf-install runs before the accounts and units
+    system_packages: Tuple[str, ...] = ()
 
     @property
     def ready(self) -> bool:
@@ -182,6 +185,7 @@ class Block:
                            **({"project": f.project} if f.source == "runtime" else {})} for f in self.files],
                 # the terms as labels (the person reads their text in the CLI or the window and accepts them there)
                 "terms": [{"part": t.part, "licence": t.licence, "free": t.free} for t in self.terms],
+                "system_packages": list(self.system_packages),
                 # the routes the gateway serves for it (paths, methods and protocols are labels)
                 "reach": [{"method": r.method, "path": r.path, "protocol": r.protocol,
                            **({"match": r.match} if r.match else {})} for r in (self.reach.routes if self.reach
@@ -343,7 +347,7 @@ def parse_block(text: str, folder: Path, trust: str = "own", sha256: str = "") -
     if not isinstance(spec, dict):
         raise BlockError("block.yml is not a mapping")
     allowed = {"schema", "id", "version", "kind", "title", "status", "summary", "variables", "files", "start",
-               "memory", "keygen", "unit", "notes", "terms", "reach"}
+               "memory", "keygen", "unit", "notes", "terms", "reach", "system_packages"}
     unknown = set(spec) - allowed
     if unknown:
         raise BlockError(f"unknown fields: {', '.join(sorted(map(str, unknown)))}")
@@ -406,11 +410,19 @@ def parse_block(text: str, folder: Path, trust: str = "own", sha256: str = "") -
         raise BlockError(f"reach: {e}") from None
     if reach is not None and (kind in ("gateway", "harness") or (status == "ready" and not program)):
         raise BlockError("reach belongs to a block that runs an engine (not the gateway, not a harness)")
+    packages = spec.get("system_packages") or []
+    from orchestrator.runtime.bundle.manifest import MAX_PACKAGES, RE_PACKAGE, package_name
+    if not isinstance(packages, list) or len(packages) > MAX_PACKAGES or \
+            not all(isinstance(p, str) and RE_PACKAGE.fullmatch(p) for p in packages) or \
+            len({package_name(p) for p in packages}) != len(packages):
+        raise BlockError(f"system_packages is a list of up to {MAX_PACKAGES} packages of the distribution, each "
+                         "NAME or NAME=VERSION by its naming rules, each name once")
     return Block(id=block_id, version=version, kind=kind, title=_str(spec, "title", 120, block_id), status=status,
                  summary=_str(spec, "summary", 500), variables=variables, files=files, program=program, args=args,
                  memory_base_mb=base, memory_model_factor=float(factor), keygen=bool(spec.get("keygen", False)),
                  unit=bool(spec.get("unit", False)), folder=Path(folder), trust=trust, sha256=sha256,
-                 notes=tuple(notes), terms=_terms(spec.get("terms")), reach=reach)
+                 notes=tuple(notes), terms=_terms(spec.get("terms")), reach=reach,
+                 system_packages=tuple(packages))
 
 
 def _tree_sha256(folder: Path) -> str:

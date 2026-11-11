@@ -11,7 +11,7 @@ pub const MAX_COMPONENTS: usize = 16;
 pub const MAX_FILES: usize = 64;
 pub const MAX_ARGS: usize = 96;
 pub const MAX_ROOT_ACTIONS: usize = 64;
-pub const ROOT_ACTIONS: [&str; 10] = [
+pub const ROOT_ACTIONS: [&str; 11] = [
     "create_user",
     "install_unit",
     "set_cgroup",
@@ -22,6 +22,7 @@ pub const ROOT_ACTIONS: [&str; 10] = [
     "remove_root_file",
     "run_harness",
     "allow_unit_control",
+    "install_package",
 ];
 /// The component kinds that are no engine (manifest.NOT_ENGINES): every other kind is an engine whose unit the
 /// gateway may start and stop (allow_unit_control), whatever the kind is called.
@@ -45,6 +46,8 @@ pub fn is_engine(kind: &str) -> bool {
 pub const HARNESS_ARCHIVE: &str = "harness.tar";
 pub const HARNESS_WATCH: &str = "harness_watch.sh";
 pub const ROOT_PLACES: [&str; 3] = ["unit-dropin", "tmpfiles", "sysctl"];
+/// At most this many packages in one install_package (manifest.MAX_PACKAGES).
+pub const MAX_PACKAGES: usize = 16;
 
 // --- the value rules (manifest.py RE_*; no regex crate: each pattern as a small function) ------------------------
 
@@ -205,6 +208,32 @@ pub fn is_harness_env(s: &str) -> bool {
         && all(value, |c| alnum(c) || b"_.:-".contains(&c))
 }
 
+/// RE_PACKAGE `^[a-z0-9][a-z0-9+.-]{1,63}(=[0-9][A-Za-z0-9.+~:-]{0,63})?$`: a package of the distribution by
+/// Debian's naming rules, optionally with the one version to install (`NAME=VERSION`). Never an option, a path, an
+/// architecture qualifier or anything a shell would read.
+pub fn is_package(s: &str) -> bool {
+    let (name, version) = match s.split_once('=') {
+        Some((n, v)) => (n, Some(v)),
+        None => (s, None),
+    };
+    let n = name.as_bytes();
+    let name_ok =
+        (2..=64).contains(&n.len()) && lower_digit(n[0]) && all(name, |c| lower_digit(c) || b"+.-".contains(&c));
+    let version_ok = match version {
+        None => true,
+        Some(v) => {
+            let b = v.as_bytes();
+            (1..=64).contains(&b.len()) && b[0].is_ascii_digit() && all(v, |c| alnum(c) || b".+~:-".contains(&c))
+        }
+    };
+    name_ok && version_ok
+}
+
+/// The name of a package word (`NAME` or `NAME=VERSION`).
+pub fn package_name(s: &str) -> &str {
+    s.split_once('=').map(|(n, _)| n).unwrap_or(s)
+}
+
 /// RE_PIN `^(?:[0-9a-f]{40}|[0-9a-f]{64})$`
 pub fn is_pin(s: &str) -> bool {
     (s.len() == 40 || s.len() == 64) && all(s, |c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
@@ -275,6 +304,8 @@ pub struct RootAction {
     /// install_unit only: the unit is installed but not enabled at boot; the gateway starts it on demand (engines in
     /// turn). Only `true` is written; absent means enabled and started as before.
     pub on_demand: bool,
+    /// install_package only: the distribution's packages the component needs (NAME or NAME=VERSION)
+    pub packages: Vec<String>,
 }
 
 impl RootAction {
@@ -282,7 +313,8 @@ impl RootAction {
     pub fn what(&self) -> String {
         let mut out = vec![self.component.clone()];
         let units = (!self.units.is_empty()).then(|| self.units.join(","));
-        let pairs: [(&str, Option<String>); 10] = [
+        let packages = (!self.packages.is_empty()).then(|| self.packages.join(","));
+        let pairs: [(&str, Option<String>); 11] = [
             ("user", self.user.clone()),
             ("unit", self.unit.clone()),
             ("units", units),
@@ -293,6 +325,7 @@ impl RootAction {
             ("place", self.place.clone()),
             ("file", self.file.clone()),
             ("on_demand", self.on_demand.then(|| "true".to_string())),
+            ("packages", packages),
         ];
         for (k, v) in pairs {
             if let Some(v) = v {
@@ -627,6 +660,7 @@ fn root_action(v: &Value) -> R<RootAction> {
             "file",
             "units",
             "on_demand",
+            "packages",
         ],
     )?;
     let action = one_of(text(m, "action", "root action")?, &ROOT_ACTIONS, "root action")?.to_string();
@@ -690,6 +724,29 @@ fn root_action(v: &Value) -> R<RootAction> {
     if !units.is_empty() && action != "allow_unit_control" {
         return Err(format!("{what}: only allow_unit_control names units"));
     }
+    let packages = match m.get("packages") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(items)) => {
+            let mut out: Vec<String> = Vec::new();
+            for item in items {
+                let p = item.as_str().filter(|p| is_package(p)).ok_or_else(|| {
+                    format!("{what}: a package is named by the distribution's rules (NAME or NAME=VERSION)")
+                })?;
+                if out.iter().any(|x| package_name(x) == package_name(p)) {
+                    return Err(format!("{what}: a package twice"));
+                }
+                out.push(p.into());
+            }
+            if !(1..=MAX_PACKAGES).contains(&out.len()) {
+                return Err(format!("{what}: 1 to {MAX_PACKAGES} packages"));
+            }
+            out
+        }
+        Some(_) => return Err(format!("{what}: packages is a list")),
+    };
+    if !packages.is_empty() && action != "install_package" {
+        return Err(format!("{what}: only install_package names packages"));
+    }
     let on_demand = match m.get("on_demand") {
         None | Some(Value::Null) => false,
         Some(Value::Bool(true)) => true,
@@ -705,6 +762,7 @@ fn root_action(v: &Value) -> R<RootAction> {
         "remove_unit" | "remove_cgroup" => &["unit"],
         "set_cgroup" => &["unit", "memory_max_mb"],
         "run_harness" => &[],
+        "install_package" => &["packages"],
         _ => &["place", "file"],
     };
     let have = |k: &str| match k {
@@ -713,6 +771,7 @@ fn root_action(v: &Value) -> R<RootAction> {
         "memory_max_mb" => memory_max_mb.is_some(),
         "place" => place.is_some(),
         "units" => !units.is_empty(),
+        "packages" => !packages.is_empty(),
         _ => file.is_some(),
     };
     let missing: Vec<&str> = need.iter().copied().filter(|k| !have(k)).collect();
@@ -740,6 +799,7 @@ fn root_action(v: &Value) -> R<RootAction> {
         file: file.map(Into::into),
         units,
         on_demand,
+        packages,
     })
 }
 
@@ -910,6 +970,7 @@ mod tests {
             "unit" => is_unit,
             "root_file" => is_root_file,
             "fact" => is_fact,
+            "package" => is_package,
             other => panic!("no rule {other}"),
         }
     }

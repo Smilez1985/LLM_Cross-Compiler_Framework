@@ -31,6 +31,7 @@ from orchestrator.remote import gate
 from orchestrator.remote import openssh_switch  # noqa: F401 - defines the setup steps of the switch to OpenSSH
 from orchestrator.runtime.bundle import gate_ops  # noqa: F401 - defines bundle-run and bundle-kept (the board bundle)
 from orchestrator.runtime.device import board_clock  # noqa: F401 - defines clock-read (the board's clock)
+from orchestrator.runtime.device import board_packages  # noqa: F401 - defines package-facts, package-root, package-take
 from orchestrator.remote.gate import define
 from orchestrator.runtime.device import measure  # noqa: F401 - defines the board measurement's operations
 from orchestrator.runtime.device import thermal
