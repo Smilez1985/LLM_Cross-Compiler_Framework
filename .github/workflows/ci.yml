@@ -75,7 +75,8 @@ jobs:
   test:
     name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
-    # Windows needs about 45 minutes for the whole suite, Linux with the GUI extra about 30 (headless about 15).
+    # Windows runs the whole suite in one process (about 55 minutes); Linux runs it on every core with pytest-xdist,
+    # as the suite is run locally (serially it had grown to 45 to 55 minutes there, close to the limit).
     timeout-minutes: ${{ matrix.os == 'windows-latest' && 90 || 60 }}
     strategy:
       fail-fast: false
@@ -110,10 +111,13 @@ jobs:
         run: python -m pip install --no-deps -r requirements-gui.txt -r requirements-dev.txt
 
       - name: Run tests
-        run: python -m pytest -ra --junitxml=test-results.xml
+        run: python -m pytest -ra --junitxml=test-results.xml ${{ runner.os == 'Linux' && '-n auto' || '' }}
 
       - name: Upload test results
         if: always()
+        # The report is for reading only: an upload GitHub cannot take (its artifact service answered with an error
+        # page) never turns a job whose tests passed red.
+        continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-results-${{ matrix.os }}-py${{ matrix.python }}
@@ -428,6 +432,9 @@ jobs:
 
       - name: Upload test results
         if: always()
+        # The report is for reading only: an upload GitHub cannot take (its artifact service answered with an error
+        # page) never turns a job whose tests passed red.
+        continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-results-headless

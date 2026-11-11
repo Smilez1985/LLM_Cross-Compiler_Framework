@@ -269,7 +269,10 @@ class Key:
         if len(body) < 6 or body[0] != 4:
             raise ValueError("not a version 4 key")
         self.body, self.algo = body, body[5]
-        self.fingerprint = hashlib.sha1(b"\x99" + len(body).to_bytes(2, "big") + body).hexdigest().upper()
+        # A version 4 fingerprint is SHA-1 by definition (RFC 4880, 12.2), as gpg computes it. Matching a pinned one
+        # takes a second preimage, not a collision, and the board checks every Release again with its own gpgv.
+        self.fingerprint = hashlib.sha1(  # nosec B324 - the OpenPGP v4 fingerprint, see above
+            b"\x99" + len(body).to_bytes(2, "big") + body).hexdigest().upper()
         self.n = self.e = None
         if self.algo in (1, 3):
             self.n, at = _mpi(body, 6)
