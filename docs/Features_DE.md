@@ -4214,6 +4214,17 @@ Jede Entscheidung steht im Aktivitätsprotokoll. (Die Frage und ihre Konsole im 
 nächsten Schritt und dem englischen technischen Detail zum Aufklappen und Kopieren (Ditto liest das englische Detail
 und erklärt es dir auf Deutsch).
 
+**Starten ohne Terminal:** Unter Linux steht das Framework in deinem Anwendungsmenü (**LLM Cross-Compiler
+Framework**, dein eigener Eintrag, vom Installer geschrieben), unter Windows im Startmenü und, wenn du willst, auf dem
+Desktop; beide öffnen das Fenster ohne Terminal- oder Konsolenfenster. Trifft das Fenster auf einen Fehler, den
+niemand abgefangen hat, verschwindet es nicht einfach: Ein Dialog sagt das in einfachen Worten, mit **Log-Ordner
+öffnen**, **Details kopieren** (der Traceback, die Version, Python und das System, ohne Geheimnisse und ohne deinen
+Home-Ordner, für einen Fehlerbericht) und **Schließen**, und das Programm läuft weiter; eine Serie von Fehlern zeigt
+einen Dialog, der die übrigen zählt. Alles, was das Fenster loggt, steht in `gui.log` in deinem Log-Ordner; ein
+Absturz, bevor es das Fenster gibt, hinterlässt dort eine `crash-<Zeit>.txt` (unter Windows auch ein
+Meldungsfenster). Der Eintrag wird unter **Datei > Einstellungen…**, **Update**, **Starteintrag** gezeigt, repariert
+und entfernt, oder mit `llmcf launcher status|install|remove`.
+
 **Die Menüleiste** (übersetzt, mit Alt-Tastenkürzeln; die Objektnamen der Einträge bleiben gleich, so behält jeder
 Pfad der Kommandozeile seinen Mausweg):
 
@@ -4238,7 +4249,7 @@ deutschen Anrede, der Framework-Modus und die Build-Vorgaben), **Ditto** (die KI
 Tool-Berechtigungen und die Ordner, die die KI nutzen darf), **Sprachmodell** (die lokale Laufzeit: wo Dittos lokaler
 Server läuft und sein Speicherbudget; die Anmeldung jedes Anbieters mit seinen Schlüsseln und seiner Serveradresse;
 die Geheimnisse; der Schlüsselspeicher), **Update** (nach neuen Commits suchen, nur den getesteten
-Abhängigkeitsstand, **Framework aktualisieren...**), danach **Lokales Netz**, **Build-Türklingel**, **Ditto in
+Abhängigkeitsstand, **Framework aktualisieren...**, der Starteintrag), danach **Lokales Netz**, **Build-Türklingel**, **Ditto in
 Editoren**, **Quell-Repositorys** und **Wirksame Einstellungen**. Die alten Einträge funktionieren weiter und öffnen
 ihre Seite: **Ditto > KI-Einstellungen...**, **Tool-Berechtigungen...**, **Ordner, die die KI nutzen darf...**,
 **Sicherheit > Geheimnisse...**, **Anmeldeübersicht...**, **Schlüsselspeicher...**, **OpenAI-API-Key festlegen...**

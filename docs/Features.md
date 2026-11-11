@@ -3800,6 +3800,16 @@ the activity record. (The question and its console in the window come with the D
 **Errors in your language:** an error is shown with a plain summary in your language, the next step, and the English
 technical detail to expand and copy (Ditto reads the English detail and explains it to you).
 
+**Starting without a terminal:** on Linux the framework is in your application menu (**LLM Cross-Compiler
+Framework**, your own entry, written by the installer), on Windows in the Start menu and, if you want, on the desktop;
+both open the window without a terminal or console window. When the window meets an error nobody caught, it does not
+just vanish: a dialog says so in plain words, with **Open Log Folder**, **Copy details** (the traceback, the version,
+Python and the system, without secrets or your home folder, for a bug report) and **Close**, and the program keeps
+running; a burst of errors shows one dialog that counts the rest. Everything the window logs is in `gui.log` in your
+log folder; a crash before the window exists leaves a `crash-<time>.txt` there (on Windows also a message box). The
+entry is shown, repaired and removed under **File > Settings...**, **Update**, **Start entry**, or with `llmcf
+launcher status|install|remove`.
+
 **The menu bar** (translated, with Alt shortcuts; the object names of the entries stay the same, so every path of the
 command line keeps its mouse path):
 
@@ -3822,7 +3832,7 @@ line for one. Its pages, in a list on the left: **General** (the language, Engli
 of address, the framework mode and the build defaults), **Ditto** (the AI settings, the tool permissions and the
 folders the AI may use), **Language model** (the local runtime: where Ditto's local server runs and its memory
 budget; the sign-in of every provider with its keys and server address; the secrets; the key storage), **Update**
-(check for new commits, only the tested dependency set, **Update Framework...**), then **Local network**, **Build
+(check for new commits, only the tested dependency set, **Update Framework...**, the start entry), then **Local network**, **Build
 doorbell**, **Ditto in editors**, **Source repositories** and **Effective settings**. The old entries still work and
 open their page: **Ditto > AI Settings...**, **Tool Permissions...**, **Folders the AI May Use...**, **Security >
 Secrets...**, **Sign-in Overview...**, **Key Storage...**, **Set OpenAI API Key...** (the sign-in with OpenAI

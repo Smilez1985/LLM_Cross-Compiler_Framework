@@ -272,7 +272,9 @@ The installer:
    set fails, it comes back unchanged and the installer stops. `--offline` (or `LCF_OFFLINE=1`) installs the tested
    set without resolving, from a preload (see [A computer without any network](#a-computer-without-any-network-the-preload)). pip is the one that comes with Python (it is not upgraded: that would download it without
    a checksum),
-5. creates the launcher `/usr/local/bin/llm-framework`, which starts the GUI,
+5. creates the launcher `/usr/local/bin/llm-framework`, which starts the GUI from a terminal, and puts
+   **LLM Cross-Compiler Framework** into your application menu (your own entry in `~/.local/share/applications`,
+   written as you; it starts without a terminal window; `llm-cli launcher` shows, repairs or removes it),
 6. sets up Ditto's local model server (`llm-cli ditto runtime ensure`, run as you, never as root): bare metal by
    default, in Docker when you choose it or when bare metal is not possible here. If Ditto is there already, it does
    nothing. If it fails, the installer says why and finishes anyway. Before a model is downloaded you see its size
@@ -306,8 +308,10 @@ The installer checks for Python (installs Python 3.13 with `winget` if none is f
 3.14), copies the framework to `C:\Program Files\LLM-Cross-Compiler-Framework`, creates `.venv` there with the
 newest compatible versions the same way as on Linux (resolved fresh, 5 days old at least, audited, checked; else the
 tested `requirements-gui.txt`, with the GUI; `install.bat --offline` or `LCF_OFFLINE=1` takes the tested set at
-once; the earlier `.venv` comes back when nothing works), and puts a **LLM-Cross-Compiler-Framework** shortcut on the public desktop (every account on the computer sees it). The shortcut runs
-`start_framework.bat`, which starts the GUI. When no 7-Zip is found (`7z` or `7zz` on the PATH, or
+once; the earlier `.venv` comes back when nothing works), and puts a **LLM-Cross-Compiler-Framework** shortcut into the Start menu and, unless you answer no to its question
+(`install.bat --no-desktop-shortcut` or `LCF_DESKTOP_SHORTCUT=0` for an unattended run), on the public desktop; every
+account on the computer sees them. The shortcuts start the GUI with `pythonw.exe`, so no console window opens;
+`start_framework.bat` in the program folder starts it with a console, for troubleshooting. When no 7-Zip is found (`7z` or `7zz` on the PATH, or
 `C:\Program Files\7-Zip\7z.exe`), it installs it with `winget install -e --id 7zip.7zip` for the harness take-in
 (7z, rar, iso and disk images); a failure is a warning, the installation goes on. The Ditto step is the same as on Linux (`install.bat --ditto=...` or
 `LCF_DITTO`); it runs only for the person who is signed in. In this version Windows has no self-built server and
@@ -363,7 +367,8 @@ version is an update of the shared part, and everyone's own folders stay as they
 installed (`.lcf-installed-by`) and what (`.lcf-installed-state`). Once the framework writes nothing into `/opt` any
 more (a coming release), the shared part belongs to root and is only readable for the group `llmcf`; until then it
 goes to the installing account as before. On Windows the program folder is readable for every account anyway; a
-second account gets no new copy, and the shortcut is on the public desktop.
+second account gets no new copy, and the shortcuts are in the Start menu and on the public desktop. On Linux each
+person's run of the installer writes that person's own application-menu entry.
 
 ### An installation from before the rename
 
@@ -465,7 +470,9 @@ The installers create no data folders of their own.
 
 ## Quick start: the GUI
 
-1. **Start** the GUI: `llm-framework` on Linux, the desktop shortcut on Windows.
+1. **Start** the GUI: **LLM Cross-Compiler Framework** in the application menu on Linux (or `llm-framework` in a
+   terminal), the Start menu or desktop shortcut on Windows. When the GUI meets an error nobody caught, a dialog
+   says so, with **Open Log Folder** and **Copy details** for a bug report (without secrets or your home folder).
 2. **Language:** on the first start a dialog asks for English or German. The choice is saved as `language`.
 3. **Tool permissions ("Ditto setup"):** decide once what Ditto and connected AI clients may do on their own:
 

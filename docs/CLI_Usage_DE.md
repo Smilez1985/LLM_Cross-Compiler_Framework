@@ -21,6 +21,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [mojo](#mojo): Gesundheitscheck (Mojo Oracle) und Reparaturen (Mojo Miracle)
 - [doctor](#doctor): der alte Name von `mojo`
 - [update](#update): das Framework aktualisieren (Git-Vorspulen, dann erneut der Installer)
+- [launcher](#launcher): der Starteintrag ohne Terminal (`status`, `install`, `remove`)
 - [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
 - [build](#build): `start`, `preflight`, `tune`, `save`, `deps`, `status`
@@ -127,6 +128,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `mojo` | Die Installation prüfen (Mojo Oracle) und reparieren, was sich sicher reparieren lässt (Mojo Miracle) |
 | `doctor` | Der alte Name von `mojo`, mit seinen Optionen aus 3.0.0 |
 | `update` | Das Framework aktualisieren: Der Checkout, aus dem du installiert hast, wird vorgespult, dann läuft sein Installer erneut mit den neuesten passenden Abhängigkeiten |
+| `launcher status` / `install` / `remove` | Der Starteintrag, der die GUI ohne Terminal öffnet (der Eintrag im Linux-Anwendungsmenü, die Windows-Verknüpfung im Startmenü): zeigen, anlegen oder reparieren, den eigenen entfernen |
 | `knowledge snapshots` | Die Snapshots der Wissensbasis mit vollem Pfad, Namen, Größe und was jeder ist auflisten; die ausgewählten löschen oder exportieren |
 | `knowledge index-docs` | Die eigene Dokumentation des Frameworks (und mit `--with-code` seinen Code) in die Wissensbasis aufnehmen |
 | `knowledge storage` | Wo die Wissensbasis liegt (Qdrant Edge), die Umwandlung einer älteren und ihr alter Ordner: `convert`, `delete-old` |
@@ -320,6 +322,45 @@ In der GUI: **Datei > Einstellungen…**, Seite **Update** (auch **Extras > Wart
 **Nach Updates suchen** ist `--check`, **Nur den getesteten Abhängigkeitsstand** ist `--offline`, **Framework
 aktualisieren...** prüft, fragt mit „Nein“ als Vorgabe und startet das Update dann in einem Terminal; unter Windows in
 der Konsole des Installers, und das Framework schließt sich. Eine KI startet nie ein Update.
+
+---
+
+## launcher
+
+```
+llm-cli launcher status
+llm-cli launcher install
+llm-cli launcher remove
+```
+
+Der Starteintrag, der die GUI ohne Terminal öffnet. Der Installer schreibt ihn; diese Befehle zeigen ihn, legen ihn
+an oder reparieren ihn und entfernen ihn, ohne neu zu installieren.
+
+- **Linux**: dein eigener Desktop-Eintrag `llm-cross-compiler-framework.desktop` in `~/.local/share/applications`
+  (oder `$XDG_DATA_HOME/applications`), so steht das Framework in deinem Anwendungsmenü. Er startet das Python der
+  Installation in `.venv` mit `orchestrator/main.py` über absolute Pfade, ohne Shell und ohne aktivierte Umgebung,
+  und ohne Terminalfenster. Jede Person auf einem Rechner hat ihren eigenen Eintrag (der Installer schreibt ihn für
+  die Person, die ihn startet). Ist der Installationsordner weg, blenden Desktops den Eintrag von selbst aus;
+  `remove` löscht die Datei.
+- **Windows**: Der Installer legt die Verknüpfung für alle Konten ins Startmenü (und, wenn du ja gesagt hast, auf den
+  Desktop). Sie startet `pythonw.exe`, also öffnet sich kein Konsolenfenster. `install` schreibt eine eigene
+  Verknüpfung in dein Startmenü (ohne Administratorrechte) nur, wenn jene fehlt oder woandershin zeigt; `remove`
+  entfernt nur deine eigene (die für alle Konten geht mit dem Deinstaller).
+
+| Befehl | Was er tut |
+|---|---|
+| `status` | Wo der Eintrag ist und ob er da ist, aktuell, für eine andere Installation gemacht, oder eine gleichnamige Datei, die nicht vom Framework stammt (die wird nie geändert). |
+| `install` | Legt den Eintrag an oder repariert ihn, wenn er nicht mehr zu dieser Installation passt. |
+| `remove` | Entfernt deinen eigenen Eintrag, nur einen, den das Framework geschrieben hat. |
+
+Jeder Start der GUI schreibt deinen Linux-Eintrag außerdem neu, wenn er nicht mehr zu dieser Installation passt, legt
+aber nie einen an, den du entfernt hast. Trifft die GUI auf einen Fehler, den niemand abgefangen hat, sagt ein Dialog
+das in einfachen Worten, mit **Log-Ordner öffnen** und **Details kopieren** (der Traceback, die Version, Python und das
+System, ohne Geheimnisse und ohne deinen Home-Ordner); das Log ist `gui.log` in deinem Log-Ordner
+(`~/.llm-framework/logs`). Ein Absturz, bevor es das Fenster gibt, landet dort in einer `crash-<Zeit>.txt`.
+
+In der GUI: **Datei > Einstellungen…**, Seite **Update**, Teil **Starteintrag**: der Zustand ist `status`, **Anlegen
+oder reparieren** ist `install`, **Entfernen** ist `remove`.
 
 ---
 

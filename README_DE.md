@@ -287,7 +287,10 @@ Der Installer:
    (oder `LCF_OFFLINE=1`) installiert den getesteten Stand ohne neue Auflösung, aus einem Preload (siehe
    [Ein Rechner ganz ohne Netz](#ein-rechner-ganz-ohne-netz-das-preload)). pip ist das, das mit Python kommt (es
    wird nicht aktualisiert: Das lüde es ohne Prüfsumme),
-5. legt den Starter `/usr/local/bin/llm-framework` an, der die GUI startet,
+5. legt den Starter `/usr/local/bin/llm-framework` an, der die GUI aus einem Terminal startet, und trägt
+   **LLM Cross-Compiler Framework** in dein Anwendungsmenü ein (dein eigener Eintrag in
+   `~/.local/share/applications`, als du geschrieben; er startet ohne Terminalfenster; `llm-cli launcher` zeigt,
+   repariert oder entfernt ihn),
 6. richtet Dittos lokalen Modellserver ein (`llm-cli ditto runtime ensure`, als du, nie als root): standardmäßig
    direkt, in Docker, wenn du das wählst oder wenn es direkt hier nicht geht. Ist Ditto schon da, tut der Schritt
    nichts. Scheitert er, sagt der Installer warum und wird trotzdem fertig. Bevor ein Modell heruntergeladen wird,
@@ -324,9 +327,11 @@ Der Installer sucht Python (installiert Python 3.13 mit `winget`, wenn keines ge
 3.11 bis 3.14), kopiert das Framework nach `C:\Program Files\LLM-Cross-Compiler-Framework`, legt dort `.venv` mit
 den neuesten verträglichen Versionen an, wie unter Linux (frisch aufgelöst, mindestens 5 Tage alt, geprüft,
 selbstgeprüft; sonst der getestete Stand `requirements-gui.txt`, mit der GUI; `install.bat --offline` oder
-`LCF_OFFLINE=1` nimmt gleich den getesteten Stand; die bisherige `.venv` kommt zurück, wenn nichts geht) und legt eine Verknüpfung **LLM-Cross-Compiler-Framework** auf
-den öffentlichen Desktop (jedes Konto des Rechners sieht sie). Die
-Verknüpfung startet `start_framework.bat` und damit die GUI. Findet er kein 7-Zip (`7z` oder `7zz` im PATH oder
+`LCF_OFFLINE=1` nimmt gleich den getesteten Stand; die bisherige `.venv` kommt zurück, wenn nichts geht) und legt eine Verknüpfung **LLM-Cross-Compiler-Framework** ins
+Startmenü und, wenn du seine Frage nicht mit Nein beantwortest (`install.bat --no-desktop-shortcut` oder
+`LCF_DESKTOP_SHORTCUT=0` für einen unbeaufsichtigten Lauf), auf den öffentlichen Desktop; jedes Konto des Rechners
+sieht sie. Die Verknüpfungen starten die GUI mit `pythonw.exe`, also öffnet sich kein Konsolenfenster;
+`start_framework.bat` im Programmordner startet sie mit Konsole, zur Fehlersuche. Findet er kein 7-Zip (`7z` oder `7zz` im PATH oder
 `C:\Program Files\7-Zip\7z.exe`), installiert er es mit `winget install -e --id 7zip.7zip` für die Übernahme einer
 Harness (7z, rar, iso und Disk-Images); ein Fehlschlag ist eine Warnung, die Installation geht weiter. Der Ditto-Schritt ist derselbe wie unter Linux
 (`install.bat --ditto=...` oder `LCF_DITTO`); er läuft nur für die angemeldete Person. In dieser Version hat Windows
@@ -383,7 +388,8 @@ Version ist ein Update des gemeinsamen Teils, und die eigenen Ordner aller bleib
 fest, wer installiert hat (`.lcf-installed-by`) und was (`.lcf-installed-state`). Sobald das Framework nichts mehr nach
 `/opt` schreibt (ein kommendes Release), gehört der gemeinsame Teil root und ist für die Gruppe `llmcf` nur lesbar; bis
 dahin bekommt ihn wie bisher das installierende Konto. Unter Windows ist der Programmordner ohnehin für jedes Konto
-lesbar; ein zweites Konto bekommt keine neue Kopie, und die Verknüpfung liegt auf dem öffentlichen Desktop.
+lesbar; ein zweites Konto bekommt keine neue Kopie, und die Verknüpfungen liegen im Startmenü und auf dem öffentlichen
+Desktop. Unter Linux schreibt der Lauf des Installers jeder Person deren eigenen Eintrag im Anwendungsmenü.
 
 ### Eine Installation von vor der Umbenennung
 
@@ -488,7 +494,10 @@ Die Installer legen keine eigenen Datenordner an.
 
 ## Schnellstart: die GUI
 
-1. **Starten:** `llm-framework` unter Linux, die Desktop-Verknüpfung unter Windows.
+1. **Starten:** **LLM Cross-Compiler Framework** im Anwendungsmenü unter Linux (oder `llm-framework` in einem
+   Terminal), die Verknüpfung im Startmenü oder auf dem Desktop unter Windows. Trifft die GUI auf einen Fehler, den
+   niemand abgefangen hat, sagt ein Dialog das, mit **Log-Ordner öffnen** und **Details kopieren** für einen
+   Fehlerbericht (ohne Geheimnisse und ohne deinen Home-Ordner).
 2. **Sprache:** Beim ersten Start fragt ein Dialog nach Englisch oder Deutsch. Die Wahl wird als `language`
    gespeichert.
 3. **Tool-Berechtigungen („Ditto-Einrichtung“):** Lege einmal fest, was Ditto und verbundene KI-Clients selbst

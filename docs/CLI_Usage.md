@@ -21,6 +21,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [mojo](#mojo): health check (Mojo Oracle) and repairs (Mojo Miracle)
 - [doctor](#doctor): the old name of `mojo`
 - [update](#update): update the framework (git fast-forward, then the installer again)
+- [launcher](#launcher): the start entry without a terminal (`status`, `install`, `remove`)
 - [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
 - [build](#build): `start`, `preflight`, `tune`, `save`, `deps`, `status`
@@ -126,6 +127,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `mojo` | Check the installation (Mojo Oracle) and repair what can be repaired safely (Mojo Miracle) |
 | `doctor` | The old name of `mojo`, with its options of 3.0.0 |
 | `update` | Update the framework: the checkout you installed from moves forward, then its installer runs again with the newest compatible dependencies |
+| `launcher status` / `install` / `remove` | The start entry that opens the GUI without a terminal (the Linux application-menu entry, the Windows Start-menu shortcut): show it, create or repair it, remove your own |
 | `knowledge snapshots` | List the knowledge base's snapshots with full path, name, size and what each is; delete the ones you pick, or export them |
 | `knowledge index-docs` | Add the framework's own documentation (and with `--with-code` its code) to the knowledge base |
 | `knowledge storage` | Where the knowledge base is stored (Qdrant Edge), the conversion of an older one, and its old folder: `convert`, `delete-old` |
@@ -315,6 +317,44 @@ In the GUI: **File > Settings...**, page **Update** (also **Tools > Maintenance 
 Updates** is `--check`, **Only the tested dependency set** is `--offline`, **Update Framework...** checks, asks with
 "No" as the default, then runs the update in a terminal; on Windows in the installer's console, and the framework
 closes. An AI never starts an update.
+
+---
+
+## launcher
+
+```
+llm-cli launcher status
+llm-cli launcher install
+llm-cli launcher remove
+```
+
+The start entry that opens the GUI without a terminal. The installer writes it; these commands show, create or
+repair, and remove it without installing again.
+
+- **Linux**: your own desktop entry `llm-cross-compiler-framework.desktop` in `~/.local/share/applications` (or
+  `$XDG_DATA_HOME/applications`), so the framework is in your application menu. It starts the installation's Python
+  in `.venv` with `orchestrator/main.py` by absolute paths, without a shell or an activated environment, and without
+  a terminal window. Each person on a computer has their own entry (the installer writes it for whoever runs it).
+  Once the installation folder is gone, desktops hide the entry by themselves; `remove` deletes the file.
+- **Windows**: the installer puts the shortcut for all accounts into the Start menu (and, if you said yes, on the
+  desktop). It starts `pythonw.exe`, so no console window opens. `install` writes a shortcut of your own in your
+  Start menu (no administrator rights needed) only when that one is missing or points elsewhere; `remove` removes
+  only your own one (the one for all accounts goes with the uninstaller).
+
+| Command | What it does |
+|---|---|
+| `status` | Where the entry is and whether it is there, up to date, made for another installation, or a file of that name the framework did not write (that one is never changed). |
+| `install` | Creates the entry, or repairs it when it no longer fits this installation. |
+| `remove` | Removes your own entry, only one the framework wrote. |
+
+Each GUI start also rewrites your Linux entry when it no longer fits this installation, but never creates one you
+removed. When the GUI meets an error nobody caught, a dialog says so in plain words, with **Open Log Folder** and
+**Copy details** (the traceback, the version, Python and the system, without secrets or your home folder); the log
+is `gui.log` in your log folder (`~/.llm-framework/logs`). A crash before the window exists goes into a
+`crash-<time>.txt` there.
+
+In the GUI: **File > Settings...**, page **Update**, part **Start entry**: the state is `status`, **Create or Repair**
+is `install`, **Remove** is `remove`.
 
 ---
 
