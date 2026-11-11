@@ -39,7 +39,7 @@ erzeugt diese Einträge selbst, aus demselben Startbefehl, mit dem es den MCP-Se
 (Teil C):
 
 - **In der GUI:** **Sicherheit > Verbindungen zu KI-Apps (MCP)...** zeigt die Einträge des MCP-Servers (Claude Code,
-  Claude Desktop, VS Code, Zed), jeden mit einem Knopf **Kopieren**. **Datei > Einstellungen…**, Tab **Ditto in
+  Claude Desktop, VS Code, Zed), jeden mit einem Knopf **Kopieren**. **Datei > Einstellungen…**, Seite **Ditto in
   Editoren**, zeigt die Einträge für Ditto (den Befehl, den Zed-Eintrag, den JetBrains-Eintrag), jeden mit einem
   Knopf **Kopieren**.
 - **Im Terminal**, mit dem Python des Frameworks (damit der ausgegebene Pfad der richtige Interpreter ist):
@@ -114,7 +114,7 @@ Nachricht jeder Editor-Sitzung ([Features: Ditto in Editoren](Features_DE.md#dit
 
 ### Zed
 
-Kopiere den Eintrag **Zed** aus **Datei > Einstellungen…**, Tab **Ditto in Editoren**, oder aus
+Kopiere den Eintrag **Zed** aus **Datei > Einstellungen…**, Seite **Ditto in Editoren**, oder aus
 `llm-cli acp config` und füge ihn in Zeds `settings.json` unter `agent_servers` ein. Zed nimmt einen eigenen Agenten
 als `"type": "custom"` mit `command`, `args` und `env`; der kopierte Eintrag hat genau diese Felder
 ([Zed: External Agents][zed-agents]).

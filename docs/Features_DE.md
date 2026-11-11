@@ -3396,8 +3396,8 @@ erklärt sie dort, wo sie stehen.
   ein Traceback) sind unter **Technische Details** eingeklappt; **Details kopieren** kopiert sie ohne Geheimnisse und
   mit `~` statt deines Home-Ordners, für einen Fehlerbericht oder um Ditto zu fragen, der sie dir auf Deutsch erklären
   kann. Kein Teil des Fensters zeigt ein Geheimnis, auch nicht dort, wo er die Meldung eines Fehlers wiederholt.
-- **„du“ oder „Sie“:** Deutsche Texte sprechen dich mit „du“ an. **Datei > Einstellungen…** hat einen Reiter
-  **Allgemein**, in dem du stattdessen „Sie“ wählst; die Wahl wird gespeichert (Einstellung `form_of_address`, `du`
+- **„du“ oder „Sie“:** Deutsche Texte sprechen dich mit „du“ an. **Datei > Einstellungen…** hat eine Seite
+  **Allgemein**, auf der du stattdessen „Sie“ wählst; die Wahl wird gespeichert (Einstellung `form_of_address`, `du`
   oder `sie`) und gilt sofort für jeden Text, der danach gelesen wird, auch für die nächsten Schritte und die
   Zusammenfassungen von Fehlern. Ein Fenster, das schon offen ist, behält seine Texte, bis du es neu öffnest.
 - **Größen** erscheinen in Dezimaleinheiten in der Schreibweise deiner Sprache (`1,5 GB`, englisch `1.5 GB`); die
@@ -4188,6 +4188,27 @@ Pfad der Kommandozeile seinen Mausweg):
   **Wartung** (Build-Images des Frameworks..., Mojo-Gesundheitscheck...), Gesprochene Ansagen, Eingabeverlauf
   löschen....
 - **Hilfe:** Über....
+
+**Ein Einstellungsfenster:** **Datei > Einstellungen…** ist die eine Stelle für jede Einstellung, du brauchst dafür
+nie die Kommandozeile. Seine Seiten, in einer Liste links: **Allgemein** (die Sprache, English oder Deutsch, neben der
+deutschen Anrede, der Framework-Modus und die Build-Vorgaben), **Ditto** (die KI-Einstellungen, die
+Tool-Berechtigungen und die Ordner, die die KI nutzen darf), **Sprachmodell** (die lokale Laufzeit: wo Dittos lokaler
+Server läuft und sein Speicherbudget; die Anmeldung jedes Anbieters mit seinen Schlüsseln und seiner Serveradresse;
+die Geheimnisse; der Schlüsselspeicher), **Update** (nach neuen Commits suchen, nur den getesteten
+Abhängigkeitsstand, **Framework aktualisieren...**), danach **Lokales Netz**, **Build-Türklingel**, **Ditto in
+Editoren**, **Quell-Repositorys** und **Wirksame Einstellungen**. Die alten Einträge funktionieren weiter und öffnen
+ihre Seite: **Ditto > KI-Einstellungen...**, **Tool-Berechtigungen...**, **Ordner, die die KI nutzen darf...**,
+**Sicherheit > Geheimnisse...**, **Anmeldeübersicht...**, **Schlüsselspeicher...**, **OpenAI-API-Key festlegen...**
+(die Anmeldung mit OpenAI ausgewählt) und **Extras > Wartung > Framework aktualisieren...**. Eine Seite, die speichert
+(die KI-Einstellungen, die Berechtigungen), bleibt offen und sagt in der unteren Zeile des Fensters, was gespeichert
+wurde. Eine neue Sprache gilt sofort für die Menüs, die Reitertitel, das Chat-Panel, die Standardknöpfe, das
+Einstellungsfenster (es öffnet sich neu) und jedes danach geöffnete Fenster; die Inhalte der Reiter Builder,
+Deployment und Auto-Tuning und die Statusleiste wechseln beim nächsten Start, und ein offenes Fenster behält seine
+Texte, bis du es neu öffnest. Schlüssel bleiben im verschlüsselten Tresor, in maskierten Feldern; keine KI kann die
+Berechtigungen, die Ordner, einen Schlüssel oder den Schlüsselspeicher ändern. Jede Einstellung hat auch ihren Befehl:
+`llmcf config set` (die Sprache, die Anrede, der Framework-Modus, die Build-Vorgaben und Dittos KI-Einstellungen,
+geprüft nach denselben Regeln), `llm-cli ditto login`, `llm-cli tools permissions`, `llm-cli tools folders`,
+`llm-cli ditto runtime ensure`, `llm-cli ditto cache set`, `llm-cli ditto auth storage` und `llm-cli update`.
 
 Ein Text, der einen Ort nennt, schreibt `{path:<objectName>}`; das Fenster füllt ihn aus den Beschriftungen auf dem
 Bildschirm in deiner Sprache, so passt ein Pfad in einer Meldung immer zum Menü, das du siehst. Für Mitwirkende:

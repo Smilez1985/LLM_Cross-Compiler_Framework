@@ -170,6 +170,8 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `config doorbell` | Dein MQTT-Broker für die Build-Türklingel, und eine Test-Klingel |
 | `config set framework_mode` | Dein Framework-Modus: privat (Standard) oder enterprise (auf einem Board nur OpenSSH mit sudo) |
 | `config set default_enable_imatrix` | Build-Vorgaben: die Importance Matrix, die Kalibrier-Textdatei und die Sprachen des mitgelieferten Texts |
+| `config set language` | Die Sprache des Programms (en oder de) und die deutsche Anrede (`form_of_address`: du oder sie) |
+| `config set ai_provider` | Dittos KI-Einstellungen (Anbieter, Modell, Adresse, Aufwand, Datenschutz, Ausweichkette, Wissensdatenbank, Offline-Modus), geprüft wie im Fenster |
 | `config output-folder` | Den Ausgabeordner zeigen oder festlegen, in dem fertige Modelle gespeichert werden |
 | `config take-over` | Was eine frühere Version im Installationsordner abgelegt hat, in deine eigenen Ordner verschieben |
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
@@ -312,9 +314,10 @@ llm-cli update
 llm-cli update --offline
 ```
 
-In der GUI: **Extras > Wartung > Framework aktualisieren...** (prüft, fragt mit „Nein“ als Vorgabe und startet das
-Update dann in einem Terminal; unter Windows in der Konsole des Installers, und das Framework schließt sich). Eine KI
-startet nie ein Update.
+In der GUI: **Datei > Einstellungen…**, Seite **Update** (auch **Extras > Wartung > Framework aktualisieren...**):
+**Nach Updates suchen** ist `--check`, **Nur den getesteten Abhängigkeitsstand** ist `--offline`, **Framework
+aktualisieren...** prüft, fragt mit „Nein“ als Vorgabe und startet das Update dann in einem Terminal; unter Windows in
+der Konsole des Installers, und das Framework schließt sich. Eine KI startet nie ein Update.
 
 ---
 
@@ -3307,7 +3310,7 @@ Ordner als Labels) und ändern gewöhnliche mit `update_settings`, das dich mit 
 verschärfen; Berechtigungen, Geheimnisse, den Tresor, Einstellungen des KI-Anbieters, Adressen und Ordner änderst
 nur du, hier oder in der GUI.
 
-In der GUI: **Datei > Einstellungen…**, Tab **Wirksame Einstellungen** (nur lesen; Geheimnisse geschwärzt).
+In der GUI: **Datei > Einstellungen…**, Seite **Wirksame Einstellungen** (nur lesen; Geheimnisse geschwärzt).
 
 ### config output-folder
 
@@ -3382,7 +3385,7 @@ Commit bekommt. Das Build-Log sagt, wann die Überschreibung genutzt wurde oder 
 `source_module.sh --clone-llama-cpp`, von Hand in einem Container mit Netzwerk gestartet, klont nach derselben Regel
 daraus. Die übrigen Überschreibungen ändern in einem Build nichts: Seine Stufen-Container haben kein Netzwerk.
 
-In der GUI: **Datei > Einstellungen…**, Tab **Quell-Repositorys**: die Liste, **Hinzufügen** (Name und URL) und
+In der GUI: **Datei > Einstellungen…**, Seite **Quell-Repositorys**: die Liste, **Hinzufügen** (Name und URL) und
 **Ausgewählte entfernen…** (fragt zuerst; „Nein“ ist die Vorgabe).
 
 ### config set
@@ -3393,11 +3396,17 @@ llmcf config set framework_mode private
 llmcf config set default_enable_imatrix false
 llmcf config set default_calibration_dataset calib_de.txt
 llmcf config set calibration_language de
+llmcf config set language de
+llmcf config set form_of_address sie
+llmcf config set ai_provider ollama
+llmcf config set ai_effort high
+llmcf config set offline_mode true
 ```
 
-Setzt eine deiner eigenen Einstellungen in config.yml. `framework_mode` ist private (Standard) oder enterprise: Der Enterprise-Modus nimmt auf einem Board nur OpenSSH mit sudo (die Schlüsselzeile in Root-Besitz) und lehnt die schwächere Dropbear-Stufe und das Home-Tor ab, beim Koppeln und bei jeder Benutzung eines früher gekoppelten Boards. Exit-Code 2 für einen Wert, der keins von beiden ist. Nur du setzt ihn; eine KI darf ihn lesen (`get_settings`), nie ändern. Die Installer fragen dasselbe (`install.sh --mode=private|enterprise`, `install.bat --mode=...` oder `LCF_MODE` für einen unbeaufsichtigten Lauf).
+Setzt eine deiner eigenen Einstellungen in config.yml. Jede Einstellung hier stellst du auch in **Datei >
+Einstellungen…** ein, dem einen Einstellungsfenster. `framework_mode` ist private (Standard) oder enterprise: Der Enterprise-Modus nimmt auf einem Board nur OpenSSH mit sudo (die Schlüsselzeile in Root-Besitz) und lehnt die schwächere Dropbear-Stufe und das Home-Tor ab, beim Koppeln und bei jeder Benutzung eines früher gekoppelten Boards. Exit-Code 2 für einen Wert, der keins von beiden ist. Nur du setzt ihn; eine KI darf ihn lesen (`get_settings`), nie ändern. Die Installer fragen dasselbe (`install.sh --mode=private|enterprise`, `install.bat --mode=...` oder `LCF_MODE` für einen unbeaufsichtigten Lauf).
 
-In der GUI: **Datei > Einstellungen…**, Tab **Allgemein**, **Framework-Modus**.
+In der GUI: **Datei > Einstellungen…**, Seite **Allgemein**, **Framework-Modus**.
 
 Die Build-Vorgaben, die gelten, wenn ein Build keine nennt (`build start`, der Builder-Tab und die KI-Tools
 gleichermaßen): `default_enable_imatrix` ist true (Standard) oder false: Mit true bekommt ein GGUF-Build eines Typs
@@ -3410,7 +3419,25 @@ mitgelieferten Text. `calibration_language` ist `mixed`, `de` oder `en`, die Spr
 Exit-Code 2 für einen Wert, der keins davon ist. `--imatrix`, `--no-imatrix`, `--dataset` und `--no-dataset` von
 `build start` gewinnen über die Vorgaben. Eine KI darf `default_enable_imatrix` und `calibration_language` ändern
 und liest die Datensatz-Einstellung als `datasets:<Name>`, setzt sie aber nie. In der GUI: **Datei >
-Einstellungen…**, Tab **Allgemein**, der Kasten „Build-Vorgaben“.
+Einstellungen…**, Seite **Allgemein**, der Kasten „Build-Vorgaben“.
+
+Die Sprache des Programms: `language` ist `en` oder `de`, `form_of_address` ist `du` (Standard) oder `sie`, die
+deutsche Anrede. Exit-Code 2 für einen anderen Wert. Eine laufende GUI übernimmt sie beim nächsten Start; in der GUI
+schaltet **Datei > Einstellungen…**, Seite **Allgemein**, die Menüs, die Reitertitel, das Chat-Panel und jedes danach
+geöffnete Fenster sofort um (die Inhalte der Reiter Builder, Deployment und Auto-Tuning beim nächsten Start).
+
+Dittos KI-Einstellungen, geprüft nach denselben Regeln wie im Fenster (**Datei > Einstellungen…**, Seite **Ditto**,
+Abschnitt **KI-Einstellungen**; auch **Ditto > KI-Einstellungen...**): `ai_provider` (eine Anbieter-ID wie
+`anthropic`, `openai` oder `ollama`), `ai_model`, `ai_base_url` (die Serveradresse eines Anbieters, dessen Adresse du
+setzt), `ai_anthropic_workspace_id`, `ai_effort` (`low`, `medium`, `high`, `max` oder `''`), `ai_security_level`,
+`ai_fallback_chain` (`anbieter[:modell], ...` oder `''`), `offline_mode` und `enable_rag_knowledge` (true oder
+false). Was das Fenster ablehnt, wird hier mit Exit-Code 2 abgelehnt (ein Anbieter ohne Schlüssel, eine Adresse, die
+keine http(s)-URL ist, ein Cloud-Anbieter im Offline-Modus, ...); ein Problem, das die gespeicherten Einstellungen
+schon haben, blockiert keine andere Änderung. Ein Schlüssel kommt nie auf die Kommandozeile: Melde dich zuerst mit
+[ditto login](#ditto-login) an und setze dann den Anbieter. Die Tool-Berechtigungen, die Ordner, die eine KI nutzen
+darf, die lokale Laufzeit, der Schlüsselspeicher und das Update behalten ihre eigenen Befehle (`tools permissions`,
+`tools folders`, `ditto runtime ensure`, `ditto cache set`, `ditto auth storage`, `update`); das Fenster hat für jeden
+eine Seite.
 
 ### config local-network
 
@@ -3447,7 +3474,7 @@ konnte.
 | `--check ADDRESS` | Ob eine Adresse, ein Hostname oder eine URL als lokal zählt, und warum. |
 | `-y`, `--yes` | Vor `--add` nicht fragen; für Skripte. |
 
-In der GUI: **Datei > Einstellungen…**, Tab **Lokales Netz**: die Liste mit dem, was dann dein Netz verlassen kann,
+In der GUI: **Datei > Einstellungen…**, Seite **Lokales Netz**: die Liste mit dem, was dann dein Netz verlassen kann,
 **Als lokal zählen…** (Art und Wert; fragt mit der Erklärung, „Nein“ ist die Vorgabe), **Entfernen** (fragt zuerst),
 die Prüfung des VPN dieses Computers und **Prüfen** für eine Adresse (beides im Hintergrund).
 
@@ -3490,7 +3517,7 @@ Test-Klingel nicht angenommen wurde oder `config.yml` nicht gespeichert werden k
 | `--password` | Nach dem Passwort fragen und es in den Tresor für Zugangsdaten legen. |
 | `--test` | Jetzt eine Test-Klingel senden. |
 
-In der GUI: **Datei > Einstellungen…**, Reiter **Build-Türklingel**: dieselben Felder, **Speichern** und
+In der GUI: **Datei > Einstellungen…**, Seite **Build-Türklingel**: dieselben Felder, **Speichern** und
 **Test-Klingel senden** (im Hintergrund).
 
 ---

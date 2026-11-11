@@ -38,7 +38,7 @@ these entries itself, from the same launch command the framework uses when it st
 its own (part C):
 
 - **In the GUI:** **Security > AI App Connections (MCP)...** shows the MCP server entries (Claude Code, Claude
-  Desktop, VS Code, Zed), each with a **Copy** button. **File > Settings...**, tab **Ditto in editors**, shows the
+  Desktop, VS Code, Zed), each with a **Copy** button. **File > Settings...**, page **Ditto in editors**, shows the
   entries for Ditto (the command, the Zed entry, the JetBrains entry), each with a **Copy** button.
 - **At the terminal**, with the framework's own Python (so the printed path is the right interpreter):
 
@@ -111,7 +111,7 @@ editor session ([Features: Ditto in editors](Features.md#ditto-in-editors-acp)).
 
 ### Zed
 
-Copy the **Zed** entry from **File > Settings...**, tab **Ditto in editors**, or from `llm-cli acp config`, and add it
+Copy the **Zed** entry from **File > Settings...**, page **Ditto in editors**, or from `llm-cli acp config`, and add it
 to Zed's `settings.json` under `agent_servers`. Zed takes an own agent as `"type": "custom"` with `command`, `args`
 and `env`; the copied entry has exactly these fields ([Zed: external agents][zed-agents]).
 

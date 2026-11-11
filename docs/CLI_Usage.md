@@ -171,6 +171,8 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `config take-over` | Move what an earlier version kept in the installation folder into your own folders |
 | `config set framework_mode` | Your framework mode: private (the default) or enterprise (only OpenSSH with sudo on a board) |
 | `config set default_enable_imatrix` | Build defaults: the importance matrix, the calibration text file and the shipped text's languages |
+| `config set language` | The language of the program (en or de) and the German form of address (`form_of_address`: du or sie) |
+| `config set ai_provider` | Ditto's AI settings (provider, model, address, effort, privacy, fallback chain, knowledge base, offline mode), checked as in the window |
 | `zoo list` / `zoo show` | List the community zoo and the installed packs / show one entry |
 | `zoo install` / `zoo verify` | Install a community pack after checks and your confirmation / check installed packs or a pack file |
 | `zoo uninstall` | Uninstall an installed pack after the exact list and your confirmation ("No" by default) |
@@ -307,8 +309,10 @@ llm-cli update
 llm-cli update --offline
 ```
 
-In the GUI: **Tools > Maintenance > Update Framework...** (checks, asks with "No" as the default, then runs the
-update in a terminal; on Windows in the installer's console, and the framework closes). An AI never starts an update.
+In the GUI: **File > Settings...**, page **Update** (also **Tools > Maintenance > Update Framework...**): **Check for
+Updates** is `--check`, **Only the tested dependency set** is `--offline`, **Update Framework...** checks, asks with
+"No" as the default, then runs the update in a terminal; on Windows in the installer's console, and the framework
+closes. An AI never starts an update.
 
 ---
 
@@ -2353,7 +2357,7 @@ llm-cli acp servers list
 llm-cli acp servers enable 0123456789abcdef
 ```
 
-In the GUI: **File > Settings...**, tab **Ditto in editors**: the command and the two entries, each with a **Copy**
+In the GUI: **File > Settings...**, page **Ditto in editors**: the command and the two entries, each with a **Copy**
 button, and the recorded editor MCP servers with a consent box each. The sign-in is **Security > Sign-in
 Overview...**. Step by step for Zed, JetBrains IDEs and Android Studio: [Editors and agents: setup
 guide](Editors_and_Agents.md#b-ditto-as-the-editors-agent).
@@ -3156,7 +3160,7 @@ as labels) and change ordinary ones with `update_settings`, which asks you with 
 the change in `config.yml`. Settings that limit what an AI may do can only be tightened that way; permissions,
 secrets, the vault, AI provider settings, addresses and folders are changed only by you, here or in the GUI.
 
-In the GUI: **File > Settings...**, tab **Effective settings** (read-only; secrets redacted).
+In the GUI: **File > Settings...**, page **Effective settings** (read-only; secrets redacted).
 
 ### config output-folder
 
@@ -3226,7 +3230,7 @@ when the override was used or why not. `source_module.sh --clone-llama-cpp`, sta
 network, clones from it under the same rule. The other overrides change nothing in a build: its stage containers have
 no network.
 
-In the GUI: **File > Settings...**, tab **Source repositories**: the list, **Add** (name and URL) and **Remove
+In the GUI: **File > Settings...**, page **Source repositories**: the list, **Add** (name and URL) and **Remove
 selected...** (asks first; "No" is the default).
 
 ### config set
@@ -3237,11 +3241,17 @@ llmcf config set framework_mode private
 llmcf config set default_enable_imatrix false
 llmcf config set default_calibration_dataset calib_de.txt
 llmcf config set calibration_language de
+llmcf config set language de
+llmcf config set form_of_address sie
+llmcf config set ai_provider ollama
+llmcf config set ai_effort high
+llmcf config set offline_mode true
 ```
 
-Sets one of your own settings in config.yml. `framework_mode` is private (the default) or enterprise: enterprise mode takes only OpenSSH with sudo on a board (the root-owned key line) and refuses the weaker Dropbear tier and the home gate, at pairing and at every use of a board paired before. Exit code 2 for a value that is neither. Only you set it; an AI may read it (`get_settings`), never change it. The installers ask the same (`install.sh --mode=private|enterprise`, `install.bat --mode=...`, or `LCF_MODE` for an unattended run).
+Sets one of your own settings in config.yml. Every setting here is also set in **File > Settings...**, the one
+settings window. `framework_mode` is private (the default) or enterprise: enterprise mode takes only OpenSSH with sudo on a board (the root-owned key line) and refuses the weaker Dropbear tier and the home gate, at pairing and at every use of a board paired before. Exit code 2 for a value that is neither. Only you set it; an AI may read it (`get_settings`), never change it. The installers ask the same (`install.sh --mode=private|enterprise`, `install.bat --mode=...`, or `LCF_MODE` for an unattended run).
 
-In the GUI: **File > Settings...**, tab **General**, **Framework mode**.
+In the GUI: **File > Settings...**, page **General**, **Framework mode**.
 
 The build defaults, used when a build names none (`build start`, the Builder tab and the AI tools alike):
 `default_enable_imatrix` is true (the default) or false: with true a GGUF build of a type below 5 bits per weight
@@ -3253,7 +3263,24 @@ is refused until it does; `''` sets the shipped text again. `calibration_languag
 languages of the shipped text. Exit code 2 for a value that is none of these. `--imatrix`, `--no-imatrix`,
 `--dataset` and `--no-dataset` of `build start` win over the defaults. An AI may change `default_enable_imatrix` and
 `calibration_language` and reads the dataset setting as `datasets:<name>`, never sets it. In the GUI: **File >
-Settings...**, tab **General**, the box "Build defaults".
+Settings...**, page **General**, the box "Build defaults".
+
+The language of the program: `language` is `en` or `de`, `form_of_address` is `du` (the default) or `sie`, the
+German form of address. Exit code 2 for another value. A running GUI takes it at its next start; in the GUI, **File >
+Settings...**, page **General**, switches the menus, the tab titles, the chat panel and every window opened afterwards
+at once (the contents of the Builder, Deployment and Auto-Tuning tabs at the next start).
+
+Ditto's AI settings, checked by the same rules as the window (**File > Settings...**, page **Ditto**, section **AI
+settings**; also **Ditto > AI Settings...**): `ai_provider` (a provider id such as `anthropic`, `openai` or
+`ollama`), `ai_model`, `ai_base_url` (the server address of a provider whose address you set),
+`ai_anthropic_workspace_id`, `ai_effort` (`low`, `medium`, `high`, `max` or `''`), `ai_security_level`,
+`ai_fallback_chain` (`provider[:model], ...` or `''`), `offline_mode` and `enable_rag_knowledge` (true or false). What
+the window refuses is refused here with exit code 2 (a provider without a key, an address that is no http(s) URL, a
+cloud provider in offline mode, ...); a problem the saved settings already have does not block another change. A key
+never goes on the command line: sign in with [ditto login](#ditto-login) first, then set the provider. The tool
+permissions, the folders an AI may use, the local runtime, the key storage and the update keep their own commands
+(`tools permissions`, `tools folders`, `ditto runtime ensure`, `ditto cache set`, `ditto auth storage`, `update`);
+the window has a page for each.
 
 ### config local-network
 
@@ -3287,7 +3314,7 @@ value that is not a VPN, host name or range (an address goes under `range`), 1 w
 | `--check ADDRESS` | Whether an address, host name or URL counts as local, and why. |
 | `-y`, `--yes` | Do not ask before `--add`; for scripts. |
 
-In the GUI: **File > Settings...**, tab **Local network**: the list with what can then leave your network, **Count as
+In the GUI: **File > Settings...**, page **Local network**: the list with what can then leave your network, **Count as
 local...** (kind and value; asks with the explanation, "No" is the default), **Remove** (asks first), the check of
 this computer's VPN and **Check** for an address (both in the background).
 
@@ -3328,7 +3355,7 @@ not fit (the setting stays as it was), 1 when the test doorbell was not taken or
 | `--password` | Ask for the password and keep it in the credential vault. |
 | `--test` | Send a test doorbell now. |
 
-In the GUI: **File > Settings...**, tab **Build doorbell**: the same fields, **Save** and **Send a test doorbell** (in
+In the GUI: **File > Settings...**, page **Build doorbell**: the same fields, **Save** and **Send a test doorbell** (in
 the background).
 
 ---

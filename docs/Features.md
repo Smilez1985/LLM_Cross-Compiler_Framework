@@ -1372,7 +1372,7 @@ use Ditto as their AI agent: the editor starts `llm-cli acp` and you chat with D
 framework's own tools, the same ones as in the chat panel. This is an additional way in; the chat panel and
 `ditto ask` stay as they are. Like Ditto, it is experimental: the notice is the first message of every editor session.
 
-- **Adding it**: **File > Settings...**, tab **Ditto in editors**, shows the command and the `agent_servers` entries
+- **Adding it**: **File > Settings...**, page **Ditto in editors**, shows the command and the `agent_servers` entries
   for the editor (Zed's `settings.json` with `"type": "custom"`, a JetBrains IDE's `acp.json`), each with a **Copy**
   button; `llm-cli acp config` prints the same. Step by step for Zed, JetBrains IDEs and Android Studio:
   [Editors and agents: setup guide](Editors_and_Agents.md#b-ditto-as-the-editors-agent).
@@ -3061,7 +3061,7 @@ where they appear.
   **Technical details**; **Copy details** copies them with secrets removed and your home folder written as `~`, for a
   bug report or to ask Ditto, who can explain them in German. No part of the box shows a secret, also where it
   repeats an error's message.
-- **"du" or "Sie":** German texts address you with "du". **File > Settings...** has a **General** tab where you choose
+- **"du" or "Sie":** German texts address you with "du". **File > Settings...** has a **General** page where you choose
   "Sie" instead; the choice is saved (setting `form_of_address`, `du` or `sie`) and used at once for every text read
   from then on, the next steps and error summaries included. A window that is already open keeps its texts until you
   open it again.
@@ -3776,6 +3776,25 @@ command line keeps its mouse path):
   Knowledge Snapshots..., Knowledge Sources..., Index the Framework's Documentation..., Deep Ingest Notice...), **Maintenance**
   (Framework Build Images..., Mojo Health Check...), Spoken Announcements, Clear Input History....
 - **Help:** About....
+
+**One settings window:** **File > Settings...** is the one place for every setting, so you never need the command
+line for one. Its pages, in a list on the left: **General** (the language, English or Deutsch, beside the German form
+of address, the framework mode and the build defaults), **Ditto** (the AI settings, the tool permissions and the
+folders the AI may use), **Language model** (the local runtime: where Ditto's local server runs and its memory
+budget; the sign-in of every provider with its keys and server address; the secrets; the key storage), **Update**
+(check for new commits, only the tested dependency set, **Update Framework...**), then **Local network**, **Build
+doorbell**, **Ditto in editors**, **Source repositories** and **Effective settings**. The old entries still work and
+open their page: **Ditto > AI Settings...**, **Tool Permissions...**, **Folders the AI May Use...**, **Security >
+Secrets...**, **Sign-in Overview...**, **Key Storage...**, **Set OpenAI API Key...** (the sign-in with OpenAI
+selected) and **Tools > Maintenance > Update Framework...**. A page that saves (the AI settings, the permissions)
+stays open and says on the window's bottom line what was saved. A new language applies at once to the menus, the tab
+titles, the chat panel, the standard buttons, the settings window (it opens again) and every window opened from then
+on; the contents of the Builder, Deployment and Auto-Tuning tabs and the status bar change at the next start, and a
+window that is open keeps its texts until you open it again. Keys stay in the encrypted vault, in masked fields; no AI
+can change the permissions, the folders, a key or the key storage. Every setting has its command too:
+`llmcf config set` (the language, the form of address, the framework mode, the build defaults and Ditto's AI
+settings, checked by the same rules), `llm-cli ditto login`, `llm-cli tools permissions`, `llm-cli tools folders`,
+`llm-cli ditto runtime ensure`, `llm-cli ditto cache set`, `llm-cli ditto auth storage` and `llm-cli update`.
 
 A text that names a place writes `{path:<objectName>}`; the window fills it from the labels on screen in your
 language, so a path in a message always matches the menu you see. For contributors:
