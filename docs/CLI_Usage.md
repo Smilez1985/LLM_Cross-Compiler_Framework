@@ -26,7 +26,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [targets](#targets): `list`, `validate`
 - [build](#build): `start`, `preflight`, `tune`, `save`, `deps`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`, `devices`, `ssh-config`
-- [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
+- [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `console`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
 - [agents](#agents): `list`, `search`, `add`, `remove`, `login`, `run`
 - [mcp](#mcp): `serve`, `config`, `token add|list|rotate|revoke`
@@ -153,6 +153,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `ditto auth status/methods/storage/rotate-key` | Sign-in state of every provider / the sign-in methods / how the credential vault is protected / a new vault key |
 | `ditto setup` | Set the tool permissions (the same choices as the GUI's first-start dialog) |
 | `ditto ask` | Ask Ditto one question |
+| `ditto console` | What Ditto and AI apps type and do, as the Ditto console beside the chat shows it; `--follow` keeps printing |
 | `ditto eval` | Grade Ditto on fixed test cases, or the knowledge-base search |
 | `ditto runtime install/start/status/stop/import/export/prune` | The managed local model server (llama.cpp, built on this machine) for offline mode |
 | `ditto runtime ensure` | Install Ditto's local model server when it is not there, bare metal or in Docker; `--force` switches the mode |
@@ -1490,6 +1491,39 @@ In the GUI: the chat panel on the right (F9, **View > AI Chat Panel**) with **Se
 above the message field gives **Answer without tools** (`--no-tools`), **Provider** (`--provider`) and **Model**
 (`--model`) for the next question only, and the AI settings stay unchanged. Unlike this command, the chat keeps the
 conversation.
+
+### ditto console
+
+```
+llm-cli ditto console [--follow] [--source SOURCE] [--search TEXT] [--limit N] [--json]
+```
+
+Shows what Ditto and AI apps type and do, the same lines as the Ditto console beside the chat in the GUI: Ditto's
+answers, an app's replies, the reason an AI recorded for a decision, Ditto's tool notes, the records of what an AI
+changed, started, ended, asked or could not do, and every tool call of Ditto or an app with its arguments and how it
+ended (started, done, failed, asks for your yes, not confirmed, refused with its reason). Each line starts with its
+time and its source: Ditto, or the app by the connection the framework knows it by, its own name only quoted as its
+claim. Your own calls are left out. The lines are read from the chat feed and the audit log, which the command never
+changes; secrets, the values of arguments that hold key material (shown as `[hidden]`) and your home folder (`~`)
+never appear, and a tool's output is never shown.
+
+| Option | Meaning |
+|---|---|
+| `--follow`, `-f` | Keep printing new lines as they come, until Ctrl+C. |
+| `--source SOURCE` | `all` (default), `ditto`, `apps`, or one app by its caller id: `mcp` (the shared connection) or `mcp:<token name>`. |
+| `--search TEXT` | Only the lines that contain this text (case does not matter). |
+| `--limit N` | How many of the newest lines to print first (default 50, at most 2000). |
+| `--json` | One JSON object per line: `key`, `ts`, `source`, `caller`, `who`, `kind` (`says`, `call`, `did`), `text`, `level`. |
+
+```bash
+llm-cli ditto console --follow
+llm-cli ditto console --source apps --search start_build
+llm-cli ditto console --json --limit 200
+```
+
+In the GUI: **View > Ditto Console** (Shift+F9) or the toolbar's **Console** button shows the console beside the
+chat, with **Show:** (`--source`), **Search:** (`--search`), **Pause Scrolling**, **Clear View** (the view only) and
+**Copy**.
 
 ### ditto eval
 

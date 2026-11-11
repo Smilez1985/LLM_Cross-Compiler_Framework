@@ -1194,6 +1194,35 @@ gives the defaults).
 Answering a question with Yes or No right in the chat, "Why?" and undo come with later work; until then the
 approvals window decides.
 
+### The Ditto console
+
+Beside the chat sits the Ditto console: it shows, as it happens and in order, what Ditto and AI apps type and do,
+including the AI apps that never write into the chat. **View > Ditto Console** (Shift+F9) or the toolbar's
+**Console** button shows or hides it; it is hidden at the first start. The chat and the console each have their own
+area: drag the line between them to change their sizes, close either one, move the pair to the left or let one float.
+Their sizes and whether each is shown are kept in `~/.llm-framework/gui_state.json` with the rest of the window.
+
+- **What it shows:** Ditto's answers, an app's replies, the reason an AI recorded for a decision and Ditto's tool notes
+  ("says"); every call of a framework tool by Ditto or an app with its arguments and how it ended: started, done,
+  failed, asks for your yes, not confirmed, refused with its reason ("calls"); and the records of what an AI changed,
+  started, ended, which standing approval it used, which question it asked and how that ended, and what it could not
+  do ("did"). Each line starts with its time and its source: Ditto, or the app under the connection the framework
+  knows it by, with the name the app gives itself only quoted as its claim. Your own calls and messages are not shown.
+- **Where it comes from:** the chat feed and the audit log, from every framework process (the GUI, the command line,
+  each MCP server, AI apps working in the window over its bridge). Nothing new is stored, and the console never writes
+  to either.
+- **Never shown:** secrets, the values of arguments whose name says they hold key material (`[hidden]`), your home
+  folder (written as `~`) and a tool's output. Every line is plain text on one line, cut at 1,000 characters.
+- **Controls:** **Show:** everything, Ditto, all AI apps, or one app once it appeared; **Search:** only the lines that
+  contain a text; **Pause Scrolling** stops following the newest line while new lines still come in; **Clear View**
+  empties this view only (the records stay, and the next start reads them again); **Copy** copies the selected lines,
+  or every shown line when nothing is selected.
+- **Many calls at once** never freeze the window: the console reads the records once a second off the window's
+  thread, shows what arrived four times a second in one go, and keeps the newest 2,000 lines.
+
+The same lines at a terminal: `llm-cli ditto console`, with `--follow` to keep watching
+([CLI](CLI_Usage.md#ditto-console)).
+
 ### The AI's hands in the window (the GUI tool)
 
 The framework's tools are an AI's hands, also in the window. While the framework's window is open, Ditto and every

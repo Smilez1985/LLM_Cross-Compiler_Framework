@@ -26,7 +26,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [targets](#targets): `list`, `validate`
 - [build](#build): `start`, `preflight`, `tune`, `save`, `deps`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`, `devices`, `ssh-config`
-- [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
+- [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `console`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
 - [agents](#agents): `list`, `search`, `add`, `remove`, `login`, `run`
 - [mcp](#mcp): `serve`, `config`, `token add|list|rotate|revoke`
@@ -154,6 +154,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `ditto auth status/methods/storage/rotate-key` | Anmeldestand aller Anbieter / die Anmeldeverfahren / wie der Tresor geschützt ist / ein neuer Schlüssel für den Tresor |
 | `ditto setup` | Die Tool-Berechtigungen festlegen (dieselbe Auswahl wie im Dialog beim ersten Start der GUI) |
 | `ditto ask` | Ditto eine Frage stellen |
+| `ditto console` | Was Ditto und KI-Apps tippen und tun, wie die Ditto-Konsole neben dem Chat es zeigt; `--follow` druckt weiter |
 | `ditto eval` | Ditto anhand fester Testfälle bewerten, oder die Suche der Wissensbasis |
 | `ditto runtime install/start/status/stop/import/export/prune` | Der verwaltete lokale Modellserver (llama.cpp, auf diesem Rechner gebaut) für den Offline-Modus |
 | `ditto runtime ensure` | Dittos lokalen Modellserver installieren, wenn er fehlt, direkt oder in Docker; `--force` wechselt die Art |
@@ -1553,6 +1554,40 @@ In der GUI: der Chat-Bereich rechts (F9, **Ansicht > KI-Chat-Bereich**) mit **Se
 Frage** über dem Eingabefeld bietet **Ohne Werkzeuge antworten** (`--no-tools`), **Anbieter** (`--provider`) und
 **Modell** (`--model`) nur für die nächste Frage, die KI-Einstellungen bleiben unverändert. Anders als dieser Befehl
 behält der Chat das Gespräch.
+
+### ditto console
+
+```
+llm-cli ditto console [--follow] [--source QUELLE] [--search TEXT] [--limit N] [--json]
+```
+
+Zeigt, was Ditto und KI-Apps tippen und tun, dieselben Zeilen wie die Ditto-Konsole neben dem Chat in der GUI: Dittos
+Antworten, die Antworten einer App, den Grund, den eine KI für eine Entscheidung festgehalten hat, Dittos
+Werkzeug-Notizen, die Aufzeichnungen dessen, was eine KI geändert, gestartet, beendet, gefragt hat oder nicht tun
+konnte, und jeden Tool-Aufruf von Ditto oder einer App mit seinen Argumenten und wie er endete (gestartet, erledigt,
+fehlgeschlagen, bittet um dein Ja, nicht bestätigt, abgelehnt mit seinem Grund). Jede Zeile beginnt mit ihrer Zeit und
+ihrer Quelle: Ditto oder die App unter der Verbindung, unter der das Framework sie kennt, ihr eigener Name nur in
+Anführungszeichen als ihre Angabe. Deine eigenen Aufrufe bleiben weg. Die Zeilen werden aus dem Chat-Feed und dem
+Audit-Log gelesen, die der Befehl nie verändert; Secrets, die Werte von Argumenten, die Schlüsselmaterial halten
+(gezeigt als `[verborgen]`), und dein Home-Ordner (`~`) erscheinen nie, und die Ausgabe eines Tools wird nie gezeigt.
+
+| Option | Bedeutung |
+|---|---|
+| `--follow`, `-f` | Neue Zeilen weiter drucken, sobald sie kommen, bis Strg+C. |
+| `--source QUELLE` | `all` (Standard), `ditto`, `apps` oder eine App über ihre Aufrufer-ID: `mcp` (die gemeinsame Verbindung) oder `mcp:<Tokenname>`. |
+| `--search TEXT` | Nur die Zeilen, die diesen Text enthalten (Groß- und Kleinschreibung egal). |
+| `--limit N` | Wie viele der neuesten Zeilen zuerst gedruckt werden (Standard 50, höchstens 2000). |
+| `--json` | Ein JSON-Objekt pro Zeile: `key`, `ts`, `source`, `caller`, `who`, `kind` (`says`, `call`, `did`), `text`, `level`. |
+
+```bash
+llm-cli ditto console --follow
+llm-cli ditto console --source apps --search start_build
+llm-cli ditto console --json --limit 200
+```
+
+In der GUI: **Ansicht > Ditto-Konsole** (Umschalt+F9) oder der Knopf **Konsole** der Werkzeugleiste zeigt die Konsole
+neben dem Chat, mit **Zeigen:** (`--source`), **Suchen:** (`--search`), **Mitlaufen anhalten**, **Ansicht leeren**
+(nur die Ansicht) und **Kopieren**.
 
 ### ditto eval
 

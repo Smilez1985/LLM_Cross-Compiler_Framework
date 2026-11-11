@@ -1314,6 +1314,40 @@ die Vorgaben).
 Eine Frage direkt im Chat mit Ja oder Nein beantworten, „Warum?“ und Rückgängig kommen mit späterer Arbeit; bis
 dahin entscheidet das Freigabe-Fenster.
 
+### Die Ditto-Konsole
+
+Neben dem Chat sitzt die Ditto-Konsole: Sie zeigt, während es geschieht und in der Reihenfolge, was Ditto und KI-Apps
+tippen und tun, auch die KI-Apps, die nie in den Chat schreiben. **Ansicht > Ditto-Konsole** (Umschalt+F9) oder der
+Knopf **Konsole** der Werkzeugleiste zeigt oder verbirgt sie; beim ersten Start ist sie ausgeblendet. Chat und Konsole
+haben je einen eigenen Bereich: Zieh die Linie zwischen ihnen, um ihre Größen zu ändern, schließ einen von beiden, setz
+das Paar nach links oder lass einen frei schweben. Ihre Größen und ob jeder gezeigt wird, stehen mit dem Rest des
+Fensters in `~/.llm-framework/gui_state.json`.
+
+- **Was sie zeigt:** Dittos Antworten, die Antworten einer App, den Grund, den eine KI für eine Entscheidung
+  festgehalten hat, und Dittos Werkzeug-Notizen („schreibt“); jeden Aufruf eines Framework-Tools durch Ditto oder eine
+  App mit seinen Argumenten und wie er endete: gestartet, erledigt, fehlgeschlagen, bittet um dein Ja, nicht
+  bestätigt, abgelehnt mit seinem Grund („ruft auf“); und die Aufzeichnungen dessen, was eine KI geändert, gestartet,
+  beendet hat, welche Dauerfreigabe sie genutzt hat, welche Frage sie gestellt hat und wie sie endete, und was sie
+  nicht tun konnte („tat“). Jede Zeile beginnt mit ihrer Zeit und ihrer Quelle: Ditto oder die App unter der
+  Verbindung, unter der das Framework sie kennt, der Name, den sich die App selbst gibt, nur in Anführungszeichen als
+  ihre Angabe. Deine eigenen Aufrufe und Nachrichten erscheinen nicht.
+- **Woher sie kommt:** aus dem Chat-Feed und dem Audit-Log, von jedem Prozess des Frameworks (der GUI, der
+  Kommandozeile, jedem MCP-Server, KI-Apps, die über seine Brücke im Fenster arbeiten). Nichts Neues wird gespeichert,
+  und die Konsole schreibt in keines von beiden.
+- **Nie gezeigt:** Secrets, die Werte von Argumenten, deren Name sagt, dass sie Schlüsselmaterial halten
+  (`[verborgen]`), dein Home-Ordner (als `~` geschrieben) und die Ausgabe eines Tools. Jede Zeile ist reiner Text auf
+  einer Zeile, nach 1.000 Zeichen gekürzt.
+- **Bedienung:** **Zeigen:** alles, Ditto, alle KI-Apps oder eine App, sobald sie aufgetaucht ist; **Suchen:** nur die
+  Zeilen, die einen Text enthalten; **Mitlaufen anhalten** folgt nicht mehr der neuesten Zeile, während neue Zeilen
+  weiter ankommen; **Ansicht leeren** leert nur diese Ansicht (die Aufzeichnungen bleiben, und der nächste Start liest
+  sie wieder); **Kopieren** kopiert die markierten Zeilen, oder jede gezeigte Zeile, wenn nichts markiert ist.
+- **Viele Aufrufe auf einmal** lassen das Fenster nie hängen: Die Konsole liest die Aufzeichnungen einmal pro Sekunde
+  neben dem Fenster-Thread, zeigt viermal pro Sekunde in einem Rutsch, was angekommen ist, und behält die neuesten
+  2.000 Zeilen.
+
+Dieselben Zeilen im Terminal: `llm-cli ditto console`, mit `--follow` zum Weiterbeobachten
+([CLI](CLI_Usage_DE.md#ditto-console)).
+
 ### Die Hände der KI im Fenster (das GUI-Tool)
 
 Die Tools des Frameworks sind die Hände einer KI, auch im Fenster. Solange das Fenster des Frameworks offen ist,
