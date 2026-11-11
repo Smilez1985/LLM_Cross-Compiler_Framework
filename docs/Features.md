@@ -764,6 +764,15 @@ board...**).
   standing yes for that board (asked once after pairing), as root only through llmcf-install's typed clock action,
   written to the audit log, else a warning names the offset. `llm-cli device clock` and the Boards window's
   *Board clock...* show it and set it once by hand ([CLI](CLI_Usage.md#device-clock)).
+- **System packages on a board**: the packages a bundle's blocks name, and `fake-hwclock` for a board without a
+  working clock, are installed as root only through llmcf-install's typed action `install_package` and only when a
+  signed list names them, with apt and dpkg, after the plan and your yes. As a rule from the board's own package
+  sources (in enterprise mode only the company's internal mirror); without a network from a board preload: llmcf
+  writes `preload.sh`/`preload.ps1` for exactly those packages on the board's distribution, release and architecture,
+  a computer with a network fetches them checked against the distribution's signed lists (the archive keys pinned by
+  fingerprint), and the archive reaches the board over SSH or by USB, where llmcf-install checks every package against
+  the signed lists and the board's own keyring again. `llm-cli device package` and the Boards window's
+  *Board packages...* ([CLI](CLI_Usage.md#device-package)).
 - **Measured** with real programs instead of a board: `llama-server` and `llama-bench` built natively with the device
   plan's options for an x86-64 machine (GCC 13.3, `-j4`, about 8 minutes on 4 shared cores) gave 30 MB of programs
   and an 11.6 MB tarball; the format check (glibc 2.38 needed, no shared C++ runtime), the deployment to a local

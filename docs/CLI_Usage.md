@@ -2768,6 +2768,12 @@ llm-cli device list [--json]
 llm-cli device settings DEVICE [--install user|systemd] [--user NAME] [--port N] [--model PATH] [--confirm-sudo]
                                [--kv-cache auto|f16|q8_0|q4_0] [--clock-from-pc yes|no]
 llm-cli device clock DEVICE [--set [--yes]]
+llm-cli device package show DEVICE [--bundle BUNDLE]... [--read]
+llm-cli device package install DEVICE [PACKAGE]... [--bundle BUNDLE] [--yes]
+llm-cli device package preload write DEVICE [PACKAGE]... [--bundle BUNDLE] --out FOLDER
+                                     [--distribution debian|ubuntu|raspbian] [--release CODENAME] [--arch ARCH]
+                                     [--archive raspberrypi|armbian]...
+llm-cli device package preload take DEVICE FILE [--bundle BUNDLE] [--on-board]
 llm-cli device runtime plan DEVICE [--json]
 llm-cli device runtime build DEVICE [--jobs N] [--mirror URL] [--yes]
 llm-cli device runtime deploy DEVICE [--user NAME] [--password [VALUE] | --password-stdin] [--bench-model PATH]
@@ -2833,11 +2839,50 @@ a sudo rule written before the clock action is replaced there). llmcf-install wr
 (`hwclock -w -u`) and saves it for the next start (`fake-hwclock save force`, or systemd-timesyncd's clock file).
 Every set, also one that failed, is written to the audit log. After a bundle's root apply on a board without a working
 clock, the same yes also sets up keeping its time across a restart (`llmcf-install clock keep`: fake-hwclock where it
-is installed, else systemd-timesyncd; llmcf-install installs no package).
+is installed, else systemd-timesyncd). A board with neither gets the proposal to install fake-hwclock
+([device package](#device-package)).
 
 In the GUI: **Boards > Boards and Devices...** **> Board clock...** (the same state, then the question whether to
 set it now; "No" is the default). After pairing a board by code the window asks the question for the standing
 answer once.
+
+### device package
+
+The system packages of a board's distribution that its bundles need (a block's `system_packages`, which become the
+bundle's root action `install_package`) and the clock keeper `fake-hwclock` of a board without a working clock and
+without a time keeper. They are installed only as root through llmcf-install's typed action `install_package`, only
+when a signed list names them (the bundle's signed manifest, or, without `--bundle`, only `fake-hwclock`), through
+apt and dpkg (Debian, Ubuntu, Raspberry Pi OS, Armbian, DietPi; another package manager is named and nothing runs),
+without the recommended packages, never removing one. The board's root readiness must be set up (`bundle
+prepare-root`; an older sudo rule is replaced there). In a bundle's root apply the same action runs first, before the
+accounts and units; the packages stay when the bundle is rolled back or uninstalled.
+
+`device package show DEVICE` shows the board's distribution, release and architecture, its package sources, what its
+bundles (`--bundle`) and its clock need, what was missing at the last reading, the board preloads taken in and the last
+install; `--read` reads them from the board now (nothing changes).
+
+`device package install DEVICE` shows the plan first (which packages and dependencies would come, and from where),
+then asks ("No" is the default; `--yes`: no question; without a terminal nothing is installed, exit code 1). The
+source is the board preload taken in for it when there is one, else the board's own package sources (`apt-get
+update` and `apt-get install`). In enterprise mode the board's own sources must be the company's internal mirror:
+a source outside the own network refuses the online way and points to the board preload. Every install, also one that
+failed, is written to the audit log and the board's package record.
+
+**Without a network** (a board in an air-gapped network, in either mode): `device package preload write DEVICE --out
+FOLDER` writes `preload.sh` and `preload.ps1` for exactly these packages on the board's distribution, release and
+architecture (from its last package reading; for a board never read, name them with `--distribution`, `--release`,
+`--arch` and `--archive`). Run one on any computer with a network and Python 3 (Linux, macOS or Windows): it fetches
+the distribution's signed `Release` lists (the archive keys only with the fingerprints llmcf pins), resolves the
+dependencies, checks every package against the lists and writes `llmcf-preload-packages-...tar.gz`.
+`device package preload take DEVICE FILE` checks it here (its files, the signatures, every package) and copies it to
+the board over SSH; if you brought the archive to the board by USB, copy it into the board account's home and give its
+path there with `--on-board`. Then `device package install` installs from it without any network; llmcf-install checks
+the signatures again against the board's own archive keyring and every package against the signed lists, and refuses
+the whole preload if one file does not match.
+
+In the GUI: **Boards > Boards and Devices...** **> Board packages...** (the same state; install with the plan and the
+question, write a board preload, take one in from this computer or from the board). An AI only reads the board's
+package facts and a proposal (`list_devices`); it never installs.
 
 ### device runtime plan
 

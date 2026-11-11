@@ -832,6 +832,15 @@ entfernen...**, **Ältere Builds auf dem Board entfernen...**).
   root nur über die typisierte Uhr-Aktion von llmcf-install, ins Audit-Log geschrieben, sonst nennt eine Warnung die
   Abweichung. `llm-cli device clock` und *Uhr des Boards...* im Boards-Fenster zeigen sie und stellen sie einmal von
   Hand ([CLI](CLI_Usage_DE.md#device-clock)).
+- **Systempakete auf einem Board**: Die Pakete, die die Bausteine eines Bündels nennen, und `fake-hwclock` für ein
+  Board ohne funktionierende Uhr werden als root nur über die typisierte Aktion `install_package` von llmcf-install
+  installiert und nur, wenn eine signierte Liste sie nennt, mit apt und dpkg, nach dem Plan und deinem Ja. In der
+  Regel aus den eigenen Paketquellen des Boards (im Enterprise-Modus nur aus dem internen Spiegel der Firma); ohne Netz
+  aus einem Board-Preload: llmcf schreibt `preload.sh`/`preload.ps1` für genau diese Pakete für Distribution, Release
+  und Architektur des Boards, ein Rechner mit Netz holt sie, gegen die signierten Listen der Distribution geprüft (die
+  Archivschlüssel per Fingerabdruck festgelegt), und das Archiv kommt per SSH oder USB auf das Board, wo llmcf-install
+  jedes Paket erneut gegen die signierten Listen und den eigenen Schlüsselbund des Boards prüft. `llm-cli device
+  package` und *Pakete des Boards...* im Boards-Fenster ([CLI](CLI_Usage_DE.md#device-package)).
 - **Gemessen** mit echten Programmen statt eines Boards: `llama-server` und `llama-bench`, nativ mit den Optionen des
   Geräte-Bauplans für einen x86-64-Rechner gebaut (GCC 13.3, `-j4`, etwa 8 Minuten auf 4 geteilten Kernen), ergaben
   30 MB Programme und einen Tarball von 11,6 MB; die Formatprüfung (glibc 2.38 nötig, keine geteilte C++-Laufzeit),
