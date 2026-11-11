@@ -391,6 +391,37 @@ oder das optionale KI-Werkzeug `start_tuning` (jeden Lauf beantwortest du).
   Aufgabentest (das ist `llm-cli ditto eval`). Die CPU des Build-Computers misst Qualität, nicht die Geschwindigkeit
   des Boards.
 
+### Große Modelle: zuerst Platte und Speicher, eine F16, GGUF als Eingabe, Rezepte je Tensor, der Tokenizer geprüft
+
+- **Platte und Speicher vor dem Build.** `llm-cli build start`, `build preflight` und der Builder (eine Zeile unter der
+  Speicherschätzung) zeigen die Platte dieses Computers je Dateisystem und den Speicher, den die Umwandlung braucht,
+  mit passt, knapp oder passt nicht. Was nicht passt, entscheidest du: Der Builder fragt (Nein ist die Vorgabe), die
+  CLI fragt am Terminal und braucht ohne eines `--accept-resource-risk`. Der Build einer KI behält die Ablehnung der
+  Plattenregel; ihre Frage zeigt dieselben Zahlen.
+- **Eine F16 je Modell.** Ein quantisierter GGUF-Build wandelt das Modell einmal nach F16 um, geteilt vom
+  Importance-Matrix-Job und vom Build-Job; nach dem Build wird die F16 eines Hugging-Face-Modells zu seinem Commit
+  aufbewahrt (Einstellung `keep_f16_intermediates`, nur mit Platz auf der Platte), sodass der nächste Build, ein anderer
+  Typ, ein Auto-Tuning-Lauf oder der empfohlene Typ, von ihr aus startet. Build > **F16-Zwischenstufen…** und
+  `llm-cli build f16 list|delete` listen und löschen sie. Gemessen mit SmolLM2-135M-Instruct: Ein Auto-Tuning-Lauf mit
+  drei Kandidaten auf der aufbewahrten F16 wandelte nichts um (Convert-Stufe 0 s).
+- **Eine GGUF-Datei als Eingabe.** In ihrem eigenen Typ (oder ohne Typ) wird sie durchgereicht; in einem anderen Typ
+  wird sie neu quantisiert, mit `--allow-requantize` für eine quantisierte Datei (ohne lehnt das festgelegte
+  llama-quantize ab) und einer Warnung: gemessen an SmolLM2-135M-Instruct hat Q4_K_M aus einer Q8_0-Datei eine
+  KL-Divergenz von 0,0904 von der F16, aus der F16 gemacht 0,0855.
+- **Typen je Tensor.** `--tensor-type MUSTER=TYP` (Builder: **Typen je Tensor**) gibt llama-quantize Überschreibungen
+  je Tensor; die Speicherschätzung zählt sie, und ein Rezept aus einem solchen Build ist Format 3. Sie werden wie jeder
+  Typ gemessen: ein Auto-Tuning-Kandidat `TYP+MUSTER=TYP,...` (**Kandidaten je Tensor** im Tab, `--candidate`).
+  Gemessen: Q4_K_M mit `ffn_down=q6_k` 0,0665 gegen 0,0855 für Q4_K_M ohne (Top-1 81,2 % gegen 78,5 %), 109 MB gegen
+  105 MB.
+- **Die Importance Matrix aus einer Datei oder von Hugging Face.** `--imatrix-file PFAD` oder `hf:besitzer/name/pfad`
+  (Builder: **Importance-Matrix-Datei**) wird statt einer berechneten verwendet; ihre Tensornamen werden mit denen des
+  Modells verglichen, und die Matrix eines anderen Modells hält den Build mit dem Grund an.
+- **Tokenizer und Chat-Template nach jedem GGUF-Build geprüft**: Vokabular, EOS, die Token-IDs eines festen Texts gegen
+  den eigenen Tokenizer der Quelle, das Chat-Template gegen das der Quelle und gerendert mit einem festen Gespräch, und
+  seine Spezial-Tokens je als ein Token gelesen. Am Ende des Builds gezeigt und in `build_info.json` festgehalten; es
+  warnt, es lässt nie einen Build scheitern. Gemessen: SmolLM2-135M-Instruct in F16 und Q4_K_M bestand (146 Tokens des
+  festen Texts gleich denen des Tokenizers der Quelle).
+
 ## Build-Sandbox
 
 Konvertierungs-Container führen nicht vertrauenswürdigen Modellcode aus (zum Beispiel eigene Tokenizer), deshalb

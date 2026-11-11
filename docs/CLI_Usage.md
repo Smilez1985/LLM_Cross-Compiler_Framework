@@ -585,6 +585,9 @@ target's defaults. A target without a capabilities block is built unchecked.
 | `--remember-flags` | Remember this decision for this module version and flag set (an AI-started build of the module uses it; a new version or other flags ask again). |
 | `--ignore-preflight` | Build even when the [pre-flight check](#build-preflight) says this build cannot succeed. Your decision for this one build, never remembered, and noted in the build's warnings. At a terminal without it you are asked "Build anyway?" (No is the default); without a terminal and without it nothing is started (exit 2). |
 | `--preload FILE` | Offline: the archive of [the build's preload](#build-preload), checked and taken in before the build. Without it, an offline build whose image is not here and whose sources are missing writes the preload scripts and asks for the archive's path at a terminal; without a terminal it stops with the steps (exit 2). |
+| `--imatrix-file PATH\|hf:OWNER/NAME/FILE` | A given importance matrix (GGUF), used instead of computing one: a file in the GGUF or `.dat` format of llama-imatrix (at most 2 GiB), or a Hugging Face file written `hf:owner/name/path/in/the/repository`, downloaded by the framework's verified fetcher at the commit it resolves, its sha256 checked (online only). It is checked before the build and copied into the build's folder; the convert stage compares its tensor names with the model's and stops with the reason when it covers less than half of the model's weight matrices (a matrix of another model). It turns the importance matrix on. |
+| `--tensor-type PATTERN=TYPE` | A per-tensor type for llama-quantize (repeatable, or comma-separated): a regular expression on the tensor's name (the first match wins) and a ggml type, e.g. `ffn_down=q6_k`; `output=TYPE` and `token_embd=TYPE` are the quantizer's own `--output-tensor-type` and `--token-embedding-type`. Only for a type llama-quantize makes (not F16, BF16, F32 or Q8_0); at most 32 entries. The memory estimate counts them; `build_info.json`, the identical-build check and a recipe made from the build (format 3) carry them. Measure such a recipe first with [`build tune start --candidate`](#build-tune). |
+| `--accept-resource-risk` | Your yes to a build this computer's disk or memory does not hold by the check before the build (it may fail late, or swap). At a terminal without it you are asked "Build anyway?" (No is the default); without a terminal and without it nothing is started (exit 2). |
 
 Behaviour:
 
@@ -647,6 +650,29 @@ Behaviour:
   computer); without it the estimate is the rougher one from the parameter count. The build records the estimate in
   `build_info.json` (`memory_estimate`, next to the real file size), and the warning after the build counts the same
   KV cache.
+- Then the check of this computer: its disk and memory against what the build needs, one line per file system
+  (`Disk: needs about ... on the cache disk (estimate); ... free, ... kept free: enough`) and one for the memory of the
+  conversion (`host_fit`: the importance matrix runs the model, an NPU export loads it in PyTorch), with fits, tight or
+  does not fit. What lands on disk follows the build: a GGUF input needs no conversion margin, nor does a kept F16
+  intermediate of the model. When a part does not fit, you decide (`--accept-resource-risk`, or your yes at the
+  terminal); the line names the size of the kept F16 intermediates when the disk is short.
+- A quantized GGUF build converts the model to F16 once: the importance-matrix job and the build job share that file,
+  and after a finished build of a Hugging Face model at a known commit it is kept in the build cache (setting
+  `keep_f16_intermediates`, on by default; only while the disk keeps more than twice its reserve free), so the next
+  build of the same model, another type, an Auto-Tuning run or the recommended type, quantizes from it without
+  converting again. [`build f16`](#build-f16) lists and deletes them. A local model folder's F16 is never kept.
+- A GGUF file as `--model`: its own type is read from its header. The same type, or no `--quantization`, passes it
+  through (nothing is quantized; it is checked, packaged and tested); another type quantizes it again, and a file that
+  is quantized already gets llama-quantize's `--allow-requantize` with the warning that this loses more than quantizing
+  its 16-bit original (and that a type with more bits gains nothing). A Hugging Face repository with only GGUF files is
+  built from its downloaded file (the Hugging Face browser, or `download_hf_file` for an AI client).
+- At the end of every GGUF build the tokenizer and the chat template are checked against the source: the vocabulary
+  against the embeddings, the EOS id against `config.json` and `generation_config.json`, the token ids llama.cpp gives a
+  fixed text (English, German, code, digits, emoji and the rendered chat) against the source's own `tokenizer.json`, the
+  chat template against the source's and rendered with a fixed conversation, and every special token of the template
+  read as one token. The result is printed at the end (`Tokenizer and chat template: passed`, or the warnings with the
+  first difference) and recorded in `build_info.json` (`tokenizer_check`); it never fails the build. A GGUF input is
+  compared with its own header.
 - With `--recipe` the command first prints the recipe (author, model and commit, model licence, context length), the
   optimization level and whether it is the recipe's, yours or the board profile's, what you changed from it, its
   reference results (artifact, sha256, framework version, toolchain image, a device test) and, when the installed
@@ -689,7 +715,7 @@ llm-cli build start --recipe smollm2-135m-instruct-rk3588-gguf-q4_k_m -q Q8_0 -F
 ### build preflight
 
 ```
-llm-cli build preflight -t TARGET [-f FORMAT] [-b BOARD] [--probe ID] [--gpu] [-m MODEL [-q QUANT]] [--json]
+llm-cli build preflight -t TARGET [-f FORMAT] [-b BOARD] [--probe ID] [--gpu] [-m MODEL [-q QUANT] [--tensor-type PATTERN=TYPE ...]] [--json]
 ```
 
 The pre-flight check of a build, without starting anything; `build start`, the Builder, the build of a recipe, a
@@ -714,8 +740,9 @@ and what was not.
 
 With `--model` (a Hugging Face id or a local path) and a board, the [memory estimate](#build-start) of the model at
 `--quantization` (default: the board's default type) against the board's memory is printed as well, and `--json`
-carries it as `memory_estimate` (its numbers, its verdict and its text). It is a warning only and never changes the
-exit code.
+carries it as `memory_estimate` (its numbers, its verdict and its text). The check of this computer's disk and memory
+follows (as in [`build start`](#build-start)), and `--json` carries it as `resources`; `--tensor-type` makes the
+estimate count per-tensor types. Both are warnings only and never change the exit code.
 
 ```bash
 llm-cli build preflight -t Rockchip -f rknn -b rk3588
@@ -733,7 +760,7 @@ The memory estimate is the line under **Quantization**, updated when the model, 
 ### build tune
 
 ```
-llm-cli build tune start -m MODEL -t TARGET [-b BOARD] [--probe ID] [--type TYPE ...] [--imatrix auto|both] [--chunks N] [--ctx 256|512|1024] [-y] [-F]
+llm-cli build tune start -m MODEL -t TARGET [-b BOARD] [--probe ID] [--type TYPE ...] [--candidate TYPE+PATTERN=TYPE,... ...] [--imatrix auto|both] [--chunks N] [--ctx 256|512|1024] [-y] [-F]
 llm-cli build tune list [--json]
 llm-cli build tune show [RUN] [--json]
 llm-cli build tune build [RUN] [--type LABEL] [-F]
@@ -750,6 +777,11 @@ still fits a board, measured instead of guessed.
   fit (or are tight), plus every `--type` you name, whatever its estimate (nothing is refused). Types below 5 bits per
   weight are measured with the importance matrix; `--imatrix both` measures them also without. The reference is the
   F16 model, or a Q8_0 made from it when the F16 does not fit into three quarters of this computer's memory.
+  `--candidate` adds a per-tensor recipe, `TYPE+PATTERN=TYPE[,PATTERN=TYPE]` (for example
+  `Q4_K_M+ffn_down=q6_k,attn_v=q8_0`): the type quantized with those per-tensor types (see `build start
+  --tensor-type`), measured against the same reference on the same text, and listed as `Q4_K_M+<id>` (with
+  `-imatrix` when the type reads the importance matrix). A run whose model has a kept F16 intermediate quantizes from
+  it without converting again, and a run keeps the F16 it converted, as a build does.
   `--chunks` (4 to 48, default 16) and `--ctx` (default 512) set how much text is measured. Ctrl+C cancels it; it is
   continued like an interrupted build and measures only what is missing. Exit code 2 for a request that cannot be
   planned (for example a format other than gguf, or a `--type` the target does not build).
@@ -760,13 +792,15 @@ still fits a board, measured instead of guessed.
   build of that type); a type measured below 8 tokens per second is not recommended.
 - **`build`** starts the normal build of the recommended type (or `--type`, any measured candidate, as the report
   names it, for example `Q4_K_M-imatrix`) with the run's model, target and board; its `build_info.json` names the
-  tuning run, and `llm-cli zoo export recipe` makes a recipe of it.
+  tuning run, and `llm-cli zoo export recipe` makes a recipe of it. A per-tensor candidate is built with its per-tensor
+  types, and the build records them as measured (`tensor_types_measured: true`).
 
 ```bash
 llm-cli build tune start -m HuggingFaceTB/SmolLM2-360M-Instruct -t ARM64 -b bcm2712
 llm-cli build tune start -m HuggingFaceTB/SmolLM2-135M-Instruct -t ARM64 -b bcm2837 --type Q8_0 --imatrix both -y
 llm-cli build tune show
 llm-cli build tune build --type Q5_K_M
+llm-cli build tune start -m HuggingFaceTB/SmolLM2-135M-Instruct -t ARM64 -b bcm2712 --candidate Q4_K_M+ffn_down=q6_k
 ```
 
 In the GUI: the **Auto-Tuning** tab (**Plan**, **Start Tuning**, the finished runs with their report and **Build the
@@ -853,6 +887,26 @@ and for fetching while you are online.
 that is not in the cache stops it there (exit code 2).
 
 In the GUI: Build > **Build Dependencies...** (Fetch, Delete...).
+
+### build f16
+
+```
+llm-cli build f16 list
+llm-cli build f16 delete
+```
+
+The kept F16 intermediates: the F16 GGUF a quantized GGUF build converted from a Hugging Face model, kept in the
+build cache (`<cache_dir>/f16/<key>/`) per model, commit and llama.cpp pin, so the next build of the same model
+quantizes from it without converting again (see [`build start`](#build-start)). A build keeps one only while the setting
+`keep_f16_intermediates` is on (the default) and the disk keeps more than twice its reserve free with it.
+
+| Command | What it does |
+|---------|--------------|
+| `list` | Every kept file: model, commit, llama.cpp pin, size, when it was kept and when a build last used it. |
+| `delete` | Lists them and deletes the ones you pick, after you confirm the full list at a terminal (the trash or for good). |
+
+An AI client reads their count and size in `get_status` and never deletes them. In the GUI: Build > **F16
+Intermediates...** (Delete...).
 
 ### build status
 

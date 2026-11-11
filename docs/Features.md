@@ -363,6 +363,37 @@ the optional AI tool `start_tuning` (you answer every run).
 - **Limits.** GGUF only (RKLLM and RKNN are measured on the board). A KL divergence on fixed prose is no task test
   (`llm-cli ditto eval` is). The build computer's CPU measures quality, not the board's speed.
 
+### Large models: disk and memory first, one F16, GGUF input, per-tensor recipes, the tokenizer checked
+
+- **Disk and memory before the build.** `llm-cli build start`, `build preflight` and the Builder (a line under the
+  memory estimate) show this computer's disk per file system and the memory the conversion needs, with fits, tight or
+  does not fit. What does not fit is your decision: the Builder asks (No is the default), the CLI asks at a terminal
+  and needs `--accept-resource-risk` without one. An AI's build keeps the disk rule's refusal; its question shows the
+  same numbers.
+- **One F16 per model.** A quantized GGUF build converts the model to F16 once, shared by the importance-matrix job and
+  the build job; after the build the F16 of a Hugging Face model at its commit is kept (setting
+  `keep_f16_intermediates`, only with room on the disk), so the next build, another type, an Auto-Tuning run or the
+  recommended type, starts from it. Build > **F16 Intermediates...** and `llm-cli build f16 list|delete` list and
+  delete them. Measured with SmolLM2-135M-Instruct: an Auto-Tuning run of three candidates on the kept F16 converted
+  nothing (convert stage 0 s).
+- **A GGUF file as input.** At its own type (or without a type) it is passed through; at another type it is quantized
+  again, with `--allow-requantize` for a quantized file (without it the pinned llama-quantize refuses) and a warning:
+  measured on SmolLM2-135M-Instruct, Q4_K_M made from a Q8_0 file has a KL divergence of 0.0904 from the F16, made
+  from the F16 0.0855.
+- **Per-tensor types.** `--tensor-type PATTERN=TYPE` (Builder: **Per-tensor types**) gives llama-quantize per-tensor
+  overrides; the memory estimate counts them, and a recipe made from such a build is format 3. They are measured like
+  any type: an Auto-Tuning candidate `TYPE+PATTERN=TYPE,...` (**Per-tensor candidates** in the tab, `--candidate`).
+  Measured: Q4_K_M with `ffn_down=q6_k` 0.0665 against 0.0855 for plain Q4_K_M (top-1 81.2 % against 78.5 %), 109 MB
+  against 105 MB.
+- **The importance matrix from a file or from Hugging Face.** `--imatrix-file PATH` or `hf:owner/name/path` (Builder:
+  **Importance matrix file**) is used instead of computing one; its tensor names are compared with the model's, and a
+  matrix of another model stops the build with the reason.
+- **Tokenizer and chat template checked after every GGUF build**: vocabulary, EOS, the token ids of a fixed text
+  against the source's own tokenizer, the chat template against the source's and rendered with a fixed conversation,
+  and its special tokens read as one token each. Shown at the end of the build and kept in `build_info.json`; it warns,
+  it never fails a build. Measured: SmolLM2-135M-Instruct at F16 and Q4_K_M passed (146 tokens of the fixed text
+  equal to the source tokenizer's).
+
 ## Build sandbox
 
 Conversion containers run untrusted model code (for example custom tokenizers), so they are locked down
