@@ -37,7 +37,7 @@ from docker.models.images import Image
 from docker.types import DeviceRequest
 
 from orchestrator import __version__
-from orchestrator.Core import build_identity, build_records
+from orchestrator.Core import build_identity, build_large, build_records
 from orchestrator.tools import local_files
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.build_context import stage_build_context
@@ -277,6 +277,9 @@ class BuildConfiguration:
     tuning: Optional[Dict[str, Any]] = None
     # A build of a tuning run's chosen type (BuildService.build_tuned): build_info.json "tuning"
     tuned: Optional[Dict[str, Any]] = None
+    # The large models (Core/build_large.py, made by BuildService): per-tensor types, a given importance matrix, a GGUF
+    # input's plan; the engine adds the F16 intermediate's state and the matrix's record (build_info.json)
+    large_model: Optional[Dict[str, Any]] = None
 
 @dataclass
 class BuildProgress:
@@ -1029,6 +1032,9 @@ class BuildEngine:
             staged = self._stage_model(config, prog)
             self._report_landed(config)
             self._check_cancelled(prog)
+            # 4b. A given importance matrix (a file, or one from Hugging Face): checked, copied, used instead of the
+            #     importance-matrix job (Core/build_large.py)
+            given_imatrix = config.target_format == ModelFormat.GGUF and self._stage_given_imatrix(config, prog)
             
             # 5. Security Scan
             self._scan_image_security(image.tags[0], prog, build_id=bid,
@@ -1038,7 +1044,7 @@ class BuildEngine:
             # 5a. Importance matrix: a llama.cpp (GGUF) concept. Other formats use the dataset directly.
             if config.use_imatrix and config.target_format != ModelFormat.GGUF:
                 prog.add_warning(f"IMatrix applies to GGUF only; ignored for {config.target_format.value}.")
-            elif config.use_imatrix:
+            elif config.use_imatrix and not given_imatrix:
                 if config.dataset_path and os.path.exists(config.dataset_path):
                     self._generate_imatrix(config, prog, image, target_path, staged)
                 else:
@@ -1057,6 +1063,8 @@ class BuildEngine:
             self._report_landed(config)
             self._create_golden_artifact(config, prog)
             self._report_landed(config)  # the last count: publishing moves files, cleanup only frees space
+            # 8a. The F16 intermediate this build converted, kept for the next build of the same model
+            self._keep_f16(config, prog)
 
             # 9. Cleanup, before the outcome is settled: a cancel meanwhile still discards the staged files.
             if config.cleanup_after_build:
@@ -2239,6 +2247,33 @@ class BuildEngine:
         return {str(folder): {"bind": "/build-cache/dataset", "mode": "ro"},
                 str(copy): {"bind": inner, "mode": "ro"}}, inner
 
+    def _stage_given_imatrix(self, config: BuildConfiguration, progress: BuildProgress) -> bool:
+        """A given importance matrix (Core/build_large.stage_imatrix): a Hugging Face file through the framework's
+        verified fetcher (online only), checked and copied into the build's folder; True when one was given."""
+        if not (config.large_model or {}).get("imatrix_file"):
+            return False
+        progress.current_stage = "Importance matrix"
+
+        def download(repo: str, filename: str) -> str:
+            manager = getattr(self.framework, "model_manager", None)
+            if manager is None or not callable(getattr(manager, "download_file", None)):
+                raise RuntimeError("The framework's Hugging Face downloader is not available; nothing was built.")
+            return manager.download_file(repo, filename)
+        try:
+            return build_large.stage_imatrix(config, progress, self.cache_dir / "builds" / config.build_id,
+                                             download=download)
+        except build_large.imatrix_source.ImatrixError as e:
+            raise ValueError(f"{e} Nothing was built.") from None
+
+    def _keep_f16(self, config: BuildConfiguration, progress: BuildProgress) -> None:
+        """After a finished build: its F16 intermediate kept for the next build of the model (build_large.keep_f16);
+        a failure to keep it is a note, never a failed build."""
+        try:
+            build_large.keep_f16(config, progress, Path(self.cache_dir), self.cache_dir / "builds" / config.build_id,
+                                 self.config)
+        except Exception as e:  # noqa: BLE001 - the build is done; only the reuse is lost
+            self.logger.warning(f"The F16 intermediate of build {config.build_id} could not be kept: {e}")
+
     @staticmethod
     def _verify_local_inputs(config: BuildConfiguration) -> None:
         """Right before a container starts: the files an AI caller named are still the ones it was shown (same
@@ -2469,6 +2504,10 @@ class BuildEngine:
             "JOB_TYPE": "imatrix", # Signal to build.sh to run --imatrix mode
             "DATASET_PATH": dataset_inner,
         })
+        # the F16 intermediate the build job quantizes from afterwards (one conversion per build and per model)
+        f16_vols, f16_env = build_large.f16_plan(config, Path(self.cache_dir), build_temp)
+        vols.update(f16_vols)
+        env.update(f16_env)
         
         env.update(self._repo_overrides())  # SSOT repository overrides
 
@@ -2536,6 +2575,11 @@ class BuildEngine:
         env.update(probe_env)
         env.update(dep_env)
         env["JOB_TYPE"] = "build"
+        # The large models: the F16 intermediate's place, per-tensor types, a given importance matrix
+        f16_vols, f16_env = build_large.f16_plan(config, Path(self.cache_dir), build_temp)
+        vols.update(f16_vols)
+        env.update(f16_env)
+        env.update(build_large.stage_env(config))
         
         # Check for IMatrix from previous step
         imatrix_file = build_temp / "imatrix" / "imatrix.dat"
@@ -2625,6 +2669,9 @@ class BuildEngine:
         env.update(plan.env())
         env["JOB_TYPE"] = "tune"
         env["TUNE_TEXT"] = "/build-cache/evaluation/evaluation.txt"
+        f16_vols, f16_env = build_large.f16_plan(config, Path(self.cache_dir), build_temp)
+        vols.update(f16_vols)
+        env.update(f16_env)
         # The convert stage writes the F16 the candidates are quantized from; a GGUF input is that file already
         # (the convert stage then only checks it, for a type it accepts)
         env["QUANTIZATION"] = "Q8_0" if str(staged[0]).lower().endswith(".gguf") else "F16"
@@ -2965,6 +3012,14 @@ class BuildEngine:
             info["memory_estimate"] = {**estimate, "real_model_bytes": real}
         if getattr(config, "tuned", None):   # a build of a tuning run's chosen type: the run and its measurement
             info["tuning"] = dict(config.tuned)
+        # the large models: per-tensor types, the importance matrix's source, a GGUF input, the F16 intermediate
+        info.update(build_large.record(config))
+        if progress is not None:   # the tokenizer and chat-template check of the target stage, in the build's log
+            lines, warnings = build_large.tokenizer_lines(info)
+            for line in lines:
+                progress.add_log(line)
+            for warning in warnings:
+                progress.add_warning(warning)
         if getattr(config, "tuning", None):   # a tuning run: its report, no model (Core/tuning.py)
             from orchestrator.Core.tuning import KIND, REPORT_FILE
             info["kind"] = KIND
@@ -3028,7 +3083,9 @@ class BuildEngine:
             imatrix=bool(config.use_imatrix and config.target_format == ModelFormat.GGUF),
             dataset_sha256=(dataset or {}).get("sha256"), optimization=config.optimization_level.value,
             max_context_length=config.max_context_length, use_gpu=config.use_gpu, model_task=config.model_task,
-            hardware_sha256=config.hardware_sha256)
+            hardware_sha256=config.hardware_sha256,
+            tensor_types=build_large.options(config).get("tensor_types") or None,
+            imatrix_sha256=(build_large.options(config).get("imatrix_source") or {}).get("sha256"))
 
     def _dataset_ref(self, config: BuildConfiguration, progress: Optional[BuildProgress]) -> Optional[Dict[str, str]]:
         path = Path(config.dataset_path) if config.dataset_path else None

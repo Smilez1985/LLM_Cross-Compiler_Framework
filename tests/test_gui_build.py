@@ -104,9 +104,11 @@ def test_the_build_menu_follows_file_and_settings_sits_above_exit(window):
     from orchestrator.gui.menus.build import CLI_PATHS, WINDOW_OBJECTS
     titles = [a.text().replace("&", "") for a in window.menuBar().actions()]   # wave 6: titles with mnemonics
     assert titles[:2] == ["File", "Build"], titles
-    # Round 36 (on purpose): Build Container Images... follows Build History...; Build Dependencies... comes last
+    # Round 36 (on purpose): Build Container Images... follows Build History...; Build Dependencies... follows, and F16
+    # Intermediates... (the large models) comes last
     assert [a.text() for a in window.menu_build.actions()] == ["Targets...", "Build History...",
-                                                               "Build Container Images...", "Build Dependencies..."]
+                                                               "Build Container Images...", "Build Dependencies...",
+                                                               "F16 Intermediates..."]
     file_menu = window.menuBar().actions()[0].menu()
     assert [a.text() for a in file_menu.actions() if not a.isSeparator()][-2:] == ["Settings...", "Exit"]
     assert (window.act_build_targets.objectName(), window.act_build_history.objectName(),
@@ -150,7 +152,8 @@ def test_the_menu_labels_follow_the_language(qapp, monkeypatch):
     win.menuBar().addMenu("Help")
     menu_build.install(win, win.menuBar())
     assert [a.text() for a in win.menuBar().actions()] == ["File", "Build", "Help"]
-    assert [a.text() for a in win.menu_build.actions()] == ["Targets…", "Build-Verlauf…", "Build-Abhängigkeiten…"]
+    assert [a.text() for a in win.menu_build.actions()] == ["Targets…", "Build-Verlauf…", "Build-Abhängigkeiten…",
+                                                            "F16-Zwischenstufen…"]
     assert [a.text() for a in file_menu.actions()] == ["Output Folder...", "Einstellungen…", "Exit"]
     assert win.act_output_folder.objectName() == "act_file_output_folder"
     win.close()

@@ -72,15 +72,28 @@ class Candidate:
     origin: str = "board"
     estimate: Dict[str, Any] = field(default_factory=dict)
     note: str = ""
+    # a per-tensor recipe (Core/tensor_types.py, canonical entries): measured like any type (the row "Large models")
+    tensor_types: List[str] = field(default_factory=list)
+
+    @property
+    def tensor_id(self) -> str:
+        """The short id of the per-tensor types (tune.sh's TUNE_TT_<id>, the label's +<id>); "" without them."""
+        if not self.tensor_types:
+            return ""
+        import hashlib
+        return hashlib.sha256(" ".join(self.tensor_types).encode("utf-8")).hexdigest()[:8]
 
     @property
     def label(self) -> str:
-        return f"{self.quantization}-imatrix" if self.imatrix else self.quantization
+        base = f"{self.quantization}-imatrix" if self.imatrix else self.quantization
+        return f"{base}+{self.tensor_id}" if self.tensor_types else base
 
     @property
     def spec(self) -> str:
-        """The candidate as tune.sh reads it (TUNE_CANDIDATES): TYPE:i with the importance matrix, TYPE:- without."""
-        return f"{self.quantization}:{'i' if self.imatrix else '-'}"
+        """The candidate as tune.sh reads it (TUNE_CANDIDATES): TYPE:i with the importance matrix, TYPE:- without,
+        then :ID for its per-tensor types (TUNE_TT_ID)."""
+        spec = f"{self.quantization}:{'i' if self.imatrix else '-'}"
+        return f"{spec}:{self.tensor_id}" if self.tensor_types else spec
 
     def as_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -97,9 +110,25 @@ def _estimate_dict(est: Any) -> Dict[str, Any]:
     return out
 
 
+def parse_recipe(text: str) -> Tuple[str, List[str]]:
+    """A per-tensor candidate as the person writes it, TYPE+PATTERN=TYPE,PATTERN=TYPE: (the base type, the canonical
+    entries); TuningError when it is not one."""
+    from orchestrator.Core.tensor_types import TensorTypeError, normalize
+    base, sep, rest = str(text or "").strip().partition("+")
+    if not sep or not base.strip() or not rest.strip():
+        raise TuningError(f"'{text}' is no per-tensor candidate: write TYPE+PATTERN=TYPE[,PATTERN=TYPE], e.g. "
+                          "Q4_K_M+ffn_down=q6_k.")
+    try:
+        entries = normalize([rest])
+    except TensorTypeError as e:
+        raise TuningError(str(e)) from None
+    return base.strip(), entries
+
+
 def plan_candidates(*, offered: Sequence[str], recommended: Sequence[str], yours: Sequence[str],
                     estimate_for: Callable[[str, bool], Any], reads_imatrix: Callable[[str], bool],
-                    imatrix: str = "auto") -> Tuple[List[Candidate], List[str]]:
+                    imatrix: str = "auto",
+                    recipes: Sequence[Tuple[str, List[str]]] = ()) -> Tuple[List[Candidate], List[str]]:
     """(candidates, notes). `offered`: the types the target's gguf format offers; `recommended`: the board profile's
     order (empty without a profile: DEFAULT_TYPES); `yours`: the person's own types, always measured (a type the format
     does not offer is a TuningError, never left out silently); `estimate_for(type, imatrix)`: the memory estimate
@@ -146,6 +175,18 @@ def plan_candidates(*, offered: Sequence[str], recommended: Sequence[str], yours
                 note = f"memory estimate unknown ({est.get('reason') or 'no board memory or model size'})"
             seen.add(key)
             out.append(Candidate(name, with_matrix, how, est, note))
+    # per-tensor recipes (`recipes`: (type, entries), parse_recipe): the person's, always measured, with the importance
+    # matrix by the type's rule
+    for q, entries in recipes:
+        name = by_fold.get(str(q).strip().casefold())
+        if name is None or name.upper() in ("F16", "BF16", "F32", "Q8_0"):
+            raise TuningError(f"{q} is not a type this target's llama-quantize makes; per-tensor types need one of "
+                              f"its quantized types: {', '.join(offered)}.")
+        cand = Candidate(name, reads_imatrix(name), "yours", _estimate_dict(estimate_for(name, reads_imatrix(name))),
+                         f"per-tensor types {', '.join(entries)}", list(entries))
+        if any(c.label == cand.label for c in out):
+            continue
+        out.insert(0, cand)
     if len(out) > MAX_CANDIDATES:
         dropped = [c.label for c in out[MAX_CANDIDATES:] if c.origin != "yours"]
         keep = [c for c in out if c.origin == "yours"]
@@ -221,8 +262,13 @@ class TuningPlan:
         return any(c.imatrix for c in self.candidates)
 
     def env(self) -> Dict[str, str]:
-        return {"TUNE_REFERENCE": self.reference, "TUNE_CANDIDATES": " ".join(c.spec for c in self.candidates),
-                "TUNE_CHUNKS": str(int(self.chunks)), "TUNE_CTX": str(int(self.ctx))}
+        env = {"TUNE_REFERENCE": self.reference, "TUNE_CANDIDATES": " ".join(c.spec for c in self.candidates),
+               "TUNE_CHUNKS": str(int(self.chunks)), "TUNE_CTX": str(int(self.ctx))}
+        for c in self.candidates:   # each per-tensor recipe's entries (tune.sh's TUNE_TT_<id>)
+            if c.tensor_types:
+                from orchestrator.Core.tensor_types import env_value
+                env[f"TUNE_TT_{c.tensor_id}"] = env_value(c.tensor_types)
+        return env
 
     def as_dict(self) -> Dict[str, Any]:
         out = asdict(self)
@@ -349,6 +395,8 @@ def read_results(folder: Path, plan: TuningPlan) -> Tuple[Dict[str, Any], List[D
         info = _info(folder / f"{cand.label}.info")
         row: Dict[str, Any] = {"quantization": cand.quantization, "imatrix": cand.imatrix, "label": cand.label,
                                "origin": cand.origin, "estimate": dict(cand.estimate), "note": cand.note}
+        if cand.tensor_types:
+            row["tensor_types"] = list(cand.tensor_types)
         if not info:
             row["status"] = "not_measured"
             rows.append(row)
@@ -538,7 +586,8 @@ def ai_facts(report: Mapping[str, Any]) -> Dict[str, Any]:
     rows = []
     for r in report.get("candidates") or []:
         rows.append({k: r.get(k) for k in ("label", "quantization", "imatrix", "status", "bytes", "kld", "kld_unc",
-                                           "top1", "ppl_ratio", "tokens_s", "verdict") if r.get(k) is not None}
+                                           "top1", "ppl_ratio", "tokens_s", "verdict", "tensor_types")
+                     if r.get(k) is not None}
                     | {"memory": (r.get("estimate") or {}).get("state", "unknown")})
     return {"model": report.get("model"), "board": report.get("board"), "target": report.get("target"),
             "reference": (report.get("reference") or {}).get("type"), "candidates": rows,
@@ -548,18 +597,26 @@ def ai_facts(report: Mapping[str, Any]) -> Dict[str, Any]:
 def build_choice(report: Mapping[str, Any], label: Optional[str] = None) -> Tuple[str, bool]:
     """(quantization, imatrix) of the recommended candidate, or of `label` (any measured candidate: the person may pick
     every one). TuningError when there is none."""
+    row = chosen_row(report, label)
+    return str(row["quantization"]), bool(row.get("imatrix"))
+
+
+def chosen_row(report: Mapping[str, Any], label: Optional[str] = None) -> Mapping[str, Any]:
+    """The report's row of the recommended candidate, or of `label`: its type, importance matrix and per-tensor types
+    (tensor_types) are what "Build the recommended" builds. TuningError when there is none."""
     wanted = label or (report.get("recommendation") or {}).get("label")
     if not wanted:
         raise TuningError("The report recommends no type; name the one to build.")
     for r in report.get("candidates") or []:
         if str(r.get("label")).casefold() == str(wanted).casefold():
-            return str(r["quantization"]), bool(r.get("imatrix"))
+            return r
     raise TuningError(f"{wanted} is not a candidate of this report.")
 
 
 __all__ = ["CHUNKS_DEFAULT", "CHUNKS_MAX", "CHUNKS_MIN", "CTX_CHOICES", "CTX_DEFAULT", "Candidate", "Choice",
            "DEFAULT_TYPES", "IMATRIX_MODES", "KIND", "KLD_FLOOR", "KLD_GOOD", "MAX_CANDIDATES", "REPORT_FILE",
-           "RESULTS_FOLDER", "SCHEMA", "SPEED_FLOOR", "TuningError", "TuningPlan", "ai_facts", "build_choice",
+           "RESULTS_FOLDER", "SCHEMA", "SPEED_FLOOR", "TuningError", "TuningPlan", "ai_facts", "build_choice", "chosen_row",
+           "parse_recipe",
            "check_limits", "choose", "disk_need", "load_report", "logits_bytes", "make_report", "parse_statistics",
            "perplexity_args",
            "plan_candidates", "quality_verdict", "read_results", "reference_type", "report_lines", "row_text",

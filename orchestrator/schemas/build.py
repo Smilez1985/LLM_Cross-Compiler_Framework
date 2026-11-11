@@ -47,6 +47,19 @@ class BuildRequestIn(BaseModel):
                                  description="The board's hardware probe by its id (get_hardware_probe): the build "
                                              "is tuned to it, and NPU formats need its NPU. Omitted: the newest "
                                              "stored probe of a board of this SoC, if there is one")
+    imatrix_file: Optional[str] = Field(default=None, max_length=1024,
+                                        description="A given importance matrix (GGUF only), used instead of computing "
+                                                    "one: a local file as <label>:<relative path> or its file id, or "
+                                                    "a Hugging Face file as hf:owner/name/path/in/the/repository; "
+                                                    "never a path. Omitted: computed from the calibration text when "
+                                                    "the importance matrix is on")
+    tensor_types: Optional[List[str]] = Field(default=None, max_length=32,
+                                              description="Per-tensor quantization types for llama-quantize (GGUF, a "
+                                                          "type llama-quantize makes), each PATTERN=TYPE: a regular "
+                                                          "expression on the tensor's name and a ggml type, e.g. "
+                                                          "ffn_down=q6_k; output=TYPE and token_embd=TYPE set the "
+                                                          "output and embedding tensors. Measure such a recipe with "
+                                                          "start_tuning before building it")
 
 
 class StartBuildIn(BuildRequestIn):

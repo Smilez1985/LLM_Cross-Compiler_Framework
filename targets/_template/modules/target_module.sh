@@ -71,6 +71,43 @@ quantize_gguf() {
     QUANTIZED_FROM+=("$2")
 }
 
+# One job of quantize_jobs.sh: TYPE INPUT OUTPUT_FILE, a GGUF input that is already the requested type, passed
+# through as it is (copied into the output; nothing is quantized). The convert stage checked the file.
+passthrough_gguf() {
+    local q="$1" source_file="$2" out_file="$3"
+    echo ">> Passing the GGUF input through at $q (nothing is quantized)"
+    cp -- "$source_file" "$out_file"
+    [ -s "$out_file" ] || die "The GGUF input could not be copied into the output."
+    TARGET_CONFIG[QUANTIZED_GGUF]="$out_file"
+    TARGET_CONFIG[QUANT_METHOD]="$q"
+}
+
+# The tokenizer and chat-template check at the end of every GGUF build (scripts/model_check.py tokenizer; DESIGN, the
+# row "Large models"): the built model against its source, the result in TOKENIZER_REPORT, which write_build_info puts
+# into build_info.json ("tokenizer_check"). A difference is a warning, never a failure; a check that cannot run says
+# why; TOKENIZER_CHECK=0 leaves it out (the stage tests' stub models have no tokenizer). The same function in
+# targets/Rockchip, targets/ARM64 and targets/_template.
+TOKENIZER_REPORT="$PLAN_DIR/tokenizer_check.json"
+check_tokenizer() {
+    local model="${TARGET_CONFIG[QUANTIZED_GGUF]:-}" f
+    rm -f "$TOKENIZER_REPORT"
+    [ "$FORMAT" = "gguf" ] && [ "${TOKENIZER_CHECK:-1}" != "0" ] || return 0
+    if [ -z "$model" ]; then
+        for f in "$OUTPUT_DIR"/*.gguf "${CONVERT_OUTPUT:-}"; do
+            if [ -f "$f" ]; then
+                model="$f"
+                break
+            fi
+        done
+    fi
+    if [ -z "$model" ] || [ ! -e "${MODEL_SOURCE:-}" ] || [ ! -f "$PACKAGE_SCRIPTS/model_check.py" ]; then
+        return 0
+    fi
+    python3 "$PACKAGE_SCRIPTS/model_check.py" tokenizer "$model" --source "$MODEL_SOURCE" \
+        --tools "$LLAMA_BASE/build/bin" --report "$TOKENIZER_REPORT" --seconds "$FUNCTIONAL_TEST_SECONDS" \
+        || log_warn "The tokenizer and chat-template check could not run; the build goes on."
+}
+
 quantize_model() {
     local f16_file
     [ -s "$QUANTIZE_JOBS" ] || return 0
@@ -88,6 +125,9 @@ write_build_info() {
     fi
     if [ -n "${TARGET_CONFIG[QUANTIZE_SECONDS]:-}" ]; then   # how long llama-quantize ran (the convert statistics
         conversion="$conversion, \"quantize_seconds\": ${TARGET_CONFIG[QUANTIZE_SECONDS]}"   # have the rest)
+    fi
+    if [ -s "$TOKENIZER_REPORT" ]; then   # the tokenizer and chat-template check (check_tokenizer)
+        conversion="$conversion, \"tokenizer_check\": $(cat "$TOKENIZER_REPORT")"
     fi
     cat > "$OUTPUT_DIR/build_info.json" <<EOF
 {"model": "$MODEL_NAME", "format": "$FORMAT", "board": "${BOARD:-default}", "quantization": "$QUANT_TYPE", "llama_cpp": "$(cat "$LLAMA_BASE/.llama_cpp_tag" 2>/dev/null || echo unknown)"$conversion}
@@ -899,6 +939,7 @@ main() {
     [ -n "$(ls -A "$OUTPUT_DIR")" ] || [ -f "${CONVERT_OUTPUT:-}" ] \
         || die "No artifact in $OUTPUT_DIR for quantization '$QUANT_TYPE'."
 
+    check_tokenizer
     write_build_info
     if [ "$BOARD_PACKAGE" = "1" ] || [ "${PACKAGE_REQUESTED:-0}" = "1" ]; then
         if [ "$FORMAT" = "gguf" ]; then

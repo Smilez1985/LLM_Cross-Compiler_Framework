@@ -36,7 +36,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 MIB = 1024 * 1024
 PROBE_SOURCE = "the board's probe"   # board_profiles.board_memory's source when the probe gave the memory
@@ -401,9 +401,13 @@ def _tensor_bytes(ggml_type: str, columns: int, rows: int) -> int:
     return -(-columns // block) * size * rows
 
 
-def weights_bytes(shape: ModelShape, quantization: str, *, imatrix: bool = True) -> Tuple[Optional[int], str]:
+def weights_bytes(shape: ModelShape, quantization: str, *, imatrix: bool = True,
+                  tensor_types: Sequence[str] = ()) -> Tuple[Optional[int], str]:
     """(bytes of the model file, how it was estimated) at `quantization`: per tensor from the shape (`per_tensor`),
-    else the parameter count times the bits per weight (`parameters`); (None, "") when neither is known."""
+    else the parameter count times the bits per weight (`parameters`); (None, "") when neither is known.
+    `tensor_types`: the build's per-tensor types (Core/tensor_types.py, canonical entries), which replace the
+    quantizer's own choice for the tensors they match, as llama-quantize applies them (the fallback of a row length
+    the block does not divide still applies)."""
     q = str(quantization or "").strip().upper()
     bits = bits_per_weight(quantization)
     if q in FTYPE_BASE and shape.detailed:
@@ -414,6 +418,12 @@ def weights_bytes(shape: ModelShape, quantization: str, *, imatrix: bool = True)
         for _name, cat, layer, cols, rows in _tensors(shape):
             category = "token_embd_tied" if cat == "token_embd" and shape.tied else cat
             t = tensor_type(q, category, layer, shape.layers, cols, n_gqa=n_gqa, imatrix=imatrix, is_70b=is_70b)
+            if tensor_types and cat != "norm" and q not in ("F16", "BF16", "F32"):
+                chosen = _override(tensor_types, _name, category, layer)
+                if chosen in GGML_BLOCKS:
+                    t = chosen if not cols % GGML_BLOCKS[chosen][0] else _FALLBACK.get(chosen, "F16")
+                    if cols % GGML_BLOCKS[t][0]:
+                        t = "F16"
             total += _tensor_bytes(t, cols, rows)
             counted += cols * rows
         # parameters the shape does not explain (another part of the model): at the type's bits per weight
@@ -424,6 +434,13 @@ def weights_bytes(shape: ModelShape, quantization: str, *, imatrix: bool = True)
     if bits is not None and shape.parameters:
         return int(shape.parameters * bits / 8), "parameters"
     return None, ""
+
+
+def _override(tensor_types: Sequence[str], name: str, category: str, layer: int) -> Optional[str]:
+    """The per-tensor type an entry gives this tensor (tensor_types.type_for on llama.cpp's tensor name)."""
+    from orchestrator.Core.tensor_types import type_for
+    full = f"blk.{layer}.{name}.weight" if layer >= 0 else f"{name}.weight"
+    return type_for(tensor_types, full, category)
 
 
 def kv_bytes(shape: ModelShape, ctx: int, kv_type: str = "f16") -> int:
@@ -525,7 +542,8 @@ def context_for(shape: ModelShape, ctx: Optional[int] = None) -> int:
 
 def estimate(shape: Optional[ModelShape], quantization: Optional[str], *, board: str,
              ram_mib: Optional[float], ram_source: str = "", ctx: Optional[int] = None,
-             kv_type: Optional[str] = None, imatrix: bool = True) -> MemoryEstimate:
+             kv_type: Optional[str] = None, imatrix: bool = True,
+             tensor_types: Sequence[str] = ()) -> MemoryEstimate:
     """The memory estimate of a model (`shape`) at `quantization` on `board` with `ram_mib` of memory (from
     `ram_source`: "the board's probe" or "the most memory a <board> comes with"): the weights (weights_bytes), the
     server's buffers (SERVER_SHARE of them), the KV cache for the context (context_for; `kv_type`
@@ -544,7 +562,7 @@ def estimate(shape: Optional[ModelShape], quantization: Optional[str], *, board:
     if not quant:
         est.reason_code, est.reason = "no_quantization", "no quantization type is chosen"
         return est
-    weights, basis = weights_bytes(shape, quant, imatrix=imatrix)
+    weights, basis = weights_bytes(shape, quant, imatrix=imatrix, tensor_types=tensor_types)
     if weights is None:
         est.reason_code = "unknown_type" if bits_per_weight(quant) is None else "no_parameters"
         est.reason = (f"the size of {quant} is not known to the estimate" if bits_per_weight(quant) is None else

@@ -20,6 +20,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QComboBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget)
 
+from orchestrator.gui.plain import plain_tooltip
 from orchestrator.utils.localization import ui_text
 
 
@@ -66,6 +67,12 @@ class TuningTab(QWidget):
         self.txt_tuning_types.setObjectName("txt_tuning_types")
         self.txt_tuning_types.setToolTip(ui_text("tuning.types.tip"))
         form.addRow(ui_text("tuning.types"), self.txt_tuning_types)
+        # per-tensor recipes (DESIGN, the row "Large models"): measured by KL divergence like every type
+        self.txt_tuning_recipes = QLineEdit()
+        self.txt_tuning_recipes.setObjectName("txt_tuning_recipes")
+        self.txt_tuning_recipes.setToolTip(plain_tooltip(ui_text("tuning.recipes.tip")))
+        self.txt_tuning_recipes.setPlaceholderText("Q4_K_M+ffn_down=q6_k,attn_v=q8_0")
+        form.addRow(ui_text("tuning.recipes"), self.txt_tuning_recipes)
         self.cmb_tuning_imatrix = QComboBox()
         self.cmb_tuning_imatrix.setObjectName("cmb_tuning_imatrix")
         self.cmb_tuning_imatrix.addItem(ui_text("tuning.imatrix.auto"), "auto")
@@ -148,6 +155,10 @@ class TuningTab(QWidget):
     def _types(self) -> List[str]:
         return [t.strip() for t in self.txt_tuning_types.text().replace(";", ",").split(",") if t.strip()]
 
+    def _recipes(self) -> List[str]:
+        """The per-tensor candidates, separated by semicolons (each TYPE+PATTERN=TYPE,...)."""
+        return [r.strip() for r in self.txt_tuning_recipes.text().split(";") if r.strip()]
+
     # --- the actions --------------------------------------------------------------------------------------------
     def plan(self):
         if not self.txt_tuning_model.text().strip():
@@ -163,13 +174,14 @@ class TuningTab(QWidget):
             return
         token = self._token = object()
         types, imatrix, chunks = self._types(), self.cmb_tuning_imatrix.currentData(), self.spin_tuning_chunks.value()
+        recipes = self._recipes()
         service = self._service()
 
         def work():
             from orchestrator.gui.worker_relay import worker_relay
             try:
                 plan, _req = service.plan_tuning(request, types=types, imatrix=imatrix, chunks=chunks,
-                                                 local_paths=True)
+                                                 local_paths=True, recipes=recipes)
                 result: Any = ("plan", plan, request)
             except Exception as e:  # noqa: BLE001 - every refusal is shown as it is
                 result = ("error", str(e), None)

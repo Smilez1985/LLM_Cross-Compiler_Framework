@@ -1179,13 +1179,26 @@ class _FormatOption(click.Option):
               help="Offline: the archive of the build's preload (written by the preload scripts llmcf wrote for this "
                    "build's missing sources), checked and taken in before the build. Without it, at a terminal the "
                    "scripts are written and you are asked for the archive's path")
+# The large models (DESIGN, the row "Large models")
+@click.option('--imatrix-file', 'imatrix_file', default=None, metavar='PATH|hf:OWNER/NAME/FILE',
+              help="A given importance matrix (GGUF), used instead of computing one: a file (the GGUF or .dat format "
+                   "of llama-imatrix) or a Hugging Face file hf:owner/name/path, downloaded and checked before the "
+                   "build. Its tensor names are compared with the model's")
+@click.option('--tensor-type', 'tensor_types', multiple=True, metavar='PATTERN=TYPE',
+              help="A per-tensor type for llama-quantize (repeatable, or comma-separated): a regular expression on "
+                   "the tensor's name and a ggml type, e.g. ffn_down=q6_k; output=TYPE and token_embd=TYPE set the "
+                   "output and embedding tensors. Measure such a recipe first: build tune start --candidate")
+@click.option('--accept-resource-risk', 'accept_resource_risk', is_flag=True, default=False,
+              help="Your yes to a build this computer's disk or memory does not hold by the check before the build "
+                   "(it may fail late, or swap); at a terminal without it you are asked, with No as the default")
 @pass_context
 def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[str], format: Optional[str],
                 board: Optional[str], probe: Optional[str], quantization: Optional[str], output_dir: Optional[str],
                 optimization: Optional[str], priority: str, parallel: bool, follow: bool, gpu: bool,
                 imatrix: Optional[bool], dataset: Optional[str], no_dataset: bool = False,
                 module_flags: Optional[str] = None, remember_flags: bool = False, ignore_preflight: bool = False,
-                recipe_id: Optional[str] = None, preload: Optional[str] = None):
+                recipe_id: Optional[str] = None, preload: Optional[str] = None, imatrix_file: Optional[str] = None,
+                tensor_types: Tuple[str, ...] = (), accept_resource_risk: bool = False):
     """Start a new build job. Ctrl+C cancels it (its container is stopped) and exits with code 130.
 
     When a finished build with exactly the same options exists, you are asked first, as in the Builder tab: use it
@@ -1284,7 +1297,8 @@ def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[st
                 model=model_value, target=target, format=format, board=board, quantization=quantization,
                 use_imatrix=imatrix, use_gpu=gpu,
                 dataset_path=str(Path(dataset).resolve()) if dataset else ("" if no_dataset else None),
-                probe=probe), local_paths=True)
+                probe=probe, imatrix_file=imatrix_file or None,
+                tensor_types=list(tensor_types) or None), local_paths=True)
 
         # a label of the models already here (models:...) names its file
         model = _listed_model(ctx, model) if model else None
@@ -1323,6 +1337,9 @@ def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[st
         # The memory estimate before the build (Core/memory_estimate.py): the model at its type against the board's
         # memory; a warning, never a refusal (you decide), recorded with the build next to the real file size
         memory_estimate = _print_memory_estimate(service, request)
+        # This computer's disk and memory against what the build needs (Core/build_resources.py): a part that does not
+        # fit is your decision (asked at a terminal, No by default; --accept-resource-risk)
+        _decide_resources(service, request, accept_resource_risk)
         # the level given, else the board profile's (round 23 item 10), as the Builder and start_build choose it; with a
         # recipe the given level, else the recipe's, else the board profile's (Core/recipe_optimization.py)
         if recipe is not None:
@@ -1730,6 +1747,41 @@ def _print_memory_estimate(service, request) -> Optional[dict]:
     return est.as_dict() if est.state != "unknown" else None
 
 
+def _print_resources(service, request):
+    """Prints the check of this computer's disk and memory before a build (BuildService.resource_check) and returns
+    it; None when it could not be made (said, never a stop)."""
+    try:
+        check = service.resource_check(request)
+    except Exception as e:  # noqa: BLE001 - a check that cannot be made is said, never a stop
+        console.print(f"[yellow]Disk and memory check: not made ({escape(str(e))[:200]}).[/yellow]")
+        return None
+    color = {"fits": "green", "tight": "yellow", "unknown": "yellow", "does_not_fit": "red"}.get(check.state, "yellow")
+    for line in check.lines():
+        console.print(f"[{color}]{escape(line)}[/{color}]")
+    return check
+
+
+def _decide_resources(service, request, accept: bool) -> None:
+    """The check before a build at the terminal: a part that does not fit goes on only with your decision for this
+    build (--accept-resource-risk, or yes at a terminal, No by default); without a terminal and without the option
+    nothing is started (exit code 2)."""
+    check = _print_resources(service, request)
+    if check is None or not check.risky:
+        return
+    if accept:
+        console.print("[yellow]You build anyway (--accept-resource-risk): the build may fail late or swap.[/yellow]")
+        return
+    if not _interactive():
+        console.print("This computer's disk or memory does not hold this build by the check. Nothing was started: "
+                      "free space, choose a smaller model or type, or give --accept-resource-risk to build anyway.")
+        sys.exit(2)
+    if click.confirm("This computer's disk or memory does not hold this build by the check. Build anyway?",
+                     default=False):
+        return
+    console.print("Nothing was started.")
+    sys.exit(2)
+
+
 def _decide_preflight(ctx: FrameworkContext, result, ignore: bool, question: str) -> bool:
     """The pre-flight check at a build's start in the terminal: prints the result; a stop goes on only with your
     decision for this one build (--ignore-preflight, or yes to `question` at a terminal, No by default). Without a
@@ -1976,6 +2028,67 @@ def build_deps_delete(ctx: FrameworkContext):
     _print_deletion_result(result, accepted)
 
 
+@build.group('f16')
+def build_f16():
+    """The kept F16 intermediates: the F16 GGUF a build converted, kept per model, commit and llama.cpp pin so the next
+    build of the same model quantizes from it without converting again"""
+
+
+def _f16_cache(ctx: FrameworkContext):
+    """(the kept F16 intermediates, the framework's config) of this user (Core/f16_cache.py)."""
+    from orchestrator.Core.f16_cache import F16Cache
+    ctx.require_framework()
+    return F16Cache.for_framework(ctx.framework_manager), getattr(ctx.framework_manager, "config", None)
+
+
+@build_f16.command('list')
+@pass_context
+def build_f16_list(ctx: FrameworkContext):
+    """Every kept F16 intermediate with its model, commit, size and when a build last used it"""
+    from orchestrator.Core.deletion import size_text
+    from orchestrator.Core.f16_cache import SETTING, setting_on
+    cache, config = _f16_cache(ctx)
+    entries = cache.entries()
+    on = setting_on(config)
+    if not entries:
+        console.print("No F16 intermediate is kept." + ("" if on else f" (The setting {SETTING} is off.)"))
+        return
+    table = Table(title=f"Kept F16 intermediates ({len(entries)}, {size_text(cache.total_bytes())})")
+    for column in ("Model", "Commit", "llama.cpp", "Size", "Kept", "Last used"):
+        table.add_column(column, overflow="fold")
+    for e in entries:
+        table.add_row(escape(e.repo), e.commit[:12], escape(e.pin[:12]), size_text(e.size_bytes), e.kept[:10],
+                      e.last_used[:10])
+    console.print(table)
+    if not on:
+        console.print(f"The setting {SETTING} is off: builds use these but keep no new ones.")
+
+
+@build_f16.command('delete')
+@pass_context
+def build_f16_delete(ctx: FrameworkContext):
+    """List the kept F16 intermediates and delete the ones you pick, after you confirm them in a terminal"""
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    cache, _config = _f16_cache(ctx)
+    plan = cache.deletion_plan()
+    if plan is None:
+        console.print("No F16 intermediate is kept.")
+        return
+    accepted = confirm_deletion(plan, title=f"Kept F16 intermediates ({len(plan.items)}, "
+                                            f"{size_text(plan.total_bytes)})",
+                                multiple=True, again="llm-cli build f16 delete")
+    if accepted is None:
+        return
+    from orchestrator.Core.build_plan import state_dir
+    trash, audit = _person_trash(ctx, Path(state_dir(ctx.framework_manager) or cache.root))
+    try:
+        result = cache.delete(accepted, trash=trash, audit=audit)
+    except (PlanChanged, PermissionError, RuntimeError) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        return
+    _print_deletion_result(result, accepted)
+
+
 @build.group('interrupted')
 def build_interrupted():
     """Builds that stopped with finished stages kept: continue one (its finished stages are not run again) or delete
@@ -2165,16 +2278,20 @@ def build_save(ctx: FrameworkContext, artifact: str, destination: Optional[str])
                    "quantization against the board's memory is shown too")
 @click.option('--quantization', '-q', default=None,
               help="The quantization for the memory estimate (default: the board's default type)")
+@click.option('--tensor-type', 'tensor_types', multiple=True, metavar='PATTERN=TYPE',
+              help="Per-tensor types the memory estimate counts (as build start --tensor-type)")
 @click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
 @pass_context
 def build_preflight(ctx: FrameworkContext, target: str, format: str, board: Optional[str], probe: Optional[str],
-                    gpu: bool, as_json: bool, model: Optional[str] = None, quantization: Optional[str] = None):
+                    gpu: bool, as_json: bool, model: Optional[str] = None, quantization: Optional[str] = None,
+                    tensor_types: Tuple[str, ...] = ()):
     """The pre-flight check of a build, without starting anything: compares the hardware probes with what the build
     needs (for a GPU build this computer's NVIDIA driver with the CUDA version of the target's GPU image; for an NPU
     format the board's NPU driver and runtime with the target's toolkit) and says what stops the build, what is only a
     warning, and what could not be compared. `build start` runs the same check. Exit code 0 passed or warnings only, 1
     the build would stop, 2 an invalid request. With --model the memory estimate of the model at the quantization
-    against the board's memory is shown as well (a warning only, it never changes the exit code)"""
+    against the board's memory is shown as well, and the check of this computer's disk and memory before the build
+    (warnings only, they never change the exit code)"""
     import json as _json
     from orchestrator.Core.build_service import BuildServiceError
     ctx.require_framework()
@@ -2182,7 +2299,8 @@ def build_preflight(ctx: FrameworkContext, target: str, format: str, board: Opti
     try:
         result = service.preflight_for(target, format, board, probe, gpu)
         request = service.validate(service.request_in(model=model, target=target, format=format, board=board,
-                                                      quantization=quantization, use_gpu=gpu, probe=probe),
+                                                      quantization=quantization, use_gpu=gpu, probe=probe,
+                                                      tensor_types=list(tensor_types) or None),
                                    local_paths=True) if model else None
     except BuildServiceError as e:
         for problem in getattr(e, "problems", None) or [str(e)]:
@@ -2196,11 +2314,17 @@ def build_preflight(ctx: FrameworkContext, target: str, format: str, board: Opti
             except Exception:  # noqa: BLE001 - not made: left out
                 est = None
             out["memory_estimate"] = {**est.as_dict(), "text": est.text()} if est is not None else None
+            try:
+                check = service.resource_check(request)
+                out["resources"] = {**check.as_dict(), "lines": check.lines()}
+            except Exception:  # noqa: BLE001 - not made: left out
+                out["resources"] = None
         click.echo(_json.dumps(out, indent=2))
     else:
         _print_preflight(result)
         if request is not None:
             _print_memory_estimate(service, request)
+            _print_resources(service, request)
     sys.exit(1 if result.stopped else 0)
 
 
@@ -2228,6 +2352,10 @@ def _tune_lines(lines) -> None:
 @click.option('--imatrix', 'imatrix', type=click.Choice(['auto', 'both']), default='auto', show_default=True,
               help="auto: types below 5 bits per weight with the importance matrix (as a build makes them); both: "
                    "those types with and without it")
+@click.option('--candidate', 'candidates', multiple=True, metavar='TYPE+PATTERN=TYPE,...',
+              help="A per-tensor recipe to measure as well (repeatable), e.g. Q4_K_M+ffn_down=q6_k,attn_v=q8_0: "
+                   "llama-quantize's per-tensor types, measured like every type; 'build tune build --type LABEL' "
+                   "builds it with them")
 @click.option('--chunks', type=click.IntRange(4, 48), default=16, show_default=True,
               help='Chunks of the evaluation text (more: a smaller uncertainty, a longer run, a larger logits file)')
 @click.option('--ctx', 'ctx_size', type=click.Choice(['256', '512', '1024']), default='512', show_default=True,
@@ -2236,7 +2364,8 @@ def _tune_lines(lines) -> None:
 @click.option('--follow', '-F', is_flag=True, help='Show the progress while it runs')
 @pass_context
 def tune_start(ctx: FrameworkContext, model: str, target: str, board: Optional[str], probe: Optional[str],
-               types: Tuple[str, ...], imatrix: str, chunks: int, ctx_size: str, yes: bool, follow: bool):
+               types: Tuple[str, ...], imatrix: str, chunks: int, ctx_size: str, yes: bool, follow: bool,
+               candidates: Tuple[str, ...] = ()):
     """Measure the candidate types of MODEL for a board: each is quantized as a build makes it and compared with the
     original model (F16, or Q8_0 when the F16 does not fit this computer's memory) by the KL divergence and the top-1
     agreement on a fixed evaluation text, in the build image, without network. The run is one build (Cancel with
@@ -2249,7 +2378,7 @@ def tune_start(ctx: FrameworkContext, model: str, target: str, board: Optional[s
     try:
         request = BuildService.request_in(model=model, target=target, format="gguf", board=board, probe=probe)
         plan, _req = service.plan_tuning(request, types=list(types), imatrix=imatrix, chunks=chunks,
-                                         ctx=int(ctx_size), local_paths=True)
+                                         ctx=int(ctx_size), local_paths=True, recipes=list(candidates))
     except (TuningError, BuildServiceError) as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         nxt = getattr(e, "next", "")

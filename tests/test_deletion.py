@@ -64,6 +64,8 @@ DELETION_SITES = {
     ("orchestrator/runtime/build/store.py", "BuildStore.remove"): PERSON,
     # the dependency cache of module CMake options: the person's list (`build deps delete`, Build Dependencies...)
     ("orchestrator/runtime/build/deps.py", "DependencyCache.delete"): PERSON,
+    # the kept F16 intermediates of GGUF builds: the person's list (`build f16 delete`, F16 Intermediates...)
+    ("orchestrator/Core/f16_cache.py", "F16Cache.delete"): PERSON,
     ("orchestrator/runtime/bundle/generator.py", "BundleStore.delete"): PERSON,   # stored board bundles
     ("orchestrator/runtime/device/package.py", "DeviceRuntimeStore.delete_packages"): PERSON,
     # every object of the old runtime mode after a switch of Ditto's server (build folders, images, containers, its
@@ -198,6 +200,8 @@ DELETION_SITES = {
     ("orchestrator/Core/builder.py", "BuildEngine._publish_artifacts"): STAGING,
     ("orchestrator/Core/builder.py", "BuildEngine._save_image_for_scan"): STAGING,   # the scan's temporary archive
     ("orchestrator/Core/builder.py", "BuildEngine._stage_dataset"): STAGING,
+    # a given importance matrix copied into the build's own folder (a copy left by an earlier run, or one that failed)
+    ("orchestrator/Core/build_large.py", "stage_imatrix"): STAGING,
     ("orchestrator/Core/builder.py", "BuildEngine.cleanup_build"): STAGING,
     # the runtime layer's own folders: its read-only assembled copy (made anew from the shipped copy), the end folder
     # of one stage container, the toolbox's working folder of downloaded tarballs

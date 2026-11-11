@@ -180,11 +180,17 @@ class DiskCheck:
 
 
 def build_needs(download: int, fmt: str, quantization: Optional[str], cache_dir: Path, output_dir: Path,
-                cached: int = 0) -> List[DiskNeed]:
+                cached: int = 0, *, gguf_input: bool = False, f16_cached: bool = False,
+                passthrough: bool = False) -> List[DiskNeed]:
     """What a build lands where: the download (minus what is already staged for the same commit) and the conversion
-    margin in the build cache, the output there once, and twice next to the output folder (staged copy, golden ZIP)."""
-    margin = CONVERSION_MARGIN.get((fmt or "").lower(), DEFAULT_MARGIN)
+    margin in the build cache, the output there once, and twice next to the output folder (staged copy, golden ZIP).
+    The margin follows the build (the row "Large models"): a GGUF input is converted already (`gguf_input`), and a
+    kept F16 intermediate of the model is reused (`f16_cached`), so neither writes an F16; a passthrough's output is
+    the input's size, any other output of a GGUF input at most the input's size."""
+    margin = 0.0 if gguf_input or f16_cached else CONVERSION_MARGIN.get((fmt or "").lower(), DEFAULT_MARGIN)
     output = int(download * output_share(quantization))
+    if gguf_input:
+        output = int(download) if passthrough else min(output, int(download))
     to_fetch = max(0, int(download) - int(cached))
     needs = []
     if to_fetch:

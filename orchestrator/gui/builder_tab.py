@@ -297,6 +297,7 @@ class MemoryEstimateWorker(QThread):
     """The memory estimate of the form's build before it starts (BuildService.memory_estimate: the model's
     config.json may be read from Hugging Face) off the GUI thread. `token` names the form state it was asked for."""
     done = Signal(int, object)  # the token, the MemoryEstimate or None
+    resources = Signal(int, object)  # the token, the ResourceCheck or None
 
     def __init__(self, service, request, token):
         super().__init__()
@@ -308,6 +309,13 @@ class MemoryEstimateWorker(QThread):
         except Exception:  # noqa: BLE001 - an estimate that cannot be made shows nothing, never a stop
             est = None
         self.done.emit(self.token, est)
+        # this computer's disk and memory for the build (BuildService.resource_check; Core/build_resources.py)
+        check = getattr(self.service, "resource_check", None)
+        try:
+            resources = check(self.request) if callable(check) else None
+        except Exception:  # noqa: BLE001 - a check that cannot be made shows nothing, never a stop
+            resources = None
+        self.resources.emit(self.token, resources)
 
 
 class CancelBuildWorker(QThread):
@@ -578,6 +586,13 @@ class BuilderTab(QWidget):
         self._memory_timer.setSingleShot(True)
         self._memory_timer.setInterval(600)
         self._memory_timer.timeout.connect(self._update_memory_estimate)
+        # This computer's disk and memory against what the build needs (Core/build_resources.py): a warning; Start
+        # asks before a build that does not fit (No by default)
+        self.lbl_resources = plain_label("", self)
+        self.lbl_resources.setObjectName("lbl_builder_resources")
+        self.lbl_resources.setWordWrap(True)
+        self.lbl_resources.setVisible(False)
+        self._resources_shown = None
         self._update_quant_options()
         # The queue orders by it; a failed critical build stops the pipeline (`build start --priority`)
         self.priority_combo = QComboBox()
@@ -619,6 +634,27 @@ class BuilderTab(QWidget):
         row_dataset.addWidget(self.chk_imatrix)
         row_dataset.addWidget(self.dataset_combo, 1)
         row_dataset.addWidget(self.btn_dataset)
+        # The large models (DESIGN, the row "Large models"): a given importance matrix (a file or hf:owner/name/path)
+        # instead of computing one, and per-tensor types for llama-quantize
+        self.txt_imatrix_file = QLineEdit()
+        self.txt_imatrix_file.setObjectName("txt_builder_imatrix_file")
+        self.txt_imatrix_file.setPlaceholderText(ui_text("bld.large.imatrix.placeholder"))
+        self.txt_imatrix_file.setToolTip(plain_tooltip(ui_text("bld.large.imatrix.tip")))
+        self.txt_imatrix_file.setAccessibleName(ui_text("bld.large.imatrix"))
+        self.btn_imatrix_file = QPushButton("...")
+        self.btn_imatrix_file.setObjectName("btn_builder_imatrix_file")
+        self.btn_imatrix_file.setFixedWidth(40)
+        self.btn_imatrix_file.setAccessibleName(ui_text("bld.large.imatrix.browse"))
+        self.btn_imatrix_file.clicked.connect(self._browse_imatrix_file)
+        row_imatrix = QHBoxLayout()
+        row_imatrix.addWidget(self.txt_imatrix_file, 1)
+        row_imatrix.addWidget(self.btn_imatrix_file)
+        self.txt_tensor_types = QLineEdit()
+        self.txt_tensor_types.setObjectName("txt_builder_tensor_types")
+        self.txt_tensor_types.setPlaceholderText(ui_text("bld.large.tensor.placeholder"))
+        self.txt_tensor_types.setToolTip(plain_tooltip(ui_text("bld.large.tensor.tip")))
+        self.txt_tensor_types.setAccessibleName(ui_text("bld.large.tensor"))
+        self.txt_tensor_types.editingFinished.connect(self._schedule_memory_estimate)
 
         # Technical terms explained on mouse-over (F1 on the field), with a link to the page that explains them
         self.lbl_format = term_label("Format:", "model_format", buddy=self.format_combo)
@@ -633,6 +669,9 @@ class BuilderTab(QWidget):
         build_layout.addRow("Optimization:", self.opt_combo)
         build_layout.addRow(ui_text("bld.builder.priority"), self.priority_combo)
         build_layout.addRow("Calibration:", row_dataset)
+        build_layout.addRow(ui_text("bld.large.imatrix") + ":", row_imatrix)
+        build_layout.addRow(ui_text("bld.large.tensor") + ":", self.txt_tensor_types)
+        build_layout.addRow("", self.lbl_resources)
         self._update_calibration_options()
         # Formats, boards and quantizations follow the selected target's declared capabilities.
         self.target_combo.currentIndexChanged.connect(self._apply_target_capabilities)
@@ -1598,10 +1637,59 @@ class BuilderTab(QWidget):
         try:
             request = service.validate(service.request_in(
                 model=model, target=target, format=fmt, board=board, quantization=quant,
-                use_imatrix=self.chk_imatrix.isChecked(), probe=self._board_probe_id(target)), local_paths=True)
+                use_imatrix=self.chk_imatrix.isChecked(), probe=self._board_probe_id(target),
+                tensor_types=self._tensor_types() or None), local_paths=True)
         except Exception:  # noqa: BLE001 - a form the service refuses: no estimate (Start says why)
             return key, None
         return key, request
+
+    def _tensor_types(self):
+        """The form's per-tensor types (comma-separated PATTERN=TYPE entries), as written."""
+        text = self.txt_tensor_types.text().strip() if hasattr(self, "txt_tensor_types") else ""
+        return [part.strip() for part in text.split(",") if part.strip()]
+
+    def _imatrix_file(self):
+        """The form's given importance matrix (a file or hf:owner/name/path), or None."""
+        text = self.txt_imatrix_file.text().strip() if hasattr(self, "txt_imatrix_file") else ""
+        return text or None
+
+    def _browse_imatrix_file(self):
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(self, ui_text("bld.large.imatrix.browse"), "",
+                                              "Importance matrix (*.gguf *.dat *.imatrix);;All files (*)")
+        if path:
+            self.txt_imatrix_file.setText(path)
+
+    def _on_resources(self, token, check):
+        """The line of this computer's disk and memory for the form's build (an older answer is dropped)."""
+        if token != self._memory_token:
+            return
+        self._resources_shown = check
+        if check is None:
+            self.lbl_resources.setVisible(False)
+            return
+        colors = {"does_not_fit": "color: #c62828;", "tight": "color: #b26a00;"}
+        self.lbl_resources.setStyleSheet(colors.get(check.state, ""))
+        self.lbl_resources.setText("\n".join(check.lines()))
+        self.lbl_resources.setVisible(True)
+
+    def _resources_fit(self, service, values) -> bool:
+        """Before the build: this computer's disk and memory against what it needs (BuildService.resource_check), in
+        the log; a part that does not fit is the person's decision (No by default). True: start."""
+        check = getattr(service, "resource_check", None)
+        if not callable(check):
+            return True
+        try:
+            result = check(service.validate(self._service_request(values), local_paths=True))
+        except Exception as e:  # noqa: BLE001 - a check that cannot be made is said, never a stop
+            self._log(ui_text("bld.large.resources.not_made", reason=str(e)[:200]))
+            return True
+        for line in result.lines():
+            self._log(line)
+        if not result.risky:
+            return True
+        return ask(self, ui_text("bld.large.resources.title"),
+                   ui_text("bld.large.resources.question", lines="\n".join(result.lines())))
 
     def _update_memory_estimate(self):
         """Asks the service for the estimate of the form's build in a worker; the line says it is reading meanwhile."""
@@ -1617,6 +1705,7 @@ class BuilderTab(QWidget):
         self._memory_pending = key
         worker = MemoryEstimateWorker(self._build_service(), request, self._memory_token)
         worker.done.connect(self._on_memory_estimate)
+        worker.resources.connect(self._on_resources)
         worker.finished.connect(lambda w=worker: self._memory_workers.remove(w)
                                 if w in self._memory_workers else None)
         self._memory_workers.append(worker)
@@ -1686,7 +1775,8 @@ class BuilderTab(QWidget):
                   "target_fmt": target_fmt, "opt_lvl": opt_lvl, "quant": quant, "board": board,
                   "dataset": self.dataset_path, "recipe": recipe, "output_dir": output_dir,
                   "use_gpu": self.chk_gpu.isChecked(), "use_imatrix": self.chk_imatrix.isChecked(),
-                  "priority": self._priority(), "probe": self._board_probe_id(self.target_combo.currentData())}
+                  "priority": self._priority(), "probe": self._board_probe_id(self.target_combo.currentData()),
+                  "imatrix_file": self._imatrix_file(), "tensor_types": self._tensor_types() or None}
         if not self._model_on_this_computer(values):
             return
         found, lookup = self._earlier_builds(values)
@@ -1761,6 +1851,10 @@ class BuilderTab(QWidget):
                 self._log(ui_text("bld.preflight.cancelled"))
                 return
             options["ignore_preflight"] = True
+        # this computer's disk and memory (Core/build_resources.py): the person decides about a part that does not fit
+        if not self._resources_fit(service, values):
+            self._log(ui_text("bld.large.resources.cancelled"))
+            return
         # Offline: the build's preload for what an offline build of the target lacks (written, then its archive
         # taken in; Core/build_preload.py); Cancel starts nothing
         if not self._preload_ready(values):
@@ -1967,7 +2061,9 @@ class BuilderTab(QWidget):
                                        board=values["board"], quantization=values["quant"],
                                        use_imatrix=values["use_imatrix"], dataset_path=values["dataset"],
                                        use_gpu=values["use_gpu"], probe=values.get("probe"),
-                                       max_context_length=recipe.options.max_context_length if recipe else None)
+                                       max_context_length=recipe.options.max_context_length if recipe else None,
+                                       imatrix_file=values.get("imatrix_file"),
+                                       tensor_types=values.get("tensor_types"))
 
     def _earlier_builds(self, values):
         """(finished builds with 100 % the same options (eighth round, N11), the commit look-up still to do or None).

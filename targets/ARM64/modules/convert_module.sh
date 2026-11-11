@@ -11,8 +11,8 @@
 #         F32, Q8_0) go straight into the output folder; for every other type it writes an F16 intermediate into the
 #         work folder and leaves the quantization to the target stage (after the rotate hook, when the target has
 #         one). With --output (1.x: convert_module.sh --input DIR --output FILE --model-name NAME) that GGUF goes to
-#         FILE and is kept. A GGUF file as input (1.x: target_module.sh --input FILE.gguf) is not converted: the
-#         target stage quantizes it.
+#         FILE and is kept. A GGUF file as input (1.x: target_module.sh --input FILE.gguf) is not converted: at its
+#         own type it is passed through, at another type the target stage quantizes it.
 # Job imatrix: the importance matrix of a GGUF build (F16 intermediate, then llama-imatrix over 100 chunks), which the
 # BuildEngine hands to the build job (USE_IMATRIX, IMATRIX_PATH).
 #
@@ -135,19 +135,99 @@ check_gguf_output() {
         --stats "$CONVERT_STATS" "${test_args[@]}"
 }
 
-# The model for one GGUF type: written directly by the converter, or an F16 intermediate that the target stage
-# quantizes (quantize_jobs.sh lists what it has to do). With --output (CONVERT_OUTPUT, convert_module.sh --output of
-# version 1.x) the converter writes that file instead, and it is kept. A GGUF input (the F16 GGUF that
-# target_module.sh of 1.x took) is converted already: the target stage quantizes the file itself and keeps it.
-build_gguf() {
-    local q f16_file out_file job="quantize_gguf"
-    q="$(normalize_gguf_type "${1:-$QUANT}")"
-    local q_lower
-    q_lower="$(echo "$q" | tr '[:upper:]' '[:lower:]')"
+# ============================================================================
+# LARGE MODELS (DESIGN, the row "Large models"): the F16 intermediate, a GGUF input, per-tensor types and a given
+# importance matrix. The same functions in targets/Rockchip, targets/ARM64 and targets/_template.
+# ============================================================================
 
+# The F16 intermediate the quantizer starts from, in F16_PATH: one place per build (F16_FILE, set by the build engine:
+# the work folder, shared by the importance-matrix job and the build job, or the F16 kept from an earlier build of
+# this model, F16_KEPT=1, mounted read-only), else the stage's own file in the work folder. Converted only when it is
+# not there yet.
+f16_intermediate() {
+    F16_PATH="${F16_FILE:-$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf}"
+    if [ -n "${F16_FILE:-}" ] && [ -s "$F16_PATH" ]; then
+        if [ "${F16_KEPT:-0}" = "1" ]; then
+            echo ">> Reusing the F16 intermediate kept from an earlier build of this model: nothing is converted."
+        else
+            echo ">> Reusing the F16 intermediate this build converted already."
+        fi
+        model_check gguf-type "$F16_PATH" > /dev/null
+        return
+    fi
+    [ "${F16_KEPT:-0}" != "1" ] || die "The kept F16 intermediate of this model is missing; start the build again."
+    mkdir -p "$(dirname "$F16_PATH")"
+    convert_to_gguf f16 "$F16_PATH"
+}
+
+# QUANTIZE_ARGS gets llama-quantize's per-tensor types from TENSOR_TYPES (PATTERN=TYPE entries separated by spaces,
+# checked by the framework, orchestrator/Core/tensor_types.py): output and token_embd are the quantizer's own
+# --output-tensor-type and --token-embedding-type, every other pattern its --tensor-type.
+tensor_type_args() {
+    local entries=() entry
+    read -r -a entries <<< "${TENSOR_TYPES:-}"
+    for entry in "${entries[@]}"; do
+        [[ "$entry" == ?*=?* ]] || die "'$entry' is not a per-tensor type (PATTERN=TYPE)."
+        case "${entry%=*}" in
+            output) QUANTIZE_ARGS+=(--output-tensor-type "${entry##*=}") ;;
+            token_embd) QUANTIZE_ARGS+=(--token-embedding-type "${entry##*=}") ;;
+            *) QUANTIZE_ARGS+=(--tensor-type "$entry") ;;
+        esac
+    done
+    if [ ${#entries[@]} -gt 0 ]; then
+        echo ">> Per-tensor types: ${TENSOR_TYPES}"
+    fi
+}
+
+# TYPE: a GGUF input at its own type is passed through (GGUF_PASSTHROUGH=1: nothing is quantized); at another type it
+# is quantized again, with --allow-requantize when the file is quantized already (which loses more than quantizing
+# its 16-bit original).
+gguf_input_plan() {
+    local own
+    own="$(model_check gguf-type "$MODEL_SOURCE")"
+    if [ "$own" = "$1" ]; then
+        GGUF_PASSTHROUGH=1
+        echo ">> The GGUF input is $own already: passed through as it is (nothing is quantized)."
+        return
+    fi
+    case "$own" in
+        F32|F16|BF16) echo ">> The GGUF input is $own: quantized to $1." ;;
+        unknown) echo ">> The GGUF input does not say its type: quantized to $1." ;;
+        *)
+            QUANTIZE_ARGS+=(--allow-requantize)
+            echo "WARNING: The GGUF input is $own, quantized already: quantizing it again to $1 loses more than quantizing its 16-bit original." >&2
+            ;;
+    esac
+}
+
+# The model for one GGUF type: written directly by the converter, or an F16 intermediate that the target stage
+# quantizes (quantize_jobs.sh lists what it has to do; f16_intermediate: once per build and once per model). With
+# --output (CONVERT_OUTPUT, convert_module.sh --output of version 1.x) the converter writes that file instead, and it
+# is kept. A GGUF input is converted already: at its own type it is passed through, at another type the target stage
+# quantizes the file itself and keeps it (gguf_input_plan). TENSOR_TYPES and a given importance matrix (IMATRIX_GIVEN,
+# checked against the model's weight matrices) go to llama-quantize.
+build_gguf() {
+    local q q_lower f16_file out_file job="quantize_gguf"
+    q="$(normalize_gguf_type "${1:-$QUANT}")"
+    q_lower="$(echo "$q" | tr '[:upper:]' '[:lower:]')"
+    QUANTIZE_ARGS=()
+    GGUF_PASSTHROUGH=0
+
+    if [ "${JOB:-build}" = "tune" ] && [ -n "${F16_FILE:-}" ] && [ "${INPUT_FORMAT:-model}" != "gguf" ]; then
+        f16_intermediate   # the tuning job quantizes its candidates from it (tune.sh reads F16_FILE)
+        stage_output "$F16_PATH"
+        return
+    fi
     if [ "${INPUT_FORMAT:-model}" = "gguf" ]; then
+        gguf_input_plan "$q"
+        if [ "$GGUF_PASSTHROUGH" = "1" ]; then
+            [ -z "${TENSOR_TYPES:-}" ] || die "Per-tensor types need a quantization; the GGUF input is $q already (passed through)."
+            printf 'passthrough_gguf %q %q %q\n' "$q" "$MODEL_SOURCE" "$OUTPUT_DIR/${MODEL_NAME}-${q}.gguf" >> "$QUANTIZE_JOBS"
+            return
+        fi
         [[ "$GGUF_QUANT_TYPES" == *" $q "* ]] || die "The model is a GGUF file already; the target stage quantizes it to a type of llama-quantize, not '$q' (supported:${GGUF_QUANT_TYPES% })."
     elif [[ "$GGUF_CONVERT_TYPES" == *" $q_lower "* ]]; then
+        [ -z "${TENSOR_TYPES:-}" ] || die "Per-tensor types need a type llama-quantize makes; $q is written by the converter itself."
         out_file="${CONVERT_OUTPUT:-$OUTPUT_DIR/${MODEL_NAME}-${q}.gguf}"
         convert_to_gguf "$q_lower" "$out_file"
         stage_output "$out_file"
@@ -170,17 +250,32 @@ build_gguf() {
     if [ "${INPUT_FORMAT:-model}" = "gguf" ]; then
         f16_file="$MODEL_SOURCE"
         job="quantize_kept_gguf"
-    else
-        f16_file="${CONVERT_OUTPUT:-$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf}"
-        if [ -n "${CONVERT_OUTPUT:-}" ]; then
-            job="quantize_kept_gguf"
-        fi
+    elif [ -n "${CONVERT_OUTPUT:-}" ]; then
+        f16_file="$CONVERT_OUTPUT"
+        job="quantize_kept_gguf"
         convert_to_gguf f16 "$f16_file"
         stage_output "$f16_file"
+    else
+        f16_intermediate
+        f16_file="$F16_PATH"
+        if [ -n "${F16_FILE:-}" ]; then
+            job="quantize_kept_gguf"   # the build's work folder or the kept one: the build engine keeps or removes it
+        fi
+        stage_output "$f16_file"
     fi
+
+    # a given importance matrix (IMATRIX_GIVEN) must belong to this model: its names against the model's matrices
+    if [ "${#imatrix_args[@]}" -gt 0 ] && [ "${IMATRIX_GIVEN:-0}" = "1" ]; then
+        model_check imatrix "$IMATRIX_PATH" --model "$f16_file"
+    fi
+    tensor_type_args
+
     printf '%s %q %q %q' "$job" "$q" "$f16_file" "$out_file" >> "$QUANTIZE_JOBS"
     if [ ${#imatrix_args[@]} -gt 0 ]; then
         printf ' %q' "${imatrix_args[@]}" >> "$QUANTIZE_JOBS"
+    fi
+    if [ ${#QUANTIZE_ARGS[@]} -gt 0 ]; then
+        printf ' %q' "${QUANTIZE_ARGS[@]}" >> "$QUANTIZE_JOBS"
     fi
     echo >> "$QUANTIZE_JOBS"
 }
@@ -195,15 +290,15 @@ build_imatrix() {
     if [ "${INPUT_FORMAT:-model}" = "gguf" ]; then
         f16_file="$MODEL_SOURCE"  # measured as it is, and kept
     else
-        f16_file="$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf"
-        convert_to_gguf f16 "$f16_file"
+        f16_intermediate   # with F16_FILE the build job quantizes from the same file
+        f16_file="$F16_PATH"
     fi
     echo ">> Computing importance matrix..."
     model_check begin "$IMATRIX_DIR/imatrix.dat" --state "$CONVERT_STATE"
     # At the pinned llama.cpp -o writes the GGUF imatrix format (with a warning about the .dat name); llama-quantize
     # --imatrix reads it.
     "$IMATRIX_BIN" -m "$f16_file" -f "$dataset" -o "$IMATRIX_DIR/imatrix.dat" --chunks 100
-    if [ "${INPUT_FORMAT:-model}" != "gguf" ]; then
+    if [ "${INPUT_FORMAT:-model}" != "gguf" ] && [ -z "${F16_FILE:-}" ]; then
         rm -f "$f16_file"
     fi
     stage_output "$IMATRIX_DIR/imatrix.dat"

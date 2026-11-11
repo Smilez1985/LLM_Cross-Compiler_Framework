@@ -180,6 +180,9 @@ class Image:
             "STUB_LOG": str(self.log), "STUB_PKG": str(self.pkg),
             "LLMCF_LAYER": str(self.layer), "LLMCF_MODULES_DIR": str(self.app / "modules"),
             "LLMCF_TARGET_LABEL": "Rockchip",   # the host hands the runner the target's label (builder.py _sandbox)
+            # the stub models have no tokenizer: the tokenizer check is left out here (tests/test_large_models.py
+            # runs it)
+            "TOKENIZER_CHECK": "0",
         }
         env.update({k: str(v) for k, v in values.items() if v is not None})
         for key in [k for k, v in values.items() if v is None]:
@@ -584,6 +587,9 @@ FOR_THE_RUNTIME_LAYER = {"LLMCF_END_DIR", "LLMCF_MODULES_DIR", "LLMCF_STAGES", "
 # The tuning job's values (builder.py _execute_tuning, Core/tuning.py): the runner reads them as the inputs of the stage
 # tune (the layer's tune.sh, which reads them too); a build job has none of them
 FOR_THE_TUNING = {"TUNE_REFERENCE", "TUNE_CANDIDATES", "TUNE_CHUNKS", "TUNE_CTX", "TUNE_TEXT"}
+# The large models (builder.py _large_model_env, DESIGN the row "Large models"): the F16 intermediate's place and
+# whether it is a kept one, the per-tensor types, a given importance matrix, and the tokenizer check (on unless 0)
+FOR_THE_LARGE_MODELS = {"F16_FILE", "F16_KEPT", "TENSOR_TYPES", "IMATRIX_GIVEN", "TOKENIZER_CHECK"}
 # What the runner hands its stages (the runtime layer's runner.sh): not read from the build container's environment. STAGE_LAST (the last
 # stage of this run), CONVERT_OUTPUT (the --output option) and PACKAGE_REQUESTED (the --package option) are set by
 # the runner itself, never from outside.
@@ -660,7 +666,7 @@ def stage_scripts(modules: Path):
 def test_the_build_reads_the_same_environment_variables():
     reads = environment_reads(stage_scripts(ROCKCHIP / "modules"))
     assert reads - NEW_FOR_THE_STAGE_RUNNER - ONLY_ON_REQUEST - FOR_THE_MODULE_FLAGS - FOR_THE_TIME_RULE \
-        - FOR_THE_RUNTIME_LAYER - FOR_THE_TUNING == READ_TODAY
+        - FOR_THE_RUNTIME_LAYER - FOR_THE_TUNING - FOR_THE_LARGE_MODELS == READ_TODAY
 
 
 # ---------------------------------------------------------------------------------------------------------------

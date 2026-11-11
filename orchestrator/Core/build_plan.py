@@ -103,6 +103,9 @@ class BuildPlan:
     # the pre-flight check before the build (Core/consistency_manager.py Preflight); None when it could not run. A
     # stop is the security warning preflight_error of the question: only the person starts the build anyway.
     preflight: Optional[Any] = None
+    # the large models (DESIGN, the row "Large models"): a GGUF input's plan, the per-tensor types, the importance
+    # matrix's source and a reused F16 intermediate, in words for the question
+    large: List[str] = field(default_factory=list)
 
     def preflight_stops(self) -> List[str]:
         """The codes of the pre-flight check's stops (what the person's yes to the question overrides)."""
@@ -178,6 +181,8 @@ class BuildPlan:
         else:
             facts.append(Fact("Hardware", self.target.sentence(f"running on {r.board or 'the board'}"),
                               volatile=True))
+        for line in self.large:
+            facts.append(Fact("Large model", line))
         if self.board_note:
             facts.append(Fact("Board", self.board_note, TARGET_TEXT))
         if self.model_sizes:
@@ -340,6 +345,37 @@ class BuildPlan:
                          warnings=self.warnings(), numbers=self.numbers(), scope={"size_bytes": self.size()},
                          digest_keys=self.DIGEST_KEYS, consequence_template=self.consequence_template(),
                          names=self.names())
+
+
+def _large_model_facts(service, req, local: Optional[Path], commit: Optional[str]):
+    """(the question's lines, the GGUF input's plan or None, whether a kept F16 intermediate is reused) of a build's
+    large-model options (DESIGN, the row "Large models"); words only, never a path."""
+    from orchestrator.Core import build_large, f16_cache
+    from orchestrator.Core.build_resources import gguf_input
+    from orchestrator.Core.imatrix_source import is_hub_reference
+    lines: List[str] = []
+    gguf = None
+    if local is not None and local.is_file() and local.suffix.lower() == ".gguf" and str(req.format).lower() == "gguf":
+        gguf = gguf_input(local, req.quantization)
+        lines.append(gguf.note())
+    entries = list(getattr(req, "tensor_types", None) or [])
+    if entries:
+        lines.append(f"Per-tensor types: {', '.join(entries)}; not measured by KL divergence for this model yet "
+                     "unless a tuning run measured them (start_tuning with these entries measures them).")
+    matrix = str(getattr(req, "imatrix_file", None) or "")
+    if matrix:
+        lines.append("Importance matrix: " + (f"the Hugging Face file {matrix[3:]}, downloaded before the build"
+                                              if is_hub_reference(matrix) else "a given file") +
+                     ", used instead of computing one; its tensor names are compared with the model's.")
+    f16_cached = False
+    quant = str(req.quantization or "").upper()
+    if gguf is None and local is None and str(req.format).lower() == "gguf" and \
+            (req.use_imatrix or (quant and quant not in build_large.CONVERT_TYPES)):
+        cache = f16_cache.F16Cache(folder(service.framework, "cache_dir", "cache"))
+        f16_cached = cache.entry(f16_cache.key(req.model, commit or "", build_large._pin())) is not None
+        if f16_cached:
+            lines.append("The F16 intermediate of this model is kept from an earlier build: it is reused.")
+    return lines, gguf, f16_cached
 
 
 def _registry_word(image: str) -> str:
@@ -814,10 +850,14 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
 
     # disk (a copy on this computer in offline mode: its size, nothing to download)
     size = (plan.download or plan.local_bytes) if plan.source == "hf" else plan.local_bytes
+    plan.large, gguf, f16_cached = _large_model_facts(service, req, Path(pin.path) if pin is not None else None,
+                                                      plan.commit)
     if size:
         plan.needs = disk_plan.build_needs(size, req.format, req.quantization, folder(framework, "cache_dir", "cache"),
                                            folder(framework, "output_dir", "output"),
-                                           cached=plan.cached if plan.source == "hf" else size)
+                                           cached=plan.cached if plan.source == "hf" else size,
+                                           gguf_input=gguf is not None, f16_cached=f16_cached,
+                                           passthrough=gguf is not None and gguf.mode == "passthrough")
         plan.disk = disk_plan.check_disk(plan.needs, ledger, standing=standing, disk_usage=service.disk_usage)
         try:
             disk_plan.require(plan.disk)

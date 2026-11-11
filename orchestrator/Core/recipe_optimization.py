@@ -8,8 +8,9 @@ start_recipe_build share it instead of each knowing it.
   schemas/targets.py). A recipe made from a finished build takes it from its build_info.json (the build's recorded
   options).
 - The format version: a recipe that names a level is written as format 2; one without stays format 1, byte for byte as
-  before, so older llmcf versions still read it. This version reads formats 1 and 2; a later format is refused with a
-  sentence naming the llmcf version it needs (FORMAT_NEEDS).
+  before, so older llmcf versions still read it. A recipe with per-tensor types (options.tensor_types, the large
+  models: Core/tensor_types.py) is format 3, whatever its level. This version reads formats 1 to 3; a later format is
+  refused with a sentence naming the llmcf version it needs (FORMAT_NEEDS).
 - In the build: the level is a variable like the others. The person's choice wins, else the recipe's level, else the
   board profile's level as for any build (board_profiles.optimization_for). The recipe's value of the variable is what
   a build that leaves it takes (the recipe's level, else the board profile's), so a level that differs from it is a
@@ -32,9 +33,11 @@ VARIABLE = "optimization"
 FORMAT_NEEDS: Dict[int, str] = {
     1: "any framework version that builds recipes",
     2: "llmcf 3.4.0 or later",   # options.optimization
+    3: "llmcf 3.4.0 or later",   # options.tensor_types (the per-tensor types of the large models)
 }
 FORMAT_WITHOUT_LEVEL = 1
 FORMAT_WITH_LEVEL = 2
+FORMAT_WITH_TENSOR_TYPES = 3
 READS = tuple(sorted(FORMAT_NEEDS))
 
 # Where the level came from (resolve): the person, the recipe, the board profile.
@@ -73,16 +76,23 @@ def check_raw(data: Any) -> None:
         check_format(data.get("schema_version"))
 
 
-def format_for(level: Optional[str]) -> int:
-    """The format a recipe is written in: 2 when it names a level, else 1 (readable by older versions)."""
+def format_for(level: Optional[str], tensor_types: Any = None) -> int:
+    """The format a recipe is written in: 3 with per-tensor types, else 2 when it names a level, else 1 (readable by
+    older versions)."""
+    if tensor_types:
+        return FORMAT_WITH_TENSOR_TYPES
     return FORMAT_WITH_LEVEL if level else FORMAT_WITHOUT_LEVEL
 
 
-def check_level_format(version: int, level: Optional[str]) -> None:
-    """A format-1 recipe cannot name a level: older versions refuse the field, so such a file is no valid recipe."""
+def check_level_format(version: int, level: Optional[str], tensor_types: Any = None) -> None:
+    """A format-1 recipe cannot name a level and only a format-3 recipe has per-tensor types: older versions refuse
+    the fields, so such a file is no valid recipe."""
     if level and version < FORMAT_WITH_LEVEL:
         raise RecipeFormatError(f"A recipe that names an optimization level is format {FORMAT_WITH_LEVEL} "
                          f"(schema_version: {FORMAT_WITH_LEVEL}), not format {version}")
+    if tensor_types and version < FORMAT_WITH_TENSOR_TYPES:
+        raise RecipeFormatError(f"A recipe with per-tensor types is format {FORMAT_WITH_TENSOR_TYPES} "
+                                f"(schema_version: {FORMAT_WITH_TENSOR_TYPES}), not format {version}")
 
 
 def normalize(level: Any) -> Optional[str]:
@@ -146,7 +156,13 @@ def read(data: Any):
     from orchestrator.schemas.recipes import Recipe
     check_raw(data)
     recipe = Recipe.model_validate(data)
-    check_level_format(recipe.schema_version, recipe.options.optimization)
+    check_level_format(recipe.schema_version, recipe.options.optimization, recipe.options.tensor_types)
+    if recipe.options.tensor_types:   # the per-tensor types checked as a build checks them
+        from orchestrator.Core.tensor_types import TensorTypeError, normalize
+        try:
+            normalize(recipe.options.tensor_types)
+        except TensorTypeError as e:
+            raise RecipeFormatError(f"The recipe's per-tensor types cannot be used: {e}") from None
     return recipe
 
 
@@ -156,11 +172,13 @@ def from_build_info(info: Mapping[str, Any], **kwargs: Any):
     from orchestrator.schemas.recipes import Recipe
     recipe = Recipe.from_build_info(dict(info), **kwargs)
     level = level_from_build_info(info)
-    if not level:
+    entries = recipe.options.tensor_types
+    if not level and not entries:
         return recipe
     data = recipe.model_dump(mode="json", exclude_none=True)
-    data["schema_version"] = format_for(level)
-    data["options"] = {**data.get("options", {}), VARIABLE: level}
+    data["schema_version"] = format_for(level, entries)
+    if level:
+        data["options"] = {**data.get("options", {}), VARIABLE: level}
     return read(data)
 
 
@@ -168,12 +186,15 @@ def canonical(data: Dict[str, Any]) -> Dict[str, Any]:
     """A recipe's JSON dump without the format-2 field when it is empty, so the digest of a format-1 recipe stays what
     it was before the field existed (BuildService.recipe_digest)."""
     options = data.get("options")
-    if isinstance(options, dict) and options.get(VARIABLE) is None and VARIABLE in options:
-        data = {**data, "options": {k: v for k, v in options.items() if k != VARIABLE}}
+    empty = [k for k in (VARIABLE, "tensor_types") if isinstance(options, dict) and k in options
+             and options.get(k) is None]
+    if empty:   # a field of a later format left empty: the digest of an earlier recipe stays what it was
+        data = {**data, "options": {k: v for k, v in options.items() if k not in empty}}
     return data
 
 
-__all__ = ["BOARDS", "FORMAT_NEEDS", "FORMAT_WITHOUT_LEVEL", "FORMAT_WITH_LEVEL", "READS", "RECIPES",
+__all__ = ["BOARDS", "FORMAT_NEEDS", "FORMAT_WITHOUT_LEVEL", "FORMAT_WITH_LEVEL", "FORMAT_WITH_TENSOR_TYPES", "READS",
+           "RECIPES",
            "RecipeFormatError", "VARIABLE", "YOURS", "canonical", "changed", "check_format", "check_level_format",
            "check_raw", "describe", "format_for", "format_sentence", "from_build_info", "level_from_build_info",
            "level_of", "normalize", "read", "recipe_default", "resolve"]

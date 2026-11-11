@@ -26,6 +26,7 @@ MENU_LAYOUT = (
         ("act_build_history", "bld.menu.history"),
         ("act_build_images", "bimg.menu"),
         ("act_build_deps", "bld.menu.deps"),
+        ("act_build_f16", "bld.menu.f16"),
     )),
     ("menu_boards", "main.menu.boards", (
         ("act_boards_devices", "boards.menu.devices"),

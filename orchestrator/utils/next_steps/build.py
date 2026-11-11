@@ -20,6 +20,7 @@ MOUSE_LABELS = {
     "btn_builder_targets": ("builder_tab", "bld.builder.targets"),
     "btn_builder_start": ("builder_tab", "bld.builder.start"),
     "btn_builder_preflight": ("builder_tab", "bld.preflight.button"),
+    "btn_f16_delete": ("act_build_f16", "bld.f16.delete"),
 }
 
 STEPS = (
@@ -45,6 +46,9 @@ STEPS = (
     Step("build.decide_flags", cli="build start --module-flags", cli_args=("--module-flags", "{decision}"),
          params={"decision": Param("choice", choices=("allow", "standard"))}, person_only="permission",
          window="builder", target="btn_builder_start"),
+    # the kept F16 intermediates of GGUF builds (Core/f16_cache.py): listed for everyone, deleted by the person only
+    Step("build.f16_list", cli="build f16 list", tool="get_status", target="act_build_f16", runnable=True),
+    Step("build.f16_delete", cli="build f16 delete", person_only="deletion", target="btn_f16_delete"),
 )
 
 TEXTS = {
@@ -62,6 +66,13 @@ TEXTS = {
         "step.targets.list": "Look at the targets",
         "step.targets.list.what": "Lists every target with its ID, boards, formats and support level.",
         "step.targets.check": "Check the target",
+        "step.build.f16_list": "Look at the kept F16 intermediates",
+        "step.build.f16_list.what": "Lists the F16 intermediates kept for the next build of a model, with their size.",
+        "step.build.f16_list.why": "A kept F16 intermediate saves converting the model again.",
+        "step.build.f16_delete": "Delete kept F16 intermediates",
+        "step.build.f16_delete.what": "Lists the kept F16 intermediates and deletes the ones you pick "
+                                      "({path:btn_f16_delete}).",
+        "step.build.f16_delete.why": "They use space in the build cache until they are deleted.",
         "step.build.history": "Look at the build history",
         "step.build.history.what": "Lists the builds of every framework process with their state.",
         "step.build.decide_flags": "Decide on the module's CMake options",
@@ -82,6 +93,14 @@ TEXTS = {
         "step.targets.list": "Die Targets ansehen",
         "step.targets.list.what": "Listet jedes Target mit ID, Boards, Formaten und Unterstützungsgrad.",
         "step.targets.check": "Das Target prüfen",
+        "step.build.f16_list": "Die aufbewahrten F16-Zwischenstufen ansehen",
+        "step.build.f16_list.what": "Listet die F16-Zwischenstufen, die für den nächsten Build eines Modells "
+                                    "aufbewahrt sind, mit ihrer Größe.",
+        "step.build.f16_list.why": "Eine aufbewahrte F16-Zwischenstufe erspart das erneute Umwandeln des Modells.",
+        "step.build.f16_delete": "Aufbewahrte F16-Zwischenstufen löschen",
+        "step.build.f16_delete.what": "Listet die aufbewahrten F16-Zwischenstufen und löscht die, die du wählst "
+                                      "({path:btn_f16_delete}).",
+        "step.build.f16_delete.why": "Sie belegen Platz im Build-Cache, bis sie gelöscht sind.",
         "step.build.history": "Den Build-Verlauf ansehen",
         "step.build.history.what": "Listet die Builds aller Framework-Prozesse mit ihrem Zustand.",
         "step.build.decide_flags": "Über die CMake-Optionen des Moduls entscheiden",
@@ -94,6 +113,8 @@ TEXTS = {
 # The "Sie" form of the German texts above that address the person (Q1); only the texts that differ.
 FORMAL = {
     "de": {
+        "step.build.f16_delete.what": "Listet die aufbewahrten F16-Zwischenstufen und löscht die, die Sie wählen "
+                                      "({path:btn_f16_delete}).",
         "step.build.decide_flags.what": "Den Build selbst starten: Sie sehen die Optionen außerhalb der erlaubten "
                                         "Liste, was sie tun, und eine Empfehlung, und erlauben sie oder nehmen die "
                                         "Standard-Flags.",

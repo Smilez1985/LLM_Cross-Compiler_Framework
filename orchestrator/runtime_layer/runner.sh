@@ -273,6 +273,8 @@ inputs_digest() {
         printf 'context=%s imatrix=%s %s %s\n' "${MAX_CONTEXT_LENGTH:-}" "${USE_IMATRIX:-}" "${IMATRIX_PATH:-}" \
             "$(file_digest "${IMATRIX_PATH:-}")"
         printf 'dataset=%s %s\n' "${DATASET_PATH:-}" "$(file_digest "${DATASET_PATH:-}")"
+        # The large models' inputs: per-tensor types, a given importance matrix, the F16 intermediate's place
+        printf 'large=%s|%s|%s|%s\n' "${TENSOR_TYPES:-}" "${IMATRIX_GIVEN:-}" "${F16_FILE:-}" "${F16_KEPT:-}"
         # The profile config_module.sh reads, also the one it reads when none is named
         _profile="${HARDWARE_CONFIG_FILE:-${BUILD_CACHE_DIR:-/build-cache}/target_hardware_config.txt}"
         printf 'hardware=%s %s\n' "$_profile" "$(file_digest "$_profile")"

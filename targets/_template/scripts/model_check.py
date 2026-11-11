@@ -17,8 +17,14 @@ maintainer's design (DESIGN round 16, U9 addendum) and never had.
 - Cleanup: a file a converter is about to replace is kept as FILE.convert-backup until the new one passed its checks;
   a failed or stopped stage removes what it wrote and puts the backups back.
 
+- The large models (DESIGN, the row "Large models"): a GGUF's own type (`gguf-type`: a GGUF input is passed through
+  or quantized again), a given importance matrix against the model's weight matrices (`imatrix`), and the tokenizer
+  and chat-template check at the end of every GGUF build (`tokenizer`): the vocabulary, BOS and EOS against the
+  source, llama.cpp's token ids of a fixed text against the source tokenizer's, the chat template against the
+  source's and rendered with a fixed conversation, and the template's special tokens read as one token each.
 Runs in the target image with its python3 and the standard library only (no numpy, no gguf-py), so the tests run the
-same code. Reads model files, writes only the files named on its command line and the stage's own files, and never
+same code; only the tokenizer check uses the image's tokenizers and Jinja libraries when they are there (the
+converter's own), and says so when they are not. Reads model files, writes only the files named on its command line and the stage's own files, and never
 uses the network. Every target ships the same copy (targets/Rockchip, targets/ARM64 and targets/_template, scripts/).
 
   model_check.py input PATH --format FORMAT --stats FILE [--onnx-next TEXT] [--accepts hf,onnx,gguf]
@@ -29,6 +35,9 @@ uses the network. Every target ships the same copy (targets/Rockchip, targets/AR
   model_check.py test FILE --tools DIR --result FILE [--test-seconds N] [--what TEXT] [--stage NAME]
   model_check.py restore --state FILE (--failed | --stopped)
   model_check.py keep --state FILE
+  model_check.py gguf-type FILE
+  model_check.py imatrix FILE --model GGUF
+  model_check.py tokenizer FILE --source PATH --tools DIR --report FILE [--seconds N] [--stage NAME]
 
 Exit codes: 0 done, 1 a refusal or a failed check (the reason on stderr), 2 wrong use.
 """
@@ -673,6 +682,353 @@ def summary_line(result: str, note: str) -> str:
     return f"{result}: {note}"
 
 
+# --- The large models: a GGUF's own type, a given importance matrix, the tokenizer and chat-template check -------
+
+# llama.cpp's file types (general.file_type, llama_ftype in include/llama.h at the pin); the orchestrator has the same
+# map (orchestrator/Core/build_resources.py FILE_TYPES), and tests/test_large_models.py keeps the two equal.
+FILE_TYPES = {0: "F32", 1: "F16", 2: "Q4_0", 3: "Q4_1", 7: "Q8_0", 8: "Q5_0", 9: "Q5_1", 10: "Q2_K", 11: "Q3_K_S",
+              12: "Q3_K_M", 13: "Q3_K_L", 14: "Q4_K_S", 15: "Q4_K_M", 16: "Q5_K_S", 17: "Q5_K_M", 18: "Q6_K",
+              19: "IQ2_XXS", 20: "IQ2_XS", 21: "Q2_K_S", 22: "IQ3_XS", 23: "IQ3_XXS", 24: "IQ1_S", 25: "IQ4_NL",
+              26: "IQ3_S", 27: "IQ3_M", 28: "IQ2_S", 29: "IQ2_M", 30: "IQ4_XS", 31: "IQ1_M", 32: "BF16",
+              36: "TQ1_0", 37: "TQ2_0", 38: "MXFP4_MOE"}
+# A given importance matrix must name at least this share of the model's weight matrices
+IMATRIX_COVERAGE = 0.5
+# The fixed text of the tokenizer check: English, German, code, digits, white space and emoji
+TOKENIZER_TEXT = ("The quick brown fox jumps over the lazy dog. Grüße aus München: Äpfel, Öl und Übermut kosten "
+                  "12,50 €.\ndef add(a, b):\n    return a + b  # 1234567890\n\t  spaces  and\ttabs\n"
+                  "Emoji: \U0001F642 \U0001F680, CJK: 你好.")
+# The fixed conversation the chat template renders
+CHAT_MESSAGES = [{"role": "system", "content": "You are a helpful assistant."},
+                 {"role": "user", "content": "Hello, who are you?"},
+                 {"role": "assistant", "content": "I am a language model."},
+                 {"role": "user", "content": "Wie spät ist es?"}]
+# llama.cpp's token types (tokenizer.ggml.token_type): control and user-defined tokens are read as one token
+TOKEN_CONTROL, TOKEN_USER_DEFINED = 3, 4
+_VERBOSE_TOKEN = None   # compiled on first use (re is imported there)
+
+
+def read_gguf_meta(path: Path, arrays: Tuple[str, ...] = ()) -> Tuple[Dict[str, Any], List[Tuple[str, List[int]]]]:
+    """(the key-value pairs, the tensors as (name, dims)) of a GGUF's header. Arrays are kept only for the keys in
+    `arrays` (their values), every other array by its length; read_gguf checks the file itself."""
+    size, name = path.stat().st_size, path.name
+    with open(path, "rb") as f:
+        r = _Reader(f, size, name)
+        if size < 4 or r.take(4) != GGUF_MAGIC:
+            raise Problem(f"{name} is no GGUF file (it does not start with GGUF).")
+        version = r.unpack("<I")
+        if version not in GGUF_VERSIONS:
+            raise Problem(f"{name} has GGUF version {version}; llama.cpp reads the versions 2 and 3.")
+        n_tensors, n_kv = r.unpack("<Q"), r.unpack("<Q")
+        if n_tensors > size or n_kv > size:
+            raise Problem(f"{name} has a damaged header (impossible counts).")
+        meta: Dict[str, Any] = {}
+        for _ in range(n_kv):
+            key = r.string() or ""
+            kind = r.unpack("<I")
+            if kind == GGUF_ARRAY and key in arrays:
+                item, count = r.unpack("<I"), r.unpack("<Q")
+                if count > size:
+                    raise Problem(f"{name} has a damaged header (an array larger than the file).")
+                if item == GGUF_STRING:
+                    meta[key] = [r.string() or "" for _ in range(count)]
+                elif item in GGUF_SCALARS:
+                    meta[key] = [r.unpack(GGUF_SCALARS[item]) for _ in range(count)]
+                else:
+                    raise Problem(f"{name} has a damaged header (the array {key} holds arrays).")
+            else:
+                meta[key] = r.value(kind)
+        tensors = []
+        for _ in range(n_tensors):
+            tname = r.string() or ""
+            n_dims = r.unpack("<I")
+            if n_dims > GGML_MAX_DIMS:
+                raise Problem(f"{name} has a damaged header (a tensor with {n_dims} dimensions).")
+            dims = [r.unpack("<Q") for _ in range(n_dims)]
+            r.unpack("<I")
+            r.unpack("<Q")
+            tensors.append((tname, dims))
+    return meta, tensors
+
+
+def gguf_type(path: Path) -> str:
+    """The quantization type of a GGUF model file (general.file_type) after the file's own check; "unknown" when the
+    header names none (it is then quantized as asked, never passed through)."""
+    read_gguf(path)
+    meta, _ = read_gguf_meta(path)
+    value = meta.get("general.file_type")
+    if isinstance(value, bool) or not isinstance(value, int) or (value & 0x3FF) not in FILE_TYPES:
+        return "unknown"
+    return FILE_TYPES[value & 0x3FF]
+
+
+def _weight_matrices(tensors: List[Tuple[str, List[int]]]) -> List[str]:
+    """The model's weight matrices an importance matrix covers: two or more dimensions, ending in .weight, without the
+    token embeddings (llama-imatrix collects the inputs of matrix multiplications)."""
+    return [n for n, dims in tensors if n.endswith(".weight") and len(dims) >= 2 and not n.startswith("token_embd")]
+
+
+def imatrix_names(path: Path) -> List[str]:
+    """The tensor names a given importance matrix holds: the GGUF format's NAME.in_sum2 tensors, else the .dat
+    format's entry names."""
+    with open(path, "rb") as f:
+        magic = f.read(4)
+    if magic == GGUF_MAGIC:
+        _meta, tensors = read_gguf_meta(path)
+        return sorted({n[:-len(".in_sum2")] for n, _ in tensors if n.endswith(".in_sum2")})
+    names = []
+    size = path.stat().st_size
+    with open(path, "rb") as f:
+        r = _Reader(f, size, path.name)
+        count = r.unpack("<i")
+        if not 0 < count <= 100_000:
+            raise Problem(f"{path.name} is not an importance matrix.")
+        for _ in range(count):
+            length = r.unpack("<i")
+            if not 0 < length <= 512:
+                raise Problem(f"{path.name} is not an importance matrix (a damaged entry).")
+            names.append(r.take(length).decode("utf-8", "replace"))
+            r.unpack("<i")
+            values = r.unpack("<i")
+            r.skip(4 * max(0, values))
+    return names
+
+
+def imatrix_coverage(matrix: Path, model: Path) -> Tuple[int, int]:
+    """(weight matrices of `model` the importance matrix names, all of them); Problem below IMATRIX_COVERAGE."""
+    wanted = _weight_matrices(read_gguf_meta(model)[1])
+    have = set(imatrix_names(matrix))
+    found = sum(1 for n in wanted if n in have)
+    if not wanted:
+        raise Problem(f"{model.name} has no weight matrices to compare the importance matrix with.")
+    if found < IMATRIX_COVERAGE * len(wanted):
+        raise Problem(f"The importance matrix {matrix.name} names {found} of the {len(wanted)} weight matrices of "
+                      f"{model.name}: it belongs to another model (or another architecture). Use the matrix made for "
+                      "this model, or let the build compute one.")
+    return found, len(wanted)
+
+
+def _source_template(folder: Path) -> Optional[str]:
+    """The chat template of a Hugging Face folder: chat_template.jinja, chat_template.json, or tokenizer_config.json's
+    chat_template (a string, or a list of named templates: "default", else the first)."""
+    jinja = folder / "chat_template.jinja"
+    if jinja.is_file():
+        return jinja.read_text(encoding="utf-8", errors="replace")
+    for name in ("chat_template.json", "tokenizer_config.json"):
+        path = folder / name
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        except ValueError:
+            continue
+        value = data.get("chat_template") if isinstance(data, dict) else None
+        if isinstance(value, list):
+            named = {str(t.get("name")): t.get("template") for t in value if isinstance(t, dict)}
+            value = named.get("default") or next(iter(named.values()), None)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _ids_of(value: Any) -> List[int]:
+    if isinstance(value, bool):
+        return []
+    if isinstance(value, int):
+        return [value]
+    if isinstance(value, list):
+        return [v for v in value if isinstance(v, int) and not isinstance(v, bool)]
+    return []
+
+
+def render_template(template: str, bos: str, eos: str) -> Tuple[Optional[str], str]:
+    """(the rendered fixed conversation, why not) in a sandboxed Jinja environment like the one transformers renders
+    chat templates in; a template that refuses a system message is tried without it."""
+    try:
+        import jinja2
+        from jinja2.sandbox import ImmutableSandboxedEnvironment
+    except ImportError:
+        return None, "the image has no Jinja library to render the chat template"
+
+    def raise_exception(message):
+        raise jinja2.exceptions.TemplateError(message)
+
+    def strftime_now(fmt):
+        return time.strftime(fmt, time.gmtime(0))
+
+    env = ImmutableSandboxedEnvironment(trim_blocks=True, lstrip_blocks=True, extensions=["jinja2.ext.loopcontrols"])
+    env.filters["tojson"] = lambda value, **kw: json.dumps(value, ensure_ascii=False, **kw)
+    env.globals.update(raise_exception=raise_exception, strftime_now=strftime_now)
+    try:
+        compiled = env.from_string(template)
+    except Exception as e:  # noqa: BLE001 - the template's own error, said in the report
+        return None, f"the chat template does not compile ({type(e).__name__}: {str(e)[:160]})"
+    why = ""
+    for messages in (CHAT_MESSAGES, CHAT_MESSAGES[1:]):
+        try:
+            return compiled.render(messages=messages, add_generation_prompt=True, bos_token=bos, eos_token=eos,
+                                   tools=None, documents=None), ""
+        except Exception as e:  # noqa: BLE001
+            why = f"the chat template does not render the fixed conversation ({type(e).__name__}: {str(e)[:160]})"
+    return None, why
+
+
+def llama_tokens(gguf: Path, tools: Path, text: str, seconds: int) -> Tuple[Optional[List[int]], str]:
+    """(the token ids llama.cpp's tokenizer gives `text`, why not): llama-completion with --verbose-prompt and no
+    tokens to generate; special tokens in the text are read as such (llama-completion parses them in a prompt)."""
+    global _VERBOSE_TOKEN
+    import re
+    tool = find_test_tool(tools)
+    if tool is None or tool.name != "llama-completion":
+        return None, "the image has no llama-completion to tokenize with"
+    if _VERBOSE_TOKEN is None:
+        _VERBOSE_TOKEN = re.compile(r"^(?:[0-9.]+ [A-Z] )?\s*(\d+) -> '", re.M)
+    args = [str(tool), "-m", str(gguf), "-p", text, "-n", "0", "--verbose-prompt", "-no-cnv", "--no-warmup",
+            "-c", "4096", "--simple-io", "--offline"]
+    try:
+        run = subprocess.run(args, stdin=subprocess.DEVNULL, capture_output=True, timeout=max(30, seconds))
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"llama-completion did not tokenize the text ({type(e).__name__})"
+    out = (run.stdout + run.stderr).decode("utf-8", "replace")
+    marker = out.find("number of tokens in prompt =")
+    if run.returncode != 0 or marker < 0:
+        return None, f"llama-completion could not tokenize the text (exit {run.returncode})"
+    count = int(re.match(r"number of tokens in prompt = (\d+)", out[marker:]).group(1))
+    ids = [int(m.group(1)) for m in _VERBOSE_TOKEN.finditer(out[marker:])][:count]
+    if len(ids) != count:
+        return None, "llama-completion's list of prompt tokens could not be read"
+    return ids, ""
+
+
+def source_tokens(folder: Path, text: str) -> Tuple[Optional[List[int]], str]:
+    """(the token ids of the source's own tokenizer for `text`, why not): tokenizer.json through the tokenizers
+    library, without special tokens of its own (added tokens in the text are read as such)."""
+    path = folder / "tokenizer.json"
+    if not path.is_file():
+        return None, "the source has no tokenizer.json to compare with"
+    try:
+        from tokenizers import Tokenizer
+    except ImportError:
+        return None, "the image has no tokenizers library to read the source's tokenizer"
+    try:
+        return list(Tokenizer.from_file(str(path)).encode(text, add_special_tokens=False).ids), ""
+    except Exception as e:  # noqa: BLE001 - the source's tokenizer itself
+        return None, f"the source's tokenizer.json could not be read ({type(e).__name__})"
+
+
+def tokenizer_check(gguf: Path, source: Path, tools: Path, seconds: int) -> Dict[str, Any]:
+    """The tokenizer and chat-template check of a built GGUF against its source (a Hugging Face folder or the input
+    GGUF): {status: pass | warn, checks: [...], warnings: [...], skipped: [...]}. Never raises for a difference."""
+    report: Dict[str, Any] = {"checks": [], "warnings": [], "skipped": []}
+    meta, tensors = read_gguf_meta(gguf, ("tokenizer.ggml.tokens", "tokenizer.ggml.token_type"))
+    tokens = meta.get("tokenizer.ggml.tokens") or []
+    types = meta.get("tokenizer.ggml.token_type") or []
+    model = meta.get("tokenizer.ggml.model")
+    if not tokens or not model:
+        report["warnings"].append("The GGUF holds no tokenizer (tokenizer.ggml.model and tokens).")
+        report["status"] = "warn"
+        return report
+    report["vocabulary"] = len(tokens)
+    report["tokenizer_model"] = str(model)
+    report["checks"].append(f"vocabulary: {len(tokens)} tokens ({model})")
+    embd = next((dims for n, dims in tensors if n == "token_embd.weight"), None)
+    if embd and len(embd) >= 2 and embd[1] != len(tokens):
+        report["warnings"].append(f"The GGUF has {len(tokens)} tokens but its embeddings have {embd[1]} rows.")
+    bos, eos = meta.get("tokenizer.ggml.bos_token_id"), meta.get("tokenizer.ggml.eos_token_id")
+    for word, value in (("BOS", bos), ("EOS", eos)):
+        if isinstance(value, int) and not 0 <= value < len(tokens):
+            report["warnings"].append(f"The {word} id {value} lies outside the vocabulary.")
+    template = meta.get("tokenizer.chat_template")
+    template = template if isinstance(template, str) and template.strip() else None
+
+    if source.is_file():   # a GGUF input: its own header is the source
+        smeta, _ = read_gguf_meta(source, ("tokenizer.ggml.tokens",))
+        if (smeta.get("tokenizer.ggml.tokens") or []) != tokens:
+            report["warnings"].append("The vocabulary differs from the input GGUF's.")
+        else:
+            report["checks"].append("vocabulary: the input GGUF's")
+        for key, word in (("tokenizer.ggml.bos_token_id", "BOS"), ("tokenizer.ggml.eos_token_id", "EOS")):
+            if smeta.get(key) != meta.get(key):
+                report["warnings"].append(f"The {word} id differs from the input GGUF's.")
+        stemplate = smeta.get("tokenizer.chat_template")
+        stemplate = stemplate if isinstance(stemplate, str) and stemplate.strip() else None
+    else:
+        config: Dict[str, Any] = {}
+        for name in ("config.json", "generation_config.json"):
+            try:
+                data = json.loads((source / name).read_text(encoding="utf-8", errors="replace"))
+                if isinstance(data, dict):
+                    config.setdefault("eos", []).extend(_ids_of(data.get("eos_token_id")))
+                    config.setdefault("bos", []).extend(_ids_of(data.get("bos_token_id")))
+            except (OSError, ValueError):
+                continue
+        if isinstance(eos, int) and config.get("eos") and eos not in config["eos"]:
+            report["warnings"].append(f"The EOS id {eos} is none of the source's ({', '.join(map(str, sorted(set(config['eos']))))}): "
+                                      "generation may not stop.")
+        elif config.get("eos"):
+            report["checks"].append("EOS: the source's")
+        stemplate = _source_template(source)
+
+    if stemplate is None and template is None:
+        report["skipped"].append("chat template: neither the source nor the GGUF has one (a base model?)")
+    elif template is None:
+        report["warnings"].append("The source has a chat template, the GGUF none: chats will use a built-in fallback.")
+    elif stemplate is None:
+        report["checks"].append("chat template: in the GGUF (the source names none to compare with)")
+    elif stemplate.strip() != template.strip():
+        report["warnings"].append("The GGUF's chat template differs from the source's.")
+    else:
+        report["checks"].append("chat template: the source's")
+    report["chat_template"] = "present" if template else "missing"
+
+    rendered = None
+    if template is not None:
+        word = lambda i: tokens[i] if isinstance(i, int) and 0 <= i < len(tokens) else ""  # noqa: E731
+        rendered, why = render_template(template, word(bos), word(eos))
+        if rendered is None:
+            (report["skipped"] if why.startswith("the image") else report["warnings"]).append(
+                why[0].upper() + why[1:] + ".")
+        else:
+            report["checks"].append("chat template: renders the fixed conversation")
+    text = TOKENIZER_TEXT + ("\n" + rendered if rendered else "")
+    ids, why = llama_tokens(gguf, tools, text, seconds)
+    if ids is None:
+        report["skipped"].append(why)
+    else:
+        if meta.get("tokenizer.ggml.add_bos_token") and isinstance(bos, int) and ids[:1] == [bos]:
+            ids = ids[1:]
+        report["tokens"] = len(ids)
+        if rendered:
+            special = {t: i for i, t in enumerate(tokens) if i < len(types) and types[i] in
+                       (TOKEN_CONTROL, TOKEN_USER_DEFINED) and len(t) > 1}
+            for piece, index in sorted(special.items()):
+                wanted = rendered.count(piece)
+                if wanted and ids.count(index) < wanted:
+                    report["warnings"].append(f"llama.cpp does not read {piece} of the chat template as one token.")
+        if not source.is_file():
+            theirs, why = source_tokens(source, text)
+            if theirs is None:
+                report["skipped"].append(why)
+            elif theirs == ids:
+                report["checks"].append(f"tokens: the source tokenizer's ({len(ids)} tokens of the fixed text)")
+            else:
+                at = next((i for i, (a, b) in enumerate(zip(ids, theirs)) if a != b), min(len(ids), len(theirs)))
+                ours = [tokens[i] if 0 <= i < len(tokens) else str(i) for i in ids[at:at + 3]]
+                report["warnings"].append(f"llama.cpp tokenizes the fixed text differently from the source's "
+                                          f"tokenizer from token {at} on ({len(ids)} against {len(theirs)} tokens; "
+                                          f"llama.cpp: {ours!r}).")
+    report["status"] = "warn" if report["warnings"] else "pass"
+    return report
+
+
+def tokenizer_lines(report: Dict[str, Any]) -> List[str]:
+    """The check in the build's log: the verdict, then what passed, what differs and what could not be checked."""
+    head = ("Tokenizer and chat template: passed" if report.get("status") == "pass"
+            else f"Tokenizer and chat template: {len(report.get('warnings') or [])} warning(s)")
+    return ([head] + [f"  checked {c}" for c in report.get("checks") or []]
+            + [f"  WARNING: {w}" for w in report.get("warnings") or []]
+            + [f"  not checked: {s}" for s in report.get("skipped") or []])
+
+
 # --- Commands ----------------------------------------------------------------------------------------------------
 
 def cmd_input(args) -> None:
@@ -859,6 +1215,29 @@ def cmd_keep(args) -> None:
     state_file.unlink()
 
 
+def cmd_gguf_type(args) -> None:
+    """Prints the quantization type of a GGUF model file (its own check first): what the convert stage passes
+    through or quantizes again."""
+    print(gguf_type(Path(args.file)))
+
+
+def cmd_imatrix(args) -> None:
+    """A given importance matrix against the model it quantizes (IMATRIX_COVERAGE of its weight matrices)."""
+    found, total = imatrix_coverage(Path(args.file), Path(args.model))
+    log(f"Importance matrix {Path(args.file).name}: it names {found} of the {total} weight matrices of the model.")
+
+
+def cmd_tokenizer(args) -> None:
+    """The tokenizer and chat-template check of a built GGUF (tokenizer_check), written to --report as JSON and
+    shown in the log; a difference is a warning, never a failure."""
+    global STAGE
+    STAGE = args.stage
+    report = tokenizer_check(Path(args.file), Path(args.source), Path(args.tools), args.seconds)
+    Path(args.report).write_bytes((json.dumps(report, ensure_ascii=False, indent=1) + "\n").encode("utf-8"))
+    for line in tokenizer_lines(report):
+        log(line)
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="model_check.py", description="The checks of the convert stage.")
     sub = p.add_subparsers(dest="command", required=True)
@@ -900,11 +1279,24 @@ def parser() -> argparse.ArgumentParser:
     group.add_argument("--stopped", action="store_true")
     s = sub.add_parser("keep")
     s.add_argument("--state", required=True)
+    s = sub.add_parser("gguf-type")
+    s.add_argument("file")
+    s = sub.add_parser("imatrix")
+    s.add_argument("file")
+    s.add_argument("--model", required=True)
+    s = sub.add_parser("tokenizer")
+    s.add_argument("file")
+    s.add_argument("--source", required=True)
+    s.add_argument("--tools", required=True)
+    s.add_argument("--report", required=True)
+    s.add_argument("--seconds", type=int, default=120)
+    s.add_argument("--stage", default="TARGET")
     return p
 
 
 COMMANDS = {"input": cmd_input, "begin": cmd_begin, "watch": cmd_watch, "output": cmd_output, "test": cmd_test,
-            "restore": cmd_restore, "keep": cmd_keep}
+            "restore": cmd_restore, "keep": cmd_keep, "gguf-type": cmd_gguf_type, "imatrix": cmd_imatrix,
+            "tokenizer": cmd_tokenizer}
 
 
 def main(argv: Optional[List[str]] = None) -> int:

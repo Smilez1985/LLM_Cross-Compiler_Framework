@@ -306,7 +306,8 @@ DELETION_KINDS = ("artifact", "model_file", "download", "knowledge_snapshot", "t
                   "build_dependency",  # a pinned source of the build dependency cache (runtime/build/deps.py)
                   "failed_build",  # what an interrupted build left, kept to continue it (Core/interrupted_build.py)
                   "bundle",  # a stored board bundle (runtime/bundle/generator.py BundleStore)
-                  "acp_agent")  # an ACP agent the person added: its folders and its entry (Core/acp_hosts.py)
+                  "acp_agent",  # an ACP agent the person added: its folders and its entry (Core/acp_hosts.py)
+                  "f16_intermediate")  # a kept F16 intermediate of GGUF builds (Core/f16_cache.py)
 # Docker's own objects have no host path; every other item is listed with its full path.
 NO_PATH_KINDS = ("docker_image", "build_cache", "docker_container")
 DeletionKind = Literal[DELETION_KINDS]  # type: ignore[valid-type]

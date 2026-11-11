@@ -91,12 +91,20 @@ CLI_PATHS: Dict[str, str] = {
     # the memory estimate of the model at the type: the Builder's line under the quantization (lbl_builder_memory_estimate)
     "build preflight --model": "combo_builder_model",
     "build preflight --quantization": "combo_builder_quantization",
+    "build preflight --tensor-type": "txt_builder_tensor_types",
+    # the large models (DESIGN, the row "Large models"): the Builder's fields and its question before the start
+    "build start --imatrix-file": "txt_builder_imatrix_file",
+    "build start --tensor-type": "txt_builder_tensor_types",
+    "build start --accept-resource-risk": "btn_builder_start",   # its question about this computer's disk and memory
     "build save": "btn_deploy_save",                          # Deployment tab > Save...
     "build save --to": "btn_deploy_save",                     # its folder dialog chooses the folder
     # Build > Build Dependencies...: the dependency cache of module CMake options (runtime/build/deps.py)
     "build deps list": "act_build_deps",
     "build deps fetch": "btn_build_deps_fetch",
     "build deps delete": "btn_build_deps_delete",
+    # Build > F16 Intermediates...: the kept F16 intermediates of GGUF builds (Core/f16_cache.py)
+    "build f16 list": "act_build_f16",
+    "build f16 delete": "btn_f16_delete",
     "build status": "act_build_history",
     "build status --all": "act_build_history",
     # Build > Build History... > Continue or delete...: an interrupted build with finished stages kept
@@ -115,6 +123,7 @@ CLI_PATHS: Dict[str, str] = {
     "build tune start --type": "txt_tuning_types",
     "build tune start --imatrix": "cmb_tuning_imatrix",
     "build tune start --chunks": "spin_tuning_chunks",
+    "build tune start --candidate": "txt_tuning_recipes",
     "build tune start --yes": "btn_tuning_plan",              # the tab shows the plan first, Start Tuning starts it
     "build tune start --follow": "panel_builder_progress",    # the run is a build: the Builder's progress panel
     "build tune list": "lst_tuning_runs",
@@ -145,6 +154,7 @@ CLI_PATHS: Dict[str, str] = {
 }
 # The objects of this area that live in a window, with the menu action that opens it (the parity test opens it).
 WINDOW_OBJECTS: Dict[str, str] = {"btn_build_deps_fetch": "act_build_deps", "btn_build_deps_delete": "act_build_deps",
+                                   "btn_f16_delete": "act_build_f16",
                                    "btn_history_interrupted": "act_build_history",
                                    "btn_targets_edit": "act_build_targets"}
 # The switches of this area that are for scripts only, with the reason (as the other menu modules list theirs; the
@@ -184,6 +194,9 @@ def install(window, menubar) -> None:
     build_menu.addAction(window.act_build_targets)
     build_menu.addAction(window.act_build_history)
     build_menu.addAction(window.act_build_deps)
+    window.act_build_f16 = place.new_action(window, "act_build_f16", ui_text("bld.menu.f16", lang),
+                                            lambda: open_build_f16(window))
+    build_menu.addAction(window.act_build_f16)
 
     window.act_file_settings = place.new_action(window, "act_file_settings", ui_text("bld.menu.settings", lang),
                                                 lambda: open_settings(window))
@@ -251,6 +264,18 @@ def open_build_deps(window):
     return dialog
 
 
+def open_build_f16(window):
+    """Build > F16 Intermediates...: the kept F16 intermediates (Core/f16_cache.py), as `build f16 list|delete`."""
+    from orchestrator.gui.f16_window import F16IntermediatesDialog
+    try:
+        dialog = F16IntermediatesDialog(window.framework, window)
+    except Exception as e:  # noqa: BLE001 - e.g. no cache folder; plain text (SEC-M2)
+        plain_box(window, "critical", ui_text("bld.f16.title"), one_line(str(e)))
+        return None
+    dialog.exec()
+    return dialog
+
+
 def open_settings(window):
     """File > Settings...: the effective settings and the source repository overrides (settings_view)."""
     from orchestrator.gui.settings_window import SettingsDialog
@@ -264,5 +289,6 @@ def open_settings(window):
     return dialog
 
 
-__all__ = ["CLI_PATHS", "MACHINE_ONLY", "WINDOW_OBJECTS", "install", "open_build_deps", "open_build_history", "open_settings",
+__all__ = ["CLI_PATHS", "MACHINE_ONLY", "WINDOW_OBJECTS", "install", "open_build_deps", "open_build_f16",
+           "open_build_history", "open_settings",
            "open_targets"]

@@ -33,7 +33,7 @@ DIGEST_KEY = "build_options_sha256"
 # Every option an identical build shares (the manifest's build_options holds exactly these plus "version").
 OPTION_KEYS = ("model", "revision", "weights", "target", "target_sha256", "board", "format", "quantization",
                "imatrix", "dataset_sha256", "optimization", "max_context_length", "use_gpu", "model_task",
-               "hardware_sha256")
+               "hardware_sha256", "tensor_types", "imatrix_sha256")
 # Compared without letter case (a repo id, a board or a quantization type in another case is the same choice).
 CASELESS = ("model", "target", "board", "format", "quantization", "optimization", "model_task")
 MAX_WEIGHT_FILES = 10000
@@ -93,7 +93,8 @@ def build_options(*, model: Optional[str], revision: Optional[str], weights: Opt
                   target: str, target_sha256: Optional[str], board: Optional[str], fmt: str,
                   quantization: Optional[str], imatrix: bool, dataset_sha256: Optional[str], optimization: str,
                   max_context_length: Optional[int], use_gpu: bool, model_task: str = "LLM",
-                  hardware_sha256: Optional[str] = None) -> Dict[str, Any]:
+                  hardware_sha256: Optional[str] = None, tensor_types: Optional[List[str]] = None,
+                  imatrix_sha256: Optional[str] = None) -> Dict[str, Any]:
     """The chosen options of one build, as the manifest records them. `model`: the Hugging Face repo id (None for a
     local model, which is named by its `weights` instead: never its path). `hardware_sha256`: the board's probe the
     build was tuned to (text_sha256 of the file the build reads), None without one."""
@@ -101,11 +102,19 @@ def build_options(*, model: Optional[str], revision: Optional[str], weights: Opt
             "target_sha256": target_sha256, "board": board, "format": fmt, "quantization": quantization,
             "imatrix": bool(imatrix), "dataset_sha256": dataset_sha256, "optimization": optimization,
             "max_context_length": max_context_length, "use_gpu": bool(use_gpu), "model_task": model_task or "LLM",
-            "hardware_sha256": hardware_sha256}
+            "hardware_sha256": hardware_sha256,
+            # the large models' options, only when a build has them (a build without them keeps its digest)
+            **({"tensor_types": list(tensor_types)} if tensor_types else {}),
+            **({"imatrix_sha256": imatrix_sha256} if imatrix_sha256 else {})}
+
+
+# Options a build records only when it has them: left out of the digest when empty, so an earlier build's digest stays
+OPTIONAL_KEYS = ("tensor_types", "imatrix_sha256")
 
 
 def options_sha256(options: Dict[str, Any]) -> str:
-    text = json.dumps({k: options.get(k) for k in ("version", *OPTION_KEYS)}, sort_keys=True, separators=(",", ":"))
+    text = json.dumps({k: options.get(k) for k in ("version", *OPTION_KEYS)
+                       if k not in OPTIONAL_KEYS or options.get(k)}, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 

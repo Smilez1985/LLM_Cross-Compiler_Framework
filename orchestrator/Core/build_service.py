@@ -256,14 +256,30 @@ class BuildService:
             if dataset_pin is not None and dataset_pin.is_dir:
                 raise LocalFileError(f"{dataset_pin.ref} is a folder; a calibration dataset is a file (for RKNN the "
                                      "sample list).", next_step="name the dataset file inside its folder.")
+            # a given importance matrix: a Hugging Face file stays its reference, a local one is pinned like a dataset
+            field = "imatrix_file"
+            from orchestrator.Core.imatrix_source import is_hub_reference
+            matrix = request.imatrix_file
+            matrix_pin = None
+            if matrix and not is_hub_reference(matrix):
+                if not looks_like_reference(matrix):
+                    raise LocalFileError(f"'{matrix}' is neither a local file reference nor a Hugging Face file "
+                                         "(hf:owner/name/path).", next_step="name the importance matrix as "
+                                         "<label>:<relative path> or hf:owner/name/path.")
+                matrix_pin = local().resolve(matrix)
+                if matrix_pin.is_dir:
+                    raise LocalFileError(f"{matrix_pin.ref} is a folder; an importance matrix is a file.",
+                                         next_step="name the matrix file inside its folder.")
         except LocalFileError as e:
             e.field = field
             raise
         update = {"model": model_pin.path if model_pin else model,
                   "dataset_path": dataset_pin.path if dataset_pin else None}
+        if matrix_pin is not None:
+            update["imatrix_file"] = matrix_pin.path
         # Always present for an AI caller, also without pins: the build engine then never looks the model source up
         # on disk (a repo id that happens to name a folder below the working directory stays a repo id).
-        return request.model_copy(update=update), LocalInputs(model_pin, dataset_pin)
+        return request.model_copy(update=update), LocalInputs(model_pin, dataset_pin, matrix_pin)
 
     @staticmethod
     def _check_model_source(model: str, shown: Optional[str] = None) -> str:
@@ -1171,7 +1187,9 @@ class BuildService:
                                  board=board or None, quantization=quantization or None, use_imatrix=use_imatrix,
                                  # "" when the recipe names no dataset: a recipe never takes the person's default
                                  dataset_path=(own if own is not None else dataset_path) or "",
-                                 use_gpu=bool(use_gpu), max_context_length=recipe.options.max_context_length)
+                                 use_gpu=bool(use_gpu), max_context_length=recipe.options.max_context_length,
+                                 # a format-3 recipe's per-tensor types (the large models): part of the template
+                                 tensor_types=list(recipe.options.tensor_types or []) or None)
         return request, recipe, prov
 
     def recipe_pins(self, recipe) -> Tuple[str, Optional[str], Optional[str]]:
@@ -1462,7 +1480,58 @@ class BuildService:
             shape = None
         return me.estimate(shape, quant, board=board, ram_mib=ram, ram_source=source,
                            ctx=getattr(request, "max_context_length", None),
-                           imatrix=bool(getattr(request, "use_imatrix", True)))
+                           imatrix=bool(getattr(request, "use_imatrix", True)),
+                           tensor_types=list(getattr(request, "tensor_types", None) or ()))
+
+    def resource_check(self, request: BuildRequestIn, *, look_up_hub: bool = True, facts: Any = None):
+        """The check of this computer's disk and memory before a validated build (Core/build_resources.py): the disk
+        rule's needs of this build (a GGUF input and a kept F16 intermediate change them) against the free space and
+        what other calls reserved, and the conversion's memory against this computer's RAM. A warning for the
+        person's own builds (they decide), the same numbers as an AI's question; never raises for missing facts."""
+        from orchestrator.Core import build_large, build_resources, f16_cache
+        from orchestrator.Core.build_plan import _best_vram, _cached_bytes, _size_of, folder
+        from orchestrator.utils.locality import offline_mode
+        model = str(request.model or "")
+        path = Path(model).expanduser()
+        size = cached = 0
+        parameters, commit, gguf = None, request.revision, None
+        if path.is_absolute() or path.exists() or not HF_REPO_ID.match(model):
+            if path.exists():
+                size = cached = _size_of(path.resolve())
+                if path.is_file() and path.suffix.lower() == ".gguf" and str(request.format).lower() == "gguf":
+                    gguf = build_resources.gguf_input(path, request.quantization)
+        elif offline_mode(getattr(self.framework, "config", None)) or not look_up_hub:
+            try:
+                copy = self.local_copy(model, request.revision)
+            except Exception:  # noqa: BLE001 - no copy here: the size is unknown
+                copy = None
+            if copy is not None:
+                size = cached = _size_of(Path(copy.path))
+                commit = copy.commit or commit
+        else:
+            try:
+                facts = facts or self.hub_facts(model, request.revision)
+            except Exception:  # noqa: BLE001 - Hugging Face not reachable: the size is unknown
+                facts = None
+            if facts is not None:
+                size, parameters = int(facts.download_bytes or 0), facts.parameters
+                commit = facts.commit or commit
+                cached = _cached_bytes(folder(self.framework, "cache_dir", "cache"), model, commit, facts)
+        cache_dir = folder(self.framework, "cache_dir", "cache")
+        kept = f16_cache.F16Cache(cache_dir)
+        quant = str(request.quantization or "").upper()
+        wants_f16 = str(request.format).lower() == "gguf" and gguf is None and bool(
+            request.use_imatrix or (quant and quant not in build_large.CONVERT_TYPES))
+        f16_cached = wants_f16 and HF_REPO_ID.match(model) is not None and \
+            kept.entry(f16_cache.key(model, commit or "", build_large._pin())) is not None
+        hw = self.host_hardware()
+        return build_resources.check(
+            size=size, cached=cached, fmt=str(request.format), quantization=request.quantization,
+            use_imatrix=bool(request.use_imatrix) and not request.imatrix_file,
+            cache_dir=cache_dir, output_dir=folder(self.framework, "output_dir", "output"), parameters=parameters,
+            hardware=hw, vram=_best_vram(hw) if hw is not None else None, use_gpu=bool(request.use_gpu), gguf=gguf,
+            f16_cached=f16_cached, f16_kept_bytes=kept.total_bytes(), ledger=self.disk_ledger(),
+            disk_usage=self.disk_usage)
 
     def _estimate_record(self, req: BuildRequestIn, inputs: Optional[LocalInputs]) -> Optional[Dict[str, Any]]:
         """The estimate a build records when its caller passed none: from the local model or the copy on this
@@ -1528,7 +1597,10 @@ class BuildService:
             quantization=req.quantization, imatrix=imatrix, dataset_sha256=dataset,
             optimization=self.optimization_for(req, optimization).lower(), max_context_length=req.max_context_length,
             use_gpu=req.use_gpu, model_task=model_task,
-            hardware_sha256=build_identity.text_sha256(self.probe_text(req.probe)))
+            hardware_sha256=build_identity.text_sha256(self.probe_text(req.probe)),
+            tensor_types=list(req.tensor_types) if req.tensor_types else None,
+            imatrix_sha256=(build_identity.file_sha256(req.imatrix_file)
+                            if req.imatrix_file and Path(req.imatrix_file).is_file() else None))
 
     def earlier_builds(self, request: BuildRequestIn, *, revision: Optional[str] = None,
                        optimization: Optional[str] = None, local_paths: bool = False, model_task: str = "LLM"):
@@ -1616,11 +1688,95 @@ class BuildService:
         if check_here and getattr(inputs, "model", None) is None and HF_REPO_ID.match(model) \
                 and not Path(model).is_absolute():
             self.check_model_here(model, request.revision, for_ai=not local_paths)
+        # the large models (DESIGN, the row "Large models"): a GGUF input's own type, per-tensor types, a given matrix
+        large = self._large_model_checks(request, fmt, quant, model, use_imatrix, caps, board, dataset,
+                                         quantization_given=request.quantization is not None)
         return request.model_copy(update={"target": target, "format": fmt, "board": board, "quantization": quant,
                                           # "" when there is none: a checked request checked again (the CLI's,
                                           # start_build's) never takes a default it was not given
                                           "use_imatrix": use_imatrix, "dataset_path": dataset or "", "model": model,
-                                          "probe": probe_id}), inputs
+                                          "probe": probe_id, **large}), inputs
+
+    def _large_model_checks(self, request: BuildRequestIn, fmt: str, quant: Optional[str], model: str,
+                            use_imatrix: bool, caps: Optional[TargetCapabilities], board: Optional[str],
+                            dataset: Optional[str], *, quantization_given: bool) -> Dict[str, Any]:
+        """The request's large-model options checked (DESIGN, the row "Large models"): a GGUF input without a type
+        takes its own (a passthrough, without an importance matrix); per-tensor types need GGUF and a type
+        llama-quantize makes (Core/tensor_types.py); a given importance matrix needs GGUF, is a file of the right
+        format or a Hugging Face file (online only), and turns the importance matrix on. Returns the request's
+        updated fields."""
+        from orchestrator.Core import build_large, imatrix_source, tensor_types
+        from orchestrator.Core.build_resources import gguf_input
+        out: Dict[str, Any] = {}
+        is_gguf = str(fmt or "").lower() == "gguf"
+        source = Path(str(model or ""))
+        if is_gguf and source.suffix.lower() == ".gguf" and source.is_file():
+            plan = gguf_input(source, quant if quantization_given else None)
+            if not quantization_given and plan.file_type:
+                problems = caps.check_request(fmt, board, plan.file_type, dataset=bool(dataset),
+                                              imatrix=False) if caps is not None else []
+                if not problems:
+                    out["quantization"] = plan.file_type
+            if (out.get("quantization") or quant or "").upper() == (plan.file_type or "-"):
+                out["use_imatrix"] = False   # a passthrough quantizes nothing
+        entries = []
+        if request.tensor_types:
+            try:
+                entries = tensor_types.normalize(request.tensor_types)
+            except tensor_types.TensorTypeError as e:
+                raise BuildServiceError(str(e), code="invalid_value", field="tensor_types",
+                                        next="Write each entry as PATTERN=TYPE, e.g. ffn_down=q6_k.") from None
+            final = str(out.get("quantization") or quant or "").upper()
+            if not is_gguf or not final or final in build_large.CONVERT_TYPES:
+                raise BuildServiceError("Per-tensor types need a GGUF type llama-quantize makes (not F16, BF16, F32 or "
+                                        "Q8_0, which the converter writes itself).", code="not_supported",
+                                        field="tensor_types",
+                                        next="Choose a quantized GGUF type, or leave the per-tensor types out.")
+        out["tensor_types"] = entries or None
+        matrix = str(request.imatrix_file or "").strip()
+        if matrix:
+            if not is_gguf:
+                raise BuildServiceError("An importance matrix is a GGUF concept; this build is not GGUF.",
+                                        code="not_supported", field="imatrix_file",
+                                        next="Leave the importance matrix out for this format.")
+            try:
+                if imatrix_source.is_hub_reference(matrix):
+                    imatrix_source.parse_hub(matrix)
+                    from orchestrator.utils.locality import offline_mode
+                    if offline_mode(getattr(self.framework, "config", None)):
+                        raise imatrix_source.ImatrixError(
+                            "Offline mode is on: an importance matrix from Hugging Face cannot be downloaded.")
+                else:
+                    imatrix_source.check_file(Path(matrix).expanduser())
+                    matrix = str(Path(matrix).expanduser().resolve())
+            except imatrix_source.ImatrixError as e:
+                raise BuildServiceError(str(e), code="invalid_value", field="imatrix_file",
+                                        next="Name an importance matrix file (GGUF or .dat) made for this model, or "
+                                             "leave it out to compute one.") from None
+            if out.get("use_imatrix") is False:
+                raise BuildServiceError("The GGUF input is passed through at its own type: nothing is quantized, so "
+                                        "no importance matrix is used.", code="invalid_value", field="imatrix_file",
+                                        next="Leave the importance matrix out, or choose another type.")
+            out["use_imatrix"] = True
+        out["imatrix_file"] = matrix or None
+        return out
+
+    def large_model_options(self, req: BuildRequestIn,
+                            tuned: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """BuildRequest.large_model of a validated request: the per-tensor types (measured when a tuning run measured
+        exactly these: `tuned`), the given importance matrix, a GGUF input's plan; None when the build has none."""
+        from orchestrator.Core.build_resources import gguf_input
+        out: Dict[str, Any] = {}
+        if req.tensor_types:
+            out["tensor_types"] = list(req.tensor_types)
+            measured = list((tuned or {}).get("tensor_types") or [])
+            out["tensor_types_measured"] = bool(measured) and measured == list(req.tensor_types)
+        if req.imatrix_file:
+            out["imatrix_file"] = req.imatrix_file
+        source = Path(str(req.model or ""))
+        if str(req.format).lower() == "gguf" and source.suffix.lower() == ".gguf" and source.is_file():
+            out["gguf_input"] = gguf_input(source, req.quantization).as_dict()
+        return out or None
 
     # --- the defaults of the importance matrix and the calibration text (Core/build_defaults.py) ----------------
 
@@ -1882,6 +2038,7 @@ class BuildService:
             recipe=dict(recipe) if recipe else None,
             memory_estimate=dict(memory_estimate) if isinstance(memory_estimate, dict) else None,
             tuned=dict(tuned) if tuned else None,
+            large_model=self.large_model_options(req, tuned),
         )
         if disk_reservation:
             self._orchestrator.disk_ledger = self.disk_ledger()
@@ -1901,6 +2058,7 @@ class BuildService:
             return None
 
     def plan_tuning(self, request: BuildRequestIn, *, types: Optional[List[str]] = None, imatrix: str = "auto",
+                    recipes: Optional[List[str]] = None,
                     chunks: int = 0, ctx: int = 0, local_paths: bool = False, look_up_hub: bool = True):
         """(TuningPlan, the checked request) of a tuning run: the request checked like a build's (gguf; target,
         board and probe resolved), the candidates (tuning.plan_candidates: the board profile's types that fit by the
@@ -1944,6 +2102,7 @@ class BuildService:
                                ctx=req.max_context_length, imatrix=with_matrix)
 
         candidates, notes = tuning.plan_candidates(
+            recipes=[tuning.parse_recipe(r) for r in recipes or []],
             offered=offered, recommended=recommended, yours=list(types or []), estimate_for=estimate_for,
             reads_imatrix=lambda q: self._imatrix_of(None, "gguf", q, caps), imatrix=imatrix)
         f16 = me.weights_bytes(shape, "F16")[0] if shape is not None else None
@@ -2060,16 +2219,18 @@ class BuildService:
         from orchestrator.Core import tuning
         found = self.tuning_report(run)
         report = found["report"]
-        quant, with_matrix = tuning.build_choice(report, label)
-        row = next(r for r in report.get("candidates") or [] if r.get("quantization") == quant
-                   and bool(r.get("imatrix")) == with_matrix)
+        row = tuning.chosen_row(report, label)
+        quant, with_matrix = str(row["quantization"]), bool(row.get("imatrix"))
+        entries = list(row.get("tensor_types") or [])
         request = BuildRequestIn(model=str(report.get("model")), target=str(report.get("target")), format="gguf",
-                                 board=report.get("board") or None, quantization=quant, use_imatrix=with_matrix)
+                                 board=report.get("board") or None, quantization=quant, use_imatrix=with_matrix,
+                                 tensor_types=entries or None)
+        tuned = {"run": found["id"], "label": row.get("label"), "kld": row.get("kld"), "top1": row.get("top1"),
+                 "reference": (report.get("reference") or {}).get("type")}
+        if entries:   # the per-tensor recipe this run measured: the build records it as measured
+            tuned["tensor_types"] = entries
         return self.start_build(request, local_paths=local_paths, owner=owner,
-                                description=f"Build tuned by {found['id']}", tuned={
-                                    "run": found["id"], "label": row.get("label"), "kld": row.get("kld"),
-                                    "top1": row.get("top1"), "reference": (report.get("reference") or {}).get("type")},
-                                **kwargs)
+                                description=f"Build tuned by {found['id']}", tuned=tuned, **kwargs)
 
     def _submit(self, build_request: BuildRequest) -> BuildHandle:
         """Queues a build request on the orchestrator: the one submission of start_build and continue_interrupted, so

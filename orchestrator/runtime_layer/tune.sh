@@ -11,9 +11,11 @@
 #      when the F16 does not fit into this computer's memory).
 #   2. The reference's logits on the evaluation text (TUNE_TEXT), recorded once in the work folder:
 #      llama-perplexity --kl-divergence-base, TUNE_CHUNKS chunks of TUNE_CTX tokens.
-#   3. Every candidate of TUNE_CANDIDATES ("TYPE:i" with the importance matrix IMATRIX_PATH, "TYPE:-" without), in turn:
-#      quantized from the F16 as a build quantizes it, measured with llama-perplexity --kl-divergence against the
-#      recorded logits, and deleted again. One failing candidate is recorded as failed; the others go on.
+#   3. Every candidate of TUNE_CANDIDATES ("TYPE:i" with the importance matrix IMATRIX_PATH, "TYPE:-" without;
+#      "TYPE:i:ID" or "TYPE:-:ID" with the per-tensor types of TUNE_TT_ID, PATTERN=TYPE entries separated by spaces,
+#      as orchestrator/Core/tensor_types.py checked them), in turn: quantized from the F16 as a build quantizes it,
+#      measured with llama-perplexity --kl-divergence against the recorded logits, and deleted again. One failing
+#      candidate is recorded as failed; the others go on.
 #
 # Results: $BUILD_CACHE_DIR/output/tuning/, per candidate LABEL.info (type, importance matrix, bytes, seconds, status,
 # exit, inputs) and LABEL.log (the statistic lines of llama-perplexity, which the host parses into numbers), and
@@ -49,11 +51,16 @@ case "$REFERENCE" in F16|Q8_0) ;; *) die "TUNE_REFERENCE must be F16 or Q8_0." ;
 
 mkdir -p "$WORK" "$RESULTS"
 
-# The F16 the candidates are quantized from: a GGUF input itself, else the one F16 the convert stage wrote
+# The F16 the candidates are quantized from: the build's F16 intermediate (F16_FILE: the one the convert stage wrote,
+# or the one kept from an earlier build of this model), a GGUF input itself, else the one F16 the convert stage wrote
+# into the output folder
 SOURCE=""
+if [ -n "${F16_FILE:-}" ] && [ -s "$F16_FILE" ]; then
+    SOURCE="$F16_FILE"
+fi
 case "${MODEL_SOURCE:-}" in
     *.gguf|*.GGUF)
-        if [ -f "$MODEL_SOURCE" ]; then
+        if [ -z "$SOURCE" ] && [ -f "$MODEL_SOURCE" ]; then
             SOURCE="$MODEL_SOURCE"
         fi ;;
 esac
@@ -142,15 +149,38 @@ n=0
 for spec in $CANDIDATES; do
     n=$((n + 1))
     type="${spec%%:*}"
-    flag="${spec#*:}"
+    rest="${spec#*:}"
+    flag="${rest%%:*}"
+    tt=""
+    case "$rest" in *:*) tt="${rest#*:}" ;; esac
     case "$type" in ''|*[!A-Za-z0-9_]*) die "'$type' is not a quantization type." ;; esac
-    case "$flag" in i|-) ;; *) die "'$spec' is not a candidate (TYPE:i or TYPE:-)." ;; esac
+    case "$flag" in i|-) ;; *) die "'$spec' is not a candidate (TYPE:i or TYPE:-, then :ID for per-tensor types)." ;; esac
     label="$type"
     if [ "$flag" = i ]; then
         [ -f "${IMATRIX_PATH:-}" ] || die "$type is to be measured with the importance matrix, but there is none."
         label="$type-imatrix"
     fi
-    key="$(printf '%s %s\n' "$INPUTS" "$spec" | digest)"
+    # The per-tensor types of the candidate (TUNE_TT_ID): llama-quantize's own options for output and token_embd,
+    # --tensor-type for every other pattern; set as the positional parameters, so no pattern is expanded by the shell
+    set --
+    entries=""
+    if [ -n "$tt" ]; then
+        case "$tt" in *[!0-9a-f]*) die "'$spec' names no per-tensor types (ID: hexadecimal)." ;; esac
+        eval "entries=\${TUNE_TT_$tt:-}"
+        [ -n "$entries" ] || die "The per-tensor types $tt of $type are missing (TUNE_TT_$tt)."
+        label="$label+$tt"
+        set -f
+        for entry in $entries; do
+            case "$entry" in ?*=?*) ;; *) die "'$entry' is not a per-tensor type (PATTERN=TYPE)." ;; esac
+            case "${entry%=*}" in
+                output) set -- "$@" --output-tensor-type "${entry##*=}" ;;
+                token_embd) set -- "$@" --token-embedding-type "${entry##*=}" ;;
+                *) set -- "$@" --tensor-type "$entry" ;;
+            esac
+        done
+        set +f
+    fi
+    key="$(printf '%s %s %s\n' "$INPUTS" "$spec" "$entries" | digest)"
     if [ "$(sed -n 's/^inputs //p' "$RESULTS/$label.info" 2>/dev/null)" = "$key" ]; then
         echo "=== Tuning $n/$total: $label resumed ==="
         continue
@@ -162,9 +192,9 @@ for spec in $CANDIDATES; do
     started="$(date +%s)"
     rc=0
     if [ "$flag" = i ]; then
-        "$QUANTIZE" --imatrix "$IMATRIX_PATH" "$SOURCE" "$candidate" "$type" || rc=$?
+        "$QUANTIZE" --imatrix "$IMATRIX_PATH" "$@" "$SOURCE" "$candidate" "$type" || rc=$?
     else
-        "$QUANTIZE" "$SOURCE" "$candidate" "$type" || rc=$?
+        "$QUANTIZE" "$@" "$SOURCE" "$candidate" "$type" || rc=$?
     fi
     status="done"
     bytes=0

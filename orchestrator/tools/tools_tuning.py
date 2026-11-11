@@ -34,6 +34,10 @@ class TuningIn(BaseModel):
                              description="Types to measure as well, whatever the memory estimate says")
     imatrix: Literal["auto", "both"] = Field(default="auto", description="auto: types below 5 bits with the "
                                              "importance matrix; both: those types with and without it")
+    candidates: List[str] = Field(default_factory=list, max_length=4,
+                                  description="Per-tensor recipes to measure as well, each TYPE+PATTERN=TYPE[,...] "
+                                              "(e.g. Q4_K_M+ffn_down=q6_k): llama-quantize's per-tensor types, "
+                                              "measured by KL divergence like every type")
     chunks: int = Field(default=16, ge=4, le=48, description="Chunks of the evaluation text (default 16)")
     chunk_tokens: Literal[256, 512, 1024] = Field(default=512, description="Tokens per chunk (default 512)")
 
@@ -71,7 +75,8 @@ def tuning_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
         from orchestrator.Core.tuning import TuningError
         try:
             plan, _req = service.plan_tuning(request_of(inp), types=list(inp.types), imatrix=inp.imatrix,
-                                             chunks=inp.chunks, ctx=inp.chunk_tokens)
+                                             chunks=inp.chunks, ctx=inp.chunk_tokens,
+                                             recipes=list(inp.candidates))
         except (TuningError, BuildServiceError) as e:
             raise refusal(e) from None
         first = plan.candidates[0]

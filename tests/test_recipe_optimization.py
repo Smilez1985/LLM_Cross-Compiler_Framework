@@ -80,7 +80,8 @@ def test_the_level_and_the_format_must_fit():
     assert read(recipe_data(schema_version=2)).options.optimization is None, "format 2 is read"
 
 
-@pytest.mark.parametrize("version", [3, 17])
+# Format 3 (per-tensor types, the large models) is read since llmcf 3.4.0 too: the first later format is 4
+@pytest.mark.parametrize("version", [4, 17])
 def test_a_later_format_is_refused_naming_the_version_it_needs(tmp_path, version):
     from orchestrator.Core.community_manager import read_recipe
     from orchestrator.Core.recipe_optimization import FORMAT_NEEDS, RecipeFormatError
@@ -88,8 +89,8 @@ def test_a_later_format_is_refused_naming_the_version_it_needs(tmp_path, version
     with pytest.raises(RecipeFormatError) as e:
         read_recipe(tmp_path)
     assert f"format {version}" in str(e.value) and "a framework version newer than llmcf" in str(e.value)
-    assert "Update the framework" in str(e.value) and "formats 1, 2" in str(e.value)
-    assert FORMAT_NEEDS[2] == "llmcf 3.4.0 or later"
+    assert "Update the framework" in str(e.value) and "formats 1, 2, 3" in str(e.value)
+    assert FORMAT_NEEDS[2] == "llmcf 3.4.0 or later" and FORMAT_NEEDS[3] == "llmcf 3.4.0 or later"
     (tmp_path / "recipe.yml").write_text(json.dumps(recipe_data(schema_version="x")), encoding="utf-8")
     with pytest.raises(RecipeFormatError) as e:
         read_recipe(tmp_path)
@@ -134,9 +135,9 @@ def test_the_pack_check_accepts_a_format_2_recipe_and_names_a_later_format(tmp_p
                               license="Apache-2.0")
     notes = []
     assert cm._check_recipe(root, manifest, notes) == [] and "not installed" in notes[0]
-    (root / RECIPE_FILE).write_text(json.dumps({**data, "schema_version": 3}), encoding="utf-8")
+    (root / RECIPE_FILE).write_text(json.dumps({**data, "schema_version": 4}), encoding="utf-8")
     (problem,) = cm._check_recipe(root, manifest, [])
-    assert problem.startswith(f"{RECIPE_FILE}: The recipe is written in format 3, which needs a framework version "
+    assert problem.startswith(f"{RECIPE_FILE}: The recipe is written in format 4, which needs a framework version "
                               "newer")
 
 

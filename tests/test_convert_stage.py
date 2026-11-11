@@ -64,12 +64,31 @@ def test_the_model_suffixes_are_the_frameworks():
     assert mc.MODEL_SUFFIXES == MODEL_SUFFIXES
 
 
+# The libraries the tokenizer check uses when the image has them (the converter's own), each imported only inside a
+# try whose handler catches ImportError: without them the check says what it could not check (DESIGN, the row "Large
+# models")
+OPTIONAL_LIBRARIES = {"jinja2", "tokenizers"}
+
+
 def test_model_check_needs_only_the_standard_library():
     tree = ast.parse((ROCKCHIP / "scripts" / "model_check.py").read_text(encoding="utf-8"))
-    modules = {alias.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import)
-               for alias in node.names}
-    modules |= {node.module.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
-    assert modules <= set(sys.stdlib_module_names), modules - set(sys.stdlib_module_names)
+    guarded = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Try) and any(isinstance(h.type, ast.Name) and h.type.id == "ImportError"
+                                             for h in node.handlers):
+            guarded |= {id(inner) for stmt in node.body for inner in ast.walk(stmt)}
+    found = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                found.setdefault(alias.name.split(".")[0], []).append(id(node))
+        elif isinstance(node, ast.ImportFrom):
+            found.setdefault(node.module.split(".")[0], []).append(id(node))
+    modules = set(found)
+    outside = modules - set(sys.stdlib_module_names)
+    assert outside <= OPTIONAL_LIBRARIES, outside - OPTIONAL_LIBRARIES
+    for name in outside:   # an optional library is never needed: every import of it is guarded
+        assert all(n in guarded for n in found[name]), name
 
 
 # ---------------------------------------------------------------------------------------------------------------

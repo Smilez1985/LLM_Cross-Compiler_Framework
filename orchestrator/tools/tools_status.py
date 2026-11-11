@@ -99,6 +99,9 @@ class FrameworkSection(BaseModel):
     active_builds: int = Field(description="Unfinished build requests of this framework process")
     policy_configured: bool
     policy_problem: bool = Field(description="The permission file is damaged: every tool is denied")
+    f16_intermediates: int = Field(default=0, description="F16 intermediates kept for the next GGUF build of their "
+                                                          "model (only the person deletes them)")
+    f16_intermediates_bytes: int = Field(default=0, description="Their size in the build cache")
 
 
 class GpuOut(BaseModel):
@@ -442,7 +445,18 @@ def framework_section(framework, registry) -> FrameworkSection:
                             offline_mode=offline_mode(getattr(framework, "config", None)),
                             knowledge_base=bool(_cfg(framework, "enable_rag_knowledge", False)), active_builds=active,
                             policy_configured=bool(policy.configured),
-                            policy_problem=bool(getattr(registry.policy_store, "problem", None)))
+                            policy_problem=bool(getattr(registry.policy_store, "problem", None)),
+                            **_f16_facts(framework))
+
+
+def _f16_facts(framework) -> Dict[str, int]:
+    """The kept F16 intermediates (Core/f16_cache.py): their count and size, never a path."""
+    try:
+        from orchestrator.Core.f16_cache import F16Cache
+        entries = F16Cache.for_framework(framework).entries()
+    except Exception:  # noqa: BLE001 - no cache folder: none kept
+        return {}
+    return {"f16_intermediates": len(entries), "f16_intermediates_bytes": sum(e.size_bytes for e in entries)}
 
 
 def host_section(framework, hardware: Callable[[], Any]) -> Optional[HostSection]:

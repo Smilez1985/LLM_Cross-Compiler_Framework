@@ -11,7 +11,7 @@ makes recipes (read, from_build_info); this bottom-layer schema only declares th
 import re
 from datetime import datetime, timezone
 from pathlib import PurePath
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -60,12 +60,19 @@ class DatasetRef(_Strict):
     sha256: str = Field(pattern=_SHA256)
 
 
+# One per-tensor type as Core/tensor_types.py writes it (lower case PATTERN=TYPE; the pattern's characters only)
+_TENSOR_TYPE = r"^[a-z0-9_.\\\[\]()|*+?^$-]+=[a-z0-9_]+$"
+
+
 class RecipeOptions(_Strict):
     use_imatrix: bool = False
     max_context_length: Optional[int] = Field(default=None, ge=256, le=1_048_576)
     dataset: Optional[DatasetRef] = None
     # The build's optimization level; a recipe that names one is format 2 (Core/recipe_optimization.py).
     optimization: Optional[Literal[OPTIMIZATION_LEVELS]] = None
+    # llama-quantize's per-tensor types (Core/tensor_types.py, PATTERN=TYPE); a recipe that has them is format 3
+    tensor_types: Optional[List[Annotated[str, Field(pattern=_TENSOR_TYPE, max_length=100)]]] = Field(
+        default=None, max_length=32)
 
 
 class ArtifactRef(_Strict):
@@ -173,6 +180,7 @@ class Recipe(_Strict):
             board=board, format=fmt.lower(), quantization=quant,
             options=RecipeOptions(
                 use_imatrix=bool(info.get("imatrix")), max_context_length=info.get("max_context_length"),
+                tensor_types=list(info.get("tensor_types") or []) or None,
                 dataset=DatasetRef(name=scrub(PurePath(str(dataset["name"])).name), sha256=dataset["sha256"])
                 if dataset else None),
             results=[RecipeResult(artifact=ArtifactRef(file=artifact["file"], size=artifact["bytes"],

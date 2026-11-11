@@ -911,3 +911,4 @@ class LocalInputs:
     (a Hugging Face repo id such as 'Documents/private' is downloaded, never mounted from the working directory)."""
     model: Optional[LocalFilePin] = None
     dataset: Optional[LocalFilePin] = None
+    imatrix: Optional[LocalFilePin] = None   # a given importance matrix (BuildRequestIn.imatrix_file)

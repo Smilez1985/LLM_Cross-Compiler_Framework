@@ -133,6 +133,9 @@ class BuildRequest:
     # A build of a tuning run's chosen type (BuildService.build_tuned): the run and its measured KLD, recorded in
     # build_info.json ("tuning")
     tuned: Optional[Dict[str, Any]] = None
+    # The large models (BuildService, Core/build_large.py): per-tensor types, a given importance matrix, a GGUF input's
+    # plan; handed to the build engine as BuildConfiguration.large_model
+    large_model: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if not self.request_id:
@@ -626,6 +629,7 @@ class LLMOrchestrator:
             memory_estimate=dict(req.memory_estimate) if getattr(req, "memory_estimate", None) else None,
             tuning=dict(req.tuning) if getattr(req, "tuning", None) else None,
             tuned=dict(req.tuned) if getattr(req, "tuned", None) else None,
+            large_model=dict(req.large_model) if getattr(req, "large_model", None) else None,
         )
 
     @staticmethod
@@ -814,6 +818,8 @@ class LLMOrchestrator:
             state.warnings.append("IMatrix applies to GGUF only; disabled for this request.")
         elif req.use_imatrix and req.dataset_path:
             self.logger.info(f"IMatrix enabled with user dataset {req.dataset_path}")
+        elif req.use_imatrix and (getattr(req, "large_model", None) or {}).get("imatrix_file"):
+            self.logger.info("IMatrix given as a file: no calibration text is needed")
         elif req.use_imatrix:
             state.current_stage = "Preparing calibration data"
             language = self.config.get("calibration_language", "mixed") if hasattr(self.config, "get") else "mixed"
