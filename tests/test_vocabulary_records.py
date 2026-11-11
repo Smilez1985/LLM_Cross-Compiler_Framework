@@ -334,6 +334,8 @@ def test_text_modules_are_merged_and_never_replace_a_key(monkeypatch):
                                              "orchestrator.utils.l10n_models",
                                              # the crash dialog and the start entry (starting without a terminal)
                                              "orchestrator.utils.l10n_launch",
+                                             # the Ditto console beside the chat
+                                             "orchestrator.utils.l10n_console",
                                              # wave 6: chain a0 pre-registers every planned module (a missing one is
                                              # skipped): the menu bar, the shell, the activity, Hugging Face, the
                                              # Ditto setup guide and the glossary

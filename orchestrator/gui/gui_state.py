@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 What the main window remembers between starts (delegation design 5.1): where the chat panel sits and whether it is
-shown, the window geometry, the newest chat entry the person has seen ("New since you last looked") and the panel's
-filter.
+shown, whether the Ditto console beside it is shown (its size and place are in the dock state), the window geometry,
+the newest chat entry the person has seen ("New since you last looked") and the panel's filter.
 
 The file `gui_state.json` lives in the per-user folder (mode 0600), never in QSettings, which writes outside it (the
 registry on Windows, ~/.config elsewhere). Reading never fails: a missing, unreadable or damaged file gives the
@@ -46,6 +46,8 @@ class GuiState:
     dock_state: str = ""              # QMainWindow.saveState(), base64
     geometry: str = ""                # QMainWindow.saveGeometry(), base64
     chat_panel_visible: bool = True
+    console_visible: bool = False     # the Ditto console beside the chat (hidden at the first start)
+    console_sized: bool = False       # the console was shown once: its width is in dock_state from then on
     last_seen_entry: int = 0          # the newest feed row id the person has seen
     filter: str = "all"
     path: Optional[Path] = None
@@ -80,6 +82,9 @@ class GuiState:
         visible = raw.get("chat_panel_visible")
         if isinstance(visible, bool):
             self.chat_panel_visible = visible
+        for name in ("console_visible", "console_sized"):
+            if isinstance(raw.get(name), bool):
+                setattr(self, name, raw[name])
         seen = raw.get("last_seen_entry")
         if isinstance(seen, int) and not isinstance(seen, bool) and 0 <= seen < 2 ** 62:
             self.last_seen_entry = seen

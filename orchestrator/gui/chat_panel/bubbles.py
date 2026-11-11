@@ -42,12 +42,12 @@ from PySide6.QtGui import QDesktopServices, QFontDatabase, QGuiApplication, QPix
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QMenu, QPlainTextEdit,
                                QPushButton, QVBoxLayout, QWidget)
 
-from orchestrator.Core.chat_feed import TEXTS as FEED_TEXTS
 from orchestrator.Core.chat_feed import FeedEntry, FeedSender, StoredEntry, caller_words, feed_text
+from orchestrator.Core.feed_words import framework_text, param_text, text   # noqa: F401 - the bubbles' words
 from orchestrator.Core.speaking_names import SpeakingNames
 from orchestrator.gui.chat_panel.segments import blocks, has_marks, has_names, shown_blocks, split_segments
 from orchestrator.gui.plain import ask, button_text, display_text, one_line, plain_label
-from orchestrator.utils.localization import TRANSLATIONS, text_tables
+from orchestrator.utils.localization import TRANSLATIONS
 
 MAX_LINES = 20                       # lines shown in a bubble before "Show all"
 ASSETS = Path(__file__).resolve().parents[3] / "assets"
@@ -56,41 +56,6 @@ RESERVED_NAMES = ("ditto", "framework", "you", "du", "system")
 
 
 # --- texts ---------------------------------------------------------------------------------------------------------
-
-class _Fill(dict):
-    """format_map values: a placeholder without a value stays visible as {name} instead of failing."""
-
-    def __missing__(self, key: str) -> str:
-        return "{" + key + "}"
-
-
-def text(key: str, lang: str = "en", **values: Any) -> str:
-    """A framework text: the feed's own (chat_feed.TEXTS) or the GUI's (l10n_chat and the rest), in `lang` with
-    English as the fallback, placeholders filled; a key without a text is shown as the key."""
-    if key in FEED_TEXTS["en"]:
-        template = FEED_TEXTS.get(lang, {}).get(key) or FEED_TEXTS["en"][key]
-    else:
-        table = text_tables()   # German in the person's form of address, as ui_text reads it
-        template = table.get(lang, {}).get(key) or table["en"].get(key) or key
-    if "{path:" in template:   # a place in the window, from the live labels in `lang` (wave 6, V2)
-        from orchestrator.utils.next_steps import fill_paths
-        template = fill_paths(template, lang)
-    return template.format_map(_Fill(values)) if values else template
-
-
-def param_text(entry: FeedEntry, name: str) -> str:
-    """One parameter of a row as the person reads it: one line, hidden characters escaped, and quoted when it comes
-    from outside the framework (R2)."""
-    value = one_line(entry.params.get(name, ""))
-    return f"'{value}'" if entry.param_origin.get(name) == "external" else value
-
-
-def framework_text(entry: FeedEntry, lang: str = "en") -> str:
-    """The framework's own line of a row: its text key in the person's language with the parameters filled (each by
-    param_text), or the generic line of the row's kind."""
-    key = entry.text_key or f"chat.kind.{entry.kind}"
-    return text(key, lang, **{name: param_text(entry, name) for name in entry.params})
-
 
 def local_time(ts: str) -> str:
     """A row's time in the person's time zone: "14:05" today, "2026-10-11 14:05" otherwise."""

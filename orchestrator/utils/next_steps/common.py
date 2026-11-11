@@ -63,6 +63,7 @@ MENU_LAYOUT = (
     ("menu_view", "main.menu.view", (
         ("act_view_chat", "chat.view.toggle"),
         ("act_view_focus_chat", "chat.view.focus"),
+        ("act_view_console", "console.view.toggle"),
     )),
     ("menu_tools", "main.menu.tools", (
         ("act_tools_module_wizard", "main.tools.module_wizard"),

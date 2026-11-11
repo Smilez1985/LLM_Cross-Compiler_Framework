@@ -29,6 +29,11 @@ CLI_PATHS: Dict[str, str] = {
     "models suggestions": "combo_builder_model",    # the Builder's model list offers the same suggestions
     "models take-over": "btn_hf_take_over",         # the browser's Take over old downloads... (the same list and yes)
     "--version": "act_help_about",                  # Help > About shows the version
+    # The Ditto console beside the chat (View > Ditto Console, the toolbar's Console button): the same lines, live
+    "ditto console": "txt_console",
+    "ditto console --follow": "txt_console",        # the console follows the newest line unless Pause Scrolling
+    "ditto console --source": "cb_console_source",  # its Show: filter
+    "ditto console --search": "txt_console_search",  # its Search: field
 }
 WINDOW_OBJECTS: Dict[str, str] = {
     "btn_trash_restore": ACT_TRASH,
@@ -37,6 +42,8 @@ WINDOW_OBJECTS: Dict[str, str] = {
 }
 MACHINE_ONLY: Dict[str, str] = {
     "models suggestions --json": "machine-readable output; the Builder's model list shows the same suggestions",
+    "ditto console --json": "machine-readable output, one JSON object per line; the console shows the same lines",
+    "ditto console --limit": "how many earlier lines a terminal prints first; the console keeps the newest lines",
     "--config": "start switch of the command line program; the GUI uses its own settings (File > Settings...)",
     "--verbose": "how much the command line prints; the GUI shows its messages in its own windows",
     "--quiet": "how much the command line prints; the GUI shows its messages in its own windows",

@@ -569,6 +569,7 @@ TEXT_MODULES += ("orchestrator.utils.l10n_tuning",)   # the Auto-Tuning tab
 TEXT_MODULES += ("orchestrator.utils.l10n_large",)   # the large models: Builder fields, F16 Intermediates...
 TEXT_MODULES += ("orchestrator.utils.l10n_models",)   # the Models tab and Build > Benchmark...
 TEXT_MODULES += ("orchestrator.utils.l10n_launch",)   # the crash dialog and the start entry (llm-cli launcher)
+TEXT_MODULES += ("orchestrator.utils.l10n_console",)   # the Ditto console beside the chat (llm-cli ditto console)
 
 
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,

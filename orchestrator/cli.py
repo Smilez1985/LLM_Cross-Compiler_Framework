@@ -4381,6 +4381,56 @@ def ditto_ask(ctx: FrameworkContext, question: str, no_tools: bool, provider: Op
     click.echo(_printable(reply.text))
 
 
+@ditto.command('console')
+@click.option('--follow', '-f', is_flag=True, help='Keep printing new lines as they come, until Ctrl+C')
+@click.option('--source', default='all', show_default=True,
+              help='Whose lines: all, ditto, apps, or one app by its caller id (mcp, mcp:<token name>)')
+@click.option('--search', default='', help='Only the lines that contain this text (case does not matter)')
+@click.option('--limit', default=50, show_default=True, type=click.IntRange(1, 2000),
+              help='How many of the newest lines to print first')
+@click.option('--json', 'as_json', is_flag=True, help='One JSON object per line')
+@pass_context
+def ditto_console(ctx: FrameworkContext, follow: bool, source: str, search: str, limit: int, as_json: bool):
+    """Show what Ditto and AI apps type and do: the lines of the Ditto console beside the chat, read from the chat
+    feed and the audit log (read-only; nothing is cleared or changed)"""
+    import json as json_module
+
+    from orchestrator.Core import ditto_console as console_module
+    from orchestrator.utils.localization import current_language
+    source = source.strip()
+    if source not in console_module.SOURCES and not console_module.CALLER.fullmatch(source):
+        Console(stderr=True).print(f"[red]Unknown source {escape(_printable(source))}: use all, ditto, apps, or a "
+                                   "caller id such as mcp or mcp:<token name>.[/red]")
+        sys.exit(2)
+    ctx.require_framework()
+    lang = current_language()
+    reader = console_module.ConsoleReader.of_framework(ctx.framework_manager, lang)
+
+    def emit(line) -> None:
+        if not console_module.matches(line, source, search.strip(), lang):
+            return
+        click.echo(json_module.dumps(line.data(), ensure_ascii=False) if as_json else line.shown(lang))
+        sys.stdout.flush()
+
+    def problems() -> None:
+        for problem in reader.problems.values():
+            Console(stderr=True).print(f"[yellow]{escape(problem)}[/yellow]")
+
+    first = [line for line in reader.first_look(1000) if console_module.matches(line, source, search.strip(), lang)]
+    problems()
+    for line in first[-limit:]:
+        emit(line)
+    if not follow:
+        reader.close()
+        return
+    try:
+        console_module.follow(reader, emit)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        reader.close()
+
+
 @ditto.command('eval')
 @click.option('--cases', 'cases_file', type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
               help='Cases file (default: evals/ditto/cases.yml of the installation, for --kind retrieval '

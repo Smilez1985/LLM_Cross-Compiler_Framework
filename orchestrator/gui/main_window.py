@@ -295,6 +295,12 @@ class MainOrchestrator(QMainWindow):
         self.btn_chat.setToolTip(plain_tooltip(ui_text("chat.toolbar.tip")))
         self.btn_chat.setAutoDefault(False)
         toolbar.addWidget(self.btn_chat)
+        # The Ditto console beside the chat: what Ditto and AI apps type and do (Shift+F9 and View > Ditto Console)
+        self.btn_console = QPushButton(button_text(ui_text("console.toolbar.button")))
+        self.btn_console.setObjectName("btn_console")
+        self.btn_console.setToolTip(plain_tooltip(ui_text("console.toolbar.tip")))
+        self.btn_console.setAutoDefault(False)
+        toolbar.addWidget(self.btn_console)
 
         # Ditto Avatar
         assets_path = self.app_root / "assets"
@@ -367,6 +373,7 @@ class MainOrchestrator(QMainWindow):
         self.act_focus_chat.setShortcutContext(Qt.ApplicationShortcut)
         self.act_focus_chat.triggered.connect(self._focus_chat)
         self.view_menu.addAction(self.act_focus_chat)
+        self._setup_console_dock()
 
         panel = self.chat_window
         panel.counts_changed.connect(self._update_chat_button)
@@ -389,12 +396,45 @@ class MainOrchestrator(QMainWindow):
         if self.gui_state.dock_state:
             self.restoreState(GuiState.decode(self.gui_state.dock_state))
         self.chat_dock.setVisible(self.gui_state.chat_panel_visible)
+        self.console_dock.setVisible(self.gui_state.console_visible)
         panel.apply_state(self.gui_state)
         from orchestrator.gui.chat_panel.panel import show_ditto_notice
         show_ditto_notice(self.chat_dock, panel)   # Ditto is experimental: the notice is read once (round 8, Q-2)
 
+    def _setup_console_dock(self):
+        """The Ditto console as a dock of its own beside the chat dock (DESIGN, the row "Beside the chat sits the Ditto
+        console"): Qt's separator between the two resizes them by dragging, Shift+F9, the View menu and the toolbar's
+        Console button show or hide it, and saveState() keeps sizes and places in gui_state.json with the chat's."""
+        from orchestrator.gui.chat_panel.console import ConsoleDock, DittoConsole
+        self.ditto_console = DittoConsole(self.framework, lang=self.chat_window.lang)
+        self.console_dock = ConsoleDock(self.ditto_console, self, lang=self.chat_window.lang)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.console_dock)
+        self.splitDockWidget(self.chat_dock, self.console_dock, Qt.Horizontal)
+        self.console_dock.hide()   # hidden at the first start; gui_state.json remembers the person's choice
+        self.view_menu.addAction(self.console_dock.toggleViewAction())
+        self.console_dock.visibilityChanged.connect(self._console_shown)
+        self.btn_console.clicked.connect(self._toggle_console)
+
+    def _toggle_console(self):
+        if self.console_dock.isHidden():
+            self.console_dock.show()
+            self.console_dock.raise_()
+        else:
+            self.console_dock.hide()
+
+    def _console_shown(self, visible: bool):
+        """The first time the console is shown without a remembered size, it gets its default width."""
+        if visible and not getattr(self, "_console_sized", False):
+            self._console_sized = True
+            if not (getattr(self, "gui_state", None) and self.gui_state.console_sized):
+                from orchestrator.gui.chat_panel.console import DEFAULT_WIDTH
+                self.resizeDocks([self.console_dock], [DEFAULT_WIDTH], Qt.Horizontal)
+
     def _chat_language_changed(self, lang: str):
         self.chat_dock.retranslate(lang)
+        self.console_dock.retranslate(lang)
+        self.btn_console.setText(button_text(ui_text("console.toolbar.button", lang)))
+        self.btn_console.setToolTip(plain_tooltip(ui_text("console.toolbar.tip", lang)))
         self.view_menu.setTitle(ui_text("chat.view.menu", lang))
         self.act_focus_chat.setText(ui_text("chat.view.focus", lang))
         self.btn_chat.setToolTip(plain_tooltip(ui_text("chat.toolbar.tip", lang)))
@@ -440,6 +480,8 @@ class MainOrchestrator(QMainWindow):
         state.dock_state = GuiState.encode(self.saveState())
         state.geometry = GuiState.encode(self.saveGeometry())
         state.chat_panel_visible = not self.chat_dock.isHidden()
+        state.console_visible = not self.console_dock.isHidden()
+        state.console_sized = state.console_sized or bool(getattr(self, "_console_sized", False))
         state.last_seen_entry = self.chat_window.last_seen
         state.filter = self.chat_window.header.current_filter()
         state.save()
@@ -948,6 +990,7 @@ class MainOrchestrator(QMainWindow):
             QToolBar { background-color: #333; border-bottom: 1px solid #555; }
             QStatusBar { background-color: #333; color: #aaa; }
             QTextEdit, QLineEdit { background-color: #1e1e1e; color: #eee; border: 1px solid #555; }
+            QPlainTextEdit#txt_console { background-color: #1e1e1e; color: #eee; border: 1px solid #555; }
             QPushButton { background-color: #444; color: #fff; padding: 5px; border-radius: 3px; }
             QPushButton:hover { background-color: #555; }
         """)
@@ -958,6 +1001,9 @@ class MainOrchestrator(QMainWindow):
         if chat is not None:
             self._save_gui_state()
             chat.close()  # a tool call waiting for a confirmation is answered "no"
+        console = getattr(self, "ditto_console", None)
+        if console is not None:
+            console.stop()   # its reader thread and the activity listener end with the window
         lock = getattr(self, "_gui_lock", None)
         if lock is not None:  # the command line may offer "do not ask again" again
             lock.release()
