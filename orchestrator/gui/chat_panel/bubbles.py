@@ -411,6 +411,16 @@ class Bubble(QFrame):
         self.layout_.addWidget(widget)
         return widget
 
+    def add_steps(self) -> None:
+        """The row's next steps of the catalogue (refs.steps) as a StepsRow: [Open] goes to the place, [Run...] asks
+        the allow-to-run question of a command the framework may run (gui/allow_command.py); nothing runs from the
+        row itself."""
+        steps = list(self.entry.refs.steps) if self.entry is not None else []
+        if not steps:
+            return
+        from orchestrator.gui.next_step_widgets import StepsRow
+        self.steps_row = self.add_widget(StepsRow(steps, parent=self, lang=self.lang))
+
     def add_action(self, button: QPushButton) -> QPushButton:
         """Extension point: a button in the bubble's action row (made without mnemonic and never default; see
         make_button)."""
@@ -501,6 +511,7 @@ class NoticeBubble(Bubble):
         self.add_text(framework_text(self.entry, self.lang), warning=self.entry.level == "warning")
         if sender.role == "client":
             self.add_caption(text("chat.bubble.written_by_framework", self.lang))
+        self.add_steps()
 
 
 class RecordBubble(Bubble):
@@ -517,6 +528,7 @@ class RecordBubble(Bubble):
         self.add_warnings()
         if self.entry.ai_text:
             self.ai_box = self.add_widget(AiTextBox(self.entry.ai_text, self.lang, self.names, self))
+        self.add_steps()
 
     def add_warnings(self) -> None:
         def words(rows: List[Any]) -> str:

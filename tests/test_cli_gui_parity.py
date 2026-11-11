@@ -624,7 +624,8 @@ def test_a_steps_row_names_the_place_and_opens_it(qapp, window):
                             "llama-server bauen…")
         assert "sudo systemctl start docker" in texts[1] and not any("llmcf" in t for t in texts)
         names = sorted(b.text() for b in row.findChildren(QPushButton))
-        assert names == ["Kopieren", "Seite öffnen", "Öffnen"]
+        # runtime.install is a framework command that runs after a yes: [Ausführen...] opens its question
+        assert names == ["Ausführen...", "Kopieren", "Seite öffnen", "Öffnen"]
         assert all(b.accessibleName() and not b.hasFocus() for b in row.buttons)
         opened = []
         row.open_requested.connect(opened.append)

@@ -12,8 +12,10 @@ open_object(window, object_name) is what [Open] (and a chat row's [Show]) does: 
 window a button lives in and focuses the button, switches to the main window's tab an object lives in. It never
 clicks anything inside a window for the person: the person sees the place and clicks there.
 
-The allow-to-run question of a command (V1: "Allow `llmcf ...`? ...") and its console are built by chain console on
-next_steps.proposal() and next_steps.run_proposal(); this row only names and opens places.
+A step the framework may run after the person's yes (the catalogue's `runnable`, a framework command that needs no
+terminal) also gets [Run...]: it opens the allow-to-run question (gui/allow_command.py: "Allow `llmcf ...`? ...",
+No as the default, the output in the question and in the Ditto console). A deleting step, a step that needs a
+terminal and a board's or administrator's command never get [Run...].
 """
 
 from typing import Any, List, Optional
@@ -106,19 +108,23 @@ class StepsRow(QWidget):
     (default: the open main window). Signals: open_requested(objectName) after [Open], copied(text) after [Copy]."""
     open_requested = Signal(str)
     copied = Signal(str)
+    run_requested = Signal(str)   # the step id, after [Run...]
 
     def __init__(self, steps: Any, parent: Optional[QWidget] = None, lang: Optional[str] = None,
                  here: Optional[str] = None, window: Any = None):
         super().__init__(parent)
-        from orchestrator.utils.next_steps import rendered
+        from orchestrator.utils.next_steps import catalogue, rendered, steps_of
         self.lang = lang or current_language()
         self._window = window
         self.setObjectName("steps_row")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.rows = rendered(steps, "gui", self.lang, here=here)
+        known = catalogue().steps
+        self.next_steps = [s for s in steps_of(steps) if s.id in known]   # the same order as self.rows
+        self.dialog: Any = None
         self.buttons: List[QAbstractButton] = []
-        for row in self.rows:
+        for row, next_step in zip(self.rows, self.next_steps):
             line = QHBoxLayout()
             label = QLabel(row.text, self)
             label.setTextFormat(Qt.PlainText)
@@ -128,6 +134,14 @@ class StepsRow(QWidget):
             if row.target:
                 line.addWidget(self._button("steps.open", row.step_id, row.text,
                                             lambda _=False, t=row.target: self._open(t)))
+            if row.runnable and row.command and not row.person_only and not row.planned:
+                button = self._button("steps.open", row.step_id, row.text,
+                                      lambda _=False, s=next_step: self._run(s))
+                button.setText(ui_text("console.steps.run", self.lang))
+                button.setObjectName(f"btn_step_run_{row.step_id.replace('.', '_')}")
+                button.setAccessibleName(ui_text("console.steps.run.name", self.lang, step=row.text))
+                button.setToolTip(ui_text("console.steps.run.name", self.lang, step=row.text))
+                line.addWidget(button)
             if row.copy:
                 line.addWidget(self._button("steps.copy", row.step_id, row.text,
                                             lambda _=False, c=row.copy: self._copy(c)))
@@ -150,6 +164,12 @@ class StepsRow(QWidget):
     def _open(self, target: str) -> None:
         self.open_requested.emit(target)
         open_object(self._window or main_window(), target)
+
+    def _run(self, next_step: Any) -> None:
+        """[Run...]: the allow-to-run question; nothing runs before the person's Yes there."""
+        from orchestrator.gui.allow_command import ask_to_run
+        self.run_requested.emit(next_step.id)
+        self.dialog = ask_to_run(self._window or main_window(), next_step, parent=self.window(), lang=self.lang)
 
     def _copy(self, text: str) -> None:
         QApplication.clipboard().setText(text)

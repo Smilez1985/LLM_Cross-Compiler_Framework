@@ -186,7 +186,7 @@ def test_filters_pause_clear_and_copy(qapp, tmp_path):
         console.take()
         assert len(console.shown_text().splitlines()) == 4
         sources = [console.cb_source.itemData(i) for i in range(console.cb_source.count())]
-        assert sources == ["all", "ditto", "apps", "mcp"], "an app is offered once it appeared"
+        assert sources == ["all", "ditto", "apps", "commands", "mcp"], "an app is offered once it appeared"
         console.cb_source.setCurrentIndex(1)
         assert console.shown_text().splitlines() and all("Ditto" in s for s in console.shown_text().splitlines())
         console.cb_source.setCurrentIndex(0)

@@ -49,7 +49,7 @@ SEEN = 4 * MAX_LINES    # keys of shown lines remembered, so a line that arrives
 # The feed rows the console shows: what Ditto or an app typed, and what they did.
 SAYS_KINDS = frozenset({"ditto_answer", "client_reply", "delegated_decision", "ditto_tool_note"})
 DID_KINDS = frozenset({"ai_action", "job_result", "grant_used", "approval", "approval_end", "blocked"})
-SOURCES = ("all", "ditto", "apps")
+SOURCES = ("all", "ditto", "apps", "commands")
 PERSON_ACTORS = frozenset({"", "gui", "cli"})
 CALLER = re.compile(r"^(?:ditto|mcp|mcp:[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?)$")
 
@@ -112,9 +112,10 @@ def clock(ts: str) -> str:
 @dataclass(frozen=True)
 class ConsoleLine:
     """One line of the console. `key`: what makes it unique across both records (feed:<entry id>, audit:<id>:<time>,
-    since an archived audit log starts its ids again); `source`: ditto or app; `caller`: the trusted caller id (ditto,
-    mcp, mcp:<token name>); `who`: the source in the framework's words (an app's own name only quoted as its claim);
-    `kind`: says, call or did; `text`: what it typed or did, scrubbed; `level`: info or warning."""
+    since an archived audit log starts its ids again; run:<id>:<n> for a command the person allowed); `source`: ditto,
+    app, or command (a command the person allowed); `caller`: the trusted caller id (ditto, mcp, mcp:<token name>);
+    `who`: the source in the framework's words (an app's own name only quoted as its claim); `kind`: says, call or did,
+    and runs or output for an allowed command; `text`: what it typed or did, scrubbed; `level`: info or warning."""
     key: str
     ts: str
     source: str
@@ -134,15 +135,28 @@ class ConsoleLine:
 
 
 def matches(line: ConsoleLine, source: str = "all", search: str = "", lang: str = "en") -> bool:
-    """Whether `line` passes the console's filters: `source` all, ditto, apps or one caller id; `search` a text the
+    """Whether `line` passes the console's filters: `source` all, ditto, apps, commands (the commands the person
+    allowed) or one caller id; `search` a text the
     shown line contains (case does not matter)."""
     if source == "ditto" and line.source != "ditto":
         return False
     if source == "apps" and line.source != "app":
         return False
+    if source == "commands" and line.source != "command":
+        return False
     if source not in SOURCES and line.caller != source:
         return False
     return not search or search.casefold() in line.shown(lang).casefold()
+
+
+def command_line_entry(run_id: str, number: int, kind: str, words: str, *, level: str = "info",
+                       lang: str = "en") -> ConsoleLine:
+    """A console line of a command the person allowed (gui/allow_command.py): `kind` "runs" (the person's yes and the
+    command), "output" (one line of its output, redacted already) or "did" (how it ended). `run_id` makes the keys of
+    one run unique; `words` is scrubbed like every other line."""
+    return ConsoleLine(key=f"run:{run_id}:{number}", ts=datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                       source="command", caller="", who=text("console.who.allowed", lang), kind=kind,
+                       text=scrub(words), level=level)
 
 
 def _sender(caller: str, client: str = "") -> FeedSender:
@@ -476,6 +490,6 @@ def follow(reader: ConsoleReader, emit: Callable[[ConsoleLine], None], *, interv
         sleep(interval)
 
 
-__all__ = ["ConsoleLine", "ConsoleReader", "ConsoleFollower", "SeenKeys", "MAX_LINES", "FIRST_LOOK", "MAX_CHARS",
-           "SOURCES", "follow", "hide_secret_values", "line_of_audit", "line_of_feed", "matches", "scrub",
+__all__ = ["ConsoleLine", "ConsoleReader", "command_line_entry", "ConsoleFollower", "SeenKeys", "MAX_LINES",
+           "FIRST_LOOK", "MAX_CHARS", "SOURCES", "follow", "hide_secret_values", "line_of_audit", "line_of_feed", "matches", "scrub",
            "secret_name", "clock"]
