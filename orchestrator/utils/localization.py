@@ -568,6 +568,7 @@ TEXT_MODULES += ("orchestrator.utils.l10n_pairing",)   # the pairing during the 
 TEXT_MODULES += ("orchestrator.utils.l10n_tuning",)   # the Auto-Tuning tab
 TEXT_MODULES += ("orchestrator.utils.l10n_large",)   # the large models: Builder fields, F16 Intermediates...
 TEXT_MODULES += ("orchestrator.utils.l10n_models",)   # the Models tab and Build > Benchmark...
+TEXT_MODULES += ("orchestrator.utils.l10n_launch",)   # the crash dialog and the start entry (llm-cli launcher)
 
 
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,

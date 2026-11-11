@@ -5306,6 +5306,77 @@ def update(check_only: bool, offline: bool, yes: bool):
     sys.exit(code)
 
 
+LAUNCHER_STATES = {
+    "missing": "not there",
+    "current": "present and up to date",
+    "outdated": "present, but for another installation ('llm-cli launcher install' updates it)",
+    "foreign": "a file of this name the framework did not write; it stays as it is",
+}
+LAUNCHER_RESULTS = {
+    "written": "The start entry is written: {path}",
+    "unchanged": "The start entry was already up to date: {path}",
+    "covered": "The Start-menu shortcut for all accounts is up to date; nothing to do: {path}",
+    "foreign": "A file of this name that the framework did not write is in the way; it stays as it is: {path}",
+    "failed": "The start entry could not be written: {path}",
+    "removed": "The start entry is removed: {path}",
+    "missing": "There was no start entry of your own to remove: {path}",
+}
+
+
+@cli.group()
+def launcher():
+    """The start entry that opens the GUI without a terminal: on Linux your application-menu entry, on Windows the
+    Start-menu shortcut (it starts pythonw.exe, so no console window opens). The installer writes it; these
+    commands show, create or repair, and remove it without installing again"""
+
+
+def _launcher_entries():
+    from orchestrator.utils import launcher as start_entry
+    if not start_entry.supported():
+        click.echo("This system has no start entry the framework writes (only Linux and Windows have one).")
+        sys.exit(1)
+    return start_entry
+
+
+@launcher.command('status')
+def launcher_status():
+    """Show the start entry: where it is and whether it is up to date"""
+    start_entry = _launcher_entries()
+    for entry in start_entry.status():
+        whose = "for all accounts (from the installer)" if entry.scope == "everyone" else "your own"
+        click.echo(f"{entry.path}: {LAUNCHER_STATES[entry.state]} ({whose})")
+
+
+@launcher.command('install')
+def launcher_install():
+    """Create the start entry, or repair it when it no longer fits this installation"""
+    start_entry = _launcher_entries()
+    try:
+        result = start_entry.install()
+    except (OSError, ValueError) as e:
+        click.echo(f"The start entry could not be written: {e}", err=True)
+        sys.exit(1)
+    entries = {e.scope: e for e in start_entry.status()}
+    path = (entries.get("everyone") if result == "covered" else entries.get("person")).path
+    click.echo(LAUNCHER_RESULTS[result].format(path=path), err=result in ("foreign", "failed"))
+    sys.exit(1 if result in ("foreign", "failed") else 0)
+
+
+@launcher.command('remove')
+def launcher_remove():
+    """Remove your own start entry (only one the framework wrote; the shortcut for all accounts on Windows goes with
+    the uninstaller)"""
+    start_entry = _launcher_entries()
+    path = next(e for e in start_entry.status() if e.scope == "person").path
+    try:
+        result = start_entry.remove()
+    except OSError as e:
+        click.echo(f"The start entry could not be removed: {e}", err=True)
+        sys.exit(1)
+    click.echo(LAUNCHER_RESULTS[result].format(path=path), err=result == "foreign")
+    sys.exit(1 if result == "foreign" else 0)
+
+
 @cli.command('doctor')
 @click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
 @click.option('--fix', is_flag=True, help='Apply automatic fixes up to --tier, then check again')

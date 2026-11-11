@@ -2272,8 +2272,9 @@ person_install() {
     ensure_shared_group
     person_folder
     setup_mode
+    setup_start_entry
     setup_ditto
-    log_success "Dein eigener Teil ist eingerichtet: die Gruppe $SHARED_GROUP, ~/$PERSON_DIR_NAME, die Container-Engine für dich, der Framework-Modus und Ditto."
+    log_success "Dein eigener Teil ist eingerichtet: die Gruppe $SHARED_GROUP, ~/$PERSON_DIR_NAME, die Container-Engine für dich, der Framework-Modus, der Eintrag im Anwendungsmenü und Ditto."
     if [ "$SHARED_GROUP_ADDED" = "1" ]; then
         log_warn "Melde dich einmal ab und wieder an, damit die Gruppe $SHARED_GROUP gilt; dann startet 'llm-framework' (oder llm-cli) für dich."
     fi
@@ -2548,6 +2549,28 @@ setup_mode() {
     return 0
 }
 
+# Der Eintrag im Anwendungsmenü (docs/DESIGN.md, Starten ohne Terminal): 'llm-cli launcher install' als die Person,
+# die installiert (nie als root), schreibt ~/.local/share/applications/llm-cross-compiler-framework.desktop. Er startet
+# das Python der .venv mit orchestrator/main.py über absolute Pfade, ohne Shell und ohne PATH. Nicht mit --headless
+# (keine GUI) und nicht im Container-Build. Der Schritt lässt die Installation nie scheitern: Ein Fehler wird gemeldet.
+setup_start_entry() {
+    if [ "$HEADLESS" = "1" ] || [ "$CONTAINER_BUILD" = "1" ]; then return 0; fi
+    local real_user="${SUDO_USER:-${USER:-}}" run=()
+    if [ "$real_user" = "root" ] || [ -z "$real_user" ]; then
+        log_info "Der Eintrag im Anwendungsmenü gehört einer Person, nicht root: Später als dein Benutzer: llm-cli launcher install"
+        return 0
+    fi
+    run=(sudo -H -u "$real_user")
+    if ! command -v sudo &> /dev/null; then run=(runuser -u "$real_user" --); fi
+    log_info "[Menü] Eintrag im Anwendungsmenü für '$real_user'..."
+    if (cd "$INSTALL_DIR" && "${run[@]}" "$INSTALL_DIR/.venv/bin/python" -m orchestrator.cli launcher install); then
+        log_success "Im Anwendungsmenü: LLM Cross-Compiler Framework."
+    else
+        log_warn "Der Eintrag im Anwendungsmenü ließ sich nicht schreiben (Meldungen oben); die Installation ist trotzdem fertig. Später: llm-cli launcher install"
+    fi
+    return 0
+}
+
 # Richtet Dittos lokale Laufzeit ein: 'llm-cli ditto runtime ensure' als die Person, die installiert (nie als root).
 # Idempotent: Ist Ditto schon da (direkt oder in Docker), tut der Befehl nichts und sagt das. Der Schritt lässt die
 # Installation nie scheitern: Ein Fehler wird gemeldet, und die Installation geht weiter. Ein Wechsel der Art
@@ -2602,7 +2625,7 @@ finish() {
     if [ "$HEADLESS" = "1" ]; then
         echo "🚀 Start:  llm-cli bzw. llmcf (ohne grafische Oberfläche installiert, --headless)"
     else
-        echo "🚀 Start:  Tippe einfach 'llm-framework'"
+        echo "🚀 Start:  im Anwendungsmenü 'LLM Cross-Compiler Framework', oder im Terminal 'llm-framework'"
     fi
     case "$ROOTLESS_ENGINE" in
         podman) echo "🐳 Engine: rootless Podman (mit deinen Rechten, ohne Gruppe docker)" ;;
@@ -2691,7 +2714,8 @@ plan_docker() {
 }
 
 plan_installation() {
-    local requirements="requirements-gui.txt"
+    local requirements="requirements-gui.txt" START_ENTRY_PLAN="der Eintrag im Anwendungsmenü für dich (~/.local/share/applications), "
+    if [ "$HEADLESS" = "1" ]; then START_ENTRY_PLAN=""; fi
     if [ "$HEADLESS" = "1" ]; then requirements="requirements.txt"; fi
     log_info "Probelauf (--dry-run): Es wird nichts verändert, nichts geladen und keine Paketverwaltung aufgerufen; so liefe die Installation hier ab."
     detect_system
@@ -2724,7 +2748,7 @@ plan_installation() {
         echo "   rsync: fehlt -> ${PKG_ARGV[*]} rsync"
     fi
     plan_sevenzip
-    echo "   Danach: Programmdateien nach $INSTALL_DIR, .venv (${PYTHON:-dem eben installierten Python}) mit den neuesten verträglichen Versionen (uv, 5 Tage Wartezeit, pip-audit, Selbstprüfung; sonst $requirements, der getestete Stand), Starter /usr/local/bin/llm-framework, Ditto ($DITTO_CHOICE)"
+    echo "   Danach: Programmdateien nach $INSTALL_DIR, .venv (${PYTHON:-dem eben installierten Python}) mit den neuesten verträglichen Versionen (uv, 5 Tage Wartezeit, pip-audit, Selbstprüfung; sonst $requirements, der getestete Stand), Starter /usr/local/bin/llm-framework, ${START_ENTRY_PLAN}Ditto ($DITTO_CHOICE)"
     if [ -n "$PRELOAD_FILE" ]; then
         echo "   Offline mit Preload $PRELOAD_FILE: geprüft (SHA256SUMS, Plattform, Python, Lock), Python-Pakete nur daraus (pip --no-index), keine Paketverwaltung, Ditto später"
     elif [ "$OFFLINE" = "1" ]; then
@@ -2753,6 +2777,7 @@ main() {
     share_installation
     record_installation
     setup_mode
+    setup_start_entry
     setup_ditto
     finish
 }

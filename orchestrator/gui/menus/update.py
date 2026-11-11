@@ -24,10 +24,15 @@ CLI_PATHS: dict[str, str] = {
     "update": "btn_update_run",              # File > Settings... > Update: Update Framework... checks, asks, updates
     "update --check": "btn_update_check",    # Check for updates: the new commits, nothing changes
     "update --offline": "chk_update_offline",  # the tested dependency set without resolving anew
+    # the start entry (utils/launcher.py), in the page's part "Start entry"
+    "launcher status": "lbl_launcher_status",
+    "launcher install": "btn_launcher_install",
+    "launcher remove": "btn_launcher_remove",
 }
 # The objects of the Update page, with the menu entry that opens it (the parity test opens it).
 WINDOW_OBJECTS: dict[str, str] = {"btn_update_run": "act_tools_update", "btn_update_check": "act_tools_update",
-                                  "chk_update_offline": "act_tools_update"}
+                                  "chk_update_offline": "act_tools_update", "lbl_launcher_status": "act_tools_update",
+                                  "btn_launcher_install": "act_tools_update", "btn_launcher_remove": "act_tools_update"}
 MACHINE_ONLY: dict[str, str] = {
     "update --yes": "skips the question in scripts; the menu entry always asks",
 }

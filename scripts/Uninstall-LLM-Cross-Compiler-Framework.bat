@@ -11,6 +11,9 @@ SET "SHORTCUT_NAME=LLM-Cross-Compiler-Framework.lnk"
 :: Die Installation vor der Umbenennung des Repositorys (LLM Conversion Framework): eigener Ordner, eigene Verknuepfung.
 SET "OLD_APP_NAME=LLM-Conversion-Framework"
 SET "OLD_SHORTCUT_NAME=LLM-Conversion-Framework.lnk"
+:: Die Startmenue-Verknuepfung: install.bat legt sie fuer alle Konten an, llm-cli launcher install die eigene einer Person.
+SET "COMMON_START=%ProgramData%\Microsoft\Windows\Start Menu\Programs"
+SET "OWN_START=%APPDATA%\Microsoft\Windows\Start Menu\Programs"
 SET "BACKUP_DIR_NAME=backup_user_data_%DATE:~6,4%%DATE:~3,2%%DATE:~0,2%_%TIME:~0,2%%TIME:~3,2%"
 SET "BACKUP_DIR_NAME=!BACKUP_DIR_NAME: =0!"
 
@@ -90,6 +93,8 @@ echo Entfernt wird der Ordner "!INSTALL_PATH!" mit allem darin:
 FOR /F "delims=" %%E IN ('dir /b /a "!INSTALL_PATH!" 2^>nul') DO echo     %%E
 IF DEFINED LNK_NAME IF EXIST "%USERPROFILE%\Desktop\!LNK_NAME!" echo und die Verknuepfung "%USERPROFILE%\Desktop\!LNK_NAME!"
 IF DEFINED LNK_NAME IF EXIST "%PUBLIC%\Desktop\!LNK_NAME!" echo und die Verknuepfung "%PUBLIC%\Desktop\!LNK_NAME!"
+IF DEFINED LNK_NAME IF EXIST "%COMMON_START%\!LNK_NAME!" echo und die Verknuepfung "%COMMON_START%\!LNK_NAME!"
+IF DEFINED LNK_NAME IF EXIST "%OWN_START%\!LNK_NAME!" echo und die Verknuepfung "%OWN_START%\!LNK_NAME!"
 echo Es bleibt dein persoenlicher Ordner "%USERPROFILE%\.llm-framework": Einstellungen, Zugangsdaten, Builds.
 echo.
 
@@ -186,6 +191,10 @@ IF EXIST "%USERPROFILE%\Desktop\!LNK_NAME!" del "%USERPROFILE%\Desktop\!LNK_NAME
 IF EXIST "%USERPROFILE%\Desktop\!LNK_NAME!" echo [WARNUNG] Konnte "%USERPROFILE%\Desktop\!LNK_NAME!" nicht entfernen.
 IF EXIST "%PUBLIC%\Desktop\!LNK_NAME!" del "%PUBLIC%\Desktop\!LNK_NAME!"
 IF EXIST "%PUBLIC%\Desktop\!LNK_NAME!" echo [WARNUNG] Konnte "%PUBLIC%\Desktop\!LNK_NAME!" nicht entfernen.
+IF EXIST "%COMMON_START%\!LNK_NAME!" del "%COMMON_START%\!LNK_NAME!"
+IF EXIST "%COMMON_START%\!LNK_NAME!" echo [WARNUNG] Konnte "%COMMON_START%\!LNK_NAME!" nicht entfernen.
+IF EXIST "%OWN_START%\!LNK_NAME!" del "%OWN_START%\!LNK_NAME!"
+IF EXIST "%OWN_START%\!LNK_NAME!" echo [WARNUNG] Konnte "%OWN_START%\!LNK_NAME!" nicht entfernen.
 GOTO :EOF
 
 :GONE

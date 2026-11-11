@@ -14,7 +14,8 @@ prints how to install the optional 'gui' extra when PySide6 is missing).
 import sys
 import os
 from pathlib import Path
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtWidgets import QApplication, QDialog
 
 # Adjust path to ensure modules are found
 # Structure: root/orchestrator/gui/app.py -> resolve -> parents[2] is root
@@ -27,6 +28,7 @@ if str(root_dir) not in sys.path:
 from orchestrator.Core.config_manager import ConfigManager
 from orchestrator.Core.vault_key import set_passphrase_prompt
 from orchestrator.llm.sdk_env import guard_sdk_environment
+from orchestrator.utils.crash_report import add_gui_log, guard_streams, log_folder, windowless_children
 from orchestrator.utils.logging import setup_logging
 
 # GUI Imports
@@ -47,7 +49,29 @@ def save_language(cfg_mgr: ConfigManager, language: str) -> bool:
     return bool(cfg_mgr.set("language", language)) and bool(cfg_mgr.save_user_config())
 
 
+def start_without_terminal(cfg_mgr: ConfigManager, app) -> Path:
+    """What a start from the menu or a shortcut needs once Qt runs (docs/DESIGN.md, starting without a terminal):
+    gui.log in the log folder, the crash dialog for every error nobody caught, the window matched to the desktop
+    entry, and the person's existing entry rewritten when it no longer fits this installation. Returns the log
+    folder."""
+    from orchestrator.gui import crash_dialog
+    from orchestrator.utils import launcher
+    folder = log_folder(cfg_mgr)
+    add_gui_log(folder)
+    crash_dialog.install(folder)
+    QGuiApplication.setDesktopFileName(launcher.ENTRY_ID)
+    try:
+        launcher.refresh()
+    except Exception:  # noqa: BLE001 - a start entry never stops the window from opening
+        pass
+    return folder
+
+
 def main():
+    # Without a console (pythonw.exe, a desktop launcher) sys.stdout and sys.stderr can be None; console programs the
+    # window starts open no console window of their own (utils/crash_report.py). Both are no-ops with a console.
+    guard_streams()
+    windowless_children()
     # High DPI Scaling for modern screens
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 
@@ -70,6 +94,7 @@ def main():
 
     app = QApplication([arg for arg in sys.argv if arg != "--debug-http"])
     app.setApplicationName("LLM Cross-Compiler")
+    start_without_terminal(cfg_mgr, app)
     # Offline mode's locality rule never looks a name up or runs the tailscale command on the GUI thread
     # (utils/locality.py: the windows check addresses in a worker thread first).
     from orchestrator.utils.locality import mark_ui_thread
@@ -113,14 +138,10 @@ def main():
         
         sys.exit(app.exec())
     except Exception as e:
-        # Fallback error dialog if crash during boot
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Critical)
-        msg.setText("Fatal Error during startup")
-        msg.setInformativeText(str(e))
-        msg.setWindowTitle("Error")
-        msg.exec()
-        raise e
+        # The main window could not be built: the crash dialog (logged, Open log folder, Copy details), then exit 1.
+        from orchestrator.gui import crash_dialog
+        crash_dialog.report_now(e, "the start of the main window")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

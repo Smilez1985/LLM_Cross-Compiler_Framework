@@ -82,6 +82,22 @@ foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
 if ($ModeChoice -notin @("", "private", "enterprise")) {
     Write-Error "Unbekannter Wert fuer --mode: '$ModeChoice' (private oder enterprise)."
 }
+# The shortcuts (docs/DESIGN.md, starting without a terminal): the Start menu of all accounts always, the public desktop
+# when the person wants it. Asked in this window, Enter meaning yes (as before, when the installer always put it there);
+# --no-desktop-shortcut or LCF_DESKTOP_SHORTCUT=0 for a run without questions; a run without a console to ask keeps it.
+$DesktopShortcut = ($env:LCF_DESKTOP_SHORTCUT -ne "0")
+$DesktopAsked = ("" + $env:LCF_DESKTOP_SHORTCUT) -ne ""
+foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
+    if ($InstallArg -eq "--no-desktop-shortcut") { $DesktopShortcut = $false; $DesktopAsked = $true }
+}
+if (-not $DesktopAsked -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+    try {
+        $DesktopAnswer = ("" + (Read-Host "Auch eine Verknuepfung auf dem Desktop (zusaetzlich zum Startmenue)? [J/n]")).Trim().ToLower()
+        $DesktopShortcut = -not ($DesktopAnswer -in @("n", "nein", "no"))
+    } catch {
+        $DesktopShortcut = $true
+    }
+}
 # Dependencies (DESIGN round 65): every run resolves the newest compatible versions fresh (step [3/5]); --offline (for
 # unattended runs also LCF_OFFLINE=1) installs the shipped tested lock without resolving.
 $Offline = ($env:LCF_OFFLINE -eq "1")
@@ -536,24 +552,51 @@ $LauncherBat = Join-Path $InstallDir "start_framework.bat"
 $PythonVenv = Join-Path $InstallDir ".venv\Scripts\python.exe"
 Set-Location $InstallDir
 
-# 6. SHORTCUT: on the public desktop, so every account on this computer has it (one shared installation).
-Write-Host "[5/5] Erstelle Desktop Verknuepfung..." -ForegroundColor Yellow
+# 6. SHORTCUTS: in the Start menu and, when wanted, on the public desktop, so every account on this computer has them
+# (one shared installation). They start pythonw.exe of the .venv with orchestrator\main.py: no console window opens
+# (start_framework.bat stays in the folder as the start with a console, for troubleshooting). The description marks
+# them as the framework's own (llm-cli launcher reads it, orchestrator/utils/launcher.py SHORTCUT_DESCRIPTION).
+Write-Host "[5/5] Erstelle Verknuepfungen (Startmenue, Desktop)..." -ForegroundColor Yellow
 $WshShell = New-Object -comObject WScript.Shell
 $Desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
+$StartMenu = [Environment]::GetFolderPath("CommonPrograms")
+$PythonWindowless = Join-Path $InstallDir ".venv\Scripts\pythonw.exe"
+$MainScript = Join-Path $InstallDir "orchestrator\main.py"
+$ShortcutDescription = "LLM Cross-Compiler Framework"
+$IconPath = Join-Path $InstallDir "assets\LLM-Builder.ico"
+function Test-OwnShortcut([string]$Path) {
+    # One the framework wrote: its description, or an older installer's target (start_framework.bat, pythonw.exe).
+    try {
+        if (-not (Test-Path -LiteralPath $Path)) { return $false }
+        $Found = $WshShell.CreateShortcut($Path)
+        return ($Found.Description -eq $ShortcutDescription) -or ($Found.TargetPath -eq $LauncherBat) -or ($Found.TargetPath -eq $PythonWindowless)
+    } catch { return $false }
+}
+function New-FrameworkShortcut([string]$Path) {
+    $Shortcut = $WshShell.CreateShortcut($Path)
+    $Shortcut.TargetPath = $PythonWindowless
+    $Shortcut.Arguments = '"' + $MainScript + '"'
+    $Shortcut.WorkingDirectory = $InstallDir
+    $Shortcut.Description = $ShortcutDescription
+    if (Test-Path $IconPath) { $Shortcut.IconLocation = $IconPath }
+    $Shortcut.Save()
+}
 # An earlier installer put it on the desktop of the account that ran it; that one would now be there twice.
 $OwnShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "$AppName.lnk"
 try {
-    if ((Test-Path -LiteralPath $OwnShortcut) -and ($WshShell.CreateShortcut($OwnShortcut).TargetPath -eq $LauncherBat)) { Remove-Item -LiteralPath $OwnShortcut -Force }
+    if (Test-OwnShortcut $OwnShortcut) { Remove-Item -LiteralPath $OwnShortcut -Force }
 } catch { }
-
-# App Shortcut
-$Shortcut = $WshShell.CreateShortcut((Join-Path $Desktop "$AppName.lnk"))
-$Shortcut.TargetPath = $LauncherBat
-$Shortcut.WorkingDirectory = $InstallDir
-$Shortcut.Description = "Startet das Framework"
-$IconPath = Join-Path $InstallDir "assets\LLM-Builder.ico"
-if (Test-Path $IconPath) { $Shortcut.IconLocation = $IconPath }
-$Shortcut.Save()
+if (-not (Test-Path -LiteralPath $PythonWindowless)) {
+    Write-Warning "$PythonWindowless fehlt; die Verknuepfungen starten das Framework erst, wenn die .venv vollstaendig ist (Installer erneut starten)."
+}
+New-FrameworkShortcut (Join-Path $StartMenu "$AppName.lnk")
+$DesktopLink = Join-Path $Desktop "$AppName.lnk"
+if ($DesktopShortcut) {
+    New-FrameworkShortcut $DesktopLink
+} elseif (Test-OwnShortcut $DesktopLink) {
+    # Answered no: an earlier desktop shortcut of this installer goes; one the framework did not write stays.
+    Remove-Item -LiteralPath $DesktopLink -Force -ErrorAction SilentlyContinue
+}
 
 # Marker for scripts\Uninstall-LLM-Cross-Compiler-Framework.bat: the installation folder, kept next to this script. The
 # first line is this installation; the lines after it name other installations that still exist (the one under the
@@ -691,6 +734,7 @@ if ($ModeChoice) {
 }
 
 Write-Host "Installation Erfolgreich!" -ForegroundColor Green
+Write-Host "Starten: im Startmenue '$AppName' (ohne Konsolenfenster); mit Konsole zur Fehlersuche: $LauncherBat"
 Write-Host "Builds, Cache und Modelle: $UserDataHint (je Benutzer)"
 
 # The installation under the old name: said in plain words, never removed here.
@@ -698,7 +742,7 @@ if (Test-Path $OldInstallDir) {
     Write-Host ""
     Write-Warning "Es gibt noch eine Installation unter dem frueheren Namen: $OldInstallDir"
     Write-Host "Dieser Installer hat sie nicht veraendert und loescht sie nicht. Die neue Installation liegt in $InstallDir,"
-    Write-Host "ihre Verknuepfung auf dem Desktop heisst '$AppName'. Die alte Verknuepfung '$OldAppName' startet weiter die alte."
+    Write-Host "ihre Verknuepfung im Startmenue (und auf dem Desktop) heisst '$AppName'. Die alte Verknuepfung '$OldAppName' startet weiter die alte."
     Write-Host "Deine Einstellungen, Zugangsdaten und Builds in $UserDataHint gelten fuer beide und bleiben, wie sie sind."
     Write-Host "KI-Apps, die du ueber MCP verbunden hast (Claude Desktop, VS Code, Claude Code), starten noch die alte Installation."
     Write-Host "Vor dem Entfernen aus der neuen einrichten (llm-cli mcp config, siehe README), im Ordner ${InstallDir}:"

@@ -491,6 +491,21 @@ def hermetic_docker_engine(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_crash_dialog_left():
+    """A test that starts the GUI (orchestrator/gui/app.main) sets the crash dialog's sys.excepthook and
+    threading.excepthook; they go back after the test, so an error in a Qt slot of a later test never waits on a
+    modal crash dialog nobody closes; its gui.log handler (in the test's own folder) is closed too."""
+    yield
+    crash_dialog = sys.modules.get("orchestrator.gui.crash_dialog")
+    if crash_dialog is not None:
+        crash_dialog.uninstall()
+    root = logging.getLogger()
+    for handler in [h for h in root.handlers if h.get_name() == "llmcf-gui-log"]:
+        root.removeHandler(handler)
+        handler.close()
+
+
+@pytest.fixture(autouse=True)
 def no_network_llama_source(monkeypatch):
     """Tests never fetch the llama.cpp source from the network: a real fetch is about 215 MB, and a test that reaches
     it would go on to a real build. Local mirrors and bundles (the source tests) still work."""

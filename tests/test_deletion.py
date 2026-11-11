@@ -43,6 +43,9 @@ TAKEN_OVER = ("a move the person chose (the GUI's take-over question, llm-cli co
 BOARD_MOVED = ("a move the person confirmed (Q5/P6, a board's new host key): the old device ID's data goes only after "
                "its copy under the new ID was checked and the change was made; the undo takes back only the copies "
                "the move itself made")
+START_ENTRY = ("the framework's own start entry: only the person's own desktop entry or Start-menu shortcut that "
+               "carries the framework's mark, removed on the person's own command (llm-cli launcher remove, Remove "
+               "under File > Settings..., Update); a file of that name without the mark stays")
 UNUSED = "OPEN (reported): no caller; must get a plan before it is wired"
 IMPORT_MARKS = ("bookkeeping: the framework's own import note of an installed pack (and its snapshot note), removed so "
                 "the pack is imported again after the person's yes in Mojo Miracle (knowledge.reimport)")
@@ -277,6 +280,9 @@ DELETION_SITES = {
     ("orchestrator/tools/gui_bridge.py", "_remove_stale_endpoint"): OWN_BRIDGE,
     ("orchestrator/tools/gui_bridge.py", "BridgeServer._stop_bridge"): OWN_BRIDGE,
     ("orchestrator/tools/gui_bridge.py", "BridgeServer._remove_temp_folder"): OWN_BRIDGE,
+    # the start entry that opens the GUI without a terminal
+    ("orchestrator/utils/launcher.py", "linux_remove"): START_ENTRY,
+    ("orchestrator/utils/launcher.py", "windows_remove"): START_ENTRY,
     # open, reported
     ("orchestrator/runtime/profile.py", "ProfileStore.remove_device"): UNUSED,
 }
