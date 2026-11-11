@@ -3824,7 +3824,16 @@ A step that deletes something opens the list of what goes (No is the default), a
 field and handed over through standard input, never on the command line. What runs is exactly what you read: a
 changed proposal is refused. Only commands that finish without a terminal and do no more than the question says can be
 allowed; anything else (reading a licence, for example) opens its place in the window. Each decision is recorded in
-the activity record. (The question and its console in the window come with the Ditto console.)
+the activity record.
+
+In the window, a step the framework may run has a **Run...** button wherever it reaches you: in the next steps under a
+message or an error, and under a record in the chat that names what to do. **Run...** opens the question; **No** is
+the default, and Enter, Escape or closing the question are a no. **Yes** runs the command in the background (the window
+stays usable): its output, with secrets redacted, appears in the question and in the Ditto console beside the chat
+(under "You allowed", or with **Show:** "Commands you allowed"), **Cancel** stops it, and the end says how it went with
+the exit status. A hidden field is emptied the moment you click **Yes**, and its value is replaced by `[hidden]`
+wherever the command's output would repeat it. Only your click answers the question: no AI can see, fill or press it.
+On the command line there is no such question: the same step is printed as "Next: ...: llmcf ...", and you type it.
 
 **Errors in your language:** an error is shown with a plain summary in your language, the next step, and the English
 technical detail to expand and copy (Ditto reads the English detail and explains it to you).

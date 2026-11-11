@@ -4242,7 +4242,18 @@ geprüften Werten (Auswahlen, Namen, IDs; nie ein Pfad, den du nicht gewählt ha
 Feld abgefragt und über die Standardeingabe übergeben, nie auf der Kommandozeile. Was läuft, ist genau das, was du
 gelesen hast: Ein geänderter Vorschlag wird abgelehnt. Zugelassen werden nur Befehle, die ohne Terminal durchlaufen
 und nicht mehr tun, als die Frage sagt; alles andere (zum Beispiel eine Lizenz zu lesen) öffnet seinen Ort im Fenster.
-Jede Entscheidung steht im Aktivitätsprotokoll. (Die Frage und ihre Konsole im Fenster kommen mit der Ditto-Konsole.)
+Jede Entscheidung steht im Aktivitätsprotokoll.
+
+Im Fenster hat ein Schritt, den das Framework ausführen darf, überall dort einen Knopf **Ausführen...**, wo er dich
+erreicht: in den nächsten Schritten unter einer Meldung oder einem Fehler und unter einer Aufzeichnung im Chat, die
+nennt, was zu tun ist. **Ausführen...** öffnet die Frage; **Nein** ist vorgewählt, und Enter, Escape oder das Schließen
+der Frage sind ein Nein. **Ja** führt den Befehl im Hintergrund aus (das Fenster bleibt bedienbar): seine Ausgabe, mit
+geschwärzten Secrets, erscheint in der Frage und in der Ditto-Konsole neben dem Chat (unter „Von dir zugelassen“, oder
+mit **Zeigen:** „Befehle, die du zugelassen hast“), **Abbrechen** stoppt ihn, und am Ende steht, wie es ausging, mit
+dem Exit-Status. Ein verdecktes Feld wird geleert, sobald du auf **Ja** klickst, und sein Wert wird durch
+`[verborgen]` ersetzt, wo die Ausgabe des Befehls ihn wiederholen würde. Nur dein Klick beantwortet die Frage: keine KI
+kann sie sehen, ausfüllen oder drücken. Auf der Kommandozeile gibt es keine solche Frage: Derselbe Schritt wird als
+„Next: ...: llmcf ...“ gedruckt, und du tippst ihn.
 
 **Fehler in deiner Sprache:** Ein Fehler erscheint mit einer verständlichen Zusammenfassung in deiner Sprache, dem
 nächsten Schritt und dem englischen technischen Detail zum Aufklappen und Kopieren (Ditto liest das englische Detail
