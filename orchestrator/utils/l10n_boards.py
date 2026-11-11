@@ -574,6 +574,9 @@ TEXTS = {
         "boards.packages.done": "Installed on {label}: {packages}.",
         "boards.packages.not_done": "The packages of {label}: not done: {reason}",
         "boards.packages.write_title": "Folder for preload.sh and preload.ps1",
+        "boards.packages.offer_preload": "Write a board preload for these packages now? A computer with a network "
+                                         "fetches them, checked against the distribution's signed lists; then take "
+                                         "the archive in here.",
         "boards.packages.written": "Written: {sh} and {ps}. They fetch {what}. Run one on a computer with a network "
                                    "and Python 3, then take the archive in here.",
         "boards.packages.take_title": "The board preload (.tar.gz)",
@@ -1292,6 +1295,9 @@ TEXTS = {
         "boards.packages.done": "Auf {label} installiert: {packages}.",
         "boards.packages.not_done": "Die Pakete von {label}: nicht erledigt: {reason}",
         "boards.packages.write_title": "Ordner für preload.sh und preload.ps1",
+        "boards.packages.offer_preload": "Jetzt ein Board-Preload für diese Pakete schreiben? Ein Rechner mit Netz "
+                                         "holt sie, gegen die signierten Listen der Distribution geprüft; dann "
+                                         "übernimm das Archiv hier.",
         "boards.packages.written": "Geschrieben: {sh} und {ps}. Sie holen {what}. Führe eines auf einem Rechner mit "
                                    "Netz und Python 3 aus und übernimm das Archiv dann hier.",
         "boards.packages.take_title": "Das Board-Preload (.tar.gz)",

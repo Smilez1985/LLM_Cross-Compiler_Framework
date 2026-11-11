@@ -1721,7 +1721,14 @@ class BoardsWindow(BoardSteps, QDialog):
 
         def failed(error: BaseException) -> bool:
             if isinstance(error, board_packages.PackageError):
-                self._info(self._t("boards.packages.not_done", label=label, reason=one_line(str(error))), "warning")
+                text = self._t("boards.packages.not_done", label=label, reason=one_line(str(error)))
+                if getattr(error, "offer", "") == "preload":
+                    # the way on: a board preload for exactly these packages ("No" is the default)
+                    if ask(self, self._t("boards.packages.title", label=label),
+                           text + "\n\n" + self._t("boards.packages.offer_preload")):
+                        self.write_package_preload(entry, scope)
+                    return True
+                self._info(text, "warning")
                 return True
             host, port, _s, user = contact
             self._show_error(error, address=host, port=port, user=user, device_id=device_id)

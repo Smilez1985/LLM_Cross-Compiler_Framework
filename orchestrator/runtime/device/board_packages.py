@@ -59,7 +59,12 @@ INSTALL_QUESTION = ("Install {packages} on board {board} as root through llmcf-i
 
 
 class PackageError(ValueError):
-    """A package step that cannot run (the message says why and what to do)."""
+    """A package step that cannot run (the message says why and what to do). `offer` "preload": the way on is a board
+    preload (the online way was refused)."""
+
+    def __init__(self, message: str, offer: str = ""):
+        super().__init__(message)
+        self.offer = offer
 
 
 def package_name(word: str) -> str:
@@ -494,7 +499,7 @@ def plan_install(session: Any, state_dir: Path, device_id: str, scope: str, word
     if scope not in facts.taken:
         problem = online_problem(facts, config)
         if problem:
-            raise PackageError(problem)
+            raise PackageError(problem, offer="preload")
     return facts, run_root(session.run, "plan", scope, words)
 
 
