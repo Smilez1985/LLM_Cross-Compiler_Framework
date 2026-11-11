@@ -66,6 +66,9 @@ DELETION_SITES = {
     ("orchestrator/runtime/build/deps.py", "DependencyCache.delete"): PERSON,
     # the kept F16 intermediates of GGUF builds: the person's list (`build f16 delete`, F16 Intermediates...)
     ("orchestrator/Core/f16_cache.py", "F16Cache.delete"): PERSON,
+    # the downloads in the models folder, from the Models tab and `models delete`: the person's list only, built again
+    # first, audited first (tests/test_model_library.py covers an AI actor, a changed list and the trash)
+    ("orchestrator/Core/model_library.py", "delete_downloads"): PERSON,
     ("orchestrator/runtime/bundle/generator.py", "BundleStore.delete"): PERSON,   # stored board bundles
     ("orchestrator/runtime/device/package.py", "DeviceRuntimeStore.delete_packages"): PERSON,
     # every object of the old runtime mode after a switch of Ditto's server (build folders, images, containers, its

@@ -185,6 +185,7 @@ class BenchRunner:
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self._store, self._catalog, self._engine = store, catalog, engine
         self._platform, self._cpu_problem, self._popen = platform, cpu_problem, popen
+        self._threads: Optional[int] = None   # llama-bench's -t of the current run (run(threads=))
 
     # --- what a run needs ---
 
@@ -232,12 +233,17 @@ class BenchRunner:
     # --- the run ---
 
     def run(self, model: Path, *, kind: str, label: str, trusted: bool, sha256: str, sandbox: bool = False,
-            stop: Optional[threading.Event] = None) -> BenchRun:
+            stop: Optional[threading.Event] = None, threads: Optional[int] = None) -> BenchRun:
         """Runs llama-bench on `model` with the sha256 `sha256` (`trusted` says whether it is a catalog model). The
         file is opened once and hashed through that open file, and llama-bench reads exactly that file (the inherited
         descriptor natively, a private hard link of it in the sandbox), so it cannot be swapped between the check and
         the run. Only a catalog model runs natively; any other model only in the Docker sandbox (a native run of it is
-        refused here, before anything is opened). Raises BenchError."""
+        refused here, before anything is opened). `threads`: llama-bench's -t (None or 0: its own choice; the
+        Benchmark window and `llm-cli models bench --threads`). Raises BenchError."""
+        if threads is not None and (isinstance(threads, bool) or not isinstance(threads, int)
+                                    or not 0 <= threads <= 512):
+            raise BenchError("threads must be a whole number from 0 to 512.", code="invalid_value")
+        self._threads = threads or None
         import os
         model = Path(model)
         if not model.is_file() or model.is_symlink() or model.suffix.lower() != ".gguf":
@@ -278,6 +284,8 @@ class BenchRunner:
 
     def _argv(self, binary: str, model: str, build: Any) -> List[str]:
         argv = [binary, "-m", model, *BENCH_ARGS]
+        if self._threads:
+            argv += ["-t", str(self._threads)]
         if str(build.backend) != "cpu":
             argv += ["-ngl", "99"]
         return argv
@@ -562,9 +570,23 @@ class BenchRunner:
         runs.mkdir(parents=True, exist_ok=True)
         data = {"schema": SCHEMA, **asdict(run)}
         write_private(runs / f"{run.run_id}.json", json.dumps(data, indent=2, sort_keys=True) + "\n")
-        line = {k: data[k] for k in ("run_id", "kind", "sha256", "build_id", "where", "prompt_ts", "gen_ts", "at")}
+        # the model's label too: the Models tab finds the newest run of a download by it (Core/model_library.py)
+        line = {k: data[k] for k in ("run_id", "kind", "model", "sha256", "build_id", "where", "prompt_ts", "gen_ts",
+                                     "at")}
         with open(self.root / "index.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(line, sort_keys=True) + "\n")
+
+    def run_record(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """The kept record of one run (runs/<run_id>.json, with llama-bench's rows in `records`), None when there is
+        none or it cannot be read."""
+        import re
+        if not re.fullmatch(r"bench_[0-9a-f]{12}", str(run_id or "")):
+            return None
+        try:
+            data = json.loads((self.root / "runs" / f"{run_id}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return data if isinstance(data, dict) else None
 
     def latest(self, limit: int = 5) -> List[Dict[str, Any]]:
         """The newest runs from the index (for status displays)."""

@@ -48,6 +48,7 @@ from orchestrator.gui.menus import boards as menu_boards
 from orchestrator.gui.menus import build as menu_build
 from orchestrator.gui.menus import build_image as menu_build_image
 from orchestrator.gui.menus import ditto_models as menu_ditto_models
+from orchestrator.gui.menus import models as menu_models
 from orchestrator.gui.menus import ditto_runtime as menu_ditto_runtime
 from orchestrator.gui.menus import knowledge as menu_knowledge
 from orchestrator.gui.menus import mojo as menu_mojo
@@ -253,6 +254,7 @@ class MainOrchestrator(QMainWindow):
         # Security, View, Tools, Help). The deploy area's paths are buttons of the Deployment and Builder tabs
         # (menus/deploy.py).
         menu_build.install(self, menubar)  # File > Settings...; Build > Targets..., Build History...
+        menu_models.install(self, menubar)  # Build > Benchmark... (the Models tab's Benchmark... opens it too)
         menu_build_image.install(self, menubar)  # Build > Build Container Images...
         menu_boards.install(self, menubar)  # Boards > Boards and Devices...
         menu_ditto_runtime.install(self, menubar)  # Ditto > Advanced > Local Runtime...
@@ -324,12 +326,26 @@ class MainOrchestrator(QMainWindow):
         self.tuning_tab = TuningTab(self.framework)
         self.tabs.addTab(self.tuning_tab, "")
 
-        # 4. Model Manager Placeholder
-        self.models_tab = QLabel("Model Manager (Local Library)")
+        # 4. Models: the downloaded models and the builds in one list (gui/models_tab.py, Core/model_library.py)
+        from orchestrator.gui.models_tab import ModelsTab
+        self.models_tab = ModelsTab(self.framework, open_hf=self._open_hf_browser,
+                                    open_benchmark=lambda key: menu_models.open_benchmark(self, key),
+                                    show_deploy=self._show_build_in_deployment)
         self.tabs.addTab(self.models_tab, "")
         # The tab titles from ui_text keys (menus/place.py TAB_TITLES): the emoji in front, the text alone for screen
         # readers; they follow a language change with the menus (retranslate_menus).
         menu_place.retitle_tabs(self)
+
+    def _show_build_in_deployment(self, path: str) -> None:
+        """The Models tab's Deploy...: the Deployment tab with this build selected in its list."""
+        window = self.deployment_window
+        window.refresh_data()
+        for i in range(window.list_artifacts.count()):
+            item = window.list_artifacts.item(i)
+            if item.data(Qt.UserRole) == path:
+                window.list_artifacts.setCurrentItem(item)
+                break
+        self.tabs.setCurrentWidget(window)
 
     # --- the chat panel on the right (delegation design 5.1, 5.9) ---------------------------------------------------
 

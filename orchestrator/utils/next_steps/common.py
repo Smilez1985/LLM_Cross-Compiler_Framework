@@ -27,6 +27,7 @@ MENU_LAYOUT = (
         ("act_build_images", "bimg.menu"),
         ("act_build_deps", "bld.menu.deps"),
         ("act_build_f16", "bld.menu.f16"),
+        ("act_build_benchmark", "bench.menu"),
     )),
     ("menu_boards", "main.menu.boards", (
         ("act_boards_devices", "boards.menu.devices"),
@@ -93,6 +94,7 @@ MENU_LAYOUT = (
 MOUSE_LABELS = {
     "builder_tab": (None, "main.tab.builder"),
     "deployment_window": (None, "main.tab.deployment"),
+    "models_tab": (None, "main.tab.models"),
     "btn_trash_restore": ("act_file_trash", "trash.restore"),
     "btn_trash_delete": ("act_file_trash", "trash.delete"),
     "btn_mojo_miracle": ("act_mojo_health", "mojo.miracle.button"),

@@ -330,6 +330,8 @@ def test_text_modules_are_merged_and_never_replace_a_key(monkeypatch):
                                              "orchestrator.utils.l10n_tuning",
                                              # the large models: Builder fields, Build > F16 Intermediates...
                                              "orchestrator.utils.l10n_large",
+                                             # the Models tab and Build > Benchmark...
+                                             "orchestrator.utils.l10n_models",
                                              # wave 6: chain a0 pre-registers every planned module (a missing one is
                                              # skipped): the menu bar, the shell, the activity, Hugging Face, the
                                              # Ditto setup guide and the glossary

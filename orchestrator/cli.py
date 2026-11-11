@@ -6293,7 +6293,7 @@ def trash_empty(ctx: FrameworkContext, ids: Tuple[str, ...], everything: bool, d
 
 @cli.group()
 def models():
-    """The models folder: take over what earlier versions downloaded from Hugging Face"""
+    """Downloaded models and builds: list, delete and benchmark them; take over old downloads"""
     pass
 
 
@@ -6398,6 +6398,196 @@ def _remove_old_hf_copies(ctx: FrameworkContext, manager, plan, lang: Optional[s
     for name in result.done:
         console.print(f"[green]{escape(ui_text(key, lang, name=name))}[/green]")
     _print_kept(result, lang)
+
+
+@models.command('list')
+@click.option('--kind', type=click.Choice(["download", "ditto", "copy", "input", "f16", "build"]), default=None,
+              help='Only rows of this kind')
+@click.option('--search', default='', metavar='TEXT', help='Only rows whose name, type, target, board or place '
+                                                           'contain TEXT')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def library_list(ctx: FrameworkContext, kind: Optional[str], search: str, as_json: bool):
+    """Every model on this computer and every build made from them, in one list: the downloads, Ditto's models, the
+    Builder's copies, the inputs of earlier builds, the kept F16 intermediates and the finished builds, with format,
+    type, size, place, date, target and board, the boards a build was tested on and the newest benchmark here. The
+    same list as the GUI's Models tab."""
+    ctx.require_framework()
+    from orchestrator.Core.deletion import size_text
+    from orchestrator.Core.model_library import library, matching
+    lang = _config_language(ctx)
+    rows = matching(library(ctx.framework_manager), kind or "", search)
+    if as_json:
+        click.echo(json.dumps([r.to_dict() for r in rows], indent=2, default=str))
+        return
+    if not rows:
+        console.print("[yellow]No downloaded model and no build on this computer"
+                      + (" matches." if kind or search else " yet. Download one with the Hugging Face browser of "
+                                                            "the GUI, or build one with 'llm-cli build start'.")
+                      + "[/yellow]")
+        return
+    table = Table(title=f"Models and builds ({len(rows)})")
+    for column in ("Name", "Kind", "Format", "Type", "Size", "Where", "Date", "Target / board", "Tested and measured",
+                   "Full path"):
+        table.add_column(column, overflow="fold")
+    for row in rows:
+        table.add_row(escape(row.name), escape(row.kind_text(lang)), escape(row.format), escape(row.quant),
+                      size_text(row.size_bytes) if row.size_bytes is not None else "?", escape(row.where_text(lang)),
+                      escape(row.date), escape(" / ".join(x for x in (row.target, row.board) if x)),
+                      escape(row.state(lang)), escape(str(row.path or "")))
+    console.print(table)
+    console.print(f"{size_text(sum(r.size_bytes or 0 for r in rows))} in all. A row is named in 'llm-cli models "
+                  "delete' and 'llm-cli models bench' by its full path, its label or its name.")
+
+
+def _model_row(ctx: FrameworkContext, name: str):
+    """The one library row `name` means (full path, label, artifact id or name); a usage error otherwise."""
+    from orchestrator.Core.model_library import find, library
+    found = find(library(ctx.framework_manager, with_bench=False), name)
+    if not found:
+        raise click.UsageError(f"No model or build named {name!r}; 'llm-cli models list' shows them.")
+    if len(found) > 1:
+        raise click.UsageError(f"{name!r} names {len(found)} rows; give its full path ('llm-cli models list').")
+    return found[0]
+
+
+@models.command('delete')
+@click.argument('names', nargs=-1, required=True)
+@pass_context
+def library_delete(ctx: FrameworkContext, names):
+    """Delete models or builds of the list, each through its own deletion: a build (its folder and golden ZIP), a
+    download in the models folder, a kept F16 intermediate. The full list first, then the trash or for good, "No" by
+    default; only at a terminal. Ditto's models, files in your own folders and the Builder's copies are not deleted
+    here. The same as Delete... in the Models tab."""
+    ctx.require_framework()
+    from orchestrator.Core import model_library as lib
+    from orchestrator.Core.deletion import PlanChanged
+    fm = ctx.framework_manager
+    lang = _config_language(ctx)
+    rows = [_model_row(ctx, name) for name in names]
+    for row in rows:
+        if not row.deletable:
+            console.print(f"[yellow]{escape(row.name)}: " + ("Ditto's models are kept in Ditto's local models "
+                          "('llm-cli ditto models list'); they are not deleted here." if row.kind == "ditto" else
+                          "it lies in a folder of yours or in the build cache; the framework does not delete it.")
+                          + "[/yellow]")
+    rows = [r for r in rows if r.deletable]
+    try:
+        trash = _cli_trash(ctx)
+    except Exception:  # noqa: BLE001 - no per-user folder: only deleting for good works then
+        trash = None
+    audit = _cli_audit(ctx)
+    downloads = [r for r in rows if r.kind == "download"]
+    try:
+        if downloads:
+            plan = lib.download_plan(fm, downloads)
+            accepted = confirm_deletion(plan, title="Delete downloaded models", again="llm-cli models delete")
+            if accepted is not None:
+                _print_deletion_result(lib.delete_downloads(fm, accepted, trash=trash, audit=audit), accepted)
+        for row in [r for r in rows if r.kind == "f16"]:
+            plan = lib.f16_deletion(fm, row)
+            if plan is None:
+                raise PlanChanged("the list of F16 intermediates")
+            accepted = confirm_deletion(plan, title="Delete a kept F16 intermediate", again="llm-cli models delete")
+            if accepted is not None:
+                from orchestrator.Core.f16_cache import F16Cache
+                _print_deletion_result(F16Cache.for_framework(fm).delete(accepted, trash=trash, audit=audit),
+                                       accepted)
+        for row in [r for r in rows if r.kind == "build"]:
+            target, plan = lib.build_deletion(fm, row)
+            accepted = confirm_deletion(plan, title="Delete a build", again="llm-cli models delete")
+            if accepted is None:
+                continue
+            done = lib.delete_build(fm, row, target, accepted, trash=trash, audit=audit)
+            if accepted.mode == "trash":
+                console.print(f"[green]Moved to the trash: {escape(row.name)} ({len(done.trash_ids)} items).[/green]")
+            else:
+                from orchestrator.Core.deletion import size_text
+                console.print(f"[green]Deleted: {escape(row.name)}; {size_text(done.freed_bytes)} freed.[/green]")
+    except PlanChanged:
+        from orchestrator.utils.localization import ui_text
+        console.print(f"[yellow]{escape(ui_text('deletion.changed', lang))}[/yellow]")
+        sys.exit(1)
+    except Exception as e:  # noqa: BLE001 - refused by the owner (a build still writing, no audit log): one line
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+
+
+@models.command('bench')
+@click.argument('name')
+@click.option('--threads', type=click.IntRange(0, 512), default=0, show_default=True,
+              help="llama-bench's threads (0: its own choice)")
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def library_bench(ctx: FrameworkContext, name: str, threads: int, as_json: bool):
+    """Measure a GGUF model of the list with llama-bench on this computer: prompt processing (pp512) and generation
+    (tg128) in tokens per second, three repetitions each. Ditto's catalogue models run natively; every other model
+    only in the Docker sandbox with the llama-bench built in the builder container (that measures this computer, not
+    the board it was built for; on a board: 'llm-cli device runtime verify DEVICE --bench-model PATH'). The result is
+    kept ('llm-cli models bench-results'). Ctrl+C stops it. The same as Build > Benchmark... in the GUI."""
+    ctx.require_framework()
+    import threading
+    from dataclasses import asdict
+    from orchestrator.Core.disk_plan import folder
+    from orchestrator.Core.model_library import record_rows
+    from orchestrator.runtime.bench import BenchError, BenchRunner, BenchStopped
+    from orchestrator.utils.helpers import sha256_file
+    fm = ctx.framework_manager
+    row = _model_row(ctx, name)
+    if row.gguf is None:
+        raise click.UsageError(f"{name!r} is no GGUF model file; only those are measured with llama-bench.")
+    runner = BenchRunner(Path(fm.config.user_state_dir), cache_dir=folder(fm, "cache_dir", "cache"))
+    digest = sha256_file(row.gguf)
+    trusted = digest in runner.trusted_sha256()
+    stop = threading.Event()
+    try:
+        with _ctrl_c_cancels(stop), console.status(f"Measuring {escape(row.name)}"
+                                                   + (" natively" if trusted else " in the Docker sandbox") + "..."):
+            run = runner.run(row.gguf, kind="tier_speed" if trusted else "artifact_speed", label=row.name,
+                             trusted=trusted, sha256=digest, sandbox=not trusted, stop=stop, threads=threads or None)
+    except BenchStopped:
+        console.print("[yellow]The benchmark was stopped.[/yellow]")
+        sys.exit(1)
+    except BenchError as e:
+        console.print(f"[red]{escape(str(e))}[/red]" + (f"\n{escape(e.next)}" if e.next else ""))
+        sys.exit(1)
+    if as_json:
+        click.echo(json.dumps(asdict(run), indent=2))
+        return
+    table = Table(title=f"llama-bench: {escape(row.name)} ({'natively' if run.where == 'native' else 'Docker sandbox'}"
+                        f", build {run.build_id[:16]})")
+    for column in ("Test", "Tokens/s", "Threads", "Backend"):
+        table.add_column(column)
+    for line in record_rows(run.records):
+        table.add_row(line["test"], line["speed"], line["threads"], escape(line["backend"]))
+    console.print(table)
+    console.print(f"Kept as {run.run_id} ({run.duration_s} s"
+                  + (f", peak memory {run.peak_rss_mib} MiB" if run.peak_rss_mib else "") + ").")
+
+
+@models.command('bench-results')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def library_bench_results(ctx: FrameworkContext, as_json: bool):
+    """The llama-bench runs kept on this computer, newest first: model, where it ran, prompt and generation speed and
+    time. The same list as the Benchmark window's earlier runs."""
+    ctx.require_framework()
+    from orchestrator.Core.model_library import bench_runs, speed
+    runs = bench_runs(ctx.framework_manager, 50)
+    if as_json:
+        click.echo(json.dumps(runs, indent=2))
+        return
+    if not runs:
+        console.print("[yellow]No benchmark has run on this computer yet ('llm-cli models bench NAME').[/yellow]")
+        return
+    table = Table(title="Benchmarks on this computer")
+    for column in ("Run", "Model", "Where", "Prompt (pp512)", "Generation (tg128)", "Time"):
+        table.add_column(column, overflow="fold")
+    for run in runs:
+        table.add_row(escape(str(run.get("run_id"))), escape(str(run.get("model") or "-")),
+                      escape(str(run.get("where") or "-")), speed(run.get("prompt_ts")), speed(run.get("gen_ts")),
+                      escape(str(run.get("at") or "")))
+    console.print(table)
 
 
 # ============================================================================

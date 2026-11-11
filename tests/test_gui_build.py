@@ -105,10 +105,10 @@ def test_the_build_menu_follows_file_and_settings_sits_above_exit(window):
     titles = [a.text().replace("&", "") for a in window.menuBar().actions()]   # wave 6: titles with mnemonics
     assert titles[:2] == ["File", "Build"], titles
     # Round 36 (on purpose): Build Container Images... follows Build History...; Build Dependencies... follows, and F16
-    # Intermediates... (the large models) comes last
+    # Intermediates... (the large models), then Benchmark... (the Models tab's benchmark window) comes last
     assert [a.text() for a in window.menu_build.actions()] == ["Targets...", "Build History...",
                                                                "Build Container Images...", "Build Dependencies...",
-                                                               "F16 Intermediates..."]
+                                                               "F16 Intermediates...", "Benchmark..."]
     file_menu = window.menuBar().actions()[0].menu()
     assert [a.text() for a in file_menu.actions() if not a.isSeparator()][-2:] == ["Settings...", "Exit"]
     assert (window.act_build_targets.objectName(), window.act_build_history.objectName(),

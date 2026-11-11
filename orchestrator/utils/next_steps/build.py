@@ -21,6 +21,10 @@ MOUSE_LABELS = {
     "btn_builder_start": ("builder_tab", "bld.builder.start"),
     "btn_builder_preflight": ("builder_tab", "bld.preflight.button"),
     "btn_f16_delete": ("act_build_f16", "bld.f16.delete"),
+    # the Models tab and Build > Benchmark... (gui/models_tab.py, gui/benchmark_window.py)
+    "btn_models_delete": ("models_tab", "models.delete"),
+    "btn_models_bench": ("models_tab", "models.bench"),
+    "btn_bench_run": ("act_build_benchmark", "bench.run"),
 }
 
 STEPS = (

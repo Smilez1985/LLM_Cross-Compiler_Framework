@@ -359,38 +359,66 @@ def test_no_default_names_a_registry_image(tmp_path):
         assert not registry_of(str(docker.get("image_name", ""))), target
 
 
-def test_the_benchmark_window_never_pulls_its_image():
-    """containers.run pulls a missing image by itself; the benchmark asks first and stops when it is not here."""
-    pytest.importorskip("PySide6")
-    import docker
-    from orchestrator.gui.benchmark_window import BENCHMARK_IMAGE, BenchmarkWorker
-    calls, errors = [], []
-
-    def missing(name):
-        calls.append(("get", name))
-        raise docker.errors.ImageNotFound(name)
-
-    client = SimpleNamespace(images=SimpleNamespace(get=missing),
-                             containers=SimpleNamespace(run=lambda *a, **k: calls.append(("run", a, k))))
-    worker = BenchmarkWorker(SimpleNamespace(client=client), {})
-    worker.error.connect(errors.append)
-    worker.run()
-    assert calls == [("get", BENCHMARK_IMAGE)] and not registry_of(BENCHMARK_IMAGE)
-    assert errors and "not on this computer" in errors[0]
+def _bench_runner_with(engine, tmp_path):
+    """A BenchRunner whose sandbox run uses `engine` (a stand-in Docker engine) and a stand-in builder build."""
+    from orchestrator.runtime import bench
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    build = SimpleNamespace(build_id="b" * 64, backend="cpu", bin_dir=bin_dir,
+                            manifest={"builder_image": "llm-framework/llama-builder:debian-0123456789ab"})
+    runner = bench.BenchRunner(tmp_path / "state", engine=engine, cache_dir=tmp_path / "cache")
+    runner.bench_build = lambda sandbox=False: (build, Path("x"))
+    model = tmp_path / "models" / "m.gguf"
+    model.parent.mkdir()
+    model.write_bytes(b"GGUF stand-in model")
+    import hashlib
+    return runner, model, hashlib.sha256(model.read_bytes()).hexdigest()
 
 
-def test_the_benchmark_container_runs_without_network_or_capabilities():
-    """llama-bench reads a model from the cache and prints numbers: its container gets no network
-    (network_mode='none'), no capabilities and no new privileges."""
-    pytest.importorskip("PySide6")
-    from orchestrator.gui.benchmark_window import BENCHMARK_IMAGE, BenchmarkWorker
-    runs, done = [], []
-    client = SimpleNamespace(images=SimpleNamespace(get=lambda name: name),
-                             containers=SimpleNamespace(run=lambda *a, **k: runs.append((a, k)) or b"done"))
-    worker = BenchmarkWorker(SimpleNamespace(client=client), {"cache_dir": "/build-cache-test"})
-    worker.finished.connect(done.append)
-    worker.run()
-    (args, kwargs), = runs
-    assert args == (BENCHMARK_IMAGE,) and kwargs["network_mode"] == "none"
-    assert kwargs["cap_drop"] == ["ALL"] and kwargs["security_opt"] == ["no-new-privileges:true"]
-    assert done and done[0]["raw"] == "done"
+def test_the_benchmark_window_never_pulls_its_image(tmp_path, monkeypatch):
+    """containers.run pulls a missing image by itself: the Benchmark window starts no container of its own (no docker
+    client, no containers.run); it measures through BenchRunner, whose sandbox asks whether the builder image is here
+    first and stops when it is not, before anything runs."""
+    import ast
+    source = (REPO_ROOT / "orchestrator" / "gui" / "benchmark_window.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    assert not [n for n in ast.walk(tree) if isinstance(n, ast.Attribute) and n.attr == "containers"]
+    assert not [n for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))
+                and "docker" in (getattr(n, "module", "") or "") + " ".join(a.name for a in n.names)]
+    assert "BenchRunner" in source
+    from orchestrator.runtime import bench, server_policy
+    monkeypatch.setattr(server_policy, "check_command", lambda argv: None)
+    calls = []
+    engine = SimpleNamespace(unavailable=lambda: None,
+                             image_exists=lambda tag: calls.append(("exists", tag)) or False,
+                             run=lambda *a, **k: calls.append(("run",)) or 0)
+    runner, model, digest = _bench_runner_with(engine, tmp_path)
+    with pytest.raises(bench.BenchError, match="not on this computer"):
+        runner.run(model, kind="artifact_speed", label="m", trusted=False, sha256=digest, sandbox=True)
+    assert calls == [("exists", "llm-framework/llama-builder:debian-0123456789ab")]
+    assert not registry_of("llm-framework/llama-builder:debian-0123456789ab")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the sandbox's private model link is a POSIX path")
+def test_the_benchmark_container_runs_without_network_or_capabilities(tmp_path, monkeypatch):
+    """llama-bench reads a model and prints numbers: the Benchmark window's sandbox run (BenchRunner) gets no network
+    (network_mode='none'), no capabilities, no new privileges, a read-only root and the model read-only."""
+    from orchestrator.runtime import server_policy
+    monkeypatch.setattr(server_policy, "check_command", lambda argv: None)
+    runs = []
+
+    def run(image, command, *, mounts, env, options, log, timeout, stop=None):
+        runs.append((image, options, [(m.target, m.read_only) for m in mounts], command))
+        log.write_bytes(b'[{"n_prompt": 512, "n_gen": 0, "avg_ts": 100.0, "n_threads": 2}, '
+                        b'{"n_prompt": 0, "n_gen": 128, "avg_ts": 10.0, "n_threads": 2}]')
+        return 0
+    engine = SimpleNamespace(unavailable=lambda: None, image_exists=lambda tag: True, run=run)
+    runner, model, digest = _bench_runner_with(engine, tmp_path)
+    result = runner.run(model, kind="artifact_speed", label="m", trusted=False, sha256=digest, sandbox=True,
+                        threads=2)
+    (image, options, mounts, command), = runs
+    assert options["network_mode"] == "none" and options["cap_drop"] == ["ALL"]
+    assert options["security_opt"] == ["no-new-privileges:true"] and options["read_only"] is True
+    assert ("/models/model.gguf", True) in mounts and ("/opt/llama/bin", True) in mounts
+    assert command[command.index("-t") + 1] == "2"
+    assert result.gen_ts == 10.0 and result.where == "sandbox"

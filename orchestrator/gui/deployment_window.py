@@ -300,8 +300,10 @@ class PackageWorker(QThread):
 class BoardBenchWorker(QThread):
     """The checks of the board's runtime with a short llama-bench run on a model on the board (seventh round 2',
     N3): the measurement runs on the board, never on this computer, and a passed run is recorded with the builds of
-    that model as "tested on" the board."""
+    that model as "tested on" the board. `measured` carries the board's result (prompt_ts, gen_ts, checks) before
+    `finished`, for the Benchmark window's table."""
     finished = Signal(bool, str)
+    measured = Signal(object)
 
     def __init__(self, framework, device_id: str, model: str, allow_untrusted: bool):
         super().__init__()
@@ -309,6 +311,13 @@ class BoardBenchWorker(QThread):
         self.device_id = device_id
         self.model = model
         self.allow_untrusted = allow_untrusted
+        from orchestrator.remote.session import CancelToken
+        self._stop = CancelToken()
+
+    def cancel(self) -> None:
+        """Stops waiting for the board (the Benchmark window's Cancel): the session closes at once; a llama-bench run
+        the board started on its own ends there by itself."""
+        self._stop.cancel()
 
     def _consent(self, digest: str) -> None:
         """The person's yes to an untrusted model, written to the audit log before the board loads it."""
@@ -344,7 +353,7 @@ class BoardBenchWorker(QThread):
             from orchestrator.Core.config_manager import framework_mode
             out = dev.benchmark(state, device, profile, settings, fp, allow_untrusted=self.allow_untrusted,
                                 consent=self._consent, output_dirs=artifact_folders(self.framework),
-                                mode=framework_mode(config))
+                                mode=framework_mode(config), cancel=self._stop, on_client=self._stop.hold)
         except SettingsError as e:
             self.finished.emit(False, str(e))
             return
@@ -357,6 +366,7 @@ class BoardBenchWorker(QThread):
         except Exception as e:  # noqa: BLE001 - a failure no step expected
             self.finished.emit(False, str(e))
             return
+        self.measured.emit(dict(out))
         lines = [f"{ui_text('device.bench.prompt')}: {out.get('prompt_ts') or '-'} t/s",
                  f"{ui_text('device.bench.gen')}: {out.get('gen_ts') or '-'} t/s",
                  f"{ui_text('device.bench.checks')}: " + ", ".join(f"{c['name']} {c['result']}"

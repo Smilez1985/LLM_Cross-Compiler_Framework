@@ -567,6 +567,7 @@ TEXT_MODULES += ("orchestrator.utils.l10n_acp",)   # Ditto in editors (ACP agent
 TEXT_MODULES += ("orchestrator.utils.l10n_pairing",)   # the pairing during the hardware probe (both ways)
 TEXT_MODULES += ("orchestrator.utils.l10n_tuning",)   # the Auto-Tuning tab
 TEXT_MODULES += ("orchestrator.utils.l10n_large",)   # the large models: Builder fields, F16 Intermediates...
+TEXT_MODULES += ("orchestrator.utils.l10n_models",)   # the Models tab and Build > Benchmark...
 
 
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,
