@@ -559,27 +559,81 @@ def write_scripts(spec: Path, out: Path):
 # --- the build's preload (kind=build) ------------------------------------------------------------------------------
 # A build's preload carries exactly the sources an offline build of one target's build container image lacks
 # (Core/build_preload.py writes the recipe, BUILD_SPEC_FILES): base images, the pinned llama.cpp commit, the image's
-# Python packages, pinned downloads and the files taken from source images; same folder, manifest, SHA256SUMS and
-# checks as the installer's preload. The image reader is scripts/image_files.py, standard library only,
-# next to this file in the scripts the build writes.
+# Python packages, pinned downloads, the files taken from source images and the image's distribution packages; same
+# folder, manifest, SHA256SUMS and checks as the installer's preload. The image reader is scripts/image_files.py and
+# the distribution packages are scripts/deb_preload.py's (the board preload's packages/ folder), both standard library
+# only, next to this file in the scripts the build writes.
 BUILD_SPEC_FILES = ("manifest.base", "sources.json")
 ARCHES = {"linux/amd64": "x86_64", "linux/arm64": "aarch64"}
 
 
-def _image_files_path() -> Path:
-    """image_files.py next to this file (scripts/ of the checkout, and the folder the build's scripts unpack into)."""
-    path = Path(__file__).resolve().with_name("image_files.py")
+def _beside(name: str) -> Path:
+    """A program next to this file (scripts/ of the checkout, and the folder the build's scripts unpack into)."""
+    path = Path(__file__).resolve().with_name(name)
     if not path.is_file():
-        raise PreloadError("image_files.py is missing next to preload_lock.py")
+        raise PreloadError(f"{name} is missing next to preload_lock.py")
     return path
 
 
-def _image_files():
+def _image_files_path() -> Path:
+    return _beside("image_files.py")
+
+
+def _load(name: str):
     import importlib.util
-    spec = importlib.util.spec_from_file_location("llmcf_image_files", _image_files_path())
+    spec = importlib.util.spec_from_file_location(f"llmcf_{name}", _beside(f"{name}.py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _image_files():
+    return _load("image_files")
+
+
+def _deb_preload():
+    return _load("deb_preload")
+
+
+def _gather_packages(apt: dict, images_saved: dict, top: Path) -> dict:
+    """The build image's distribution packages into top/packages (the board preload's folder, deb_preload.gather):
+    each stage resolved against its base image's dpkg status, from the recipe (an image on the computer that wrote
+    it) or read from the base image this preload fetched (`images_saved`: reference -> its docker save archive);
+    without one, the whole closure. Returns the manifest's lines for it."""
+    deb, images = _deb_preload(), _image_files()
+    distribution, release = apt.get("distribution"), apt.get("release")
+    stages = []
+    for stage in apt.get("stages") or []:
+        installed = stage.get("installed")
+        saved = images_saved.get(stage.get("image") or "")
+        if saved is not None:
+            try:
+                read = images.read_saved(saved, ["usr/lib/os-release", "etc/os-release", "var/lib/dpkg/status"])
+            except images.ImageFilesError as error:
+                raise PreloadError(str(error))
+            facts = deb.parse_os_release((read["usr/lib/os-release"] or read["etc/os-release"] or b"").decode(
+                "utf-8", "replace"))
+            found = (facts.get("ID", ""), facts.get("VERSION_CODENAME", ""))
+            if (distribution or release) and found != (distribution, release):
+                raise PreloadError(f"the base image {stage['image']} is {found[0]} {found[1]}, the recipe names "
+                                   f"{distribution} {release}")
+            distribution, release = found
+            if installed is None and read["var/lib/dpkg/status"] is not None:
+                installed = deb.installed_from_status(read["var/lib/dpkg/status"].decode("utf-8", "replace"))
+        if installed is None:
+            say(f"the dpkg status of {stage.get('image')} is not known: its packages' whole closure is fetched")
+        stages.append({"packages": stage["packages"], "installed": installed or {}})
+    try:
+        recipe = deb.make_build_recipe(distribution, release, apt.get("arch"), stages)
+        say(f"fetching the build image's distribution packages for {distribution} {release} on {apt.get('arch')} "
+            "(checked against the distribution's signed package lists)...")
+        resolved = deb.gather(recipe, top / deb.FOLDER, fetch=deb._fetch, log=say)
+    except deb.PreloadError as error:
+        raise PreloadError(str(error))
+    names = {word.split("=", 1)[0] for word in resolved}
+    in_base = sorted({p for s in stages for p in s["packages"] if p.split("=", 1)[0] not in names})
+    return {"packages_distribution": distribution, "packages_release": release, "packages_arch": apt.get("arch"),
+            "packages_resolved": ",".join(resolved) or "-", "packages_in_base": ",".join(in_base) or "-"}
 
 
 def build_archive_name(manifest: dict) -> str:
@@ -739,6 +793,11 @@ def pack_build(spec: Path, out: Path) -> Path:
             lines.append(f"images/{number:02d}.tar {saved['name']} {saved['digest']} {saved['config']}")
         if lines:
             (top / "images.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        packages = {}
+        if recipe.get("apt"):
+            saved = {ref: top / "images" / f"{number:02d}.tar" for number, ref in enumerate(recipe.get("images") or [])}
+            packages = _gather_packages(recipe["apt"], saved, top)
+            say(f"{packages['packages_resolved'].count('=')} distribution packages for the build image")
         llama = recipe.get("llama_cpp") or {}
         if recipe.get("llama_cpp_bundle") and llama:
             say(f"fetching llama.cpp at the pinned commit {llama['commit'][:12]} (git)...")
@@ -766,6 +825,7 @@ def pack_build(spec: Path, out: Path) -> Path:
         (top / "sources.json").write_bytes(recipe_bytes)
         created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         (top / "manifest.txt").write_text((spec / "manifest.base").read_text(encoding="utf-8")
+                                          + "".join(f"{k}={v}\n" for k, v in packages.items())
                                           + f"personal={'yes' if personal else 'no'}\ncreated={created}\n",
                                           encoding="utf-8")
         files = sorted(p.relative_to(top).as_posix() for p in top.rglob("*") if p.is_file())
@@ -788,10 +848,12 @@ def pack_build(spec: Path, out: Path) -> Path:
 
 
 def write_build_scripts(spec: Path, out: Path, what: str):
-    """preload.sh and preload.ps1 for a build's recipe: the recipe, this program and the image reader inside."""
+    """preload.sh and preload.ps1 for a build's recipe: the recipe, this program, the image reader and the board
+    preload's program (the distribution packages) inside."""
     files = {name: (spec / name).read_text(encoding="utf-8") for name in BUILD_SPEC_FILES}
     programs = {"preload_lock.py": Path(__file__).read_text(encoding="utf-8"),
-                "image_files.py": _image_files_path().read_text(encoding="utf-8")}
+                "image_files.py": _image_files_path().read_text(encoding="utf-8"),
+                "deb_preload.py": _beside("deb_preload.py").read_text(encoding="utf-8")}
     end = _delimiter([*files.values(), *programs.values()])
     out.mkdir(parents=True, exist_ok=True)
     sh = ["#!/bin/sh",

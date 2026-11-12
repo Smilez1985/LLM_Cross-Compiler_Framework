@@ -94,6 +94,10 @@ def stage_build_context(target_dir: Path, app_root: Path, context_dir: Path,
     # The files a target's template takes from source images (Core/build_preload.image_files), at their path in the
     # image; the template's Dockerfile copies the folder into its image root, so it holds nothing else.
     (context_dir / "sources" / "image-files").mkdir()
+    # The build's preload's distribution packages as a file repository (Core/build_preload.file_repository); every
+    # stage of a target Dockerfile that runs apt copies the folder, so it is there, empty unless an offline build
+    # uses it.
+    (context_dir / "sources" / "apt").mkdir()
     (context_dir / "docker").mkdir()
     shutil.copy2(Path(app_root) / "entrypoint.sh", context_dir / "docker" / "entrypoint.sh")
 

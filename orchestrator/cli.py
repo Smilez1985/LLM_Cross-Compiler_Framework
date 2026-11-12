@@ -2772,8 +2772,9 @@ def build_image_import(ctx: FrameworkContext, file: Path, digest: Optional[str],
 @build.group('preload')
 def build_preload_group():
     """The build's preload for a computer without any network: preload scripts for exactly the sources an offline
-    build of a target lacks (base images, llama.cpp, the build image's Python packages, pinned downloads, files taken
-    from source images), run on a computer with a network, and the archive they write taken in as local sources."""
+    build of a target lacks (base images, llama.cpp, the build image's Python and distribution packages, pinned
+    downloads, files taken from source images), run on a computer with a network, and the archive they write taken in
+    as local sources."""
     pass
 
 
@@ -2827,8 +2828,9 @@ def build_preload_write(ctx: FrameworkContext, target: str, gpu: bool):
 @pass_context
 def build_preload_take(ctx: FrameworkContext, archive: str, target: str, digest: str):
     """Checks the build's preload ARCHIVE (paths inside its folder, no links, SHA256SUMS, a recipe written on this
-    computer, the image names and pins) and takes it in: base images loaded into the container engine, llama.cpp into
-    the source store, the build image's Python packages, downloads and taken files kept for offline builds."""
+    computer, the image names and pins, the distribution packages against the signed package lists with the pinned
+    archive keys) and takes it in: base images loaded into the container engine, llama.cpp into the source store, the
+    build image's Python and distribution packages, downloads and taken files kept for offline builds."""
     _take_preload(_image_framework(ctx), target, archive, digest)
 
 

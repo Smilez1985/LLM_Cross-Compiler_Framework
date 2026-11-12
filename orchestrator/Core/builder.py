@@ -149,7 +149,7 @@ OFFLINE_NO_PROXY_ARGS = {"HTTP_PROXY": "", "HTTPS_PROXY": "", "ALL_PROXY": "", "
 # the person's apt and pip mirrors in the own network, the local llama.cpp copy) and the proxy settings: not inputs of
 # the image (INPUTS_LABEL).
 SOURCE_ONLY_ARGS = frozenset(("APT_MIRROR", "APT_PROXY", "PIP_INDEX_URL", "PIP_TRUSTED_HOST", "LLAMA_CPP_SOURCE",
-                              "PIP_FIND_LINKS", "PIP_NO_INDEX")) \
+                              "PIP_FIND_LINKS", "PIP_NO_INDEX", "APT_PRELOAD")) \
     | frozenset(OFFLINE_NO_PROXY_ARGS)
 # The build arguments that only say how this computer builds the image, never what it holds: the user and group id
 # (the stage containers run as the host user: the sandbox's --user, or the entrypoint maps PUID/PGID; the image is no

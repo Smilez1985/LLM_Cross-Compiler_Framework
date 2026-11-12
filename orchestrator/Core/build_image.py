@@ -48,7 +48,7 @@ from orchestrator.utils.modes import SHARED_READ, SHARED_RUN
 # The build arguments that say where the image's sources come from, never what they are: they stay out of the image's
 # INPUTS_LABEL, so an image built online is found offline and the other way round (the pins are in the other args).
 SOURCE_ARGS = ("APT_MIRROR", "APT_PROXY", "PIP_INDEX_URL", "PIP_TRUSTED_HOST", "LLAMA_CPP_SOURCE", "PIP_FIND_LINKS",
-               "PIP_NO_INDEX")
+               "PIP_NO_INDEX", "APT_PRELOAD")
 # The build's preload's Python packages in the build context (Core/build_preload.py stages them into sources/wheels;
 # the Dockerfile COPYs sources/ to /tmp/llmcf-sources): pip installs only from them (PIP_NO_INDEX).
 PRELOAD_WHEELS = "/tmp/llmcf-sources/wheels"
@@ -479,6 +479,22 @@ def _preload_pip(pip: ImageSource, text: str, preload: Any, plan: ImagePlan) -> 
     return ImageSource("pip", pip.label, True, "from the build's preload (pip installs only from it)")
 
 
+def _preload_apt(apt: ImageSource, text: str, preload: Any, plan: ImagePlan) -> ImageSource:
+    """apt packages that are not local through a mirror: local from the build's preload when it brought the packages
+    of the Dockerfile's current need and the Dockerfile takes them (ARG APT_PRELOAD: the file repository the build
+    engine stages into sources/apt, signed by the pinned archive keys)."""
+    packages = getattr(preload, "apt", None)
+    if apt.local or packages is None:
+        return apt
+    if not _declares(text, "APT_PRELOAD"):
+        return ImageSource("apt", apt.label, False, "the build's preload has the packages, but the target's Dockerfile "
+                           "takes no ARG APT_PRELOAD; " + apt.how, apt.detail)
+    plan.build_args["APT_PRELOAD"] = "1"
+    plan.preload_stage.append(("apt", Path(packages)))
+    return ImageSource("apt", apt.label, True, "from the build's preload (apt installs only from its file repository, "
+                       "signed by the pinned archive keys)")
+
+
 def offline_plan(text: str, config: Any, client: Any, *, state_dir: Any = None, llama_repo: Optional[str] = None,
                  copy_finder=None, preload: Any = None) -> ImagePlan:
     """The plan of an offline build of the build container image from the Dockerfile `text`: every source it needs
@@ -486,8 +502,8 @@ def offline_plan(text: str, config: Any, client: Any, *, state_dir: Any = None, 
     client (None: base images cannot be checked); `state_dir`: the per-user state folder (the local llama.cpp copy);
     `llama_repo`: the LLAMA_CPP_REPO_OVERRIDE the build uses. Names are resolved through the system resolver (never on
     the GUI thread: the GUI asks it in a worker). `preload`: what the person's taken-in build preloads give
-    (Core/build_preload.PreloadSources: wheels, pinned downloads, the source images whose files are missing). Nothing is
-    pulled, fetched or built."""
+    (Core/build_preload.PreloadSources: wheels, pinned downloads, the source images whose files are missing, the
+    distribution packages). Nothing is pulled, fetched or built."""
     plan = ImagePlan()
     plan.sources += _base_sources(text, config, client, plan)
     llama = _llama_source(text, config, plan, state_dir, llama_repo, copy_finder or local_llama_copy)
@@ -495,7 +511,8 @@ def offline_plan(text: str, config: Any, client: Any, *, state_dir: Any = None, 
         plan.sources.append(llama)
     body = "\n".join(_logical_lines(text))
     if _APT.search(body):
-        plan.sources.append(_mirror_source("apt", "apt packages", (APT_MIRROR, APT_PROXY), text, config, plan))
+        plan.sources.append(_preload_apt(_mirror_source("apt", "apt packages", (APT_MIRROR, APT_PROXY), text, config,
+                                                        plan), text, preload, plan))
     pip = None
     if _PIP.search(body):
         pip = _mirror_source("pip", "pip packages", (PIP_INDEX,), text, config, plan)

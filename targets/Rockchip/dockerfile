@@ -28,6 +28,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LLAMA_CPP_PATH=/usr/src/llama.cpp
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# The build's preload's distribution packages (orchestrator/Core/build_preload.py): with APT_PRELOAD the framework
+# staged them as a file repository into sources/apt (checked when the preload was taken in, signed by the archive keys
+# llmcf pins), and the step below makes it apt's one source; empty in every other build. scripts/build_apt_preload.sh.
+ARG APT_PRELOAD
+COPY sources/apt/ /tmp/llmcf-apt/
 # Sources in your own network for an offline build (orchestrator/Core/build_image.py): the person's apt mirror (it
 # serves the distribution's paths, such as /debian and /debian-security) or apt cache proxy. The framework passes them
 # only in offline mode, after the locality rule judged them; empty (the default) keeps the distribution's own sources.
@@ -42,7 +47,8 @@ RUN set -eu; \
     fi; \
     if [ -n "${APT_PROXY:-}" ]; then \
         printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/01llmcf-proxy; \
-    fi
+    fi; \
+    if [ -n "${APT_PRELOAD:-}" ]; then sh /tmp/llmcf-apt/llmcf-apt.sh use; fi
 
 # The person's pip index in the own network for an offline build (pip reads both from the environment; PIP_TRUSTED_HOST
 # only for an http index). Not set: PyPI and the Dockerfile's own addresses.
@@ -58,6 +64,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake git ca-certificates \
         python3 python3-venv python3-dev pkg-config libgomp1 libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
+
+# The image's own package sources back and the preload's file repository gone (an empty folder in every other build)
+RUN if [ -n "${APT_PRELOAD:-}" ]; then sh /tmp/llmcf-apt/llmcf-apt.sh restore; fi; rm -rf /tmp/llmcf-apt
 
 # --- llama.cpp conversion tools (convert, quantize, imatrix; completion, perplexity, bench): the source ---
 # Built from the one llama.cpp pin (configs/llama_runtime.yml, llama_cpp.source) by commit, never by a tag alone: the
@@ -223,6 +232,11 @@ ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 # for a native x86_64 plan, and on arm64 as the aarch64 compilers); gcc-/g++-aarch64-linux-gnu on amd64; libgomp1:
 # the OpenMP runtime of the llama.cpp tools; libgl1/libglib2.0-0: opencv (rknn-toolkit2); git: the llama.cpp source
 # by hand (source_module.sh --clone-llama-cpp); gosu: privilege drop that keeps PATH.
+# The build's preload's distribution packages (orchestrator/Core/build_preload.py): with APT_PRELOAD the framework
+# staged them as a file repository into sources/apt (checked when the preload was taken in, signed by the archive keys
+# llmcf pins), and the step below makes it apt's one source; empty in every other build. scripts/build_apt_preload.sh.
+ARG APT_PRELOAD
+COPY sources/apt/ /tmp/llmcf-apt/
 # Sources in your own network for an offline build (orchestrator/Core/build_image.py): the person's apt mirror (it
 # serves the distribution's paths, such as /debian and /debian-security) or apt cache proxy. The framework passes them
 # only in offline mode, after the locality rule judged them; empty (the default) keeps the distribution's own sources.
@@ -237,7 +251,8 @@ RUN set -eu; \
     fi; \
     if [ -n "${APT_PROXY:-}" ]; then \
         printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/01llmcf-proxy; \
-    fi
+    fi; \
+    if [ -n "${APT_PRELOAD:-}" ]; then sh /tmp/llmcf-apt/llmcf-apt.sh use; fi
 
 # hadolint ignore=DL3008,SC2086
 RUN set -eu; \
@@ -250,6 +265,9 @@ RUN set -eu; \
         cmake make gcc g++ libc6-dev pkg-config git ca-certificates gosu \
         python3 libgomp1 libgl1 libglib2.0-0 ${cross}; \
     rm -rf /var/lib/apt/lists/*
+
+# The image's own package sources back and the preload's file repository gone (an empty folder in every other build)
+RUN if [ -n "${APT_PRELOAD:-}" ]; then sh /tmp/llmcf-apt/llmcf-apt.sh restore; fi; rm -rf /tmp/llmcf-apt
 
 # The venvs and the llama.cpp tools of the builder stage, at the paths they were made for
 COPY --from=builder /usr/src/llama.cpp /usr/src/llama.cpp

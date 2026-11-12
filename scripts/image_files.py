@@ -15,12 +15,16 @@ a container engine; the build (Core/build_preload.reader) loads it for an online
   is decided. A named file must be a regular file (a hard link inside its layer counts); a symbolic link, a folder, a
   deleted or a missing file is refused, naming it. Each copy is checked against its pinned sha256 and stored under
   that sha256; the rest of the image is discarded (each layer is deleted once read).
+- read_files() and read_saved(): small text files of an image whose content is not pinned (its os-release and dpkg
+  status, for the build's distribution packages), read the same way from its layers, from the layer files or from a
+  `docker save` archive; a link inside the image is followed once.
 """
 
 import hashlib
 import json
 import os
 import platform as _platform
+import posixpath
 import re
 import shutil
 import tarfile
@@ -374,10 +378,84 @@ def _copy(tar, member, sha: str, out: Path, path: str, problems: dict):
     return {"sha256": sha, "mode": member.mode & 0o777, "size": size}
 
 
+# --- small files of an image whose content is not pinned (os-release, the dpkg status) --------------------------------
+
+MAX_READ = 64 * 1024 * 1024
+
+
+def _read_once(layers, paths) -> dict:
+    """{path: ("file", bytes) | ("link", target path) | None} from the top layer that decides each path."""
+    todo, out = list(paths), {}
+    for layer in reversed(layers):
+        if not todo:
+            break
+        if hasattr(layer, "seek"):
+            layer.seek(0)
+        try:
+            tar = tarfile.open(fileobj=layer, mode="r:*") if hasattr(layer, "read") else tarfile.open(layer, "r:*")
+        except (tarfile.TarError, OSError, EOFError) as error:
+            raise ImageFilesError(f"a layer is not a readable tar archive ({error})") from None
+        with tar:
+            names = {normal_path(m.name): m for m in tar.getmembers()}
+            for path in list(todo):
+                member = names.get(path)
+                if member is not None and member.issym():
+                    link = member.linkname
+                    joined = link if link.startswith("/") else "/".join(path.split("/")[:-1] + [link])
+                    out[path] = ("link", normal_path(posixpath.normpath("/" + joined)))
+                    todo.remove(path)
+                    continue
+                verdict = _decide(path, names)
+                if verdict is None:
+                    continue
+                kind, detail = verdict
+                handle = tar.extractfile(detail) if kind == "file" and detail.size <= MAX_READ else None
+                out[path] = ("file", handle.read()) if handle is not None else None
+                todo.remove(path)
+    return out
+
+
+def read_files(layers, paths) -> dict:
+    """{path: bytes or None} of `paths` in the image made of `layers` (seekable binary file objects or paths of layer
+    tars, from the bottom up): the top layer that decides a path wins, a whiteout or an opaque folder hides it (None),
+    a symbolic link is followed once, to its target in the same image. Nothing is checked against a pin: the caller
+    reads only facts of the image (what it is, what it has installed)."""
+    layers = list(layers)
+    wanted = [normal_path(p) for p in paths]
+    first = _read_once(layers, wanted)
+    links = {p: v[1] for p, v in first.items() if v and v[0] == "link"}
+    second = _read_once(layers, sorted(set(links.values()))) if links else {}
+    out = {}
+    for path in wanted:
+        entry = second.get(links[path]) if path in links else first.get(path)
+        out[path] = entry[1] if entry and entry[0] == "file" else None
+    return out
+
+
+def read_saved(archive, paths) -> dict:
+    """read_files() over a `docker save` archive (its manifest.json names the layers, as Docker, Podman and
+    save_image() write them)."""
+    try:
+        with tarfile.open(archive, "r") as tar:
+            handle = tar.extractfile("manifest.json")
+            listing = json.loads(handle.read().decode("utf-8")) if handle is not None else None
+            if not isinstance(listing, list) or len(listing) != 1 or not isinstance(listing[0], dict):
+                raise ImageFilesError(f"{archive}: not one image in a docker save archive")
+            layers = []
+            for name in listing[0].get("Layers") or []:
+                member = tar.extractfile(str(name))
+                if member is None:
+                    raise ImageFilesError(f"{archive}: the layer {name} is missing")
+                layers.append(member)
+            return read_files(layers, paths)
+    except (tarfile.TarError, OSError, EOFError, KeyError, ValueError) as error:
+        raise ImageFilesError(f"{archive}: not a readable docker save archive ({error})") from None
+
+
 def copy_file(source: Path, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, dest)
 
 
 __all__ = ["ImageFilesError", "Registry", "copy_file", "host_platform", "load_name", "normal_path",
-           "parse_reference", "resolve", "save_image", "take_files"]
+           "parse_reference", "read_files", "read_saved", "resolve", "save_image", "take_files"]

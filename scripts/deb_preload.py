@@ -5,8 +5,9 @@ packages its components need..."): on a computer with a network, exactly the pac
 for one board's distribution, release and architecture, checked against the distribution's signed package lists, in
 one archive in the preload format of the installer and the build (scripts/preload_lock.py: llmcf-preload/ with
 manifest.txt, here of kind "packages", and SHA256SUMS). Standard library only (it runs inside the preload.sh and
-preload.ps1 llmcf writes, on Linux, macOS and Windows, with any Python 3.8 or newer); the build's preload will carry
-its image's distribution packages in the same format through the same functions.
+preload.ps1 llmcf writes, on Linux, macOS and Windows, with any Python 3.8 or newer); the build's preload carries
+its image's distribution packages in the same format through the same functions (its section packages/, made by
+gather() from make_build_recipe(): each build stage's packages resolved against what its base image has).
 
     deb_preload.py pack --spec RECIPE.json [--out FOLDER]
         fetches and checks everything and writes llmcf-preload-packages-SCOPE-RELEASE-ARCH-RECIPE.tar.gz into FOLDER;
@@ -25,7 +26,8 @@ reading, NAME -> VERSION; null for a board never read).
 The interface the build's preload reuses: sources_for (the archive suites of a release), fetch_suite (a suite's
 Release, its signature checked with the pinned keys, and its package lists checked against it), resolve (the packages
 with their Depends and Pre-Depends), gather (the packages/ folder: lists, .deb files, keys), verify_folder (that folder
-checked again, as the PC does at take-in).
+checked again, as the PC does at take-in), gpgv_check (the same signatures through gpgv against pinned_keyring, a
+keyring of the pinned keys only), parse_os_release and installed_from_status (what a base image is and has).
 
 Trust: the distributions' archive keys are fetched from their own addresses and taken only when their fingerprint is
 one of PINNED_KEYS; the signature check is this program's own OpenPGP code (version 4 signatures, RSA with SHA-256,
@@ -89,6 +91,9 @@ RE_VERSION = re.compile(r"^[0-9][A-Za-z0-9.+~:-]{0,63}$", re.ASCII)
 RE_POOL = re.compile(r"^pool/(?:[A-Za-z0-9._+~%-]+/)+[A-Za-z0-9._+~%-]+\.deb$", re.ASCII)
 MAX_PACKAGES = 16
 MAX_RESOLVED = 2000
+# A build image's stages: more packages per stage than a board's component asks for (a toolchain)
+MAX_BUILD_PACKAGES = 64
+MAX_STAGES = 8
 
 
 class PreloadError(Exception):
@@ -123,6 +128,39 @@ def make_recipe(scope, distribution, release, arch, packages, archives=(), insta
                      if re.fullmatch(r"[a-z0-9][a-z0-9+.-]{0,63}", str(k)) and RE_VERSION.fullmatch(str(v))}
     return {"format": FORMAT, "scope": scope, "distribution": distribution, "release": release, "arch": arch,
             "archives": archives, "packages": packages, "installed": installed}
+
+
+def _installed(installed):
+    if installed is None:
+        return None
+    return {str(k): str(v) for k, v in dict(installed).items()
+            if re.fullmatch(r"[a-z0-9][a-z0-9+.-]{0,63}", str(k)) and RE_VERSION.fullmatch(str(v))}
+
+
+def make_build_recipe(distribution, release, arch, stages) -> dict:
+    """The recipe of a build image's distribution packages: per stage its packages (NAME or NAME=VERSION, as its
+    Dockerfile names them) and what its base image has installed (NAME -> VERSION; an empty dict fetches the whole
+    closure). gather() resolves each stage on its own and fetches the union."""
+    if distribution not in ("debian", "ubuntu"):
+        raise PreloadError(f"the build image's distribution is debian or ubuntu, not {distribution!r}")
+    for what, value in (("release", release), ("architecture", arch)):
+        if not RE_WORD.fullmatch(value or ""):
+            raise PreloadError(f"not a {what}: {value!r}")
+    stages = list(stages or [])
+    if not 1 <= len(stages) <= MAX_STAGES:
+        raise PreloadError(f"1 to {MAX_STAGES} build stages")
+    out = []
+    for stage in stages:
+        packages = list(stage.get("packages") or [])
+        if not 1 <= len(packages) <= MAX_BUILD_PACKAGES or any(not RE_PACKAGE.fullmatch(p) for p in packages):
+            raise PreloadError(f"1 to {MAX_BUILD_PACKAGES} packages per build stage, each NAME or NAME=VERSION by the "
+                               "distribution's rules")
+        if len({p.split("=", 1)[0] for p in packages}) != len(packages):
+            raise PreloadError("a package twice in one build stage")
+        out.append({"packages": packages, "installed": _installed(stage.get("installed")) or {}})
+    return {"format": FORMAT, "scope": "build", "distribution": distribution, "release": release, "arch": arch,
+            "archives": [], "packages": sorted({p for s in out for p in s["packages"]}), "installed": None,
+            "stages": out}
 
 
 def recipe_sha256(recipe: dict) -> str:
@@ -710,7 +748,14 @@ def gather(recipe: dict, dest: Path, fetch=_fetch, log=say) -> list:
         log(f"reading {source.url} {source.suite}")
         suites.append(fetch_suite(source, recipe["release"], recipe["arch"], keys, fetch))
     index = Index(suites, recipe["arch"])
-    resolved = resolve(index, recipe["packages"], recipe["installed"])
+    if recipe.get("stages"):   # a build image: each stage against its own base, the union fetched
+        picked = {}
+        for stage in recipe["stages"]:
+            for st in resolve(index, stage["packages"], stage["installed"]):
+                picked.setdefault((st["Package"], st["Version"]), st)
+        resolved = list(picked.values())
+    else:
+        resolved = resolve(index, recipe["packages"], recipe["installed"])
     log(f"{len(resolved)} package(s) with their dependencies: "
         + ", ".join(f"{st['Package']} {st['Version']}" for st in resolved))
     used = {}
@@ -745,11 +790,7 @@ def verify_folder(folder: Path, release: str, arch: str) -> list:
     of `release` and `arch`, each list against its Release, every .deb against its list, and no other file. Returns
     the NAME=VERSION of its .deb files."""
     folder = Path(folder)
-    keys = []
-    for path in sorted((folder / "keys").glob("*")):
-        data = path.read_bytes()
-        for fingerprint, _url in PINNED_KEYS.values():
-            keys += signing_keys(data, fingerprint)
+    keys = folder_keys(folder)
     if not keys:
         raise PreloadError("the preload holds no archive key with a fingerprint llmcf pins")
     found = []
@@ -798,6 +839,139 @@ def verify_folder(folder: Path, release: str, arch: str) -> list:
     if not found:
         raise PreloadError("the preload holds no packages")
     return found
+
+
+def _frame(tag: int, body: bytes) -> bytes:
+    """One OpenPGP packet with a new-format header."""
+    n = len(body)
+    if n < 192:
+        length = bytes([n])
+    elif n < 8384:
+        length = bytes([((n - 192) >> 8) + 192, (n - 192) & 0xFF])
+    else:
+        length = b"\xff" + n.to_bytes(4, "big")
+    return bytes([0xC0 | tag]) + length + body
+
+
+def pinned_keyring(key_files) -> bytes:
+    """A binary keyring of the pinned archive keys only: from the key files' bytes, each transferable key whose primary
+    key has a pinned fingerprint (with its user ids, subkeys and signatures), every other key left out."""
+    pinned = {fingerprint for fingerprint, _url in PINNED_KEYS.values()}
+    out, seen = [], set()
+    for data in key_files:
+        block, keep = [], False
+        for tag, body in list(packets(dearmor(data))) + [(6, None)]:
+            if tag == 6:
+                if keep and block:
+                    out.append(b"".join(block))
+                block, keep = [], False
+                if body is None:
+                    break
+                try:
+                    fingerprint = Key(body).fingerprint
+                except ValueError:
+                    continue
+                keep = fingerprint in pinned and fingerprint not in seen
+                seen.add(fingerprint)
+            if keep and tag != 12:   # trust packets are local to a keyring
+                block.append(_frame(tag, body))
+    return b"".join(out)
+
+
+def _crc24(data: bytes) -> int:
+    crc = 0xB704CE
+    for byte in data:
+        crc ^= byte << 16
+        for _ in range(8):
+            crc <<= 1
+            if crc & 0x1000000:
+                crc ^= 0x1864CFB
+    return crc & 0xFFFFFF
+
+
+def armor(data: bytes, kind: str = "SIGNATURE") -> bytes:
+    """`data` as an ASCII-armored OpenPGP block (apt takes a detached signature only armored)."""
+    body = base64.b64encode(data).decode("ascii")
+    lines = [body[i:i + 64] for i in range(0, len(body), 64)]
+    check = base64.b64encode(_crc24(data).to_bytes(3, "big")).decode("ascii")
+    return ("\n".join([f"-----BEGIN PGP {kind}-----", ""] + lines + [f"={check}", f"-----END PGP {kind}-----"])
+            + "\n").encode("ascii")
+
+
+def folder_keys(folder: Path) -> list:
+    """The signing keys of the pinned archive keys in a packages/ folder's keys/."""
+    keys = []
+    for path in sorted((Path(folder) / "keys").glob("*")):
+        data = path.read_bytes()
+        for fingerprint, _url in PINNED_KEYS.values():
+            keys += signing_keys(data, fingerprint)
+    return keys
+
+
+def pinned_signature(release: bytes, signature: bytes, keys: list) -> bytes:
+    """Release.gpg with only the signatures that verify with `keys` (the pinned keys), armored; a distribution signs
+    with more keys than llmcf pins (Debian's release keys too), and gpgv fails on a signature whose key it does not
+    have. Empty when none verifies."""
+    kept = []
+    for tag, body in packets(dearmor(signature)):
+        if tag != 2:
+            continue
+        try:
+            sig = Signature(body)
+        except ValueError:
+            continue
+        if sig.type in (0x00, 0x01) and any(sig.by(key) and sig.verify(key, release) for key in keys):
+            kept.append(_frame(2, body))
+    return armor(b"".join(kept)) if kept else b""
+
+
+def gpgv_check(folder: Path, gpgv: str = "") -> bool:
+    """Checks each suite's Release of a packages/ folder again with gpgv against a keyring of the pinned keys only
+    (pinned_keyring of keys/) and its signatures by those keys (pinned_signature), as apt does in the image build and
+    llmcf-install on a board against the board's own keyrings. False when this computer has no gpgv (verify_folder's
+    own check stands alone then); PreloadError when one does not verify."""
+    import shutil
+    import subprocess
+    gpgv = gpgv or shutil.which("gpgv") or ""
+    if not gpgv:
+        return False
+    folder = Path(folder)
+    ring = pinned_keyring(p.read_bytes() for p in sorted((folder / "keys").glob("*")))
+    keys = folder_keys(folder)
+    if not ring or not keys:
+        raise PreloadError("the preload holds no archive key with a fingerprint llmcf pins")
+    with tempfile.TemporaryDirectory(prefix="llmcf-gpgv-") as home:
+        keyring = Path(home) / "pinned.gpg"
+        keyring.write_bytes(ring)
+        for top in sorted(p for p in folder.iterdir() if p.is_dir() and p.name.isdigit()):
+            release = (top / "Release").read_bytes()
+            signature = pinned_signature(release, (top / "Release.gpg").read_bytes(), keys)
+            (Path(home) / "Release.gpg").write_bytes(signature)
+            result = subprocess.run([gpgv, "--homedir", home, "--ignore-time-conflict", "--status-fd", "1",
+                                     "--keyring", str(keyring), str(Path(home) / "Release.gpg"), str(top / "Release")],
+                                    capture_output=True, text=True)
+            if not signature or result.returncode != 0 or "[GNUPG:] VALIDSIG " not in result.stdout:
+                raise PreloadError(f"suite {top.name}: its Release does not verify with gpgv against the pinned keys")
+    return True
+
+
+def parse_os_release(text: str) -> dict:
+    """The fields of an os-release file (quotes removed)."""
+    out = {}
+    for line in (text or "").splitlines():
+        key, sep, value = line.strip().partition("=")
+        if sep and re.fullmatch(r"[A-Z_]+", key):
+            out[key] = value.strip().strip("\"'")
+    return out
+
+
+def installed_from_status(text: str) -> dict:
+    """NAME -> VERSION of the packages dpkg's status file names as installed."""
+    out = {}
+    for st in stanzas(text or ""):
+        if st.get("Status", "").split()[-1:] == ["installed"] and st.get("Package") and st.get("Version"):
+            out[st["Package"]] = st["Version"]
+    return out
 
 
 def sha256_of(path: Path) -> str:

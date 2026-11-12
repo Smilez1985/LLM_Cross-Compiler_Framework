@@ -8,11 +8,16 @@ one llmcf-preload/ folder, manifest.txt, SHA256SUMS), of kind build.
 
 - recipe(): what the preload fetches, from the plan's missing sources: base images, the pinned llama.cpp commit, the
   build image's Python packages (target.yml build_preload), pinned downloads of the Dockerfile, the files taken from
-  source images (target.yml template_variables.source_images); and what it cannot carry (not_covered).
+  source images (target.yml template_variables.source_images), the image's distribution packages (read from its
+  Dockerfile by Core/image_packages.py, each stage against what its base image has, in the board preload's packages/
+  folder, scripts/deb_preload.py); and what it cannot carry (not_covered).
 - write(): preload.sh and preload.ps1 for that recipe into the person's folder, the recipe's sha256 recorded.
 - take(): checks an archive (the installer's checks, then kind, target, platform, a recipe written here, the image
-  names, the llama.cpp commit and every pinned sha256) and takes it in: images loaded into the container engine,
-  llama.cpp into the source store, wheels, downloads and taken files into the person's state folder.
+  names, the llama.cpp commit, every pinned sha256, and the distribution packages as a board preload is checked:
+  pinned keys, gpgv where it is, lists and .deb files) and takes it in: images loaded into the container engine,
+  llama.cpp into the source store, wheels, downloads, taken files and packages into the person's state folder.
+- stage() puts the packages into the build context as a file repository signed by the pinned keys (sources/apt), which
+  the target Dockerfiles use with the build argument APT_PRELOAD instead of the image's own package sources.
 - the build engine asks preload_sources() for the plan and stage() for the build context; image_files() takes the
   files of source images (online through the registry, offline from the person's cache).
 
@@ -44,6 +49,9 @@ CONTEXT_WHEELS = "wheels"          # sources/wheels in the build context (PIP_FI
 CONTEXT_FILES = "files"            # sources/files/NAME: pinned downloads the Dockerfile takes from the context
 CONTEXT_IMAGE_FILES = "image-files"  # sources/image-files/DEST: copied into the image root by the Dockerfile
 IMAGE_SOURCES = "/tmp/llmcf-sources"   # where the target Dockerfiles COPY sources/
+CONTEXT_APT = "apt"                # sources/apt: the file repository of the distribution packages
+APT_REPOSITORY = "/tmp/llmcf-apt"  # where the target Dockerfiles COPY sources/apt/ (scripts/build_apt_preload.sh)
+APT_STORE = "apt-"                 # build-preload/TARGET/apt-KEY/ARCHIVE: the packages taken in, KEY of the need
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 # The pinned downloads the module generator writes (module_generator.vendor_blocks): the file, its address, its size
 # and its sha256.
@@ -83,6 +91,11 @@ def _preload_lock():
 def reader():
     """scripts/image_files.py: reads images through the registry without running them (standard library only)."""
     return _script("image_files")
+
+
+def deb_preload():
+    """scripts/deb_preload.py: the board preload's distribution packages (standard library only)."""
+    return _script("deb_preload")
 
 
 def _sha256_file(path: Path) -> str:
@@ -173,11 +186,32 @@ def missing_image_files(state_dir: Any, images: List[Any]) -> List[Any]:
 @dataclass
 class PreloadSources:
     """What the person's taken-in preloads give an offline build of one target: the wheels folder of the target's
-    current pip declaration (or None), the pinned downloads present (url -> file) and the source images whose files
-    are all in the cache."""
+    current pip declaration (or None), the pinned downloads present (url -> file), the source images whose files
+    are all in the cache, and the distribution packages of the Dockerfile's current package need (or None)."""
     wheels: Optional[Path] = None
     downloads: Dict[str, Path] = field(default_factory=dict)
     images_missing: List[str] = field(default_factory=list)
+    apt: Optional[Path] = None
+
+
+def apt_store(state_dir: Any, target: str, dockerfile_text: str, platform: str = "") -> Optional[Path]:
+    """The folder the distribution packages of the Dockerfile's current need are kept in (None: no need this computer
+    can read)."""
+    from orchestrator.Core.image_packages import dpkg_arch, need, need_key
+    arch = dpkg_arch(platform or reader().host_platform())
+    if not arch:
+        return None
+    found, problems = need(dockerfile_text or "", arch)
+    if problems or not found:
+        return None
+    return target_store(state_dir, target) / f"{APT_STORE}{need_key(found, arch)}"
+
+
+def _newest_apt(folder: Optional[Path]) -> Optional[Path]:
+    if folder is None or not folder.is_dir():
+        return None
+    taken = [p for p in folder.iterdir() if p.is_dir() and (p / "sources.txt").is_file()]
+    return max(taken, key=lambda p: p.stat().st_mtime) if taken else None
 
 
 def preload_sources(state_dir: Any, target: str, target_dir: Path, dockerfile_text: str,
@@ -196,15 +230,70 @@ def preload_sources(state_dir: Any, target: str, target_dir: Path, dockerfile_te
         if path.is_file() and path.stat().st_size == item["size"]:
             found.downloads[item["url"]] = path
     found.images_missing = [image.image for image in missing_image_files(state_dir, source_images(target_dir))]
+    found.apt = _newest_apt(apt_store(state_dir, target, dockerfile_text))
     return found
 
 
+def file_repository(folder: Path, dest: Path) -> List[str]:
+    """The packages/ folder of a build's preload (checked at take-in) as an apt file repository in `dest`: each suite's
+    Release and Release.gpg at N/dists/SUITE/, its lists below them and its pool at N/pool/ unchanged (the signed
+    hashes still hold), keyring.gpg with the pinned archive keys only, llmcf-preload.sources (deb822, file: addresses,
+    Signed-By that keyring, never trusted=yes) and the helper llmcf-apt.sh the Dockerfiles run. Returns the suites."""
+    deb = deb_preload()
+    folder, dest = Path(folder), Path(dest)
+    lines = (folder / "sources.txt").read_text(encoding="utf-8").splitlines()
+    ring = deb.pinned_keyring(p.read_bytes() for p in sorted((folder / "keys").glob("*")))
+    keys = deb.folder_keys(folder)
+    if not ring or not keys:
+        raise PreloadProblem("The distribution packages of the preload hold no pinned archive key.", "mismatch")
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "keyring.gpg").write_bytes(ring)
+    stanzas, suites = [], []
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 4 or not parts[0].isdigit() or not re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,63}", parts[2]):
+            raise PreloadProblem(f"sources.txt of the preload has a line that is not a suite: {line[:80]}", "mismatch")
+        number, suite = parts[0], parts[2]
+        top = folder / number
+        if not top.is_dir():
+            continue
+        dists = dest / number / "dists" / suite
+        dists.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(top / "Release", dists / "Release")
+        # only the signatures of the pinned keys: gpgv in the build fails on one whose key it does not have
+        signature = deb.pinned_signature((top / "Release").read_bytes(), (top / "Release.gpg").read_bytes(), keys)
+        if not signature:
+            raise PreloadProblem(f"Suite {number} of the preload is not signed by a pinned archive key.",
+                                 "mismatch")
+        (dists / "Release.gpg").write_bytes(signature)
+        components = []
+        for packages in sorted(top.glob("*/binary-*/Packages")):
+            component = packages.parent.parent.name
+            (dists / component / packages.parent.name).mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(packages, dists / component / packages.parent.name / "Packages")
+            components.append(component)
+        if (top / "pool").is_dir():
+            shutil.copytree(top / "pool", dest / number / "pool", dirs_exist_ok=True, copy_function=shutil.copyfile)
+        stanzas.append(f"Types: deb\nURIs: file:{APT_REPOSITORY}/{number}\nSuites: {suite}\n"
+                       f"Components: {' '.join(dict.fromkeys(components))}\nSigned-By: {APT_REPOSITORY}/keyring.gpg\n"
+                       "Check-Valid-Until: no\nCheck-Date: no\nBy-Hash: no\n")
+        suites.append(suite)
+    if not stanzas:
+        raise PreloadProblem("The distribution packages of the preload name no suite.", "mismatch")
+    (dest / "llmcf-preload.sources").write_bytes("\n".join(stanzas).encode("utf-8"))
+    (dest / "llmcf-apt.sh").write_bytes((_SCRIPTS / "build_apt_preload.sh").read_bytes())
+    return suites
+
+
 def stage(context: Path, plan: Any) -> None:
-    """Puts what the plan takes from the build's preload into the build context's sources/ (wheels/ and files/)."""
+    """Puts what the plan takes from the build's preload into the build context's sources/ (wheels/, files/, and the
+    distribution packages as a file repository in apt/)."""
     sources = Path(context) / "sources"
     for kind, path in getattr(plan, "preload_stage", None) or []:
         if kind == CONTEXT_WHEELS:
             shutil.copytree(path, sources / CONTEXT_WHEELS, dirs_exist_ok=True, copy_function=shutil.copyfile)
+        elif kind == CONTEXT_APT:
+            file_repository(path, sources / CONTEXT_APT)
         else:
             (sources / CONTEXT_FILES).mkdir(parents=True, exist_ok=True)
             shutil.copyfile(path, sources / CONTEXT_FILES / Path(path).name)
@@ -250,16 +339,52 @@ def _ref_of(source: Any) -> str:
     return str(getattr(source, "ref", "") or "")
 
 
+def _apt_section(text: str, platform: str, client: Any, fetched: List[str]) -> Tuple[Optional[Dict[str, Any]], str]:
+    """(the recipe's distribution packages, "") or (None, why a preload cannot carry them)."""
+    from orchestrator.Core.image_packages import base_facts, dpkg_arch, need, need_key
+    arch = dpkg_arch(platform)
+    if not arch:
+        return None, f"a build image for {platform} is not one whose packages the preload knows"
+    if not re.search(r"^\s*ARG\s+APT_PRELOAD\b", text or "", re.MULTILINE):
+        return None, ("the target's Dockerfile takes no ARG APT_PRELOAD (the file repository of the build's preload); "
+                      "use an apt mirror or cache in your own network")
+    found, problems = need(text, arch)
+    if problems:
+        return None, ("the Dockerfile's apt installs cannot be read for certain (" + "; ".join(problems[:3]) + "); use "
+                      "an apt mirror or cache in your own network")
+    if not found:
+        return None, "the Dockerfile names no package its apt installs would fetch"
+    distribution = release = None
+    stages = []
+    for stage in found:
+        installed = None
+        if stage["image"] not in fetched:
+            facts = base_facts(client, stage["image"], arch)
+            if facts is None:
+                return None, (f"the base image {stage['image']} could not be read on this computer (what it is and has "
+                              "installed); bring it onto this computer first")
+            if (distribution or release) and (facts["distribution"], facts["release"]) != (distribution, release):
+                return None, "the stages' base images are of different releases"
+            distribution, release, installed = facts["distribution"], facts["release"], facts["installed"]
+        stages.append(dict(stage, installed=installed))
+    if distribution is not None and distribution not in ("debian", "ubuntu"):
+        return None, (f"the base image is {distribution}, whose archive keys are not pinned; use an apt mirror or "
+                      "cache in your own network")
+    return {"distribution": distribution, "release": release, "arch": arch, "key": need_key(found, arch),
+            "stages": stages}, ""
+
+
 def recipe(plan: Any, target: str, target_dir: Path, dockerfile_text: str, *, gpu: bool = False,
-           platform: str = "") -> Dict[str, Any]:
-    """The build's preload recipe (sources.json) for the plan's missing sources."""
+           platform: str = "", client: Any = None) -> Dict[str, Any]:
+    """The build's preload recipe (sources.json) for the plan's missing sources. `client`: the container engine, which
+    saves a base image on this computer so its os-release and dpkg status are read (never run)."""
     from orchestrator.utils.locality import url_host
     images_reader = reader()
     missing = [s for s in plan.sources if not s.local]
     kinds = {s.kind for s in missing}
     out: Dict[str, Any] = {"format": "1", "target": target, "platform": platform or images_reader.host_platform(),
                            "images": [], "llama_cpp": None, "llama_cpp_bundle": False, "pip": None, "downloads": [],
-                           "source_images": [], "not_covered": []}
+                           "source_images": [], "apt": None, "not_covered": []}
     for source in missing:
         if source.kind != "base_image":
             continue
@@ -292,7 +417,11 @@ def recipe(plan: Any, target: str, target_dir: Path, dockerfile_text: str, *, gp
             else:
                 out["not_covered"].append(f"{source.label}: the Dockerfile fetches it without a pinned size and "
                                           "sha256, so no preload carries it")
-        elif source.kind in ("apt", "registry_mirror", "download"):
+        elif source.kind == "apt":
+            out["apt"], why = _apt_section(dockerfile_text, out["platform"], client, out["images"])
+            if out["apt"] is None:
+                out["not_covered"].append(f"{source.label}: {why}")
+        elif source.kind in ("registry_mirror", "download"):
             out["not_covered"].append(f"{source.label}: {source.how}")
     for source in missing:
         if source.kind == "image_files":
@@ -311,7 +440,7 @@ def recipe_bytes(data: Dict[str, Any]) -> bytes:
 
 def fetches(data: Dict[str, Any]) -> bool:
     return bool(data["images"] or data["llama_cpp_bundle"] or data["pip"] or data["downloads"]
-                or data["source_images"])
+                or data["source_images"] or data.get("apt"))
 
 
 def describe(data: Dict[str, Any]) -> str:
@@ -328,6 +457,12 @@ def describe(data: Dict[str, Any]) -> str:
         parts.append("pinned downloads " + ", ".join(d["name"] for d in data["downloads"]))
     if data["source_images"]:
         parts.append("files taken from " + ", ".join(i["image"].split("@")[0] for i in data["source_images"]))
+    apt = data.get("apt")
+    if apt:
+        words = sorted({p for s in apt["stages"] for p in s["packages"]})
+        base = f"{apt['distribution']} {apt['release']}" if apt.get("distribution") else "its base image"
+        parts.append(f"the build image's distribution packages with their dependencies ({', '.join(words)}; for "
+                     f"{base} on {apt['arch']}, checked against the signed package lists)")
     return "; ".join(parts) + f" (for {data['platform']})"
 
 
@@ -399,6 +534,9 @@ class Taken:
     image_files: int
     personal: bool
     not_covered: List[str]
+    packages: List[str] = field(default_factory=list)   # NAME=VERSION of the build image's distribution packages
+    packages_for: str = ""                              # "debian bookworm amd64"
+    packages_gpgv: bool = False                         # their signatures checked with gpgv too
 
     def lines(self) -> List[str]:
         out = [f"Preload of {self.target} checked (sha256 {self.archive_sha256}) and taken in:"]
@@ -412,11 +550,53 @@ class Taken:
             out.append("pinned downloads: " + ", ".join(self.downloads))
         if self.image_files:
             out.append(f"{self.image_files} file(s) taken from source images")
+        if self.packages:
+            out.append(f"{len(self.packages)} distribution packages for the build image ({self.packages_for}), checked "
+                       "against the distribution's signed package lists with the pinned archive keys"
+                       + (" (and with gpgv)" if self.packages_gpgv else ""))
         if self.personal:
             out.append("It holds files whose licence does not allow passing them on: they stay with you (never share "
                        "the archive).")
         out += [f"Not in the preload (provide it otherwise): {item}" for item in self.not_covered]
         return out
+
+
+def _check_packages(top: Path, manifest: Dict[str, Any], apt: Optional[Dict[str, Any]]) -> Tuple[List[str], str, bool]:
+    """The distribution packages of a build's preload checked as a board preload is (deb_preload.verify_folder: the
+    archive keys only with a pinned fingerprint, each Release signed by one, of the release and architecture, each list
+    against its Release, every .deb against its list, no other file; then gpgv against the pinned keys when this
+    computer has it), and every package a stage asks for in it or recorded as in its base image. ([NAME=VERSION],
+    "distribution release arch", whether gpgv checked); nothing when the recipe has none."""
+    folder = top / "packages"
+    if not apt:
+        if folder.exists():
+            raise PreloadProblem("The preload holds distribution packages its recipe does not name.", "mismatch")
+        return [], "", False
+    deb = deb_preload()
+    distribution, release = manifest.get("packages_distribution", ""), manifest.get("packages_release", "")
+    arch = manifest.get("packages_arch", "")
+    if arch != apt.get("arch") or (apt.get("distribution") and (distribution, release) != (apt["distribution"],
+                                                                                             apt["release"])):
+        raise PreloadProblem(f"The preload's distribution packages are for {distribution} {release} {arch}, not for the "
+                             "build image's base.", "mismatch")
+    if not folder.is_dir():
+        raise PreloadProblem("The preload lacks the distribution packages its recipe names.", "mismatch")
+    try:
+        debs = deb.verify_folder(folder, release, arch)
+        gpgv = deb.gpgv_check(folder)
+    except deb.PreloadError as e:
+        raise PreloadProblem(f"The preload's distribution packages were refused: {e}", "mismatch",
+                             "Make the preload anew with the scripts the framework wrote.") from None
+    names = {word.split("=", 1)[0]: word.split("=", 1)[1] for word in debs}
+    in_base = set(str(manifest.get("packages_in_base") or "").split(","))
+    for stage in apt.get("stages") or []:
+        for word in stage["packages"]:
+            name, _, version = word.partition("=")
+            if word in in_base or (name in names and (not version or names[name] == version)):
+                continue
+            raise PreloadProblem(f"The preload's distribution packages lack {word}, which the Dockerfile installs.",
+                                 "mismatch", "Make the preload anew with the scripts the framework wrote.")
+    return sorted(debs), f"{distribution} {release} {arch}", gpgv
 
 
 def _check_image_archive(file: Path, name: str) -> None:
@@ -496,6 +676,7 @@ def take(state_dir: Any, target: str, archive: Path, *, client: Any, sha256: str
         bundle = top / "llama.cpp" / "llama.cpp.bundle"
         if data.get("llama_cpp_bundle") and not bundle.is_file():
             raise PreloadProblem("The preload lacks llama.cpp, which its recipe names.", "mismatch")
+        packages, packages_for, gpgv = _check_packages(top, manifest, data.get("apt"))
         # taken in
         if images and client is None:
             raise PreloadProblem("The container engine is not available, so the base images cannot be loaded.",
@@ -530,9 +711,18 @@ def take(state_dir: Any, target: str, archive: Path, *, client: Any, sha256: str
         for path in taken_files:
             cache.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(path, cache / path.name)
+        if packages:
+            say("Keeping the build image's distribution packages (checked)...")
+            kept = store / f"{APT_STORE}{data['apt']['key']}" / str(manifest.get("archive_sha256"))[:16]
+            if not (kept / "sources.txt").is_file():
+                part = kept.with_name(kept.name + ".part")
+                shutil.copytree(top / "packages", part, dirs_exist_ok=True, copy_function=shutil.copyfile)
+                os.replace(part, kept)
+            os.utime(kept)   # the newest taken in is the one a build uses
     return Taken(str(manifest.get("target")), str(manifest.get("archive_sha256")), [n for _, n in images],
                  bool(data.get("llama_cpp_bundle")), wheel_count, [d["name"] for d in data.get("downloads") or []],
-                 len(taken_files), manifest.get("personal") == "yes", list(data.get("not_covered") or []))
+                 len(taken_files), manifest.get("personal") == "yes", list(data.get("not_covered") or []),
+                 packages, packages_for, gpgv)
 
 
 # --- the framework's view (CLI, GUI, the build service) --------------------------------------------------------------
@@ -585,7 +775,8 @@ def write(framework: Any, target: str, *, gpu: bool = False, plan: Any = None) -
     text = dockerfile.read_text(encoding="utf-8", errors="replace")
     name = getattr(engine.target_manager, "resolve", lambda t: t)(target) if getattr(engine, "target_manager", None) \
         else target
-    data = recipe(plan, str(name or target), folder, text, gpu=gpu)
+    data = recipe(plan, str(name or target), folder, text, gpu=gpu,
+                  client=build_image.docker_client(framework, engine))
     return write_scripts(state_dir_of(framework), data, _version())
 
 
@@ -598,7 +789,7 @@ def take_in(framework: Any, target: str, archive: Path, *, actor: str, sha256: s
                 client=build_image.docker_client(framework, engine), sha256=sha256, actor=actor, log=log)
 
 
-__all__ = ["PreloadProblem", "PreloadSources", "Taken", "Written", "declared_pip", "describe", "fetches",
-           "image_cache", "image_files", "missing_image_files", "needed", "pinned_downloads", "preload_sources",
-           "reader", "recipe", "recipe_bytes", "scripts_folder", "source_images", "stage", "store_root", "take",
-           "take_in", "target_store", "write", "write_scripts"]
+__all__ = ["PreloadProblem", "PreloadSources", "Taken", "Written", "apt_store", "deb_preload", "declared_pip",
+           "describe", "fetches", "file_repository", "image_cache", "image_files", "missing_image_files", "needed",
+           "pinned_downloads", "preload_sources", "reader", "recipe", "recipe_bytes", "scripts_folder",
+           "source_images", "stage", "store_root", "take", "take_in", "target_store", "write", "write_scripts"]
