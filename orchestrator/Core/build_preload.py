@@ -522,6 +522,14 @@ def recipe(plan: Any, target: str, target_dir: Path, dockerfile_text: str, *, gp
                 else:
                     entry["image"] = image.image
                 out["source_images"].append(entry)
+    # A vendor file that may not be passed on is never in a preload: the build stages it from the person's own vendor
+    # store (Core/vendor_files.py), where the person put it under their own licence acceptance.
+    from orchestrator.Core.vendor_files import entries as vendor_entries
+    for vendor in vendor_entries(target_dir):
+        if vendor.file.dest:
+            out["not_covered"].append(f"vendor file {vendor.file.name}: it may not be passed on, so no preload carries "
+                                      "it; the build takes it from your own vendor store, where you put it under its "
+                                      "licence")
     return out
 
 

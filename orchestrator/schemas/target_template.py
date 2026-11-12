@@ -45,6 +45,7 @@ HTTPS_RE = (r"^https://[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(?::\d{1,5
             r"(?:/[A-Za-z0-9._~%/+=-]*)?$")
 # A label or note: printable text without quotes, backslash, $, backtick, brackets or braces.
 TEXT_RE = r"^[^\"'\\$`\[\]{}<>\x00-\x1f\x7f]*$"
+SHA256_HEX_RE = r"^[0-9a-f]{64}$"
 InputFormat = Literal["hf", "onnx", "gguf"]
 
 
@@ -103,7 +104,8 @@ class RuntimeLibrary(BaseModel):
     source_url: Optional[str] = Field(default=None, pattern=HTTPS_RE, max_length=500,
                                       description="Where the person fetches it under their own licence acceptance "
                                                   "(required when it may not be passed on)")
-    licence_url: Optional[str] = Field(default=None, pattern=HTTPS_RE, max_length=500)
+    licence_url: Optional[str] = Field(default=None, pattern=HTTPS_RE, max_length=500,
+                                       description="Where the vendor's licence of the library is")
 
     @model_validator(mode="after")
     def _source(self):
@@ -114,24 +116,58 @@ class RuntimeLibrary(BaseModel):
         return self
 
 
+LICENCE_FILE_RE = r"^licences/[A-Za-z0-9][A-Za-z0-9._-]{0,99}\.txt$"
+
+
 class VendorFile(BaseModel):
-    """A vendor file the format needs that may not be passed on: only referenced, never copied into a package or a
-    pack; the person fetches it under their own licence acceptance."""
+    """A vendor file the format needs that may not be passed on: only referenced, never copied into a package, a pack,
+    a preload or a bundle; the person fetches it under their own licence acceptance (Core/vendor_files.py), it is kept
+    in their own vendor store, and a build stages it into the build image at `dest` when it names one."""
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(pattern=FILE_NAME_RE)
-    url: str = Field(pattern=HTTPS_RE, max_length=500)
-    licence_url: str = Field(pattern=HTTPS_RE, max_length=500)
-    purpose: str = Field(default="", max_length=200, pattern=TEXT_RE)
+    name: str = Field(pattern=FILE_NAME_RE, description="The file's name as the vendor publishes it, e.g. "
+                                                        "vendor_sdk-2.1.0-py3-none-linux_x86_64.whl")
+    url: str = Field(pattern=HTTPS_RE, max_length=500,
+                     description="The vendor's download page (where the person signs in and downloads it), or the "
+                                 "file itself when `direct` is set")
+    licence_url: str = Field(pattern=HTTPS_RE, max_length=500, description="Where the vendor's licence of the file is")
+    purpose: str = Field(default="", max_length=200, pattern=TEXT_RE, description="What the file is for, in a few words")
+    sha256: Optional[str] = Field(default=None, pattern=SHA256_HEX_RE,
+                                  description="The file's sha256 when the vendor publishes it (then a file with "
+                                              "another one is refused); empty: the person confirms the file's own")
+    dest: Optional[str] = Field(default=None, pattern=ABS_PATH_RE, max_length=300,
+                                description="Where the build image gets it, e.g. /opt/vendor/sdk.whl (a toolchain the "
+                                            "build needs); empty: only for the board, the person installs it there")
+    size: Optional[int] = Field(default=None, ge=1, le=64 * 1024 ** 3,
+                                description="The file's size in bytes when the vendor publishes it (needed with direct)")
+    executable: bool = Field(default=False, description="The build image runs it (a compiler or converter program)")
+    direct: bool = Field(default=False, description="The address is the file itself on a public server without a "
+                                                    "sign-in: the framework may download it after the person accepted the "
+                                                    "licence")
+    licence_file: Optional[str] = Field(default=None, pattern=LICENCE_FILE_RE,
+                                        description="The licence text in the target folder (licences/NAME.txt), when "
+                                                    "the licence allows shipping its text; empty: read from licence_url")
+
+    @model_validator(mode="after")
+    def _dots(self):
+        if self.dest:
+            _no_dots(self.dest, "dest")
+        if self.direct and not (self.sha256 and self.size):
+            raise ValueError(f"vendor file {self.name}: direct needs its sha256 and size (the framework downloads only a "
+                             "pinned file; without them the person downloads it)")
+        return self
 
 
 class BoardPaths(BaseModel):
     """Where the package goes on the board."""
     model_config = ConfigDict(extra="forbid")
 
-    install_dir: str = Field(default="/opt/llmcf", pattern=ABS_PATH_RE, max_length=200)
-    model_dir: str = Field(default="/opt/llmcf/models", pattern=ABS_PATH_RE, max_length=200)
-    lib_dir: str = Field(default="/opt/llmcf/lib", pattern=ABS_PATH_RE, max_length=200)
+    install_dir: str = Field(default="/opt/llmcf", pattern=ABS_PATH_RE, max_length=200,
+                             description="Where the package is installed on the board")
+    model_dir: str = Field(default="/opt/llmcf/models", pattern=ABS_PATH_RE, max_length=200,
+                           description="Where the models go on the board")
+    lib_dir: str = Field(default="/opt/llmcf/lib", pattern=ABS_PATH_RE, max_length=200,
+                         description="Where the runtime libraries go on the board")
 
     @model_validator(mode="after")
     def _dots(self):
@@ -146,17 +182,26 @@ class FormatVariables(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(pattern=FORMAT_ID_RE, description="Format id as builds name it, e.g. gguf or hef")
-    label: str = Field(min_length=1, max_length=80, pattern=TEXT_RE)
-    converter: Converter
+    label: str = Field(min_length=1, max_length=80, pattern=TEXT_RE,
+                       description="The format as the person reads it, e.g. HEF (Hailo NPU)")
+    converter: Converter = Field(description="The program that converts a model into the format")
     input: List[InputFormat] = Field(min_length=1, max_length=3, description="Input formats: hf, onnx, gguf")
-    output_extension: str = Field(pattern=r"^[a-z0-9]{1,12}$")
-    quantizations: List[str] = Field(min_length=1, max_length=100)
-    default_quantization: str
-    runtime_libraries: List[RuntimeLibrary] = Field(default_factory=list, max_length=32)
-    board_paths: BoardPaths = Field(default_factory=BoardPaths)
-    sdk: Optional[SdkNeeds] = None
-    vendor_files: List[VendorFile] = Field(default_factory=list, max_length=16)
-    notes: str = Field(default="", max_length=300, pattern=TEXT_RE)
+    output_extension: str = Field(pattern=r"^[a-z0-9]{1,12}$", description="The extension of the converted file, "
+                                                                           "e.g. hef")
+    quantizations: List[str] = Field(min_length=1, max_length=100,
+                                     description="The quantization types the converter offers, e.g. int8 int16")
+    default_quantization: str = Field(description="The type a build takes when none is chosen (one of the types)")
+    runtime_libraries: List[RuntimeLibrary] = Field(default_factory=list, max_length=32,
+                                                    description="The libraries the board needs to run the format's "
+                                                                "models")
+    board_paths: BoardPaths = Field(default_factory=BoardPaths, description="Where the package goes on the board")
+    sdk: Optional[SdkNeeds] = Field(default=None, description="What the format's SDK needs on the board, for the "
+                                                              "check before a build (empty: not checked)")
+    vendor_files: List[VendorFile] = Field(default_factory=list, max_length=16,
+                                           description="Vendor files that may not be passed on: the person fetches "
+                                                       "them under their own licence acceptance")
+    notes: str = Field(default="", max_length=300, pattern=TEXT_RE, description="A note the Builder shows with the "
+                                                                                 "format")
 
     @field_validator("quantizations")
     @classmethod
@@ -220,7 +265,6 @@ HELPER_SCRIPTS = {"modules/rknn_module.sh": ("scripts/rknn_converter.py",),
 IMAGE_PIN_RE = (r"^(?:[a-z0-9.-]+(?::\d{1,5})?/)?[a-z0-9]+(?:[._-]+[a-z0-9]+)*(?:/[a-z0-9]+(?:[._-]+[a-z0-9]+)*)*"
                 r"(?::[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?@sha256:[0-9a-f]{64}$")
 PLATFORM_RE = r"^linux/(?:amd64|arm64)$"
-SHA256_HEX_RE = r"^[0-9a-f]{64}$"
 
 
 class ImageFile(BaseModel):

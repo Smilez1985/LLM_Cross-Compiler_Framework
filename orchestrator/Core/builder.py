@@ -1280,6 +1280,7 @@ class BuildEngine:
                 if earlier is not None:
                     return earlier
                 self._take_image_files(config, progress, path, online=False)
+                self._stage_vendor_files(config, progress, path)
                 plan = self._offline_build_plan(config, progress, path)
                 buildargs.update(plan.build_args)
                 buildargs.update(OFFLINE_NO_PROXY_ARGS)
@@ -1287,6 +1288,7 @@ class BuildEngine:
                 offline_build = True
             else:
                 self._take_image_files(config, progress, path, online=True)
+                self._stage_vendor_files(config, progress, path)
                 offline_build = False
             if engine_name(self.docker_client) == "podman":
                 progress.add_log("Podman builds the image (its builder buildah, through its Docker-compatible "
@@ -1393,6 +1395,17 @@ class BuildEngine:
         if folder is None or state is None:
             return
         image_files(state, folder, dockerfile.parent, online=online, log=progress.add_log)
+
+    def _stage_vendor_files(self, config: BuildConfiguration, progress: BuildProgress, dockerfile: Path) -> None:
+        """The vendor files the target's template variables name for its build image (a `dest`), from the person's own
+        vendor store into the build context's image files, each checked by its sha256 (Core/vendor_files.stage). They
+        may not be passed on, so a missing one stops the build before anything is built and names the person's fetch
+        under its licence; nothing of them leaves this computer."""
+        from orchestrator.Core.vendor_files import stage
+        folder = self.resolve_target_dir(config.target_arch)
+        if folder is None:
+            return
+        stage(getattr(self.config, "user_state_dir", None), folder, dockerfile.parent, log=progress.add_log)
 
     def _pull_mirrored_bases(self, config: BuildConfiguration, plan: Any, progress: BuildProgress) -> None:
         """Offline mode: each Docker Hub base image the plan takes through a registry mirror of the Docker daemon in the

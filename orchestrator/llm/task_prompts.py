@@ -92,6 +92,22 @@ MODULE_REPAIR_TASK = (
     "anything is saved, and the build is then run again. Never add a download piped into a shell, sudo, "
     "world-writable permissions or the deletion of user data. When the cause lies outside the module (the host, the "
     "network, a full disk) or is unclear, leave diff empty, say so in root_cause and give a low confidence.")
+FORMAT_VALUES_TASK = (
+    "The framework's general target template holds the pattern of every build stage for any hardware; what depends on "
+    "the board or the SoC is its variables (the fields listed below: a format's converter and its arguments, its "
+    "inputs, its output's extension, its quantization types, the runtime libraries the board needs, the paths on the "
+    "board, the SDK needs and the vendor files that may not be passed on). Propose the values of these variables for "
+    "the output format(s) the hardware's own accelerator needs (not GGUF, which the template already has), one value "
+    "per field path, from the hardware probe and the numbered documentation excerpts only. For each value give its "
+    "path (records by index: runtime_libraries.0.version), the value (a word, a list of words, or true/false), the "
+    "reason, the source (S1, S2 ... for an excerpt, probe:KEY for a key of the probe, or template for a value the "
+    "template itself defines, such as its board paths or the format's id and label), and a confidence from 0 to 1. "
+    "Never guess: a value you cannot read from the probe or an excerpt goes into missing with why, and stays empty. "
+    "Converter arguments are single words with the placeholders {input}, {output}, {output_dir}, {quant}, "
+    "{model_name} and {work_dir}; never a shell string, no sudo, no download piped into a shell. A vendor file the "
+    "vendor's licence does not allow to pass on goes into vendor_files with its download page and licence address; "
+    "a runtime library is redistributable only when an excerpt says the licence allows it. The person reviews every "
+    "value before anything is made; the framework checks each value again.")
 OPTIMIZER_TASK = (
     "Recommend build settings "
     "for a model on a target: a format and a quantization type strictly from the options given, and an "
@@ -108,6 +124,10 @@ MODULE_SYSTEM = (f"You are Ditto, an expert embedded systems engineer for the LL
                  + "\n" + UNTRUSTED_RULE)
 MODULE_REPAIR_SYSTEM = (f"You are the self-healing analyst of the LLM Cross-Compiler Framework. {FRAMEWORK} "
                         + MODULE_REPAIR_TASK + "\n" + CANNOT_RULE + "\n" + UNTRUSTED_RULE)
+FORMAT_VALUES_SYSTEM = (f"You are Ditto, an expert embedded systems engineer for the LLM Cross-Compiler Framework. "
+                        f"{FRAMEWORK} " + FORMAT_VALUES_TASK + " When there is nothing to base a value on at all "
+                        "(no accelerator in the probe and no excerpt), fill cannot.\n" + CANNOT_RULE + "\n"
+                        + UNTRUSTED_RULE)
 OPTIMIZER_SYSTEM = (f"You are Ditto, the build engineer of the LLM Cross-Compiler Framework. {FRAMEWORK} "
                     + OPTIMIZER_TASK + " When you cannot, fill cannot.\n" + CANNOT_RULE + "\n" + UNTRUSTED_RULE)
 
@@ -220,6 +240,38 @@ def module_repair_parts(log_content: str, files: Dict[str, str], context_info: s
         used += len(text)
         parts.append(f"Module file {name}:\n" + wrap_untrusted(text, f"module file {name}",
                                                               max_len=MODULE_FILE_CHARS + 200))
+    return parts
+
+
+FORMAT_EXCERPT_CHARS = 2500   # one documentation excerpt in a format-values task
+FORMAT_EXCERPTS_CHARS = 16000  # all of them
+
+
+def format_value_parts(fields: str, probe: str = "", board: str = "", excerpts: Sequence[Any] = (),
+                       current: str = "", log_content: str = "",
+                       roots: Optional[Dict[str, str]] = None) -> List[str]:
+    """The user turns of a format-values task: the template's fields (the framework's own text), the probe or the
+    board, each documentation excerpt numbered S1, S2 ... with its source (untrusted), the module's current values
+    (a repair; untrusted) and the end of the failed build's log (log_for_ai)."""
+    parts = ["The template's variables (path: kind; choices; explanation):\n" + fields]
+    parts += module_parts(probe, board)
+    used = 0
+    for number, (source, content) in enumerate(excerpts, 1):
+        text = str(content or "")[:FORMAT_EXCERPT_CHARS]
+        if used + len(text) > FORMAT_EXCERPTS_CHARS:
+            break
+        used += len(text)
+        parts.append(f"Documentation excerpt S{number} (source: {sanitize_untrusted(str(source), 300)}):\n"
+                     + wrap_untrusted(text, f"documentation excerpt S{number}", max_len=FORMAT_EXCERPT_CHARS + 200))
+    if not excerpts:
+        parts.append("No documentation excerpt was found for this hardware: values that need the vendor's "
+                     "documentation go into missing.")
+    if current:
+        parts.append("The module's current values (YAML; change only what the log shows is wrong):\n"
+                     + wrap_untrusted(current, "current template values", max_len=MODULE_FILE_CHARS))
+    if log_content:
+        parts.append("The end of the failed build's log:\n" + wrap_untrusted(log_for_ai(log_content, roots=roots),
+                                                                               "build log", max_len=LOG_CHARS + 200))
     return parts
 
 

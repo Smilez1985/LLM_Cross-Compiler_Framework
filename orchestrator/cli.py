@@ -16,7 +16,7 @@ import os
 import time
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional, Dict, Any, Iterable, List, Tuple
+from typing import TYPE_CHECKING, Callable, Optional, Dict, Any, Iterable, List, Sequence, Tuple
 from datetime import datetime
 
 import click
@@ -491,6 +491,13 @@ def _target_profile(probe_file, strict: bool):
                    "list whose entries are a format's values (id, label, converter with its args, input, "
                    "output_extension, quantizations, default_quantization, runtime_libraries, board_paths, sdk, "
                    "vendor_files) or a preset name (gguf, rknn, rkllm). Without it the module builds GGUF")
+@click.option('--set', 'set_values', multiple=True, metavar='FORMAT.PATH=VALUE',
+              help="Set one value of an output format (the general template's variables), e.g. "
+                   "hef.converter.command=/opt/vendor/bin/conv or hef.quantizations=int8,int16; a new FORMAT id adds "
+                   "a format; repeatable, applied after --formats ('llm-cli module fields' lists the paths)")
+@click.option('--ask-values', 'ask_values', is_flag=True,
+              help="Ask for each value of the output formats at the terminal, with its explanation and the current "
+                   "value (from --formats or --set) as the default")
 @click.option('--edit', 'edit_files', is_flag=True,
               help="The module wizard's \"edit all files\" step: the module is made in a scratch folder, each of its "
                    "stage modules, target.yml and Dockerfile opens in $EDITOR, the diff is shown and the checks run "
@@ -499,8 +506,13 @@ def _target_profile(probe_file, strict: bool):
 def module_create(ctx: FrameworkContext, name: Optional[str], arch: Optional[str], sdk: Optional[str],
                   probe_file: Optional[str], description: Optional[str], base_image: Optional[str],
                   packages: Optional[str], cpu_flags: Optional[str], cmake_flags: str, setup_file: Optional[str],
-                  quant_file: Optional[str], knowledge_roots: tuple, formats_file: Optional[str], edit_files: bool):
+                  quant_file: Optional[str], knowledge_roots: tuple, formats_file: Optional[str], edit_files: bool,
+                  set_values: tuple = (), ask_values: bool = False):
     """Create a new hardware target module (the module wizard's values as options; what is not given is asked)"""
+    if ask_values and not _interactive():
+        console.print("[red]--ask-values asks at a terminal; without one give the values with --formats FILE or "
+                      "--set FORMAT.PATH=VALUE.[/red]")
+        sys.exit(2)
     from orchestrator.Core.module_generator import probe_module_name, probe_sdk
     # The person's own targets folder, as builds and the GUI use it; names are checked against every targets folder.
     targets_dir, roots_read = _target_folders(ctx)
@@ -547,6 +559,12 @@ def module_create(ctx: FrameworkContext, name: Optional[str], arch: Optional[str
         "detection_commands": "lscpu",
         "formats": read(formats_file),
     }
+    if set_values or ask_values:
+        try:
+            module_data["formats"] = _formats_text(_values_from(module_data["formats"], set_values, ask_values))
+        except ValueError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(2)
 
     roots = sorted(set(knowledge_roots))
 
@@ -836,8 +854,12 @@ _ditto_confirm.confirm_channel = "framework-cli"  # recorded in the audit log
 @click.argument('probe_file', type=click.Path(exists=True))
 @click.option('--provider', help='AI provider for this run (e.g. anthropic, openai, ollama); default: AI settings')
 @click.option('--model', help='Model for this run; default: AI settings')
+@click.option('--formats-out', 'formats_out', type=click.Path(dir_okay=False), default=None,
+              help="Write Ditto's proposal of the output formats' values (when the probe names an accelerator) to "
+                   "this YAML file, for review and 'llm-cli module create --formats FILE --ask-values'")
 @pass_context
-def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], model: Optional[str]):
+def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], model: Optional[str],
+                formats_out: Optional[str] = None):
     """
     🤖 AI-Powered: Generate module from hardware probe (target_hardware_config.txt).
 
@@ -881,23 +903,30 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
     proposal = json.dumps(definition.model_dump(exclude={"cannot"}), indent=2, ensure_ascii=False)
     click.echo("\n".join(visible(line) for line in proposal.split("\n")))
     click.echo("\n".join(visible(line) for line in proposal_facts(definition).split("\n")))
+    formats = _proposed_formats(ditto, Path(probe_file), formats_out)
     from rich.prompt import Confirm
     if not Confirm.ask("Generate module with these settings?"):
         return
+    if formats:
+        save_data = definition.model_dump()
+        save_data["formats"] = formats
+    else:
+        save_data = None
     console.print("[dim]cpu_flags and cmake_flags go into the config stage, which uses them for the board package's "
                   "cross build; the plan from the board's probe comes after them and wins where it decides.[/dim]")
     targets_dir, roots_read = _target_folders(ctx)
     module_name = definition.module_name.replace(" ", "_")
     profile = _target_profile(probe_file, strict=False)
     try:
-        path = ditto.save_module(definition, targets_dir, module_name=module_name, profile=profile,
+        path = ditto.save_module(save_data or definition, targets_dir, module_name=module_name, profile=profile,
                                  other_roots=[r for r in roots_read if r != targets_dir])
     except (ValueError, OSError) as e:   # OSError: the targets folder cannot be written
         console.print(f"[bold red]The proposal was rejected:[/bold red] {escape(_printable(e))}")
         sys.exit(1)
     from orchestrator.Core.module_generator import generator_input
     from orchestrator.Core.module_generator import record_module_saved
-    record_module_saved(ctx.framework_manager, "cli", generator_input(definition.model_dump(), module_name), path, "framework-cli")
+    record_module_saved(ctx.framework_manager, "cli", generator_input(save_data or definition.model_dump(), module_name),
+                        path, "framework-cli")
     console.print(f"[bold green]✅ Module '{escape(module_name)}' created in {escape(str(path))}[/bold green]")
 
 
@@ -912,9 +941,15 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
 @click.option('--variables', 'variables_file', type=click.Path(exists=True, dir_okay=False), default=None,
               help="Change the module's template variables (its output formats, as YAML or JSON) first: the files "
                    "that hold them are made anew from the template, shown as their diff and checked like any edit")
+@click.option('--set', 'set_values', multiple=True, metavar='FORMAT.PATH=VALUE',
+              help="Change one value of the module's output formats (repeatable); the files that hold them are made "
+                   "anew from the template and shown as their diff")
+@click.option('--ask-values', 'ask_values', is_flag=True,
+              help="Ask for each value of the module's output formats at the terminal (the current value as the "
+                   "default) instead of opening them as YAML")
 @pass_context
 def module_edit(ctx: FrameworkContext, target: str, files: tuple, patch_file: Optional[str],
-                variables_file: Optional[str]):
+                variables_file: Optional[str], set_values: tuple = (), ask_values: bool = False):
     """Edit the files of a target module: the "edit all files" step of the module wizard
 
     A module made from the general template shows its template variables first (its output formats, as YAML in
@@ -934,16 +969,22 @@ def module_edit(ctx: FrameworkContext, target: str, files: tuple, patch_file: Op
         chosen = [session._known(f) for f in files]
         if variables_file:
             _apply_variables_file(session, variables_file)
+        if set_values or ask_values:
+            if ask_values and not _interactive():
+                console.print("[red]--ask-values asks at a terminal; without one use --set FORMAT.PATH=VALUE.[/red]")
+                sys.exit(2)
+            _apply_value_changes(session, set_values, ask_values)
         if patch_file:
             changed = session.apply_diff(Path(patch_file).read_text(encoding="utf-8"))
             console.print("The diff changes: " + (", ".join(changed) or "nothing"))
     except (OSError, UnicodeDecodeError, ValueError) as e:
         console.print(f"[red]{escape(_printable(e))}[/red]")
         sys.exit(1)
-    to_edit = chosen or ([] if (patch_file or variables_file) else session.files)
+    by_values = bool(set_values or ask_values)
+    to_edit = chosen or ([] if (patch_file or variables_file or by_values) else session.files)
     console.print(f"The files of {escape(folder.name)}: {', '.join(session.files)} (never the framework's stage "
                   "runner).")
-    if not (chosen or patch_file or variables_file):
+    if not (chosen or patch_file or variables_file or by_values):
         _open_variables(session)
     _open_in_editor(session, to_edit)
     if not session.changed():
@@ -1066,6 +1107,316 @@ def module_repair(click_ctx: click.Context, target: str, propose: bool, patch_fi
         return
     click_ctx.invoke(start_build, model=settings.get("model"), target=folder.name, format=settings.get("format"),
                      board=settings.get("board"), quantization=settings.get("quantization"))
+
+
+def _formats_text(formats: List[Dict[str, Any]]) -> str:
+    return yaml.safe_dump(formats, sort_keys=False, allow_unicode=True) if formats else ""
+
+
+def _values_from(text: str, set_values: Sequence[str], ask: bool,
+                 notes: Optional[Dict[str, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """The output formats from YAML or JSON text (--formats), then --set, then the terminal's questions."""
+    from orchestrator.Core.module_generator import parse_formats
+    from orchestrator.Core.template_values import apply_sets
+    from orchestrator.schemas.target_template import resolve_formats
+    formats = resolve_formats(parse_formats(text)) if text and text.strip() else []
+    formats = apply_sets(formats, set_values)
+    if ask:
+        formats = _ask_values(formats, notes or {})
+    return formats
+
+
+def _ask_values(formats: List[Dict[str, Any]], notes: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Asks for each value of each output format at the terminal (Core/template_values.py: the template's fields with
+    their explanation; the current value, or Ditto's proposal, as the default; '-' clears a value), checks the format
+    and asks again for a value that fails; a new format on request."""
+    from orchestrator.Core.template_values import (field_problems, format_fields, get_value, missing_required,
+                                                   parse_text, set_value, value_text)
+    fields = format_fields()
+    formats = [dict(f) for f in formats]
+    if not formats and click.confirm("Does the module build a format of its own (other than GGUF)?", default=False):
+        formats.append({"id": click.prompt("The format's id (e.g. hef)").strip().lower()})
+
+    def ask_one(values: Dict[str, Any], spec, path: str, label: str) -> None:
+        note = (notes.get(str(values.get("id"))) or {}).get(path)
+        if spec.help:
+            click.echo(f"  {spec.help}")
+        if note is not None:
+            click.echo("  " + _printable(f"Ditto: {note.line()}"))
+        if spec.choices:
+            click.echo(f"  One of: {', '.join(spec.choices)}")
+        current = value_text(spec, get_value(values, path))
+        while True:
+            text = click.prompt(f"{label}{' *' if spec.required else ''}", default=current, show_default=bool(current))
+            if text.strip() == "-":
+                set_value(values, path, None)
+                return
+            try:
+                set_value(values, path, parse_text(spec, text))
+                return
+            except ValueError as e:
+                click.echo(f"  {e}")
+
+    for values in formats:
+        while True:
+            click.echo(f"\nFormat {values.get('id')} (enter keeps the value shown, '-' clears it):")
+            for spec in fields:
+                if spec.path == "id":
+                    continue
+                if spec.kind == "records":
+                    rows = list(get_value(values, spec.path) or [])
+                    count = click.prompt(f"{spec.path}: how many rows ({spec.help})", default=len(rows),
+                                         type=click.IntRange(0, 32))
+                    rows = (rows + [{} for _ in range(count)])[:count]
+                    set_value(values, spec.path, rows or None)
+                    for i in range(count):
+                        for col in spec.columns:
+                            ask_one(values, col, f"{spec.path}.{i}.{col.path}", f"{spec.path}[{i + 1}].{col.path}")
+                    continue
+                if spec.group and not get_value(values, spec.group) and spec.path.endswith(".toolkit"):
+                    if not click.confirm(f"Does the format declare its {spec.group} needs for the check before a "
+                                         "build?", default=False):
+                        continue
+                if spec.group and not get_value(values, spec.group) and not spec.path.endswith(".toolkit"):
+                    continue
+                ask_one(values, spec, spec.path, spec.path)
+            problems = {p: ["required"] for p in missing_required(values, fields)} or field_problems(values)
+            if not problems:
+                break
+            click.echo("The format does not pass its checks yet:")
+            for path, reasons in problems.items():
+                for reason in reasons:
+                    click.echo(f"  {path or 'format'}: {_printable(reason)}")
+            if not click.confirm("Go through its values again?", default=True):
+                break
+    return formats
+
+
+def _apply_value_changes(session, set_values: Sequence[str], ask: bool) -> None:
+    """`module edit --set/--ask-values`: the module's template variables changed value by value (ValueError)."""
+    text = session.variables()
+    if text is None:
+        raise ValueError("This module records no template variables (it was made before the general template); "
+                         "edit its files instead.")
+    record = yaml.safe_load(text)
+    formats = record.get("formats") if isinstance(record, dict) else record
+    changed_formats = _values_from(_formats_text(formats or []), set_values, ask)
+    new_text = yaml.safe_dump({**record, "formats": changed_formats} if isinstance(record, dict) else changed_formats,
+                              sort_keys=False, allow_unicode=True)
+    changed = session.set_variables(new_text)
+    console.print("The variables change: " + (", ".join(changed) or "nothing"))
+
+
+def _proposed_formats(ditto, probe_file: Path, formats_out: Optional[str]) -> List[Dict[str, Any]]:
+    """`module generate-ai`: Ditto's proposal of the output formats' values when the probe names an accelerator,
+    shown per value with its source and confidence; written to `formats_out` when given. Returns the formats the
+    module is made with: only a complete proposal (no gap, every check passed), else none (GGUF; the draft is for
+    review and 'module create --formats FILE --ask-values')."""
+    from orchestrator.Core.ditto_manager import DittoError
+    from orchestrator.Core.format_proposal import accelerator_named
+    from orchestrator.tools.confirmation import visible
+    try:
+        if not accelerator_named(probe_file.read_text(encoding="utf-8", errors="ignore")):
+            return []
+        with console.status("Ditto reads the output formats' values from the probe and the documentation...",
+                            spinner="dots"):
+            from orchestrator.Core.format_proposal import propose
+            proposal = propose(ditto, probe_file)
+    except (DittoError, OSError) as e:
+        console.print(f"[yellow]Ditto could not propose the output formats' values: {escape(_printable(e))}; the "
+                      "module builds GGUF unless you add them.[/yellow]")
+        return []
+    console.print("\n[bold]Ditto's proposal of the output formats (each value with its source and confidence; "
+                  "check them):[/bold]")
+    click.echo("\n".join(visible(line) for line in proposal.lines()))
+    if formats_out and proposal.drafts:
+        Path(formats_out).write_text(proposal.formats_yaml(), encoding="utf-8")
+        console.print(f"The proposed formats are in {escape(formats_out)}.")
+    if not proposal.complete:
+        console.print("[yellow]The proposal has gaps or failing checks, so the module is made without it (GGUF); "
+                      "fill it with 'llm-cli module create --formats FILE --ask-values' or in the module "
+                      "wizard.[/yellow]")
+        return []
+    console.print("The module is made with these formats when you say yes.")
+    return proposal.formats()
+
+
+@module.command('fields')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+def module_fields(as_json: bool):
+    """The variables of an output format of the general template: each path with its kind, choices, whether it is
+    required and its explanation (the fields of the wizard's form, of --ask-values and of --set)"""
+    from orchestrator.Core.template_values import catalogue_text, format_fields
+    if as_json:
+        click.echo(json.dumps({"fields": [f.as_dict() for f in format_fields()]}, indent=2, ensure_ascii=False))
+        return
+    click.echo(catalogue_text())
+
+
+@module.command('propose-values')
+@click.argument('probe_file', type=click.Path(exists=True, dir_okay=False))
+@click.option('--provider', help='AI provider for this run; default: AI settings')
+@click.option('--model', help='Model for this run; default: AI settings')
+@click.option('--out', 'out_file', type=click.Path(dir_okay=False), default=None,
+              help="Write the proposed formats as YAML to this file (for 'module create --formats FILE')")
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def module_propose_values(ctx: FrameworkContext, probe_file: str, provider: Optional[str], model: Optional[str],
+                          out_file: Optional[str], as_json: bool):
+    """Ditto's proposal of the output formats' values from a hardware probe and the crawled vendor documentation:
+    each value with its reason, source and confidence; what Ditto cannot read stays empty and is named. A draft for
+    you to check, never a module."""
+    from orchestrator.Core.ditto_manager import DittoError
+    from orchestrator.tools.confirmation import visible
+    if not as_json:
+        _ditto_notice_once()
+    ctx.require_framework()
+    ditto = _run_ditto(ctx, provider, model)
+    try:
+        from orchestrator.Core.format_proposal import propose
+        proposal = propose(ditto, Path(probe_file))
+    except (DittoError, OSError) as e:
+        if as_json:
+            click.echo(json.dumps({"error": _printable(e)}))
+        else:
+            console.print(f"[red]{escape(_printable(e))}[/red]")
+        sys.exit(1)
+    if out_file and proposal.drafts:
+        Path(out_file).write_text(proposal.formats_yaml(), encoding="utf-8")
+    if as_json:
+        click.echo(json.dumps(proposal.as_json(), indent=2, ensure_ascii=False))
+        return
+    click.echo("\n".join(visible(line) for line in proposal.lines()) or "Ditto proposed no format.")
+    if out_file and proposal.drafts:
+        console.print(f"The proposed formats are in {escape(out_file)}.")
+
+
+# ============================================================================
+# VENDOR FILES (the guided fetch: Core/vendor_files.py)
+# ============================================================================
+
+@cli.group()
+def vendor():
+    """Vendor files that may not be passed on: their licence shown, your own yes, kept in your own vendor store"""
+    pass
+
+
+def _vendor_state(ctx: FrameworkContext) -> Path:
+    from orchestrator.runtime.profile import default_state_dir
+    config, _ = _settings(ctx)
+    return Path(getattr(config, "user_state_dir", None) or default_state_dir())
+
+
+@vendor.command('list')
+@click.argument('target')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def vendor_list(ctx: FrameworkContext, target: str, as_json: bool):
+    """The vendor files a target's formats name: what each is for, whether its licence is accepted and whether it is
+    in your vendor store"""
+    from orchestrator.Core import vendor_files as vf
+    folder = _module_folder(_target_folders(ctx)[1], target)
+    rows = vf.status(_vendor_state(ctx), folder)
+    if as_json:
+        click.echo(json.dumps({"target": vf.target_id(folder), "vendor_files": rows}, indent=2))
+        return
+    if not rows:
+        click.echo(f"{folder.name} names no vendor file.")
+        return
+    for row in rows:
+        click.echo(f"{row['name']} ({row['format']}, for the {row['for']}"
+                   + (f" at {row['dest']}" if row['dest'] else "") + f"): licence "
+                   + (f"accepted {row['accepted']}" if row['accepted'] else "not accepted")
+                   + ("; in your vendor store" if row['in_store'] else "; not in your vendor store"))
+
+
+@vendor.command('fetch')
+@click.argument('target')
+@click.argument('name')
+@click.option('--file', 'given', type=click.Path(exists=True, dir_okay=False), default=None,
+              help="The file you downloaded from the vendor's page (taken in after your yes to the licence)")
+@pass_context
+def vendor_fetch(ctx: FrameworkContext, target: str, name: str, given: Optional[str]):
+    """Fetch a vendor file under its licence: its whole licence text is shown and your own yes at this terminal
+    accepts it (there is no option that skips it, and an AI never accepts it); then the file you downloaded is
+    checked by its sha256 and kept in your own vendor store, or, for a pinned file the target marks as public, llmcf
+    downloads it after another yes."""
+    from orchestrator.Core import vendor_files as vf
+    if not _interactive():
+        console.print("[yellow]Nothing was accepted: a vendor's licence is accepted only by your own answer at a "
+                      "terminal (llm-cli vendor fetch TARGET NAME), or in Build > Targets... > Vendor "
+                      "Files...[/yellow]")
+        sys.exit(2)
+    folder = _module_folder(_target_folders(ctx)[1], target)
+    state = _vendor_state(ctx)
+    from orchestrator.utils.locality import offline_mode
+    config, _ = _settings(ctx)
+    fetch_text = None if offline_mode(config) else vf.default_fetch_text
+    try:
+        asked = vf.question(folder, name, fetch_text)
+    except vf.VendorProblem as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        if e.next:
+            console.print(escape(e.next))
+        sys.exit(1)
+    click.echo("\n".join(_printable(line) for line in asked.facts()))
+    click.echo(f"\n--- The licence (sha256 {asked.text_sha256[:16]}...) ---")
+    text = _printable(asked.text)
+    if sys.stdout.isatty() and len(text.splitlines()) > PAGED_QUESTION_LINES:
+        click.echo_via_pager(text + "\n")
+    else:
+        click.echo(text)
+    click.echo("--- End of the licence ---\n")
+    if not click.confirm("Have you read this licence, and do you accept it yourself?", default=False):
+        console.print("Not accepted; nothing was fetched.")
+        sys.exit(1)
+    vf.accept(state, asked, actor="cli", accepted=True)
+    console.print("[green]Your acceptance is recorded.[/green]")
+    entry = asked.entry
+    try:
+        if given:
+            kept = _vendor_add(state, folder, name, given)
+        elif entry.file.direct and click.confirm(f"Download it now from {entry.file.url}?", default=False):
+            kept = vf.download(state, folder, name, actor="cli")
+        else:
+            console.print(f"Download {entry.file.name} on the vendor's page: {entry.file.url}")
+            console.print(f"Then give it: llm-cli vendor add {entry.target} {entry.file.name} FILE")
+            return
+    except (vf.VendorProblem, OSError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]{escape(kept.lines[0])}[/green]")
+
+
+def _vendor_add(state: Path, folder: Path, name: str, path: str):
+    from orchestrator.Core import vendor_files as vf
+
+    def confirm(digest: str) -> bool:
+        if not _interactive():
+            return False
+        click.echo(f"The vendor publishes no sha256 for {name}. The file you gave has the sha256\n{digest}")
+        return click.confirm("Is it the file you downloaded from the vendor's page? Later builds check this sha256.",
+                             default=False)
+    return vf.add_file(state, folder, name, Path(path), actor="cli", confirm_sha256=confirm)
+
+
+@vendor.command('add')
+@click.argument('target')
+@click.argument('name')
+@click.argument('file', type=click.Path(exists=True, dir_okay=False))
+@pass_context
+def vendor_add(ctx: FrameworkContext, target: str, name: str, file: str):
+    """Give the vendor file you downloaded (after you accepted its licence with 'llm-cli vendor fetch'): checked by
+    its sha256 (without a published one you confirm the file's own at a terminal) and kept in your own vendor store,
+    never in a module, pack, package or preload."""
+    from orchestrator.Core import vendor_files as vf
+    folder = _module_folder(_target_folders(ctx)[1], target)
+    try:
+        kept = _vendor_add(_vendor_state(ctx), folder, name, file)
+    except (vf.VendorProblem, OSError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]{escape(kept.lines[0])}[/green]")
 
 
 # ============================================================================

@@ -76,6 +76,10 @@ DELETION_SITES = {
     ("orchestrator/Core/model_archive.py", "prepare_take"): STAGING,
     ("orchestrator/Core/model_archive.py", "write_archive"): TEMP,
     ("orchestrator/Core/model_archive.py", "_write_zip"): TEMP,
+    # the vendor store (Core/vendor_files.py): its own .part copy of a file the person gave or llmcf downloaded,
+    # removed when the sha256 does not match (nothing of it is kept)
+    ("orchestrator/Core/vendor_files.py", "_keep"): TEMP,
+    ("orchestrator/Core/vendor_files.py", "add_file"): TEMP,
     # the downloads in the models folder, from the Models tab and `models delete`: the person's list only, built again
     # first, audited first (tests/test_model_library.py covers an AI actor, a changed list and the trash)
     ("orchestrator/Core/model_library.py", "delete_downloads"): PERSON,

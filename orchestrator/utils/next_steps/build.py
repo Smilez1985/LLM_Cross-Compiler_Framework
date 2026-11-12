@@ -33,6 +33,8 @@ MOUSE_LABELS = {
     # Build > Build Container Images...: a source image published only as a file (Core/build_preload.take_image_file)
     "btn_bimg_image_file": ("act_build_images", "bimg.source.take"),
     "btn_bimg_source_list": ("act_build_images", "bimg.source.list"),
+    # Build > Targets... > Vendor Files...: the guided fetch of vendor files (Core/vendor_files.py)
+    "btn_targets_vendor": ("act_build_targets", "bld.targets.vendor"),
 }
 
 STEPS = (
@@ -65,6 +67,11 @@ STEPS = (
     Step("build.source_image_take", cli="build source-image take", cli_args=("{file}", "--target", "{target}"),
          params={"file": Param("path"), "target": Param("id")}, person_only="permission",
          target="btn_bimg_image_file"),
+    # a vendor file that may not be passed on: its licence shown, the person's own yes, then the file the person
+    # downloads (Core/vendor_files.py); an AI never accepts the licence nor fetches the file
+    Step("build.vendor_fetch", cli="vendor fetch", cli_args=("{target}", "{name}"),
+         params={"target": Param("id"), "name": Param("label")}, person_only="licence",
+         target="btn_targets_vendor"),
 )
 
 TEXTS = {
@@ -92,6 +99,12 @@ TEXTS = {
                                              "nothing is run.",
         "step.build.source_image_take.why": "A source image of the target is published only as a file, which no build "
                                             "can fetch.",
+        "step.build.vendor_fetch": "Fetch the vendor file {name} under its licence",
+        "step.build.vendor_fetch.what": "Shows the whole licence text of {name} of target {target}; your own yes "
+                                        "accepts it, then you download the file on the vendor's page and give it, "
+                                        "checked by its sha256 and kept in your own vendor store.",
+        "step.build.vendor_fetch.why": "The file may not be passed on, so the framework never ships it; only you can "
+                                       "accept its licence.",
         "step.build.f16_delete.what": "Lists the kept F16 intermediates and deletes the ones you pick "
                                       "({path:btn_f16_delete}).",
         "step.build.f16_delete.why": "They use space in the build cache until they are deleted.",
@@ -126,6 +139,13 @@ TEXTS = {
                                              "genannten Dateien bleiben, nichts wird ausgeführt.",
         "step.build.source_image_take.why": "Ein Quell-Image des Targets ist nur als Datei veröffentlicht, die kein "
                                             "Build holen kann.",
+        "step.build.vendor_fetch": "Die Herstellerdatei {name} unter ihrer Lizenz holen",
+        "step.build.vendor_fetch.what": "Zeigt den ganzen Lizenztext von {name} des Targets {target}; dein eigenes Ja "
+                                        "nimmt ihn an, dann lädst du die Datei auf der Seite des Herstellers herunter "
+                                        "und gibst sie an, nach ihrem sha256 geprüft und in deinem eigenen "
+                                        "Herstellerspeicher aufbewahrt.",
+        "step.build.vendor_fetch.why": "Die Datei darf nicht weitergegeben werden, darum liefert das Framework sie "
+                                       "nie mit; nur du kannst ihre Lizenz annehmen.",
         "step.build.f16_delete.what": "Listet die aufbewahrten F16-Zwischenstufen und löscht die, die du wählst "
                                       "({path:btn_f16_delete}).",
         "step.build.f16_delete.why": "Sie belegen Platz im Build-Cache, bis sie gelöscht sind.",
@@ -141,6 +161,12 @@ TEXTS = {
 # The "Sie" form of the German texts above that address the person (Q1); only the texts that differ.
 FORMAL = {
     "de": {
+        "step.build.vendor_fetch.what": "Zeigt den ganzen Lizenztext von {name} des Targets {target}; Ihr eigenes Ja "
+                                        "nimmt ihn an, dann laden Sie die Datei auf der Seite des Herstellers herunter "
+                                        "und geben sie an, nach ihrem sha256 geprüft und in Ihrem eigenen "
+                                        "Herstellerspeicher aufbewahrt.",
+        "step.build.vendor_fetch.why": "Die Datei darf nicht weitergegeben werden, darum liefert das Framework sie "
+                                       "nie mit; nur Sie können ihre Lizenz annehmen.",
         "step.build.f16_delete.what": "Listet die aufbewahrten F16-Zwischenstufen und löscht die, die Sie wählen "
                                       "({path:btn_f16_delete}).",
         "step.build.decide_flags.what": "Den Build selbst starten: Sie sehen die Optionen außerhalb der erlaubten "

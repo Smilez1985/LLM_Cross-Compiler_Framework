@@ -104,6 +104,17 @@ class BuildImageOut(BaseModel):
     transfer: str = ""
 
 
+class VendorFileOut(BaseModel):
+    """A vendor file of a target (Core/vendor_files.status): facts to read, never an action."""
+    name: untrusted_text(100)
+    format: untrusted_text(30)
+    purpose: untrusted_text(200) = ""
+    used_for: Literal["build image", "board"] = Field(description="Where it is needed")
+    sha256_published: bool = False
+    licence_accepted: bool = Field(default=False, description="The person accepted its licence (only they can)")
+    in_store: bool = Field(default=False, description="The file is in the person's own vendor store")
+
+
 class TargetDetailsOut(TargetCapabilitiesOut):
     target: str = ""
     trust: Literal[TRUST_VALUES] = "unknown"
@@ -131,6 +142,11 @@ class TargetDetailsOut(TargetCapabilitiesOut):
     failed_log: Optional[untrusted_text(8000)] = Field(default=None, description="With module_files, for a module "
                                                                                  "that needs rework: the end of the "
                                                                                  "failed build's log (cleaned)")
+    vendor_files: List[VendorFileOut] = Field(
+        default_factory=list, description="The vendor files the target's formats name that may not be passed on: "
+                                          "whether each licence is accepted and each file is in the person's vendor "
+                                          "store. Only the person accepts a licence and gives such a file, in the "
+                                          "framework's own window or at a terminal; an AI never does")
 
 
 class ProbeIn(BaseModel):
@@ -400,6 +416,7 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
                                                   else None))
         out.board_profiles, out.benchmarks = service.board_data_out(tid)
         out.build_test = service.build_test(tid) if hasattr(service, "build_test") else None
+        out.vendor_files = vendor_facts(m.get("folder"), ctx)
         if inp.module_files:
             module_files(out, m.get("folder"), ctx)
         if inp.check_files:
@@ -425,6 +442,24 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
         elif m["untested"]:
             ctx.notes.append("This target was generated on this computer and is untested on real hardware.")
         return out
+
+    def vendor_facts(folder: Any, ctx: ToolContext) -> List[VendorFileOut]:
+        """The target's vendor files with whether each is accepted and in the store (read-only)."""
+        if folder is None:
+            return []
+        from orchestrator.Core import vendor_files as vf
+        config = getattr(framework, "config", None)
+        try:
+            rows = vf.status(getattr(config, "user_state_dir", None), Path(folder))
+        except Exception:  # noqa: BLE001 - facts only: a target without them is no failure
+            return []
+        if any(not r["accepted"] or not r["in_store"] for r in rows):
+            ctx.notes.append("vendor_files: a licence is not accepted or a file is not in the person's vendor store; "
+                             "only the person fetches it, in the framework's own window or at a terminal. Never accept a "
+                             "licence for the person.")
+        return [VendorFileOut(name=r["name"], format=r["format"], purpose=r["purpose"], used_for=r["for"],
+                              sha256_published=r["sha256_published"], licence_accepted=bool(r["accepted"]),
+                              in_store=r["in_store"]) for r in rows]
 
     def module_files(out: TargetDetailsOut, folder: Any, ctx: ToolContext) -> None:
         """The edit step's files of a generated module (scrubbed like any text an AI reads) and, when it needs

@@ -45,11 +45,27 @@ CLI_PATHS: Dict[str, str] = {
     "module generate-ai --provider": "act_tools_module_wizard",   # "for this analysis only" provider
     "module generate-ai --model": "act_tools_module_wizard",      # "for this analysis only" model
     "module create --edit": "act_tools_module_wizard",        # the last page: edit all files
+    # the flags page's form per value of the output formats (gui/format_form.py) and Ditto's proposal of the values
+    "module create --set": "act_tools_module_wizard",
+    "module create --ask-values": "act_tools_module_wizard",
+    "module fields": "act_tools_module_wizard",
+    "module generate-ai --formats-out": "act_tools_module_wizard",
+    "module propose-values": "act_tools_module_wizard",          # the flags page: Ditto: Propose the Values
+    "module propose-values --provider": "act_tools_module_wizard",
+    "module propose-values --model": "act_tools_module_wizard",
+    "module propose-values --out": "act_tools_module_wizard",    # the form's YAML (advanced) view holds the same
     # Build > Targets... > Edit Files...: the edit step for an existing target (its Apply a Diff... button)
     "module edit": "btn_targets_edit",
     "module edit --file": "btn_targets_edit",
     "module edit --apply": "btn_targets_edit",
     "module edit --variables": "btn_targets_edit",   # the step's variables, shown first
+    "module edit --set": "btn_targets_edit",           # the step's form per value
+    "module edit --ask-values": "btn_targets_edit",
+    # Build > Targets... > Vendor Files...: the guided fetch of vendor files (gui/vendor_files_window.py)
+    "vendor list": "btn_targets_vendor",
+    "vendor fetch": "btn_targets_vendor",
+    "vendor fetch --file": "btn_targets_vendor",   # its Add the File... after the licence
+    "vendor add": "btn_targets_vendor",
     # the same step for a generated module that needs rework: the failed build's error and log above the files, a
     # waiting proposal applied, Propose a Repair from the Log, and after the save the question to build again
     "module repair": "btn_targets_edit",
@@ -158,7 +174,8 @@ CLI_PATHS: Dict[str, str] = {
 WINDOW_OBJECTS: Dict[str, str] = {"btn_build_deps_fetch": "act_build_deps", "btn_build_deps_delete": "act_build_deps",
                                    "btn_f16_delete": "act_build_f16",
                                    "btn_history_interrupted": "act_build_history",
-                                   "btn_targets_edit": "act_build_targets"}
+                                   "btn_targets_edit": "act_build_targets",
+                                   "btn_targets_vendor": "act_build_targets"}
 # The switches of this area that are for scripts only, with the reason (as the other menu modules list theirs; the
 # hidden, deprecated build start --parallel is not offered at all).
 MACHINE_ONLY: Dict[str, str] = {
@@ -169,6 +186,10 @@ MACHINE_ONLY: Dict[str, str] = {
                               "for comparisons by script",
     "build tune list --json": "machine-readable output for scripts; the Auto-Tuning tab lists the same runs",
     "build tune show --json": "the report as JSON for scripts; the Auto-Tuning tab shows the same report",
+    "module fields --json": "the template's fields as JSON for scripts; the wizard's form shows the same fields",
+    "module propose-values --json": "the proposal as JSON for scripts; the wizard's form shows each value beside "
+                                    "its field",
+    "vendor list --json": "machine-readable output for scripts; Vendor Files... shows the same rows as a table",
     # what an earlier version wrote into the installation folder (Core/install_migration.py)
     "config take-over": "the GUI asks the same question once at its first start after the change; the command "
                         "moves what was declined there",

@@ -34,6 +34,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+import yaml
+
 from orchestrator.Core.community_pack import MODULE_TEST_NAME
 from orchestrator.schemas.build import BuildTestOut
 from orchestrator.utils.logging import get_logger
@@ -334,7 +336,8 @@ def _needs_rework(folder: Path) -> Dict[str, Any]:
 
 def propose_repair(framework: Any, folder: Path) -> Dict[str, Any]:
     """The self-healing analysis of the failed build for the module: the pattern library first (a known cause gives
-    its step as text, no diff), then Ditto (the log cleaned, scrubbed and wrapped as untrusted text, the module's
+    its step as text, no diff), then, for a module made from the general template, Ditto's proposal of changed
+    template values (_values_repair), else Ditto (the log cleaned, scrubbed and wrapped as untrusted text, the module's
     files as untrusted text) with a unified diff, checked by check_diff. The proposal waits in the record for the
     edit step; RepairError when there is none."""
     from orchestrator.Core.ditto_manager import DittoError
@@ -358,6 +361,9 @@ def propose_repair(framework: Any, folder: Path) -> Dict[str, Any]:
     edit = ModuleEdit(folder)
     context = (f"Target module {folder.name}; the build {rework.get('build_id')} failed"
                + (f" in stage {rework['stage']}" if rework.get("stage") else "") + ".")
+    by_values = _values_repair(ditto, folder, edit, log_text, base)
+    if by_values is not None:
+        return _store_proposal(folder, record, by_values)
     try:
         answer = ditto.propose_module_repair(log_text, {rel: edit.text(rel) for rel in repair_files(folder)},
                                              context)
@@ -367,6 +373,49 @@ def propose_repair(framework: Any, folder: Path) -> Dict[str, Any]:
     return _store_proposal(folder, record, dict(base, by="ditto", summary=answer.summary,
                                                  root_cause=answer.root_cause, step="", diff=answer.diff,
                                                  confidence=answer.confidence, problems=problems))
+
+
+def _values_repair(ditto: Any, folder: Path, edit: Any, log_text: str, base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """A module made from the general template is repaired by its variables first: Ditto's proposal of the values
+    (Core/format_proposal.py) with the module's current values and the failed build's log; the changed values become
+    the variables proposal (the edit step's own path makes them into the diff of its files). None when the module
+    records no variables, Ditto cannot propose values, or it changes none (the diff of the files is asked then)."""
+    from orchestrator.Core.ditto_manager import DittoError
+    from orchestrator.Core.module_edit import variables_diff
+    text = edit.variables()
+    if text is None or not hasattr(ditto, "_structured"):
+        return None
+    try:
+        record = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return None
+    formats = record.get("formats") if isinstance(record, dict) else record
+    if not isinstance(formats, list) or not formats:
+        return None
+    try:
+        from orchestrator.Core.format_proposal import propose
+        proposal = propose(ditto, current=formats, log_content=log_text)
+    except (DittoError, OSError, ValueError):
+        return None
+    changed = [f"{d.id}.{path}" for d in proposal.drafts for path in d.changed]
+    if not changed:
+        return None
+    by_id = {d.id: d.values for d in proposal.drafts}
+    new_formats = [by_id.get(str(f.get("id")), f) if isinstance(f, dict) else f for f in formats]
+    new_text = yaml.safe_dump({**record, "formats": new_formats} if isinstance(record, dict) else new_formats,
+                              sort_keys=False, allow_unicode=True)
+    try:
+        diff = variables_diff(folder, new_text)
+    except ValueError as e:
+        problems = [f"the proposed values do not fit the module: {e}"]
+        diff = ""
+    else:
+        problems = check_diff(folder, diff) if diff.strip() else []
+    notes = [note.line() for d in proposal.drafts for path, note in d.notes.items() if path in d.changed]
+    return dict(base, by="ditto", summary=proposal.summary or f"Changed template values: {', '.join(changed)}",
+                root_cause="", step="", diff=diff, variables=new_text, value_notes=notes[:40],
+                confidence=min([n.confidence for d in proposal.drafts for p, n in d.notes.items()
+                                if p in d.changed] or [0.0]), problems=problems)
 
 
 def store_client_proposal(folder: Path, *, request_id: str, diff: str, summary: str, root_cause: str = "",

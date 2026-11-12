@@ -12,6 +12,7 @@ with the failed build of a generated module that needs rework (`llm-cli module r
 a generated module's state (tested, untested, needs rework; Core/module_test.py). Every text is plain text.
 """
 
+from pathlib import Path
 from typing import Any, List, Optional
 
 from PySide6.QtCore import Qt
@@ -127,8 +128,11 @@ class TargetsDialog(QDialog):
         # the "edit all files" step for the selected target (`llm-cli module edit`), the place of a repair by hand
         self.btn_edit = QPushButton(button_text(self._t("bld.targets.edit")), self)
         self.btn_edit.setObjectName("btn_targets_edit")
+        # the guided fetch of the vendor files the selected target names (`llm-cli vendor fetch`)
+        self.btn_vendor = QPushButton(button_text(self._t("bld.targets.vendor")), self)
+        self.btn_vendor.setObjectName("btn_targets_vendor")
         for button, slot in ((self.btn_check, self._check), (self.btn_boards, self._boards),
-                             (self.btn_edit, self._edit), (self.btn_reload, self._reload)):
+                             (self.btn_edit, self._edit), (self.btn_vendor, self._vendor), (self.btn_reload, self._reload)):
             button.setAutoDefault(False)
             button.clicked.connect(slot)
             buttons.addButton(button, QDialogButtonBox.ActionRole)
@@ -174,6 +178,7 @@ class TargetsDialog(QDialog):
         self.btn_check.setEnabled(has)
         self.btn_boards.setEnabled(has)
         self.btn_edit.setEnabled(has)
+        self.btn_vendor.setEnabled(has)
 
     def selected(self) -> Optional[str]:
         rows = self.table.selectionModel().selectedRows() if self.table.selectionModel() else []
@@ -237,6 +242,26 @@ class TargetsDialog(QDialog):
         return open_module_edit(self, folder, registry=getattr(self.framework, "tool_registry", None),
                                 on_saved=lambda _files: self._reload(), framework=self.framework,
                                 on_retry=self.on_retry)
+
+    def _vendor(self):
+        """Vendor Files...: the vendor files of the selected target, fetched by the person under their licence."""
+        name = self.selected()
+        if not name:
+            plain_box(self, "information", self._t("bld.targets.title"), self._t("bld.targets.pick"))
+            return None
+        tm = _target_manager(self.framework)
+        folder = tm.folder_of(name) if tm is not None and hasattr(tm, "folder_of") else None
+        if folder is None:
+            plain_box(self, "critical", self._t("bld.targets.title"),
+                      self._t("bld.edit.open_failed", target=one_line(name), reason="-"))
+            return None
+        config = getattr(self.framework, "config", None)
+        state = getattr(config, "user_state_dir", None)
+        if state is None:
+            from orchestrator.runtime.profile import default_state_dir
+            state = default_state_dir()
+        from orchestrator.gui.vendor_files_window import open_vendor_files
+        return open_vendor_files(self, Path(folder), state)
 
     def _reload(self) -> None:
         tm = _target_manager(self.framework)

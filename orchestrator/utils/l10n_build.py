@@ -479,6 +479,63 @@ TEXTS = {
                             "build again with its settings?",
         "bld.repair.retry_cli": "The repair is saved; {target} stays untested until a build passes. Build it again "
                                 "in the Builder with the failed build's settings: {settings}",
+        "bld.form.row_add": "Add a Row",
+        "bld.form.row_remove": "Remove the Row",
+        "bld.form.new_format": "(a new format)",
+        "bld.form.add": "Add the Format",
+        "bld.form.remove": "Remove the Format",
+        "bld.form.yaml": "YAML (advanced)",
+        "bld.form.yaml_tip": "The same values as YAML text; leaving this view fills the form from it.",
+        "bld.form.none": "No format of its own: the module builds GGUF. Add a format for the hardware's own "
+                         "conversion.",
+        "bld.form.summary": "{n} format(s); {bad} with a check that fails (the reason stands under its field).",
+        "bld.form.yaml_unreadable": "The YAML is not a list of formats, so the form cannot show it: {reason}",
+        "bld.form.proposed": "Ditto: {value} ({source}, confidence {confidence}): {reason}",
+        "bld.form.gap": "Ditto: left empty, {reason}",
+        "bld.form.required": "Required.",
+        "bld.wizard.formats_propose": "Ditto: Propose the Values",
+        "bld.wizard.formats_propose_tip": "Ditto reads the values of the format(s) from the imported probe and the "
+                                          "crawled vendor documentation; each value shows its source and "
+                                          "confidence, and what it cannot read stays empty.",
+        "bld.wizard.formats_no_probe": "Import the board's probe first (on the first page): Ditto reads the values "
+                                       "from it and from the crawled vendor documentation.",
+        "bld.wizard.formats_proposed": "Ditto proposed the values of the output formats: each shows its source and "
+                                       "confidence beside its field. Check them and fill the gaps; nothing is made "
+                                       "before you click Finish.",
+        "bld.wizard.formats_failed": "Ditto could not propose the values of the output formats:\n{reason}",
+        "bld.targets.vendor": "Vendor Files...",
+        "bld.vendor.title": "Vendor files of {target}",
+        "bld.vendor.intro": "Files the target's formats need that may not be passed on. The framework never ships "
+                            "them: you "
+                            "read the licence and accept it yourself, download the file on the vendor's page and give "
+                            "it here; it is checked by its sha256 and kept in your own vendor store, never in a "
+                            "module, pack, package or preload.",
+        "bld.vendor.none": "{target} names no vendor file.",
+        "bld.vendor.col.name": "File",
+        "bld.vendor.col.format": "Format",
+        "bld.vendor.col.for": "For",
+        "bld.vendor.col.sha": "Published sha256",
+        "bld.vendor.col.accepted": "Licence accepted",
+        "bld.vendor.col.store": "In your store",
+        "bld.vendor.yes": "yes",
+        "bld.vendor.no": "no",
+        "bld.vendor.fetch": "Show the Licence and Fetch...",
+        "bld.vendor.add": "Add the File...",
+        "bld.vendor.open_page": "Open the Download Page",
+        "bld.vendor.download": "Download It Now",
+        "bld.vendor.licence_title": "Licence of {name}",
+        "bld.vendor.accept_tick": "I have read this licence and accept it myself.",
+        "bld.vendor.accept": "Accept",
+        "bld.vendor.accepted": "Your acceptance of the licence of {name} is recorded. Download the file on the "
+                               "vendor's page and give it with Add the File...",
+        "bld.vendor.accepted_direct": "Your acceptance of the licence of {name} is recorded. Download It Now fetches "
+                                      "the pinned file from the vendor's server.",
+        "bld.vendor.confirm_sha": "The vendor publishes no sha256 for {name}. The file you gave has the sha256\n"
+                                  "{sha256}\nIs it the file you downloaded from the vendor's page? Later builds check "
+                                  "this sha256.",
+        "bld.vendor.added": "{name} is in your vendor store (sha256 {sha256}).",
+        "bld.vendor.refused": "{reason}",
+        "bld.vendor.pick": "Select a vendor file first.",
         "bld.repair.ask_title": "The module needs rework",
         "bld.repair.ask": "The build failed in the module {target}, which is now marked for rework. Open its files "
                           "with the error to repair it (by hand, or from a proposal made from its log)?",
@@ -964,6 +1021,65 @@ TEXTS = {
                             "gescheiterten Build mit seinen Einstellungen erneut starten?",
         "bld.repair.retry_cli": "Die Reparatur ist gespeichert; {target} bleibt ungetestet, bis ein Build besteht. "
                                 "Baue es im Builder mit den Einstellungen des gescheiterten Builds erneut: {settings}",
+        "bld.form.row_add": "Zeile hinzufügen",
+        "bld.form.row_remove": "Zeile entfernen",
+        "bld.form.new_format": "(ein neues Format)",
+        "bld.form.add": "Format hinzufügen",
+        "bld.form.remove": "Format entfernen",
+        "bld.form.yaml": "YAML (erweitert)",
+        "bld.form.yaml_tip": "Dieselben Werte als YAML-Text; wer diese Ansicht verlässt, füllt das Formular daraus.",
+        "bld.form.none": "Kein eigenes Format: Das Modul baut GGUF. Füge ein Format für die eigene Konvertierung "
+                         "der Hardware hinzu.",
+        "bld.form.summary": "{n} Format(e); {bad} mit einer Prüfung, die fehlschlägt (der Grund steht unter seinem "
+                            "Feld).",
+        "bld.form.yaml_unreadable": "Das YAML ist keine Liste von Formaten, darum kann das Formular es nicht zeigen: "
+                                    "{reason}",
+        "bld.form.proposed": "Ditto: {value} ({source}, Sicherheit {confidence}): {reason}",
+        "bld.form.gap": "Ditto: leer gelassen, {reason}",
+        "bld.form.required": "Pflichtfeld.",
+        "bld.wizard.formats_propose": "Ditto: Werte vorschlagen",
+        "bld.wizard.formats_propose_tip": "Ditto liest die Werte der Formate aus der importierten Prüfdatei und der "
+                                          "gecrawlten Herstellerdokumentation; jeder Wert zeigt seine Quelle und "
+                                          "Sicherheit, und was es nicht lesen kann, bleibt leer.",
+        "bld.wizard.formats_no_probe": "Importiere zuerst die Prüfdatei des Boards (auf der ersten Seite): Ditto "
+                                       "liest die Werte daraus und aus der gecrawlten Herstellerdokumentation.",
+        "bld.wizard.formats_proposed": "Ditto hat die Werte der Ausgabeformate vorgeschlagen: Jeder zeigt neben "
+                                       "seinem Feld Quelle und Sicherheit. Prüfe sie und fülle die Lücken; nichts "
+                                       "wird erzeugt, bevor du auf Finish klickst.",
+        "bld.wizard.formats_failed": "Ditto konnte die Werte der Ausgabeformate nicht vorschlagen:\n{reason}",
+        "bld.targets.vendor": "Herstellerdateien...",
+        "bld.vendor.title": "Herstellerdateien von {target}",
+        "bld.vendor.intro": "Dateien, die die Formate des Targets brauchen und die nicht weitergegeben werden dürfen. "
+                            "Das Framework liefert sie nie mit: Du liest die Lizenz und nimmst sie selbst an, lädst die Datei "
+                            "auf der Seite des Herstellers herunter und gibst sie hier an; sie wird nach ihrem sha256 "
+                            "geprüft und in deinem eigenen Herstellerspeicher aufbewahrt, nie in einem Modul, Pack, "
+                            "Paket oder Preload.",
+        "bld.vendor.none": "{target} nennt keine Herstellerdatei.",
+        "bld.vendor.col.name": "Datei",
+        "bld.vendor.col.format": "Format",
+        "bld.vendor.col.for": "Für",
+        "bld.vendor.col.sha": "Veröffentlichter sha256",
+        "bld.vendor.col.accepted": "Lizenz angenommen",
+        "bld.vendor.col.store": "In deinem Speicher",
+        "bld.vendor.yes": "ja",
+        "bld.vendor.no": "nein",
+        "bld.vendor.fetch": "Lizenz zeigen und holen...",
+        "bld.vendor.add": "Datei angeben...",
+        "bld.vendor.open_page": "Download-Seite öffnen",
+        "bld.vendor.download": "Jetzt herunterladen",
+        "bld.vendor.licence_title": "Lizenz von {name}",
+        "bld.vendor.accept_tick": "Ich habe diese Lizenz gelesen und nehme sie selbst an.",
+        "bld.vendor.accept": "Annehmen",
+        "bld.vendor.accepted": "Deine Annahme der Lizenz von {name} ist aufgezeichnet. Lade die Datei auf der Seite "
+                               "des Herstellers herunter und gib sie mit Datei angeben... an.",
+        "bld.vendor.accepted_direct": "Deine Annahme der Lizenz von {name} ist aufgezeichnet. Jetzt herunterladen "
+                                      "holt die gepinnte Datei vom Server des Herstellers.",
+        "bld.vendor.confirm_sha": "Der Hersteller veröffentlicht keinen sha256 für {name}. Die angegebene Datei hat "
+                                  "den sha256\n{sha256}\nIst es die Datei, die du von der Seite des Herstellers "
+                                  "heruntergeladen hast? Spätere Builds prüfen diesen sha256.",
+        "bld.vendor.added": "{name} liegt in deinem Herstellerspeicher (sha256 {sha256}).",
+        "bld.vendor.refused": "{reason}",
+        "bld.vendor.pick": "Wähle zuerst eine Herstellerdatei.",
         "bld.repair.ask_title": "Das Modul braucht Nacharbeit",
         "bld.repair.ask": "Der Build ist im Modul {target} gescheitert, das jetzt zur Nacharbeit markiert ist. Seine "
                           "Dateien mit dem Fehler öffnen, um es zu reparieren (von Hand oder aus einem Vorschlag aus "

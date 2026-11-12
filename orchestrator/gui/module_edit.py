@@ -14,8 +14,8 @@ to the editors, marked, listed in the banner with its Undo and shown in the diff
 A file the person edited is theirs, so a proposal that would change it is refused. Only the person's Finish or
 Save writes anything. Every text is plain text.
 
-A module made from the general template shows its template variables first (its output formats as YAML, above the
-files): Apply the Variables makes the files that hold them anew from the template (ModuleEdit.set_variables), shown
+A module made from the general template shows its template variables first (its output formats as a form per value,
+gui/format_form.py, with the YAML as its advanced view, above the files): Apply the Variables makes the files that hold them anew from the template (ModuleEdit.set_variables), shown
 in the diff and checked like any edit. The variables are a field of the form an AI may fill (marked, with its Undo);
 only the person applies and saves them.
 """
@@ -68,8 +68,12 @@ class ModuleEditPanel(QWidget):
         self.variables_edit = QPlainTextEdit(self.variables_box)
         self.variables_edit.setObjectName("text_module_edit_variables")
         self.variables_edit.setLineWrapMode(QPlainTextEdit.NoWrap)
-        self.variables_edit.setMaximumHeight(160)
-        box.addWidget(self.variables_edit)
+        # a form per value over the YAML (gui/format_form.py), the YAML kept as its advanced view
+        from orchestrator.gui.format_form import FormatsForm
+        self.variables_form = FormatsForm(self.variables_edit, self.variables_box, lang=self.lang)
+        self.variables_form.personEdited.connect(
+            lambda: self.form.person_edited("variables") if self.form is not None else None)
+        box.addWidget(self.variables_form)
         self.btn_variables = QPushButton(button_text(self._t("bld.edit.variables_apply")), self.variables_box)
         self.btn_variables.setObjectName("btn_module_edit_variables")
         self.btn_variables.setAutoDefault(False)

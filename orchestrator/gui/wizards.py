@@ -43,6 +43,8 @@ from orchestrator.utils.localization import current_language, ui_text
 
 # The Docker page's packages before anything is imported (a probe import puts them back after Ditto's proposal).
 DEFAULT_PACKAGES = "build-essential cmake git python3-pip"
+# The key under which the AI import's worker hands Ditto's proposal of the format values to on_ai_finished.
+FORMAT_PROPOSAL_KEY = "__format_proposal__"
 
 
 def module_name_hint(raw: str) -> str:
@@ -269,6 +271,8 @@ class ModuleCreationWizard(QWizard):
         self._staged_key: Optional[str] = None   # the pages' values it was made from
         self._stage_error = ""
         worker_relay().done.connect(self._on_pin_relay, Qt.QueuedConnection)
+        self._formats_request: Optional[object] = None   # Ditto's proposal of the format values (Propose the Values)
+        worker_relay().done.connect(self._on_formats_relay, Qt.QueuedConnection)
         
         # Container for Avatar (Stacked to switch widgets)
         self.avatar_container = QStackedWidget()
@@ -724,13 +728,24 @@ class ModuleCreationWizard(QWizard):
         self.setup_commands.setPlaceholderText(ui_text("bld.wizard.setup_hint"))
         layout.addRow(ui_text("bld.wizard.setup_label"), self.setup_commands)
 
-        # The output formats: the general template's variables (orchestrator/schemas/target_template.py), as YAML;
-        # the template's stages call the declared converter, so no stage code is typed here
+        # The output formats: the general template's variables (orchestrator/schemas/target_template.py), a form per
+        # value generated from the schema (gui/format_form.py) over the YAML, which stays as the advanced view; the
+        # template's stages call the declared converter, so no stage code is typed here
         self.formats_edit = QTextEdit()
         self.formats_edit.setAcceptRichText(False)
         self.formats_edit.setStyleSheet(mono)
         self.formats_edit.setPlaceholderText(ui_text("bld.wizard.formats_hint"))
-        layout.addRow(ui_text("bld.wizard.formats_label"), self.formats_edit)
+        from orchestrator.gui.format_form import FormatsForm
+        self.formats_form = FormatsForm(self.formats_edit)
+        self.formats_form.personEdited.connect(self._formats_person_edited)
+        self.btn_formats_propose = QPushButton(ui_text("bld.wizard.formats_propose"))
+        self.btn_formats_propose.setObjectName("btn_wizard_formats_propose")
+        self.btn_formats_propose.setToolTip(ui_text("bld.wizard.formats_propose_tip"))
+        self.btn_formats_propose.setAutoDefault(False)
+        self.btn_formats_propose.clicked.connect(lambda *_a: self.propose_formats())
+        self.format_proposal = None   # Ditto's proposal of the format values the form shows (None: none)
+        layout.addRow(ui_text("bld.wizard.formats_label"), self.btn_formats_propose)
+        layout.addRow(self.formats_form)
         
         page.setLayout(layout)
         return page
@@ -1163,6 +1178,9 @@ class ModuleCreationWizard(QWizard):
                                                              reason=str(e), next=e.next)))
                     return
             result = ("done", definition.model_dump())
+            proposal = ModuleCreationWizard._format_proposal_of(ditto, path)
+            if proposal is not None:
+                result[1][FORMAT_PROPOSAL_KEY] = proposal
         except DittoCannot as e:  # its reason code decides whether Deep Ingest is offered
             result = ("cannot", (str(e), e.cannot.reason))
         except (DittoError, OSError) as e:
@@ -1170,6 +1188,78 @@ class ModuleCreationWizard(QWizard):
         except Exception as e:
             result = ("error", ui_text("bld.wizard.ai_unexpected", reason=e))
         relay.done.emit(token, result)
+
+    @staticmethod
+    def _format_proposal_of(ditto, path):
+        """Ditto's proposal of the format values (Core/format_proposal.py) when the probe names an accelerator of its
+        own; None otherwise, or when Ditto cannot propose them (the definition stands on its own then)."""
+        from orchestrator.Core.ditto_manager import DittoError
+        from orchestrator.Core import format_proposal
+        if not hasattr(ditto, "_structured"):
+            return None
+        try:
+            if not format_proposal.accelerator_named(Path(path).read_text(encoding="utf-8", errors="ignore")):
+                return None
+            return format_proposal.propose(ditto, Path(path))
+        except (DittoError, OSError, ValueError):
+            return None
+
+    def propose_formats(self) -> bool:
+        """Ditto: Propose the Values: the format values from the imported probe and the crawled documentation, in a
+        worker thread; the form shows them with their sources (on_formats_proposed). False when nothing was asked."""
+        if not self.probe_path:
+            self._run_problem(ui_text("bld.wizard.formats_no_probe"))
+            return False
+        ditto = self._ditto()
+        if ditto is None:
+            QMessageBox.critical(self, ui_text("status.error"), ui_text("bld.wizard.no_ditto"))
+            return False
+        if not ditto.is_configured("json"):
+            self.configure_ai()
+            if not ditto.is_configured("json"):
+                return False
+        self.btn_formats_propose.setEnabled(False)
+        token = self._formats_request = object()
+        relay = worker_relay()
+
+        def work():
+            from orchestrator.Core import format_proposal
+            from orchestrator.Core.ditto_manager import DittoError
+            try:
+                result = ("formats", format_proposal.propose(ditto, Path(self.probe_path)))
+            except (DittoError, OSError, ValueError) as e:
+                result = ("formats_error", str(e))
+            relay.done.emit(token, result)
+        threading.Thread(target=work, name="ai-formats", daemon=True).start()
+        return True
+
+    def _on_formats_relay(self, token, result) -> None:
+        if token is not getattr(self, "_formats_request", None) or not isinstance(result, tuple):
+            return
+        self._formats_request = None
+        self.btn_formats_propose.setEnabled(True)
+        kind, value = result
+        if kind == "formats":
+            self.on_formats_proposed(value)
+        else:
+            self._run_problem(ui_text("bld.wizard.formats_failed", reason=value))
+
+    def on_formats_proposed(self, proposal) -> None:
+        """Ditto's proposal of the format values fills the form: each value with its reason, source and confidence
+        beside its field, the gaps empty with why. The field counts as Ditto's (marked, the module untested)."""
+        self.format_proposal = proposal
+        form = getattr(self, "gui_form", None)
+        text = self.formats_form.proposal_text(proposal)
+        outcome = form.fill({"formats": text}) if form is not None else None
+        if outcome is not None and "formats" in outcome.filled:   # Ditto's value: marked, with its Undo
+            self.formats_form.set_proposal_notes(proposal)
+        else:   # the person asked for it over their own values (or the same values): the form takes it
+            self.formats_form.load_proposal(proposal)
+
+    def _formats_person_edited(self) -> None:
+        form = getattr(self, "gui_form", None)
+        if form is not None:
+            form.person_edited("formats")
 
     def _on_ai_relay(self, token, result) -> None:
         """GUI thread: the answer of this wizard's latest AI import (other workers' results are not ours)."""
@@ -1218,6 +1308,8 @@ class ModuleCreationWizard(QWizard):
         if not isinstance(config, dict):
             self.on_ai_error(ui_text("bld.wizard.ai_not_json"))
             return
+        config = dict(config)
+        formats_proposal = config.pop(FORMAT_PROPOSAL_KEY, None)
         self.ai_proposal = dict(config)
         self._update_description_hint()
 
@@ -1254,6 +1346,9 @@ class ModuleCreationWizard(QWizard):
         
         from orchestrator.Core.ditto_manager import proposal_facts
         message = ui_text("bld.wizard.ai_filled") + "\n\n" + proposal_facts(config)
+        if formats_proposal is not None:
+            self.on_formats_proposed(formats_proposal)
+            message += "\n\n" + ui_text("bld.wizard.formats_proposed") + "\n" + "\n".join(formats_proposal.lines())
         if warnings:
             message += "\n\n" + "\n".join(warnings)
         box = QMessageBox(QMessageBox.Information, "Ditto", message, QMessageBox.Ok, self)
@@ -1340,7 +1435,8 @@ class ModuleCreationWizard(QWizard):
         from orchestrator.Core.module_generator import AI_DEFINITION_FIELDS
         definition = {k: v for k, v in (self.ai_proposal or {}).items() if k in AI_DEFINITION_FIELDS}
         definition.update({k: self.module_data[k] for k in ("architecture", "sdk", "base_os", "packages", "cpu_flags",
-                                                            "cmake_flags", "setup_commands", "quantization_logic")})
+                                                            "cmake_flags", "setup_commands", "quantization_logic",
+                                                            "formats")})
         return definition, self.module_data["module_name"], self.person_description()
 
     def _audit_ditto_save(self, path) -> None:
