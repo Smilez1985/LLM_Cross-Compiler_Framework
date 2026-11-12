@@ -78,11 +78,75 @@ def test_every_shipped_target_is_read_without_a_problem_on_both_build_computers(
             assert found and problems == [], (folder.name, arch, problems)
 
 
-def test_the_templates_shell_constructs_are_named_never_guessed():
+def test_the_raw_templates_placeholders_are_named_never_guessed():
     for name in ("Dockerfile", "Dockerfile.gpu"):
         _found, problems = image_packages.need(text(REPO_ROOT / "targets" / "_template" / name), "amd64")
         named = " ".join(problems)
-        assert "${cross}" in named and "{packages_str}" in named, name
+        assert "{packages_str}" in named and "gcc-[GNU_TRIPLET]" in named, name
+
+
+TEMPLATE_BUILDER = ["build-essential", "cmake", "make", "git", "curl", "wget", "ca-certificates", "python3",
+                    "python3-pip", "python3-dev", "python3-venv", "pkg-config", "libffi-dev", "libssl-dev", "jq", "bc",
+                    "file", "time", "ccache", "libgomp1"]
+TEMPLATE_RUNTIME = ["python3", "cmake", "make", "git", "bc", "jq", "file", "curl", "gosu", "libgomp1", "gcc", "g++",
+                    "libc6-dev"]
+# the board's architecture -> its cross compilers on an amd64 and an arm64 build computer ([] where they are its own)
+TEMPLATE_CROSS = {
+    "aarch64": {"amd64": ["gcc-aarch64-linux-gnu", "g++-aarch64-linux-gnu"], "arm64": []},
+    "x86_64": {"amd64": [], "arm64": ["gcc-x86-64-linux-gnu", "g++-x86-64-linux-gnu"]},
+    "armv7l": {"amd64": ["gcc-arm-linux-gnueabihf", "g++-arm-linux-gnueabihf"],
+               "arm64": ["gcc-arm-linux-gnueabihf", "g++-arm-linux-gnueabihf"]},
+    "riscv64": {"amd64": ["gcc-riscv64-linux-gnu", "g++-riscv64-linux-gnu"],
+                "arm64": ["gcc-riscv64-linux-gnu", "g++-riscv64-linux-gnu"]},
+}
+
+
+@pytest.mark.parametrize("gpu", [False, True], ids=["cpu", "gpu"])
+@pytest.mark.parametrize("board", sorted(TEMPLATE_CROSS))
+def test_a_target_the_module_generator_makes_is_read_without_a_problem(tmp_path, board, gpu):
+    """The wizard's generator fills the template; the build's preload reads every package of the result."""
+    from orchestrator.Core.module_generator import ModuleGenerator, validate_target_folder
+    data = dict(module_name=f"Board {board}", architecture=board, packages=["libusb-1.0-0-dev"])
+    if gpu:
+        data["sdk"] = "cuda"
+    folder = Path(ModuleGenerator(tmp_path).generate_module(data))
+    assert validate_target_folder(folder) == []
+    dockerfile = text(folder / "Dockerfile")
+    assert "ARG APT_PRELOAD" in dockerfile and ("xz-utils" in dockerfile) is gpu
+    for arch in ("amd64", "arm64"):
+        found, problems = image_packages.need(dockerfile, arch)
+        assert problems == [], (arch, problems)
+        builder = TEMPLATE_BUILDER[:7] + (["xz-utils"] if gpu else []) + TEMPLATE_BUILDER[7:] + ["libusb-1.0-0-dev"]
+        assert [s["packages"] for s in found] == [builder, TEMPLATE_RUNTIME + TEMPLATE_CROSS[board][arch]], arch
+        assert len({s["image"] for s in found}) == 1 and ("ubuntu" in found[0]["image"]) is gpu
+
+
+# The template's former choice of the cross compilers, kept here to show the plain tests choose the same
+OLD_CROSS = """case "$(dpkg --print-architecture):${GNU_TRIPLET}" in
+    amd64:x86_64-linux-gnu|arm64:aarch64-linux-gnu|riscv64:riscv64-linux-gnu|armhf:arm-linux-gnueabihf) cross="" ;;
+    *) package="$(printf '%s' "${GNU_TRIPLET}" | tr _ -)"; cross="gcc-${package} g++-${package}" ;;
+esac
+echo "${cross}"
+"""
+
+
+@POSIX_SH
+@pytest.mark.parametrize("name", ["Dockerfile", "Dockerfile.gpu"])
+def test_the_templates_plain_tests_choose_the_cross_compilers_the_case_chose(tmp_path, name):
+    from orchestrator.Core.module_generator import GNU_TRIPLETS
+    step = find_run(text(REPO_ROOT / "targets" / "_template" / name), "cross=")
+    choice = step[:step.index("apt-get update")] + 'echo "${cross}"'
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for arch in ("amd64", "arm64", "armhf", "riscv64"):
+        (bin_dir / "dpkg").write_text(f"#!/bin/sh\necho {arch}\n")
+        (bin_dir / "dpkg").chmod(0o755)
+        for triplet in GNU_TRIPLETS.values():
+            env = {"PATH": os.pathsep.join([str(bin_dir), "/usr/bin", "/bin"]), "GNU_TRIPLET": triplet}
+            new = subprocess.run(["sh", "-c", choice], env=env, capture_output=True, text=True)
+            old = subprocess.run(["sh", "-c", OLD_CROSS], env=env, capture_output=True, text=True)
+            assert new.returncode == old.returncode == 0, new.stderr
+            assert new.stdout == old.stdout, (arch, triplet)
 
 
 @pytest.mark.parametrize("run, packages, said", [
@@ -511,7 +575,9 @@ def test_the_build_context_has_the_empty_repository_folder(tmp_path):
     assert (tmp_path / "ctx" / "sources" / "apt").is_dir() and not any((tmp_path / "ctx" / "sources" / "apt").iterdir())
 
 
-@pytest.mark.parametrize("dockerfile", [ARM64, ROCKCHIP], ids=lambda p: p.parent.name)
+@pytest.mark.parametrize("dockerfile", [ARM64, ROCKCHIP, REPO_ROOT / "targets" / "_template" / "Dockerfile",
+                                        REPO_ROOT / "targets" / "_template" / "Dockerfile.gpu"],
+                         ids=lambda p: p.parent.name + "/" + p.name)
 def test_every_stage_that_runs_apt_uses_the_preloads_repository_and_gives_the_sources_back(dockerfile):
     body = text(dockerfile)
     stages = body.split("\nFROM ")[1:]
@@ -519,9 +585,9 @@ def test_every_stage_that_runs_apt_uses_the_preloads_repository_and_gives_the_so
     for stage in stages:
         assert "ARG APT_PRELOAD\nCOPY sources/apt/ /tmp/llmcf-apt/\n" in stage
         copy, use = stage.index("COPY sources/apt/"), stage.index("llmcf-apt.sh use")
-        install = stage.index("apt-get install")
+        install = stage.rindex("apt-get install -y")
         restore = stage.index("llmcf-apt.sh restore")
-        assert copy < use < install < restore
+        assert copy < use < install < restore, "the restore after the stage's last install"
     steps = [s for s in run_steps(body) if "01llmcf-proxy" in s]
     assert all('if [ -n "${APT_PRELOAD:-}" ]; then sh /tmp/llmcf-apt/llmcf-apt.sh use; fi' in s for s in steps)
 

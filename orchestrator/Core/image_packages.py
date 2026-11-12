@@ -7,8 +7,9 @@ a second list that could drift from it.
 - stages(): per build stage its base image (a stage built on another stage has that one's base) and the packages its
   RUN lines install with `apt-get install` or `apt install`: the words after the options (`-y`, `-q`,
   `--no-install-recommends`, `-o` with its value), NAME or NAME=VERSION as the Dockerfile pins one. A shell variable
-  set in the same RUN line is followed, also in an `if [ "$(dpkg --print-architecture)" = ARCH ]` branch, which is
-  evaluated for the build computer's architecture; so is an ARG's or ENV's default. Whatever cannot be read for
+  set in the same RUN line is followed, also in an `if [ A = B ]` branch whose sides are known (an ARG's or ENV's
+  default, "$(dpkg --print-architecture)" as the build computer's architecture), which is evaluated; so is an ARG's
+  or ENV's default in a package word. Whatever cannot be read for
   certain (a `case`, a loop, an `elif`, a command substitution, a glob, an option such as `-t`, a variable without a
   known value, `apt-get upgrade`, a package source the Dockerfile adds itself) is a problem, never a guess: the
   preload then names the apt packages as not covered.
@@ -92,11 +93,15 @@ def _segments(run: str) -> List[List[str]]:
     return out
 
 
-def _condition(tokens: List[str], arch: str) -> Optional[bool]:
-    """An `if` test this reader can evaluate: [ "$(dpkg --print-architecture)" =|!= WORD ]; None otherwise."""
-    if len(tokens) == 5 and tokens[0] in ("[", "test") and tokens[-1] in ("]",) and tokens[1] == _ARCH_TEST \
-            and tokens[2] in ("=", "==", "!="):
-        same = tokens[3] == arch
+def _condition(tokens: List[str], arch: str, values: Dict[str, Any]) -> Optional[bool]:
+    """An `if` test this reader can evaluate: [ A =|!= B ], each side a word whose variables are known, where
+    "$(dpkg --print-architecture)" is the build computer's architecture (also inside a word, as in
+    "$(dpkg --print-architecture):${GNU_TRIPLET}"); None otherwise."""
+    if len(tokens) == 5 and tokens[0] == "[" and tokens[-1] == "]" and tokens[2] in ("=", "==", "!="):
+        left, right = (_expand(word.replace(_ARCH_TEST, arch), values) for word in (tokens[1], tokens[3]))
+        if left is _UNKNOWN or right is _UNKNOWN:
+            return None
+        same = left == right
         return same if tokens[2] != "!=" else not same
     return None
 
@@ -117,6 +122,11 @@ def _adds_source(tokens: List[str]) -> bool:
     return False
 
 
+def state_of(stack: List[Optional[bool]]) -> Optional[bool]:
+    """Whether the commands under the open tests run: False when one is false, None when one cannot be told."""
+    return False if False in stack else (None if None in stack else True)
+
+
 def _run_packages(run: str, arch: str, values: Dict[str, Any], stage: Stage) -> None:
     """The packages one RUN line installs with apt for `arch`, into `stage` (its problems too)."""
     local = dict(values)
@@ -130,7 +140,8 @@ def _run_packages(run: str, arch: str, values: Dict[str, Any], stage: Stage) -> 
             continue
         head = tokens[0]
         if head == "if":
-            stack.append(_condition(tokens[1:], arch))
+            known = state_of(stack)
+            stack.append(_condition(tokens[1:], arch, local) if known is not None else None)
             continue
         if head == "elif":
             if stack:
@@ -143,7 +154,7 @@ def _run_packages(run: str, arch: str, values: Dict[str, Any], stage: Stage) -> 
             if stack:
                 stack.pop()
             continue
-        state = False if False in stack else (None if None in stack else True)
+        state = state_of(stack)
         if _adds_source(tokens):
             stage.problems.append("the Dockerfile adds a package source of its own")
             continue

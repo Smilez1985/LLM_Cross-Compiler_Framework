@@ -29,6 +29,11 @@ ENV PATH="/root/.local/bin:$PATH"
 # checked against its fingerprint before the source is added (empty when the module has none).
 # [VENDOR_SOURCES]
 
+# The build's preload's distribution packages (orchestrator/Core/build_preload.py): with APT_PRELOAD the framework
+# staged them as a file repository into sources/apt (checked when the preload was taken in, signed by the archive keys
+# llmcf pins), and the step below makes it apt's one source; empty in every other build. scripts/build_apt_preload.sh.
+ARG APT_PRELOAD
+COPY sources/apt/ /tmp/llmcf-apt/
 # Sources in your own network for an offline build (orchestrator/Core/build_image.py): the person's apt mirror (it
 # serves the distribution's paths, such as /debian and /debian-security) or apt cache proxy. The framework passes them
 # only in offline mode, after the locality rule judged them; empty (the default) keeps the distribution's own sources.
@@ -43,7 +48,8 @@ RUN set -eu; \
     fi; \
     if [ -n "${APT_PROXY:-}" ]; then \
         printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/01llmcf-proxy; \
-    fi
+    fi; \
+    if [ -n "${APT_PRELOAD:-}" ]; then sh /tmp/llmcf-apt/llmcf-apt.sh use; fi
 
 # The person's pip index in the own network for an offline build (pip reads both from the environment; PIP_TRUSTED_HOST
 # only for an http index). Not set: PyPI and the Dockerfile's own addresses.
@@ -64,6 +70,9 @@ RUN apt-get update && \
         {packages_str} \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
+
+# The image's own package sources back and the preload's file repository gone (an empty folder in every other build)
+RUN if [ -n "${APT_PRELOAD:-}" ]; then sh /tmp/llmcf-apt/llmcf-apt.sh restore; fi; rm -rf /tmp/llmcf-apt
 
 # --- llama.cpp conversion tools (convert, quantize, imatrix; completion, perplexity, bench): the source ---
 # Built from the one llama.cpp pin (configs/llama_runtime.yml, llama_cpp.source) by commit, never by a tag alone: the
@@ -192,6 +201,11 @@ ENV BUILD_CACHE_DIR=/build-cache
 ENV LLAMA_CPP_PATH=/usr/src/llama.cpp
 ENV PATH="/app/modules:/app/scripts:${PATH}"
 
+# The build's preload's distribution packages (orchestrator/Core/build_preload.py): with APT_PRELOAD the framework
+# staged them as a file repository into sources/apt (checked when the preload was taken in, signed by the archive keys
+# llmcf pins), and the step below makes it apt's one source; empty in every other build. scripts/build_apt_preload.sh.
+ARG APT_PRELOAD
+COPY sources/apt/ /tmp/llmcf-apt/
 # Sources in your own network for an offline build (orchestrator/Core/build_image.py): the person's apt mirror (it
 # serves the distribution's paths, such as /debian and /debian-security) or apt cache proxy. The framework passes them
 # only in offline mode, after the locality rule judged them; empty (the default) keeps the distribution's own sources.
@@ -206,7 +220,8 @@ RUN set -eu; \
     fi; \
     if [ -n "${APT_PROXY:-}" ]; then \
         printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/01llmcf-proxy; \
-    fi
+    fi; \
+    if [ -n "${APT_PRELOAD:-}" ]; then sh /tmp/llmcf-apt/llmcf-apt.sh use; fi
 
 # Runtime Dependencies (libgomp1: the OpenMP runtime of the llama.cpp tools)
 RUN apt-get update && \
@@ -216,19 +231,26 @@ RUN apt-get update && \
 
 # The compilers of the board package's cross build (the config stage plans with CC and CXX and tests them, the target
 # stage builds llama-cli and llama-server for the board with them): GCC for the module's system [GNU_TRIPLET], the
-# image's own on a build computer of that system, else the distribution's cross compilers; libc6-dev for the test.
+# image's own on a build computer of that system, else the distribution's cross compilers (gcc-/g++-TRIPLET, "_"
+# written "-"); libc6-dev for the test. Plain tests, which the build's preload reads (Core/image_packages.py).
 ARG GNU_TRIPLET=[GNU_TRIPLET]
 # hadolint ignore=DL3008,SC2086
 RUN set -eu; \
-    case "$(dpkg --print-architecture):${GNU_TRIPLET}" in \
-        amd64:x86_64-linux-gnu|arm64:aarch64-linux-gnu|riscv64:riscv64-linux-gnu|armhf:arm-linux-gnueabihf) cross="" ;; \
-        *) package="$(printf '%s' "${GNU_TRIPLET}" | tr _ -)"; cross="gcc-${package} g++-${package}" ;; \
-    esac; \
+    cross="gcc-${GNU_TRIPLET} g++-${GNU_TRIPLET}"; \
+    if [ "${GNU_TRIPLET}" = x86_64-linux-gnu ]; then cross="gcc-x86-64-linux-gnu g++-x86-64-linux-gnu"; fi; \
+    if [ "$(dpkg --print-architecture):${GNU_TRIPLET}" = amd64:x86_64-linux-gnu ]; then cross=""; fi; \
+    if [ "$(dpkg --print-architecture):${GNU_TRIPLET}" = arm64:aarch64-linux-gnu ]; then cross=""; fi; \
+    if [ "$(dpkg --print-architecture):${GNU_TRIPLET}" = riscv64:riscv64-linux-gnu ]; then cross=""; fi; \
+    if [ "$(dpkg --print-architecture):${GNU_TRIPLET}" = armhf:arm-linux-gnueabihf ]; then cross=""; fi; \
     apt-get update; \
     apt-get install -y --no-install-recommends gcc g++ libc6-dev ${cross}; \
     rm -rf /var/lib/apt/lists/*; \
     command -v "${GNU_TRIPLET}-gcc"; \
     command -v "${GNU_TRIPLET}-g++"
+
+# The image's own package sources back and the preload's file repository gone (an empty folder in every other build)
+RUN if [ -n "${APT_PRELOAD:-}" ]; then sh /tmp/llmcf-apt/llmcf-apt.sh restore; fi; rm -rf /tmp/llmcf-apt
+
 ENV CC=${GNU_TRIPLET}-gcc CXX=${GNU_TRIPLET}-g++
 
 # Copy Python Environment and the llama.cpp tools (source tree with build/bin) from Builder
