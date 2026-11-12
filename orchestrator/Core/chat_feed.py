@@ -129,6 +129,16 @@ TEXTS: Dict[str, Dict[str, str]] = {
         # What Ditto or an AI app did (Core/activity.py): the row's sender is named by the bubble's header, so a text
         # starts with what it did. Parameters are closed framework values (setting keys, labels, counts).
         "activity.action": "Changed something.",
+        # What Ditto did to fit a turn into the model's context window (llm/context_budget.py; numbers only).
+        "activity.context.compacted": "Compacted the conversation to fit the context window of {window} tokens: "
+                                      "{summarized} earlier message(s) summarized into a note, {kept} kept word for "
+                                      "word (about {before} tokens before, {after} after). The original is kept and "
+                                      "can be read and restored.",
+        "activity.context.no_tools": "Summarized the conversation, which used tools, because this question is asked "
+                                     "without tools: {summarized} message(s) into a note (window {window} tokens). "
+                                     "The original is kept and can be read and restored.",
+        "activity.context.excerpts": "Limited the knowledge-base excerpts to {tokens} tokens to fit the context "
+                                     "window of {window} tokens.",
         "activity.tool.start_build": "Started a build.",
         "activity.tool.start_recipe_build": "Started a build from a recipe.",
         "activity.tool.cancel_build": "Cancelled a build.",
@@ -252,6 +262,16 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "caller.self_name": "nennt sich „{client}“",
         "caller.framework": "das Framework",
         "activity.action": "Hat etwas geändert.",
+        "activity.context.compacted": "Hat das Gespräch verdichtet, damit es ins Kontextfenster von {window} Token "
+                                      "passt: {summarized} frühere Nachricht(en) zu einer Notiz zusammengefasst, "
+                                      "{kept} Wort für Wort behalten (etwa {before} Token vorher, {after} danach). "
+                                      "Das Original bleibt erhalten und lässt sich lesen und wiederherstellen.",
+        "activity.context.no_tools": "Hat das Gespräch, das Tools benutzt hat, zusammengefasst, weil diese Frage "
+                                     "ohne Tools gestellt wird: {summarized} Nachricht(en) zu einer Notiz (Fenster "
+                                     "{window} Token). Das Original bleibt erhalten und lässt sich lesen und "
+                                     "wiederherstellen.",
+        "activity.context.excerpts": "Hat die Auszüge aus der Wissensdatenbank auf {tokens} Token begrenzt, damit "
+                                     "sie ins Kontextfenster von {window} Token passen.",
         "activity.tool.start_build": "Hat einen Build gestartet.",
         "activity.tool.start_recipe_build": "Hat einen Build nach einem Rezept gestartet.",
         "activity.tool.cancel_build": "Hat einen Build abgebrochen.",

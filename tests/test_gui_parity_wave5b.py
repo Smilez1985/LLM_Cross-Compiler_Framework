@@ -139,7 +139,8 @@ def test_every_menu_of_the_design_once_in_its_order_with_every_entry_once(window
     # also opened from the Models tab) comes last
     assert entries["Build"] == ["act_build_targets", "act_build_history", "act_build_images", "act_build_deps",
                                 "act_build_f16", "act_build_benchmark", "act_build_model_archives"]
-    assert entries["Ditto"][-3:] == ["act_ditto_runtime_open", "act_ditto_models_open", "act_ditto_eval_open"]
+    assert entries["Ditto"][-4:] == ["act_ditto_runtime_open", "act_ditto_models_open", "act_ditto_eval_open",
+                                    "act_ditto_context_open"]
     tools = entries["Tools"]
     assert tools.index("act_knowledge_sources") == tools.index("act_knowledge_snapshots") + 1
     for name in ("act_tools_module_wizard", "act_knowledge_hub", "act_knowledge_index_docs"):

@@ -135,9 +135,11 @@ OPTIMIZER_SYSTEM = (f"You are Ditto, the build engineer of the LLM Cross-Compile
 # imports it under the same name.
 SUMMARY_SYSTEM = ("You summarize a conversation between a user and Ditto, the assistant of the LLM Cross-Compiler "
                   f"Framework. {FRAMEWORK} Keep what matters to continue it: the user's goal, hardware, models, "
-                  "targets, settings, build request ids, errors and decisions. Copy ids, numbers, version strings, "
-                  "labels and error messages exactly. Do not invent paths. At most 12 short sentences.\n"
-                  + UNTRUSTED_RULE)
+                  "targets, settings, build request ids, errors and decisions. Write a compact note in three short "
+                  "sections: Decisions (what was decided and why), Open tasks (what is still to do or was asked and "
+                  "not answered), Facts (hardware, models, targets, settings, request ids, results and errors). Copy "
+                  "ids, numbers, version strings, labels and error messages exactly. Do not invent paths. At most 12 "
+                  "short sentences.\n" + UNTRUSTED_RULE)
 
 # The reasons a model may give for "cannot" (design 6.11 D10). "Untested" is not one.
 CANNOT_REASONS = ("missing_information", "not_supported", "no_tool", "permission_denied", "needs_person",
@@ -149,7 +151,7 @@ PROBE_CHARS = 8000       # a hardware probe in a module task
 LOG_CHARS = 6000         # the end of a build log in a healing task
 RAW_LOG_CHARS = 50 * LOG_CHARS  # the most of a raw log end that is cleaned for it (bounds the work on a huge log)
 CONTEXT_CHARS = 2000     # build context in a healing task
-KNOWLEDGE_TOKENS = 2000  # knowledge excerpts in an MCP prompt (Ditto: a third of its context limit)
+KNOWLEDGE_TOKENS = 2000  # knowledge excerpts in an MCP prompt (Ditto: llm/context_budget R5, at most this)
 
 
 # --- shared knowledge context ---------------------------------------------------------------------------------

@@ -263,6 +263,19 @@ def test_the_settings_reach_the_server_and_a_change_restarts_it_once(fake_runtim
 
 
 @POSIX_ONLY
+def test_the_server_gets_exactly_the_planned_context_and_props_confirms_it(fake_runtime):  # noqa: F811
+    """The real context window of Ditto's local model (llm/context_window.py): the -c of the start is the context the
+    memory budget left, and the stand-in server's /props reports the same, so the window is confirmed."""
+    rt = fake_runtime()
+    rt._hardware = BOARD2
+    rt.start()
+    started = int(_value(_argv(rt), "-c"))
+    endpoint = ls.read_endpoint(rt.root)
+    assert endpoint.ctx == started == endpoint.n_ctx
+    assert rt.status().ctx_confirmed is True
+
+
+@POSIX_ONLY
 def test_a_server_without_props_still_starts(fake_runtime):  # noqa: F811
     rt = fake_runtime("noprops")
     ep = rt.start()

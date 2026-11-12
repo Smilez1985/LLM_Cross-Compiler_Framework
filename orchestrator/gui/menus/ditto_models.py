@@ -24,6 +24,7 @@ from orchestrator.utils.localization import ui_text
 
 MODELS_ACTION = "act_ditto_models_open"
 EVAL_ACTION = "act_ditto_eval_open"
+CONTEXT_ACTION = "act_ditto_context_open"   # Settings > Language model > Context window (gui/context_window_box.py)
 
 CLI_PATHS: Dict[str, str] = {
     "ditto models": MODELS_ACTION,
@@ -37,6 +38,13 @@ CLI_PATHS: Dict[str, str] = {
     "ditto ask --no-tools": "chk_chat_no_tools",
     "ditto ask --provider": "cb_chat_provider",
     "ditto ask --model": "cb_chat_model",
+    # the context window, the counting and the compactions: Settings > Language model > Context window
+    "ditto context": CONTEXT_ACTION,
+    "ditto context show": "grp_context_window",
+    "ditto context --refresh": "btn_context_refresh",
+    "ditto context show --refresh": "btn_context_refresh",
+    "ditto context original": "btn_context_original",
+    "ditto context undo": "btn_context_undo",
     "ditto eval": "btn_ditto_eval_run",
     "ditto eval --cases": "btn_ditto_eval_cases_file",
     "ditto eval --provider": "cb_ditto_eval_provider",
@@ -72,6 +80,10 @@ WINDOW_OBJECTS: Dict[str, str] = {
                                                                             "lst_ditto_eval", "grp_ditto_eval",
                                                                             "sp_ditto_eval", "chk_ditto_eval"))},
     "btn_ditto_models_evaluate": MODELS_ACTION,               # "Evaluate first...": the evaluation with --measure
+    "grp_context_window": CONTEXT_ACTION,
+    "btn_context_refresh": CONTEXT_ACTION,
+    "btn_context_original": CONTEXT_ACTION,
+    "btn_context_undo": CONTEXT_ACTION,
 }
 WINDOW_OBJECTS["btn_ditto_eval_cancel"] = EVAL_ACTION
 MACHINE_ONLY: Dict[str, str] = {
@@ -81,6 +93,9 @@ MACHINE_ONLY: Dict[str, str] = {
     "ditto cache set --yes-over-cap": "skips the question above the soft cap; the GUI asks (No by default) or takes "
                                       "the checkbox 'Accept values above the soft cap without a warning'",
     "ditto eval --min-pass": "sets the exit code for scripts and CI; the window shows each run's pass rate",
+    "ditto context --json": "machine output for scripts; the Context window section shows the same values",
+    "ditto context show --json": "machine output for scripts; the Context window section shows the same values",
+    "ditto context undo --yes": "skips the question; the GUI always asks (No by default)",
 }
 
 
@@ -121,16 +136,25 @@ def open_eval(window: Any) -> Any:
     return _show(window, "ditto_eval_window", make, "ditto_eval.title")
 
 
+def open_context(window: Any) -> Any:
+    """Ditto > Context Window...: the settings window at Language model > Context window."""
+    from orchestrator.gui.menus.build import open_settings
+    return open_settings(window, "language_model", "context")
+
+
 def install(window: Any, menubar: Any) -> None:
-    """Ditto > Local Models... and Ditto > Evaluation... in the main window's menu bar."""
+    """Ditto > Local Models..., Ditto > Evaluation... and Ditto > Context Window... in the main window's menu bar."""
     menu = ditto_menu(window, menubar)
     models = place.new_action(window, MODELS_ACTION, ui_text("ditto_models.menu.models"), lambda: open_models(window))
     menu.addAction(models)
     evaluation = place.new_action(window, EVAL_ACTION, ui_text("ditto_models.menu.eval"), lambda: open_eval(window))
     menu.addAction(evaluation)
+    context = place.new_action(window, CONTEXT_ACTION, ui_text("context.menu"), lambda: open_context(window))
+    menu.addAction(context)
     window.act_ditto_models = models
     window.act_ditto_eval = evaluation
+    window.act_ditto_context = context
 
 
-__all__ = ["CLI_PATHS", "DITTO_MENU", "EVAL_ACTION", "MACHINE_ONLY", "MODELS_ACTION", "WINDOW_OBJECTS", "ditto_menu",
-           "install", "open_eval", "open_models"]
+__all__ = ["CLI_PATHS", "CONTEXT_ACTION", "DITTO_MENU", "EVAL_ACTION", "MACHINE_ONLY", "MODELS_ACTION", "WINDOW_OBJECTS",
+           "ditto_menu", "install", "open_context", "open_eval", "open_models"]

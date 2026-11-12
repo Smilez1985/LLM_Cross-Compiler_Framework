@@ -49,6 +49,7 @@ MENU_LAYOUT = (
             ("act_ditto_runtime_open", "ditto_runtime.menu.open"),
             ("act_ditto_models_open", "ditto_models.menu.models"),
             ("act_ditto_eval_open", "ditto_models.menu.eval"),
+            ("act_ditto_context_open", "context.menu"),
         )),
     )),
     ("menu_security", "main.menu.security", (

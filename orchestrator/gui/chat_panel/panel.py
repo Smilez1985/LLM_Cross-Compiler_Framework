@@ -356,6 +356,7 @@ class ChatPanel(QWidget):
         self.history_file = history_dir / ChatHistory.FILE_NAME
         self._migrate_legacy_history(config)
         self.history = ChatHistory.in_state_dir(history_dir)
+        self._history_stamp = self._file_stamp()
 
         self.feed = getattr(framework_manager, "chat_feed", None)
         self.writer = FeedWriter(self.feed, "gui")
@@ -747,6 +748,31 @@ class ChatPanel(QWidget):
                 return None
         return choice
 
+    # --- Ditto's conversation file, shared with the terminal (`llm-cli ditto context undo`) ------------------------
+
+    def _file_stamp(self) -> Optional[tuple]:
+        try:
+            st = Path(self.history_file).stat()
+        except OSError:
+            return None
+        return (st.st_mtime_ns, st.st_size)
+
+    def save_history(self) -> bool:
+        """Saves the conversation and remembers the file's state, so a change by another program is noticed."""
+        saved = self.history.save()
+        self._history_stamp = self._file_stamp()
+        return saved
+
+    def sync_history(self) -> bool:
+        """Reads the conversation file again when another program changed it since this window read or wrote it (an
+        undo of a compaction in the terminal), so the next save does not overwrite that change. True when read."""
+        stamp = self._file_stamp()
+        if stamp is None or stamp == self._history_stamp:
+            return False
+        self.history = ChatHistory.load(self.history_file)
+        self._history_stamp = stamp
+        return True
+
     @staticmethod
     def _ditto_sender() -> FeedSender:
         return FeedSender(role="ditto", caller="ditto")
@@ -797,6 +823,7 @@ class ChatPanel(QWidget):
         choice = self._question_choice()
         if choice is None:
             return
+        self.sync_history()
         self.txt_input.clear()
         self.build_turns.person_spoke()
         reply_to = self.composer.reply_to
@@ -844,11 +871,14 @@ class ChatPanel(QWidget):
             # Summarized because it got long, or because it had tool turns and was asked without tools.
             no_tools = getattr(reply, "new_conversation_reason", "") == "no_tools"
             self.post_notice("chat.notice.new_conversation_no_tools" if no_tools else "chat.notice.new_conversation")
+        for key, params in getattr(reply, "context_lines", None) or ():
+            # What the turn's budget compacted or cut (llm/context_budget.py): a did line of Ditto's in the console.
+            self._post("ai_action", self._ditto_sender(), text_key=key, params=dict(params))
         if reply.text:
             self._post("ditto_answer", self._ditto_sender(), ai_text=reply.text, ai_text_kind="answer",
                        announce_row=True)
         self.history.apply(reply)
-        self.history.save()
+        self.save_history()
         QTimer.singleShot(0, self._next_build_turn)   # a build end that came in during this turn
 
     def _on_ai_error(self, error_msg: str) -> None:

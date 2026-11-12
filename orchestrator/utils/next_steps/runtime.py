@@ -34,6 +34,8 @@ MOUSE_LABELS = {
     "btn_ditto_models_evaluate": ("act_ditto_models_open", "ditto_models.evaluate"),
     "btn_ditto_eval_run": ("act_ditto_eval_open", "ditto_eval.run"),
     "btn_prompt_cache_apply": ("act_ditto_models_open", "prompt_cache.apply"),
+    "btn_context_original": ("act_ditto_context_open", "context.original"),
+    "btn_context_undo": ("act_ditto_context_open", "context.undo"),
 }
 
 STEPS = (
@@ -92,6 +94,11 @@ STEPS = (
     Step("models.show", cli="ditto models list", tool="get_status", window="ditto_models",
          target="act_ditto_models_open", runnable=True),
     # the local server's memory budget: only the person raises it (an AI may lower it with update_settings)
+    # Ditto's context: a compaction's original and its undo, the person's alone (an AI reads the window in get_status)
+    Step("context.original", cli="ditto context original", person_only="permission", window="settings",
+         target="btn_context_original"),
+    Step("context.undo", cli="ditto context undo", person_only="permission", window="settings",
+         target="btn_context_undo"),
     Step("cache.auto", cli="ditto cache set", cli_args=("{name}", "auto"),
          params={"name": Param("choice", ("local_cache_ram_mib", "local_cache_keep_minutes"))},
          person_only="permission", window="ditto_models", target="btn_prompt_cache_apply"),
@@ -153,6 +160,14 @@ TEXTS = {
         "step.cache.auto.what": "Sets the prompt cache and the keep time of Ditto's local server back to auto: the "
                                 "values measured on this computer.",
         "step.cache.auto.why": "A saved value is above what this computer has to spare now.",
+        "step.context.original": "Read the original conversation of the newest compaction",
+        "step.context.original.what": "Shows the conversation as it was before the newest compaction, with the "
+                                      "summary Ditto continued with.",
+        "step.context.original.why": "A compaction summarized earlier turns; the original is kept.",
+        "step.context.undo": "Undo the newest compaction",
+        "step.context.undo.what": "Puts the original messages of the newest compaction back in front of what was "
+                                  "said after it.",
+        "step.context.undo.why": "A summary can lose a detail; the original is kept and can come back.",
     },
     "de": {
         "step.runtime.install": "Dittos lokales Modellprogramm bauen",
@@ -211,6 +226,16 @@ TEXTS = {
         "step.cache.auto.what": "Setzt den Prompt-Cache und die Haltezeit von Dittos lokalem Server zurück auf auto: "
                                 "die Werte, die auf diesem Computer gemessen werden.",
         "step.cache.auto.why": "Ein gespeicherter Wert liegt über dem, was dieser Computer gerade übrig hat.",
+        "step.context.original": "Das ursprüngliche Gespräch der neuesten Verdichtung lesen",
+        "step.context.original.what": "Zeigt das Gespräch, wie es vor der neuesten Verdichtung war, mit der "
+                                      "Zusammenfassung, mit der Ditto weitergemacht hat.",
+        "step.context.original.why": "Eine Verdichtung hat frühere Turns zusammengefasst; das Original bleibt "
+                                     "erhalten.",
+        "step.context.undo": "Die neueste Verdichtung rückgängig machen",
+        "step.context.undo.what": "Setzt die ursprünglichen Nachrichten der neuesten Verdichtung wieder vor das, was "
+                                  "danach gesagt wurde.",
+        "step.context.undo.why": "Eine Zusammenfassung kann eine Einzelheit verlieren; das Original bleibt erhalten "
+                                 "und kann zurückkommen.",
     },
 }
 

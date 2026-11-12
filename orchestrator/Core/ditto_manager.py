@@ -46,7 +46,8 @@ from orchestrator.llm.task_prompts import (CANNOT_REASONS, CANNOT_RETRY, CANNOT_
                                            CHAT_TOOLS, FRAMEWORK, HEALING_SYSTEM, MODULE_REPAIR_SYSTEM,
                                            MODULE_SYSTEM, OPTIMIZER_SYSTEM,
                                            SDK_HINTS, SUMMARY_SYSTEM, base_image_block, format_listing, healing_parts,
-                                           healing_query, is_official_image, knowledge_excerpts, module_parts,
+                                           healing_query, is_official_image, knowledge_excerpts, KNOWLEDGE_TOKENS,
+                                           module_parts,
                                            module_query, module_repair_parts, optimizer_parts)
 # Tool calls and results pair up (one implementation, in the tool loop); the names are Ditto's too.
 from orchestrator.llm.tool_loop import (CALL_NOT_RUN, close_open_calls, conversation_is_consistent,  # noqa: F401
@@ -540,6 +541,15 @@ class ChatReply:
     # Why earlier turns were summarized (new_conversation): "long", or "no_tools" for a conversation with tool turns
     # asked without tools (tool turns need the tool definitions, which a question without tools does not send).
     new_conversation_reason: str = ""
+    # The newest earlier turns a compaction kept word for word, the summary in front of the first (ChatHistory.apply
+    # puts them before new_messages); empty when everything was summarized or nothing was compacted.
+    kept_messages: List[Message] = field(default_factory=list)
+    # What a compaction did (summary, summarized, kept, before, after, window), for the record ChatHistory keeps.
+    compaction: Optional[Dict[str, Any]] = None
+    # The turn's budget (llm/context_budget.TurnBudget) and the lines of what was compacted or cut, as the framework's
+    # text keys with closed parameters (the chat panel's did lines in the Ditto console).
+    budget: Any = None
+    context_lines: List[Any] = field(default_factory=list)
 
 
 # The transcript notice of a conversation summarized into a new one, by ChatReply.new_conversation_reason (the chat
@@ -558,6 +568,9 @@ class TranscriptEntry(BaseModel):
 
 # The notice of a conversation of the removed remote mode that starts anew (the chat panel's chat.notice.source_local).
 SOURCE_LOCAL_NOTICE = "Ditto now uses its own tools: a new conversation."
+COMPACTION_UNDONE_NOTICE = "The latest compaction was undone: the original conversation is back."
+# The first words of the summary block a compaction puts in front of a turn (undo takes it out again).
+SUMMARY_LEAD = "Summary of our earlier conversation, for context:\n"
 
 
 class ChatHistory:
@@ -573,8 +586,8 @@ class ChatHistory:
     """
 
     FILE_NAME = "chat_history.json"
-    VERSION = 3
-    READS = (2, 3)
+    VERSION = 4
+    READS = (2, 3, 4)
     MAX_TRANSCRIPT = 500
 
     def __init__(self, path: Optional[Path] = None):
@@ -582,6 +595,9 @@ class ChatHistory:
         self.messages: List[Message] = []
         self.transcript: List[TranscriptEntry] = []
         self.tool_source = "local"  # kept in the file for earlier readers; "mcp:..." came from the removed remote mode
+        # Every compaction, oldest first (version 4): id, at, reason, summary, the original messages (as saved), how
+        # many messages of the conversation it made ("made") and whether the summary sits in the question's turn.
+        self.compactions: List[Dict[str, Any]] = []
 
     @classmethod
     def in_state_dir(cls, state_dir: Path) -> "ChatHistory":
@@ -625,6 +641,11 @@ class ChatHistory:
                 self.transcript.append(TranscriptEntry.model_validate(entry))
             except ValidationError:
                 continue
+        compactions = raw.get("compactions")
+        for record in compactions if isinstance(compactions, list) else []:
+            if (isinstance(record, dict) and isinstance(record.get("messages"), list)
+                    and isinstance(record.get("made"), int)):
+                self.compactions.append(record)
         messages = raw.get("messages")
         try:
             if messages is not None and not isinstance(messages, list):
@@ -655,6 +676,8 @@ class ChatHistory:
         data = {"version": self.VERSION, "tool_source": self.tool_source,
                 "messages": [m.model_dump(mode="json", exclude_defaults=True) for m in self.messages],
                 "transcript": [t.model_dump() for t in self.transcript]}
+        if self.compactions:
+            data["compactions"] = self.compactions
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=f".{self.path.name}.")
@@ -686,7 +709,9 @@ class ChatHistory:
             self.messages = []
             self.transcript.append(TranscriptEntry(role="notice", text=SOURCE_LOCAL_NOTICE))
         elif reply.new_conversation:
-            self.messages = []
+            if self.messages:
+                self._keep_compaction(reply)
+            self.messages = list(reply.kept_messages)
             notice = NEW_CONVERSATION_NOTICES.get(reply.new_conversation_reason, NEW_CONVERSATION_NOTICES["long"])
             self.transcript.append(TranscriptEntry(role="notice", text=notice))
         self.tool_source = "local"
@@ -697,9 +722,58 @@ class ChatHistory:
         self.transcript.append(TranscriptEntry(role="assistant", text=reply.text))
         del self.transcript[:-self.MAX_TRANSCRIPT]
 
+    def _keep_compaction(self, reply: ChatReply) -> None:
+        """The original conversation of a compaction, kept (never lost) for reading and undo."""
+        from datetime import datetime, timezone
+        info = dict(reply.compaction or {})
+        number = 1 + max([int(str(r.get("id", "c0"))[1:] or 0) for r in self.compactions
+                          if str(r.get("id", "")).startswith("c") and str(r.get("id"))[1:].isdigit()] or [0])
+        self.compactions.append({
+            "id": f"c{number}", "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "reason": reply.new_conversation_reason or "long", "summary": str(info.get("summary") or ""),
+            "summarized": int(info.get("summarized") or len(self.messages)),
+            "kept": int(info.get("kept") or 0), "window": info.get("window"), "before": info.get("before"),
+            "after": info.get("after"),
+            "messages": [m.model_dump(mode="json", exclude_defaults=True) for m in self.messages],
+            "made": len(reply.kept_messages), "summary_in_question": not reply.kept_messages})
+
+    def compaction_messages(self, record: Dict[str, Any]) -> List[Message]:
+        """The original messages a compaction record keeps."""
+        return [Message.model_validate(m) for m in record.get("messages") or []]
+
+    def undo_compaction(self) -> Optional[Dict[str, Any]]:
+        """Undoes the newest compaction: its original messages come back in front of everything said after it (the
+        summary taken out of the question's turn where it sat there). The record is returned and no longer kept; None
+        when there is none or the result would not be a consistent conversation (nothing is changed then)."""
+        if not self.compactions:
+            return None
+        record = self.compactions[-1]
+        try:
+            original = self.compaction_messages(record)
+        except ValidationError:
+            return None
+        made = int(record.get("made") or 0)
+        rest = [m.model_copy() for m in self.messages[made:]]
+        if record.get("summary_in_question") and rest and isinstance(rest[0].content, list):
+            blocks = [b for b in rest[0].content
+                      if not (b.get("type") == "text" and str(b.get("text", "")).startswith(SUMMARY_LEAD))]
+            if len(blocks) == 1 and blocks[0].get("type") == "text":
+                rest[0] = rest[0].model_copy(update={"content": blocks[0].get("text", "")})
+            elif blocks:
+                rest[0] = rest[0].model_copy(update={"content": blocks})
+        restored = original + rest
+        if not conversation_is_consistent(restored):
+            return None
+        self.compactions.pop()
+        self.messages = restored
+        self.transcript.append(TranscriptEntry(role="notice", text=COMPACTION_UNDONE_NOTICE))
+        del self.transcript[:-self.MAX_TRANSCRIPT]
+        return record
+
     def clear(self) -> None:
         self.messages = []
         self.transcript = []
+        self.compactions = []
         self.tool_source = "local"
 
 
@@ -855,14 +929,16 @@ class DittoCoder:
         return DittoError(message, cause=err)
 
     # --- knowledge base -----------------------------------------------------------------------------------
-    def _knowledge(self, query: str, limit: int = 5, rerank: Optional[bool] = None) -> str:
+    def _knowledge(self, query: str, limit: int = 5, rerank: Optional[bool] = None,
+                   max_tokens: Optional[int] = None) -> str:
         """Matching knowledge-base excerpts as one untrusted block ("" when disabled or nothing matches), within
-        a third of the context limit. rerank: see RAGManager.search (None: rag_rerank_default)."""
+        `max_tokens` (default: _excerpt_limit). rerank: see RAGManager.search (None: rag_rerank_default)."""
         if not (query or "").strip():
             return ""
         # The same function builds the knowledge context of the MCP prompts (task_prompts.knowledge_excerpts).
         return knowledge_excerpts(self._rag_manager(), query, limit=limit, rerank=rerank,
-                                  max_tokens=self._context_limit() // 3, logger=self.logger)
+                                  max_tokens=self._excerpt_limit() if max_tokens is None else max_tokens,
+                                  logger=self.logger)
 
     # --- structured answers -------------------------------------------------------------------------------
     def _structured(self, task: str, system: str, prompt: str, output_model: Type[BaseModel]) -> BaseModel:
@@ -1030,25 +1106,63 @@ class DittoCoder:
         return made.generate_module(data, self.framework, knowledge_roots=knowledge_roots, profile=profile)
 
     # --- chat ---------------------------------------------------------------------------------------------
-    def _context_limit(self) -> int:
+    def _context_limit(self) -> Optional[int]:
+        """The person's chat_context_limit, the ceiling of the history's room (llm/context_budget R4); None when it is
+        0 or not set (automatic: the model's window decides)."""
         try:
-            return max(512, int(self._cfg("chat_context_limit", 4096)))
+            value = int(self._cfg("chat_context_limit", 0) or 0)
         except (TypeError, ValueError):
-            return 4096
+            return None
+        return max(512, value) if value > 0 else None
 
-    def _too_long(self, messages: Sequence[Message]) -> bool:
-        if len(messages) < MIN_MESSAGES_TO_SUMMARIZE:
-            return False
-        chars = sum(len(m.text()) + sum(len(json.dumps(c.arguments, default=str)) for c in m.tool_calls)
-                    for m in messages)
-        return chars / 4 > self._context_limit()  # about four characters per token
+    def _excerpt_limit(self) -> int:
+        """The tokens knowledge excerpts of a task may take: a third of the person's chat_context_limit, else
+        KNOWLEDGE_TOKENS (llm/context_budget R5)."""
+        limit = self._context_limit()
+        return min(limit // 3, KNOWLEDGE_TOKENS) if limit else KNOWLEDGE_TOKENS
 
-    def _summarize(self, client: LLMClient, messages: Sequence[Message]) -> str:
+    def context_window(self, refresh: bool = False, cached_only: bool = False):
+        """The window of the model Ditto's chat uses (llm/context_window.context_window), never raises."""
+        from orchestrator.llm.context_window import context_window
+        return context_window(self._client_for_call(), "chat", refresh=refresh, cached_only=cached_only)
+
+    def _plan(self, client: LLMClient, window: Any, system: str, tools: Sequence[Any], earlier: Sequence[Message],
+              question: Message, excerpts: str = ""):
+        """(budget, groups) of a turn: the calibrated estimate of every part (llm/token_count.tally), an exact count
+        when it nears the window (llama.cpp, Anthropic), then the rules of llm/context_budget.plan_turn."""
+        from orchestrator.llm.context_budget import plan_turn, turn_groups
+        from orchestrator.llm import token_count
+        groups = turn_groups(earlier)
+        calibration = {"factor": 1.0, "answers": 0}
+        try:
+            calibration = client.token_calibration().get(window.provider, window.model)
+        except Exception:  # noqa: BLE001 - no calibration: the plain estimate, said so
+            pass
+        parts = token_count.tally(window.provider, window.model, system=system, tools=tools, question=[question],
+                                  history=[earlier[a:b] for a, b in groups], excerpts=excerpts,
+                                  calibration=calibration)
+        if parts.total >= token_count.EXACT_SHARE * window.tokens:
+            # the excerpts ride in the question's turn: counted with it
+            asked = Message.user(excerpts + "\n" + question.text()) if excerpts else question
+            request = ChatRequest(system=system, messages=[*earlier, asked], tools=list(tools), task="chat")
+            exact = token_count.exact_total(client, request, window.provider)
+            if exact is not None:
+                parts = token_count.scaled(parts, exact[0], exact[1])
+        budget = plan_turn(window.tokens, fixed=parts.system + parts.tools + parts.question, history=parts.history,
+                           excerpts=parts.excerpts, max_output=window.max_output, limit=self._context_limit(),
+                           method=parts.detail)
+        return budget, groups
+
+    def _summarize(self, client: LLMClient, messages: Sequence[Message], max_tokens: int = 2000,
+                   max_chars: int = 40000) -> str:
         """A summary of the conversation for the start of a new one (a separate request; the conversation
-        itself is not changed)."""
-        transcript = render_transcript(messages)[-40000:]
-        request = ChatRequest(system=SUMMARY_SYSTEM, task="chat", effort="low", max_tokens=2000, messages=[
-            Message.user("Summarize this conversation:\n" + wrap_untrusted(transcript, "conversation", max_len=40000))])
+        itself is not changed). `max_chars`: the end of the transcript that fits the window next to the summary
+        (summary_chars)."""
+        max_chars = max(1000, min(40000, int(max_chars)))
+        transcript = render_transcript(messages)[-max_chars:]
+        request = ChatRequest(system=SUMMARY_SYSTEM, task="chat", effort="low", max_tokens=max_tokens, messages=[
+            Message.user("Summarize this conversation:\n" + wrap_untrusted(transcript, "conversation",
+                                                                            max_len=max_chars))])
         try:
             summary = client.chat(request).text.strip()
             if summary:
@@ -1056,6 +1170,20 @@ class DittoCoder:
         except LLMError as e:
             self.logger.warning(f"Summarizing the chat failed ({type(e).__name__}); keeping its last exchange.")
         return render_transcript(messages[-4:])[-4000:]
+
+    def _summary_chars(self, client: LLMClient, window: Any, summary_tokens: int) -> int:
+        """How many characters of the transcript the summary request may carry: the window less its margin, the
+        summary's own length and the summary instructions, in characters of the model's family (calibrated)."""
+        from orchestrator.llm import token_count
+        from orchestrator.llm.context_budget import MARGIN_SHARE
+        family = token_count.family_of(window.model)
+        try:
+            factor = float(client.token_calibration().get(window.provider, window.model).get("factor") or 1.0)
+        except Exception:  # noqa: BLE001
+            factor = 1.0
+        overhead = token_count.estimate(SUMMARY_SYSTEM, family) + 200   # the request's wrapping words and markers
+        room = window.tokens - int(window.tokens * MARGIN_SHARE) - summary_tokens - int(overhead * factor)
+        return int(max(0, room) * family.chars_per_token / max(factor, 0.5))
 
     def _tool_specs(self, registry):
         if registry is None:
@@ -1144,27 +1272,68 @@ class DittoCoder:
         tools = self._tool_specs(registry)
         has_tool_turns = any(m.role == "tool" or m.tool_calls for m in earlier)
         # Tool turns need tool definitions (Claude rejects the request otherwise): asked without tools (no registry),
-        # the conversation continues as a new one, like a long one.
-        reason = "long" if self._too_long(earlier) else ("no_tools" if has_tool_turns and registry is None else "")
-        if reason:
-            summary = self._summarize(client, earlier)
-            earlier, new_conversation, has_tool_turns = [], True, False
-            blocks.append(_text_block("Summary of our earlier conversation, for context:\n"
-                                      + wrap_untrusted(summary, "conversation summary")))
-        if not tools and has_tool_turns:
+        # the conversation continues as a new one, summarized whole (the budget's rule R7).
+        reason = "no_tools" if has_tool_turns and registry is None else ""
+        if not tools and has_tool_turns and not reason:
             # The registry is there (see above) and still denies every call the permissions forbid.
             tools = tool_specs_from_registry(registry)
+        system = CHAT_INTRO + "\n\n" + (CHAT_TOOLS if tools else CANNOT_RULE) + "\n\n" + UNTRUSTED_RULE
+        window = self.context_window()
+        context_lines: List[Any] = []
+        compaction: Optional[Dict[str, Any]] = None
+        kept: List[Message] = []
+        # Without tools Ditto cannot search the knowledge base itself, so matching excerpts come along (R5: their
+        # tokens are counted with the turn and cut to its share).
+        excerpts = "" if tools else self._knowledge(question)
+        budget, groups = self._plan(client, window, system, tools, [] if reason else earlier, Message.user(question),
+                                    excerpts)
+        # R3: refused only against a window a server, the table or the person named; on the conservative default
+        # (a guess) everything earlier is summarized instead and the turn goes out
+        guessed = not budget.fits and window.source == "default"
+        if not budget.fits and not guessed:
+            raise DittoError(f"This question does not fit the model's context window of {window.tokens} tokens: system "
+                             f"text, tools and the question need about {budget.fixed} tokens, and {budget.answer} "
+                             "are kept for the answer. Shorten the question, or choose a model with a larger window.")
+        crowded = budget.history > budget.room - budget.excerpts   # does not fit at all: even one exchange goes
+        if reason or (guessed and earlier) or (budget.compact and (len(earlier) >= MIN_MESSAGES_TO_SUMMARIZE
+                                                                    or crowded)):
+            reason = reason or "long"
+            keep = 0 if reason == "no_tools" or guessed else budget.keep_turns
+            cut = groups[len(groups) - keep][0] if keep else len(earlier)
+            older, kept = list(earlier[:cut]), [m.model_copy() for m in earlier[cut:]]
+            summary_limit = budget.summary_tokens or max(256, min(2000, budget.room // 4))   # R7: the same limit
+            summary = self._summarize(client, older, max_tokens=summary_limit,
+                                      max_chars=self._summary_chars(client, window, summary_limit))
+            summary_block = _text_block(SUMMARY_LEAD + wrap_untrusted(summary, "conversation summary"))
+            if kept:
+                first = kept[0]
+                content = first.content if isinstance(first.content, list) else [_text_block(first.text())]
+                kept[0] = first.model_copy(update={"content": [summary_block, *content]})
+            else:
+                blocks.append(summary_block)
+            new_conversation, has_tool_turns = True, any(m.role == "tool" or m.tool_calls for m in kept)
+            earlier = kept
+            compaction = {"summary": summary, "summarized": len(older), "kept": len(kept), "window": window.tokens,
+                          "before": budget.total_before(), "after": budget.after if reason == "long" else
+                          budget.fixed + summary_limit}
+            key = "activity.context.compacted" if reason == "long" else "activity.context.no_tools"
+            context_lines.append((key, {"window": str(window.tokens), "summarized": str(len(older)),
+                                        "kept": str(len(kept)), "before": str(compaction["before"]),
+                                        "after": str(compaction["after"])}))
         # A turn cut off during a tool call (saved by an earlier version) is closed first, by appending results.
         repairs = close_open_calls(earlier)
-        if not tools:
-            # Without tools Ditto cannot search the knowledge base itself, so matching excerpts come along.
-            excerpts = self._knowledge(question)
-            if excerpts:
-                blocks.append(_text_block("Possibly relevant knowledge-base excerpts:\n" + excerpts))
+        if excerpts and budget.excerpts < budget.excerpts_wanted:
+            # R5 cut them: the excerpts again, within the turn's share (none below 64 tokens)
+            excerpts = self._knowledge(question, max_tokens=budget.excerpts) if budget.excerpts >= 64 else ""
+            context_lines.append(("activity.context.excerpts", {"tokens": str(budget.excerpts),
+                                                                "window": str(window.tokens)}))
+        if excerpts:
+            blocks.append(_text_block("Possibly relevant knowledge-base excerpts:\n" + excerpts))
         blocks.append(_text_block(question))
         user_turn = Message(role="user", content=blocks if len(blocks) > 1 else question)
-        system = CHAT_INTRO + "\n\n" + (CHAT_TOOLS if tools else CANNOT_RULE) + "\n\n" + UNTRUSTED_RULE
-        request = ChatRequest(system=system, messages=[*earlier, *repairs, user_turn], tools=tools, task="chat")
+        # R1: the answer may take the room the budget kept for it, no more (a small local window is not overrun)
+        request = ChatRequest(system=system, messages=[*earlier, *repairs, user_turn], tools=tools, task="chat",
+                              max_tokens=budget.answer)
         uses: List[ToolUse] = []
         try:
             if tools:
@@ -1196,4 +1365,5 @@ class DittoCoder:
         return ChatReply(question=question, text=text, new_messages=[*repairs, user_turn, *new],
                          new_conversation=new_conversation, tools=uses, stop=stop,
                          provider=getattr(last, "provider", ""), model=getattr(last, "model", ""), usage=usage,
-                         source_changed=source_changed, new_conversation_reason=reason)
+                         source_changed=source_changed, new_conversation_reason=reason if new_conversation else "",
+                         kept_messages=kept, compaction=compaction, budget=budget, context_lines=context_lines)

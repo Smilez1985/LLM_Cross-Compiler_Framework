@@ -1,0 +1,74 @@
+# Context windows and token estimates for Ditto (read by orchestrator/llm/context_window.py and
+# orchestrator/llm/token_count.py; docs/DESIGN.md, Ditto, the rows "The real context window" and "Tokens are counted").
+#
+# windows    used only when the provider's server does not tell the window itself (it is asked first). Each entry:
+#            provider (preset id), model (exact id, or a prefix ending in *), tokens (the input window), max_output,
+#            source (where the number comes from) and checked (the date it was read there).
+# default    the window when neither the server nor this table knows the model: a conservative number, shown as such.
+# estimates  characters per token per model family, for the estimate where no tokenizer is asked. match: words in the
+#            model id (lower case) that name the family; chars_per_token: the smallest ratio measured on the fixed
+#            corpus of scripts/measure_token_ratio.py (so the estimate does not count too few tokens on those kinds);
+#            max_overestimate_pct: how many tokens too many it counted at most on the other kinds; source: how the
+#            ratio was obtained. fallback: the ratio of every other family (the smallest of the table).
+
+version: 1
+
+default:
+  # Ditto's chat sends its tool definitions with every turn (about 20,000 tokens by the estimate); 32768, the cap of
+  # Ditto's own local server, is the smallest window that chat is built for, never a claim about a model.
+  tokens: 32768
+  source: "conservative default (the provider's server does not tell the window, and the table has no entry)"
+
+windows:
+  - {provider: anthropic, model: "claude-fable-5-2", tokens: 1000000, max_output: 128000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-mythos-5-2", tokens: 1000000, max_output: 128000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-fable-5-1", tokens: 1000000, max_output: 128000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-mythos-5-1", tokens: 1000000, max_output: 128000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-fable-5", tokens: 1000000, max_output: 128000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-mythos-5", tokens: 1000000, max_output: 128000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-opus-5-5", tokens: 1000000, max_output: 128000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-opus-5", tokens: 1000000, max_output: 128000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-sonnet-5-5", tokens: 1000000, max_output: 128000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-sonnet-5", tokens: 1000000, max_output: 128000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-haiku-5-5", tokens: 1000000, max_output: 128000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-opus-4-8", tokens: 1000000, max_output: 128000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-opus-4-7", tokens: 1000000, max_output: 128000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-opus-4-6", tokens: 1000000, max_output: 128000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-sonnet-4-6", tokens: 1000000, max_output: 128000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-opus-4-5*", tokens: 200000, max_output: 64000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-sonnet-4-5*", tokens: 200000, max_output: 64000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+  - {provider: anthropic, model: "claude-haiku-4-5*", tokens: 200000, max_output: 64000,
+     source: "https://platform.claude.com/docs/en/about-claude/models/overview", checked: "2026-11-12"}
+
+estimates:
+  fallback: {chars_per_token: 2.5, source: "the smallest ratio of this table (no measurement for the family)"}
+  families:
+    - {family: qwen, match: [qwen], chars_per_token: 3.31, max_overestimate_pct: 39.4,
+       source: "measured 2026-11-12, llama.cpp tokenizer, models/ggml-vocab-qwen35.gguf"}
+    - {family: llama, match: [llama], chars_per_token: 3.36, max_overestimate_pct: 37.4,
+       source: "measured 2026-11-12, llama.cpp tokenizer, models/ggml-vocab-llama-bpe.gguf"}
+    - {family: gemma, match: [gemma], chars_per_token: 3.30, max_overestimate_pct: 21.2,
+       source: "measured 2026-11-12, llama.cpp tokenizer, models/ggml-vocab-gemma-4.gguf"}
+    - {family: phi, match: [phi], chars_per_token: 2.94, max_overestimate_pct: 24.2,
+       source: "measured 2026-11-12, llama.cpp tokenizer, models/ggml-vocab-phi-3.gguf"}
+    - {family: smollm, match: [smollm], chars_per_token: 2.61, max_overestimate_pct: 54.2,
+       source: "measured 2026-11-12, llama.cpp tokenizer, SmolLM2-135M-Instruct Q8_0"}
+    - {family: claude, match: [claude], chars_per_token: 2.5,
+       source: "Anthropic: 1M tokens are roughly 2.5M characters on the current tokenizer (models overview); not measured here"}

@@ -522,7 +522,11 @@ class ConfigManager:
                          "provider:model, e.g. local, ollama:qwen3.5:4b"),
 
             # v2.0.0: Chat & Brain Settings
-            ConfigSchema("chat_context_limit", int, False, 4096, "Max tokens for chat context history"),
+            ConfigSchema("chat_context_limit", int, False, 0, "Ceiling of the tokens of Ditto's chat history; "
+                         "0 = automatic (the model's context window decides)", ["min:0"]),
+            ConfigSchema("ai_context_window", int, False, 0, "Context window in tokens of a model whose provider "
+                         "does not tell it; 0 = automatic (never above what a server reports)",
+                         ["min:0", "max:10000000"]),
             ConfigSchema("enable_telemetry", bool, False, False, "Allow anonymous error reporting (GitHub Issues)"),
             ConfigSchema("offline_mode", bool, False, False, "Force offline mode (no external APIs)"),
             # Private mode is the default, enterprise mode optional (the person's choice; an AI reads it, never
@@ -815,7 +819,7 @@ class ConfigManager:
                 "chat_panel_auto_show",
                 "trash_retention_days", "output_dir",
                 "ai_provider", "ai_model", "ai_base_url", "ai_effort", "ai_fallback_chain",
-                "ai_anthropic_workspace_id",
+                "ai_anthropic_workspace_id", "ai_context_window",
                 # v2.0
                 "chat_context_limit", "enable_telemetry", "offline_mode",
                 "offline_local_vpns", "offline_local_hosts", "offline_local_ranges",

@@ -144,6 +144,7 @@ class LocalEndpoint(BaseModel):
     port: int
     pid: int
     n_ctx: Optional[int] = None   # the context of the server's one slot, as its /props reported it after the start
+    ctx: Optional[int] = None     # the -c it was started with (llm/context_window.py compares the two)
 
 
 class Props(BaseModel):
@@ -171,6 +172,7 @@ class RuntimeStatus(BaseModel):
     tier: Optional[str] = None
     ctx: Optional[int] = None
     n_ctx_slot: Optional[int] = None                     # the slot's context as /props reported it (-np 1: all of it)
+    ctx_confirmed: Optional[bool] = None                 # /props reported the -c of the start (None: not asked yet)
     kv_cache: Optional[str] = None                       # the KV-cache type the server got (f16, q8_0, q4_0)
     kv_fallback: Optional[str] = None                    # the automatic type it could not get (no flash attention)
     cache_ram_mib: Optional[int] = None                  # its prompt cache (--cache-ram)
@@ -430,10 +432,11 @@ def read_endpoint(root: Path, docker: Any = None) -> Optional[LocalEndpoint]:
         if not 0 < port < 65536:
             return None
         key = key_file.read_text(encoding="utf-8").strip()
-        n_ctx = state.get("n_ctx_slot")
+        n_ctx, ctx = state.get("n_ctx_slot"), state.get("ctx")
         return LocalEndpoint(base_url=f"http://{LOOPBACK}:{port}/v1", api_key=key, model=str(state["alias"]),
                              port=port, pid=int(state.get("pid") or 0),
-                             n_ctx=n_ctx if isinstance(n_ctx, int) and not isinstance(n_ctx, bool) else None)
+                             n_ctx=n_ctx if isinstance(n_ctx, int) and not isinstance(n_ctx, bool) else None,
+                             ctx=ctx if isinstance(ctx, int) and not isinstance(ctx, bool) and ctx > 0 else None)
     except (OSError, KeyError, TypeError, ValueError):
         return None
 
@@ -1464,6 +1467,8 @@ class LocalLLMRuntime:
             for name, key in (("n_ctx_slot", "n_ctx_slot"), ("cache_ram_mib", "cache_ram")):
                 value = state.get(key)
                 setattr(status, name, value if isinstance(value, int) and not isinstance(value, bool) else None)
+            if status.n_ctx_slot is not None and isinstance(status.ctx, int):
+                status.ctx_confirmed = status.n_ctx_slot == status.ctx
             kind = state.get("kv_cache")
             status.kv_cache = kind if kind in ("f16", "q8_0", "q4_0") else None
             wanted = state.get("kv_fallback")
@@ -1638,10 +1643,16 @@ class LocalLLMRuntime:
     def _record_props(self, state: Dict[str, Any], endpoint: LocalEndpoint) -> LocalEndpoint:
         """After the health check: the slot's context and the build from /props into server.json and the endpoint
         (a server that does not answer /props keeps both unknown)."""
+        started = state.get("ctx")
+        if isinstance(started, int) and not isinstance(started, bool) and started > 0:
+            endpoint = endpoint.model_copy(update={"ctx": started})   # the -c, as read_endpoint names it too
         props = read_props(endpoint, self._local)
         if props is None:
             return endpoint
         state.update({"n_ctx_slot": props.n_ctx, "build_info": props.build_info})
+        if props.n_ctx is not None and isinstance(state.get("ctx"), int) and props.n_ctx != state["ctx"]:
+            self.logger.warning(f"The server was started with -c {state['ctx']} and /props reports {props.n_ctx}; "
+                                "Ditto uses the reported context.")
         try:
             _write_private(self.state_file, json.dumps(state))
         except OSError as e:

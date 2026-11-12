@@ -203,15 +203,21 @@ def test_the_report_of_ordinary_cases_keeps_its_format():
     assert "outcome" not in data["cases"][0] and "expected_failures" not in data and "skipped" not in json.dumps(data)
 
 
-def test_the_compaction_case_fails_today_for_the_right_reason(tmp_path, llm):
-    """The summary of the long conversation drops the last answer: the follow-up cannot name the code word."""
+def test_the_compaction_case_keeps_the_last_answer_now_and_is_reported_as_an_unexpected_pass(tmp_path, llm):
+    """Changed with the turn budget (llm/context_budget.py): the long log does not fit the case's limit of 512 tokens,
+    so it is summarized already at turn 2, and the compaction of turn 3 keeps the newest turn word for word. The
+    follow-up sees the code word; with the stand-in model the case passes, which the report shows loudly as an
+    unexpected pass (the case stays marked until a run with a real model confirms it)."""
     c = case("tokens-followup-after-compaction")
-    llm.script += [reply("A summary of the log."), reply("The code word is AMBER-7."),
-                   reply("They talked about a build log."),       # the summary request (compaction)
-                   reply("I do not know the code word.")]
+    llm.script += [reply("A summary of the log."),
+                   reply("They talked about a build log."),       # the summary request (compaction at turn 2)
+                   reply("The code word is AMBER-7."),
+                   reply("AMBER-7")]
     attempt = make_eval(tmp_path).run_case(c)
-    assert attempt.turns[2].get("new_conversation") is True and attempt.turns[2]["calls"] == 2
-    assert not attempt.passed and ditto_eval.CaseResult(c, [attempt]).outcome == "xfail"
+    assert attempt.turns[1].get("new_conversation") is True and attempt.turns[1]["calls"] == 2
+    assert attempt.turns[2].get("new_conversation") is None and attempt.turns[2]["calls"] == 1
+    assert "AMBER-7" in json.dumps([m.model_dump(mode="json") for m in llm.requests[-1].messages])
+    assert attempt.passed and ditto_eval.CaseResult(c, [attempt]).outcome == "xpass"
 
 
 # --- the pause between turns ------------------------------------------------------------------------------------------
@@ -507,13 +513,18 @@ def test_another_provider_is_refused_without_a_call(tmp_path, llm):
     assert not attempt.passed and "--provider openai" in attempt.error and not llm.requests
 
 
-def test_the_openai_count_is_only_on_the_responses_adapter(tmp_path):
+def test_a_cloud_server_behind_the_openai_compatible_adapter_has_no_count(tmp_path):
+    """Changed with the token counting (llm/token_count.py): Anthropic's free count and a llama.cpp server's
+    /apply-template and /tokenize joined OpenAI's paid one; a cloud server behind the OpenAI-compatible adapter (here
+    Gemini) still has none, refused before any request (no HTTP client: a request would fail the test)."""
     from orchestrator.llm import NotConfigured
-    client = LLMClient(FakeConfig(ai_provider="anthropic"), SimpleNamespace(get_secret=SECRETS.get),
-                       state_dir=tmp_path / "state", sleep=lambda s: None)
+    from orchestrator.llm.providers.anthropic import AnthropicAdapter
+    client = LLMClient(FakeConfig(ai_provider="google"), SimpleNamespace(get_secret=lambda name: "test-key"),
+                       state_dir=tmp_path / "state", sleep=lambda s: None,
+                       http_client=FakeHTTP().client())
     with pytest.raises(NotConfigured):
         client.count_input_tokens(ChatRequest(messages=[Message.user("Hi")]))
-    assert hasattr(OpenAIResponsesAdapter, "count_input_tokens")
+    assert hasattr(OpenAIResponsesAdapter, "count_input_tokens") and hasattr(AnthropicAdapter, "count_input_tokens")
 
 
 def test_without_a_probe_no_prompt_cache_options_are_sent(tmp_path):

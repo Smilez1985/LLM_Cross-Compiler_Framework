@@ -56,7 +56,7 @@ from orchestrator.utils.localization import current_language, ui_text
 # The pages by name (open_settings(window, page, section)) and the sections of the pages that have some.
 PAGES = ("general", "ditto", "language_model", "update", "local_network", "doorbell", "acp", "repos", "effective")
 SECTIONS = {"ditto": ("ai", "permissions", "folders"),
-            "language_model": ("runtime", "sign_in", "secrets", "key_storage")}
+            "language_model": ("runtime", "context", "sign_in", "secrets", "key_storage")}
 
 
 def source_text(source: str, lang: Optional[str] = None) -> str:
@@ -199,6 +199,7 @@ class SettingsDialog(QDialog):
         tabs.setObjectName(f"tabs_settings_{name}")
         builders = {"ai": self._ai_section, "permissions": self._permissions_section,
                     "folders": self._folders_section, "runtime": self._runtime_section,
+                    "context": self._context_section,
                     "sign_in": self._sign_in_section, "secrets": self._secrets_section,
                     "key_storage": self._key_storage_section}
         for section in SECTIONS[name]:
@@ -268,6 +269,16 @@ class SettingsDialog(QDialog):
         self.prompt_cache_box = PromptCacheBox(self.framework, inner, lang=self.lang)
         layout.addWidget(self.runtime_mode_box)
         layout.addWidget(self.prompt_cache_box)
+        layout.addStretch(1)
+        return self._scrolled(page, inner)
+
+    def _context_section(self, page: QWidget) -> QWidget:
+        """The context window of Ditto's chat model, the counting and the compactions (`llm-cli ditto context`)."""
+        from orchestrator.gui.context_window_box import ContextWindowBox
+        inner = QWidget(page)
+        layout = QVBoxLayout(inner)
+        self.context_box = ContextWindowBox(self.framework, inner, lang=self.lang)
+        layout.addWidget(self.context_box)
         layout.addStretch(1)
         return self._scrolled(page, inner)
 

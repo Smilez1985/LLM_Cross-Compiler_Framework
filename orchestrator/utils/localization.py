@@ -570,6 +570,7 @@ TEXT_MODULES += ("orchestrator.utils.l10n_large",)   # the large models: Builder
 TEXT_MODULES += ("orchestrator.utils.l10n_models",)   # the Models tab and Build > Benchmark...
 TEXT_MODULES += ("orchestrator.utils.l10n_launch",)   # the crash dialog and the start entry (llm-cli launcher)
 TEXT_MODULES += ("orchestrator.utils.l10n_console",)   # the Ditto console beside the chat (llm-cli ditto console)
+TEXT_MODULES += ("orchestrator.utils.l10n_context",)   # Ditto's context window (llm-cli ditto context)
 
 
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,

@@ -1475,7 +1475,8 @@ class TestMainWindowWiring:
                                            "Fix Proposals from AI Apps...",
                                            "Agents...",   # acp-client: the ACP agents the person picks
                                            "&Advanced"]
-            assert menus["menu_ditto_advanced"] == ["Local Runtime...", "Local Models...", "Evaluation..."]
+            assert menus["menu_ditto_advanced"] == ["Local Runtime...", "Local Models...", "Evaluation...",
+                                                     "Context Window..."]
             assert menus["menu_tools"] == ["Create Hardware Module...", "Hugging Face Model Browser...", "&Knowledge",
                                            "&Maintenance", "Spoken Announcements", "Clear Input History..."]
             assert menus["menu_tools_knowledge"] == ["Open Community Hub", "Knowledge Snapshots...",

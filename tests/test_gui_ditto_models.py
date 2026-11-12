@@ -178,10 +178,26 @@ class TestMenu:
             names[menu.EVAL_ACTION].trigger()
             evaluation = win.ditto_eval_window
             assert isinstance(evaluation, ditto_eval_window.EvaluationWindow) and evaluation.isVisible()
+            # the context window's objects live in the settings window, which Ditto > Context Window... opens
+            in_settings = {n for n, opener in menu.WINDOW_OBJECTS.items() if opener == menu.CONTEXT_ACTION}
+            in_settings.add(menu.CONTEXT_ACTION)
             for command, name in menu.CLI_PATHS.items():
-                assert win.findChild(QObject, name) is not None, (command, name)
+                if name not in in_settings or name == menu.CONTEXT_ACTION:
+                    assert win.findChild(QObject, name) is not None, (command, name)
             for name in menu.WINDOW_OBJECTS:
-                assert win.findChild(QObject, name) is not None, name
+                if name not in in_settings:
+                    assert win.findChild(QObject, name) is not None, name
+            from PySide6.QtWidgets import QApplication, QDialog
+            monkeypatch.setattr(QDialog, "exec", lambda self: (self.show(), 0)[1])
+            names[menu.CONTEXT_ACTION].trigger()
+            qapp.processEvents()
+            settings = [w for w in QApplication.topLevelWidgets() if w.objectName() == "dlg_settings"
+                        or type(w).__name__ == "SettingsDialog"]
+            assert settings, "Ditto > Context Window... opens the settings window"
+            for name in in_settings - {menu.CONTEXT_ACTION}:
+                assert any(w.findChild(QObject, name) is not None for w in settings), name
+            for w in settings:
+                w.close()
 
             names[menu.MODELS_ACTION].trigger()
             names[menu.EVAL_ACTION].trigger()
@@ -205,7 +221,9 @@ class TestMenu:
         window.framework = SimpleNamespace()
         menu.install(window, bar)
         assert [a.text() for a in bar.actions()] == ["File", "Ditto", "Security"]
-        assert [a.text() for a in shared.actions()] == ["Local Runtime...", "Local Models...", "Evaluation..."]
+        # Ditto > Context Window... joined the two (Settings > Language model > Context window, `ditto context`)
+        assert [a.text() for a in shared.actions()] == ["Local Runtime...", "Local Models...", "Evaluation...",
+                                                        "Context Window..."]
         fresh = QMainWindow()
         fresh.menuBar().addMenu("File")
         fresh.menuBar().addMenu("Security")
@@ -224,7 +242,10 @@ class TestMenu:
                     "ditto ask": cli.ditto_ask, "ditto eval": cli.ditto_eval,
                     # the Prompt cache group in this window (chain ctx-local-mem)
                     "ditto cache": cli.ditto_cache, "ditto cache show": cli.ditto_cache_show,
-                    "ditto cache set": cli.ditto_cache_set}
+                    "ditto cache set": cli.ditto_cache_set,
+                    # Settings > Language model > Context window (Ditto > Context Window...)
+                    "ditto context": cli.ditto_context, "ditto context show": cli.ditto_context_show,
+                    "ditto context original": cli.ditto_context_original, "ditto context undo": cli.ditto_context_undo}
         assert "ditto models" in menu.CLI_PATHS
         assert set(cli.ditto_models.commands) == {"list", "download"}
         for path, command in commands.items():

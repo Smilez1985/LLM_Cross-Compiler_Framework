@@ -188,8 +188,22 @@ class ProviderAccess(BaseModel):
     source: str = Field(default="none", description="vault, environment, profile, runtime or none")
 
 
+class ContextWindowOut(BaseModel):
+    """The context window of Ditto's chat model (llm/context_window.py), read-only: the person changes the model and
+    ai_context_window; compactions are the person's to read and undo."""
+    tokens: int
+    max_output: Optional[int] = None
+    source: str = Field(description="local_server (/props), local_started (the -c of the start, not confirmed yet), "
+                                    "provider (asked from the provider's server), table (pinned with its source and "
+                                    "date), default (conservative default) or setting (the person's ai_context_window)")
+    how: str = ""
+    model: str = ""
+
+
 class AiAccessSection(BaseModel):
     providers: List[ProviderAccess] = Field(default_factory=list)
+    context_window: Optional[ContextWindowOut] = Field(default=None, description="Ditto's chat model's window, from "
+                                                       "what is known already (no request is sent for it)")
     hf_token_stored: bool
     how_to_sign_in: str = ("The person signs in in the GUI's sign-in panel or with 'llm-cli ditto login'; a Hugging "
                            "Face token with 'llm-cli secrets set hf_token'. Keys never pass through an AI.")
@@ -549,6 +563,16 @@ def ai_access_section(framework, sign_in_factory: Callable[[], Any]) -> AiAccess
     except Exception:  # noqa: BLE001 - a locked vault: unknown, shown as not stored
         hf = False
     section = AiAccessSection(hf_token_stored=hf)
+    ditto = getattr(framework, "ditto_manager", None)
+    try:
+        if ditto is not None:
+            window = ditto.context_window(cached_only=True)   # never a request for a status read
+            section.context_window = ContextWindowOut(tokens=window.tokens, max_output=window.max_output,
+                                                      source=window.source,
+                                                      how=sanitize_untrusted(str(window.how))[:200],
+                                                      model=sanitize_untrusted(str(window.model))[:120])
+    except Exception:  # noqa: BLE001 - the window is a fact for reading; without it the section stays
+        pass
     try:
         statuses = sign_in_factory().status_all(check=False)
     except Exception:  # noqa: BLE001

@@ -22,7 +22,8 @@ from typing import Any, Dict, List, Optional
 from orchestrator.llm.errors import NotConfigured, Refused, map_openai_error
 from orchestrator.llm.providers.base import (DEFAULT_MAX_TOKENS, ProviderAdapter, json_dumps, schema_name,
                                              strict_object_schema)
-from orchestrator.llm.types import ChatRequest, ChatResult, Message, ModelInfo, NativeMessage, ToolCall, Usage
+from orchestrator.llm.types import (ChatRequest, ChatResult, Message, ModelInfo, NativeMessage, TokenCount, ToolCall,
+                                    Usage)
 
 _STOP = {"stop": "end", "tool_calls": "tool_use", "function_call": "tool_use", "length": "max_tokens",
          "content_filter": "refusal"}
@@ -208,6 +209,143 @@ class OpenAICompatAdapter(ProviderAdapter):
                           explanation=refusal or None, result=result, provider=self.provider)
         return result
 
+    # --- the context window and the count of a llama.cpp server (llm/context_window.py, llm/token_count.py) --------
+    PROBE_TIMEOUT = 5.0
+
+    def _root(self) -> str:
+        """The server's address without its OpenAI path (http://host:port/v1 -> http://host:port)."""
+        from urllib.parse import urlsplit, urlunsplit
+        parts = urlsplit(str(self.base_url or ""))
+        path = parts.path.rstrip("/")
+        for suffix in ("/v1", "/api/v1", "/v1beta/openai"):
+            if path.endswith(suffix):
+                path = path[:-len(suffix)]
+                break
+        return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+
+    def _get(self, url: str) -> Any:
+        return self.client().get(url, cast_to=object, options={"timeout": self.PROBE_TIMEOUT})
+
+    def _post(self, url: str, body: Dict[str, Any]) -> Any:
+        return self.client().post(url, cast_to=object, body=body, options={"timeout": self.PROBE_TIMEOUT})
+
+    @staticmethod
+    def _int(value: Any) -> Optional[int]:
+        return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+    def _llama_props(self) -> Optional[int]:
+        """llama.cpp's GET /props: the slot's context (default_generation_settings.n_ctx), or None."""
+        try:
+            data = self._get(self._root() + "/props")
+        except Exception:  # noqa: BLE001 - not a llama.cpp server
+            return None
+        settings = data.get("default_generation_settings") if isinstance(data, dict) else None
+        return self._int(settings.get("n_ctx")) if isinstance(settings, dict) else None
+
+    def _ollama(self, model: str):
+        """Ollama: /api/ps names the loaded model's context_length; before it is loaded, Ollama's documented default
+        of 4096, at most the model's own <architecture>.context_length of /api/show (asked again next time)."""
+        from orchestrator.llm.context_window import ServerWindow
+        try:
+            running = self._get(self._root() + "/api/ps")
+        except Exception:  # noqa: BLE001 - not Ollama
+            return None
+        if not isinstance(running, dict) or not isinstance(running.get("models"), list):
+            return None
+        for entry in running["models"]:
+            if isinstance(entry, dict) and model in (entry.get("name"), entry.get("model")):
+                tokens = self._int(entry.get("context_length"))
+                if tokens:
+                    return ServerWindow(tokens=tokens, how="Ollama GET /api/ps context_length (the loaded model)")
+        trained = None
+        try:
+            shown = self._post(self._root() + "/api/show", {"model": model})
+            info = shown.get("model_info") if isinstance(shown, dict) else None
+            if isinstance(info, dict):
+                trained = next((self._int(v) for k, v in info.items() if str(k).endswith(".context_length")
+                                and self._int(v)), None)
+        except Exception:  # noqa: BLE001 - the model is unknown to Ollama: its default only
+            trained = None
+        tokens = min(4096, trained) if trained else 4096
+        return ServerWindow(tokens=tokens, cache=False, how="Ollama's documented default of 4096 tokens (the model is "
+                                                            "not loaded yet; /api/ps is asked again next time)")
+
+    def _lm_studio(self, model: str):
+        """LM Studio's GET /api/v1/models: the loaded instance's context_length, else max_context_length."""
+        from orchestrator.llm.context_window import ServerWindow
+        try:
+            data = self._get(self._root() + "/api/v1/models")
+        except Exception:  # noqa: BLE001 - not LM Studio
+            return None
+        items = data.get("models") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            items = data.get("data") if isinstance(data, dict) else None
+        for item in items if isinstance(items, list) else []:
+            if not isinstance(item, dict) or model not in (item.get("key"), item.get("id")):
+                continue
+            for instance in item.get("loaded_instances") or []:
+                config = instance.get("config") if isinstance(instance, dict) else None
+                tokens = self._int(config.get("context_length")) if isinstance(config, dict) else None
+                if tokens:
+                    return ServerWindow(tokens=tokens, how="LM Studio GET /api/v1/models, the loaded instance's "
+                                                           "context_length")
+            tokens = self._int(item.get("max_context_length"))
+            if tokens:
+                return ServerWindow(tokens=tokens, how="LM Studio GET /api/v1/models max_context_length")
+        return None
+
+    def _model_list(self, model: str):
+        """The /models list's context_length (OpenRouter) or max_model_len (vLLM), when the server sends one."""
+        from orchestrator.llm.context_window import ServerWindow
+        try:
+            listed = self.list_models()
+        except Exception:  # noqa: BLE001 - no list: nothing told
+            return None
+        for info in listed:
+            if info.id == model and info.max_input_tokens:
+                field = info.capabilities.get("length_field", "context_length")
+                return ServerWindow(tokens=int(info.max_input_tokens), max_output=info.max_tokens,
+                                    how=f"{self.label} GET /models {field}")
+        return None
+
+    def context_window(self, model: str):
+        """What this server says about `model`'s window: a local engine is recognised by its answers (llama.cpp
+        /props, Ollama /api/ps, LM Studio /api/v1/models); every server's /models list is read last."""
+        from orchestrator.llm.context_window import ServerWindow
+        if self.preset.category == "local_engine" or self.preset.runtime_endpoint:
+            n_ctx = self._llama_props()
+            if n_ctx:
+                return ServerWindow(tokens=n_ctx, how="llama.cpp GET /props default_generation_settings.n_ctx")
+            for probe in (self._ollama, self._lm_studio):
+                told = probe(model)
+                if told is not None:
+                    return told
+        return self._model_list(model)
+
+    def count_input_tokens(self, request: ChatRequest, model: str) -> TokenCount:
+        """A llama.cpp server's exact count: the request rendered with the server's own chat template
+        (POST /apply-template with messages and tools), then POST /tokenize of that text. NotConfigured for a server
+        that is not llama.cpp, and for a cloud server before any request."""
+        if not (self.preset.category == "local_engine" or self.preset.runtime_endpoint):
+            raise NotConfigured(f"{self.label} has no token count endpoint in this framework.", provider=self.provider)
+        params = self.build_params(request, model, None)
+        body = {"messages": params["messages"]}
+        if "tools" in params:
+            body["tools"] = params["tools"]
+        try:
+            rendered = self._post(self._root() + "/apply-template", body)
+            prompt = rendered.get("prompt") if isinstance(rendered, dict) else None
+            if not isinstance(prompt, str):
+                raise ValueError("no prompt")
+            counted = self._post(self._root() + "/tokenize", {"content": prompt, "add_special": True})
+            tokens = counted.get("tokens") if isinstance(counted, dict) else None
+            if not isinstance(tokens, list):
+                raise ValueError("no tokens")
+        except Exception as e:  # noqa: BLE001 - not a llama.cpp server
+            raise NotConfigured(f"{self.label}: this server has no token count ({e.__class__.__name__}).",
+                                provider=self.provider) from None
+        return TokenCount(input_tokens=len(tokens), response_fields=["tokens"])
+
     def list_models(self) -> List[ModelInfo]:
         try:
             page = self.client().models.list()
@@ -215,9 +353,20 @@ class OpenAICompatAdapter(ProviderAdapter):
             for m in page:
                 extra = m.model_extra or {}
                 model_id = m.id[len("models/"):] if m.id.startswith("models/") else m.id  # Gemini lists models/<id>
+                length, field = extra.get("context_length"), "context_length"
+                if not (isinstance(length, int) and not isinstance(length, bool)):
+                    length, field = extra.get("max_model_len"), "max_model_len"   # vLLM, when it sends it
+                if not (isinstance(length, int) and not isinstance(length, bool) and length > 0):
+                    length, field = None, ""
+                top = extra.get("top_provider") if isinstance(extra.get("top_provider"), dict) else {}
+                most = top.get("max_completion_tokens")
+                caps = {k: extra[k] for k in ("supported_parameters",) if k in extra}
+                if field:
+                    caps["length_field"] = field
                 models.append(ModelInfo(id=model_id, display_name=str(extra.get("name") or model_id),
-                                        max_input_tokens=extra.get("context_length"),
-                                        capabilities={k: extra[k] for k in ("supported_parameters",) if k in extra}))
+                                        max_input_tokens=length, capabilities=caps,
+                                        max_tokens=most if isinstance(most, int) and not isinstance(most, bool)
+                                        else None))
             return models
         except Exception as e:
             raise map_openai_error(e, label=self.label, provider=self.provider, preset=self.preset,

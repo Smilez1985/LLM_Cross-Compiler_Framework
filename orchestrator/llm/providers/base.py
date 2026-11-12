@@ -135,6 +135,11 @@ class ProviderAdapter:
     def list_models(self) -> List[ModelInfo]:
         return [ModelInfo(id=m, display_name=m) for m in self.preset.suggested_models]
 
+    def context_window(self, model: str) -> Any:
+        """What this provider's server says about `model`'s context window (llm/context_window.ServerWindow), or None
+        when it does not tell (the default; OpenAI's model list names no length)."""
+        return None
+
     def _parse_with_repair(self, request: ChatRequest, model: str, result: ChatResult) -> ChatResult:
         if result.stop == "max_tokens":
             raise Truncated("The answer was cut off before the JSON was complete. Raise max_tokens or lower the "

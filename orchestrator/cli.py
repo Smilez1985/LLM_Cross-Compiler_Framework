@@ -4089,8 +4089,10 @@ def runtime_status(ctx: FrameworkContext, as_json: bool):
     if status.running:
         health = "[green]ready[/green]" if status.healthy else "[yellow]starting / not answering[/yellow]"
         where = f"container {status.container}" if status.container else f"pid {status.pid}"
+        confirmed = {True: ", confirmed by /props", False: f", /props reports {status.n_ctx_slot}",
+                     None: ""}[status.ctx_confirmed]
         table.add_row("Server", f"{health} {escape(str(status.base_url))} ({escape(where)}, "
-                                f"model {escape(str(status.model))}, ctx {status.ctx})")
+                                f"model {escape(str(status.model))}, ctx {status.ctx}{confirmed})")
     else:
         table.add_row("Server", "stopped")
     table.add_row("Recommended model", escape(f"{model.file} - {why}"))
@@ -4840,6 +4842,94 @@ def ditto_console(ctx: FrameworkContext, follow: bool, source: str, search: str,
         pass
     finally:
         reader.close()
+
+
+@ditto.group('context', invoke_without_command=True)
+@click.option('--refresh', is_flag=True, help="Ask the provider's server for the window again instead of the cache")
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@click.pass_context
+def ditto_context(click_ctx, refresh: bool, as_json: bool):
+    """The context window of Ditto's chat model, how its tokens are counted, the saved conversation against the
+    turn budget, and the compactions kept with their originals"""
+    if click_ctx.invoked_subcommand is None:
+        click_ctx.invoke(ditto_context_show, refresh=refresh, as_json=as_json)
+
+
+def _chat_history(ctx: FrameworkContext):
+    """Ditto's saved conversation (the chat panel's file in the per-user folder)."""
+    from orchestrator.Core.ditto_manager import ChatHistory
+    from orchestrator.runtime.profile import default_state_dir
+    ctx.require_framework()
+    config, _ = _settings(ctx)
+    return ChatHistory.in_state_dir(Path(getattr(config, "user_state_dir", None) or default_state_dir()))
+
+
+def _context_ditto(ctx: FrameworkContext):
+    ctx.require_framework()
+    fm = ctx.framework_manager
+    ditto = fm.get_component("ditto_manager") if hasattr(fm, "get_component") else getattr(fm, "ditto_manager", None)
+    if ditto is None:
+        console.print("[red]The AI assistant (Ditto) is not available.[/red]")
+        sys.exit(1)
+    return ditto
+
+
+@ditto_context.command('show')
+@click.option('--refresh', is_flag=True, help="Ask the provider's server for the window again instead of the cache")
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def ditto_context_show(ctx: FrameworkContext, refresh: bool = False, as_json: bool = False):
+    """The window (with its source), the counting, the saved conversation and its compactions"""
+    from orchestrator.Core.ditto_context import context_overview
+    view = context_overview(_context_ditto(ctx), _chat_history(ctx), refresh=refresh)
+    if as_json:
+        click.echo(json.dumps(view.data(), indent=2, sort_keys=True))
+        return
+    for line in view.lines():
+        console.print(escape(line))
+    if view.compactions:
+        from orchestrator.utils.next_steps import NextStep, render
+        for line in render([NextStep("context.original"), NextStep("context.undo")], "cli", "en",
+                           channel="cli").splitlines():
+            console.print(escape(line))
+
+
+@ditto_context.command('original')
+@click.argument('compaction_id', required=False)
+@pass_context
+def ditto_context_original(ctx: FrameworkContext, compaction_id: Optional[str]):
+    """Print the original conversation a compaction kept (the newest, or COMPACTION_ID such as c2)"""
+    from orchestrator.Core.ditto_context import original_text
+    text = original_text(_chat_history(ctx), compaction_id)
+    if text is None:
+        console.print("No compaction is kept" + (f" with the id {escape(compaction_id)}." if compaction_id else "."))
+        sys.exit(1)
+    click.echo(_printable(text))
+
+
+@ditto_context.command('undo')
+@click.option('--yes', is_flag=True, help='Undo without asking')
+@pass_context
+def ditto_context_undo(ctx: FrameworkContext, yes: bool):
+    """Undo the newest compaction: its original messages come back in front of what was said after it"""
+    history = _chat_history(ctx)
+    if not history.compactions:
+        console.print("No compaction is kept; nothing to undo.")
+        return
+    record = history.compactions[-1]
+    console.print(f"Compaction {escape(str(record.get('id')))} at {escape(str(record.get('at')))}: "
+                  f"{len(record.get('messages') or [])} original message(s) come back. The next question decides "
+                  "again whether the conversation fits the window.")
+    if not yes and not click.confirm("Undo it?", default=False):
+        console.print("Nothing was changed.")
+        return
+    if history.undo_compaction() is None:
+        console.print("[red]The conversation changed since; the compaction cannot be undone safely.[/red]")
+        sys.exit(1)
+    if not history.save():
+        console.print("[red]The conversation could not be saved.[/red]")
+        sys.exit(1)
+    console.print("[green]Undone: the original conversation is back.[/green]")
 
 
 @ditto.command('eval')

@@ -514,6 +514,7 @@ class LLMClient:
         while True:
             try:
                 result = adapter.chat(request, target.model)
+                self._calibrate(target, request, result)
                 return self._restore(result, mapping)
             except Refused as e:
                 if e.result is not None:
@@ -526,6 +527,27 @@ class LLMClient:
                 attempt += 1
                 self.logger.info(f"{target.provider}: {type(e).__name__}, retry {attempt}/{MAX_RETRIES} in {wait:.1f}s")
                 self.sleep(wait)
+
+    def token_calibration(self):
+        """The calibration of the token estimate (llm/token_count.Calibration), kept in this user's state folder."""
+        if getattr(self, "_calibration", None) is None:
+            from orchestrator.llm.token_count import calibration_for
+            self._calibration = calibration_for(self)
+        return self._calibration
+
+    def _calibrate(self, target: Target, request: ChatRequest, result: ChatResult) -> None:
+        """The provider's own input tokens of this call against the estimate of the same request, for the calibration
+        of later estimates (llm/token_count.py). Never fails a call."""
+        usage = getattr(result, "usage", None)
+        actual = (usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens) if usage else 0
+        if actual <= 0:
+            return
+        try:
+            from orchestrator.llm.token_count import estimate, family_of, request_text
+            estimated = estimate(request_text(request), family_of(target.model))
+            self.token_calibration().record(target.provider, target.model, estimated, actual)
+        except Exception as e:  # noqa: BLE001 - the calibration never stops an answer
+            self.logger.info(f"Token calibration skipped ({e.__class__.__name__}).")
 
     def chat(self, request: ChatRequest, *, fallback: bool = True) -> ChatResult:
         """One model turn. Refusals and outages move on along ai_fallback_chain; other errors are raised.
@@ -561,8 +583,10 @@ class LLMClient:
         """The provider's own count of `request`'s input tokens, for the configured provider of its task (no
         fallback: a count from another provider would not say anything about this one). The request goes out exactly
         as a call would: through the privacy filter for every provider that is not local, with the adapter's one SDK
-        client. NotConfigured when the provider has no count endpoint (today only OpenAI's Responses API has one in
-        this layer). Used by the paid OpenAI test of the evaluation (`ditto eval --kind openai_paid`)."""
+        client. NotConfigured when the provider has no count endpoint: OpenAI's Responses API (used by the paid OpenAI
+        test of the evaluation, `ditto eval --kind openai_paid`), Anthropic's free messages.count_tokens and a
+        llama.cpp server's /apply-template and /tokenize (both used by llm/token_count.py when a turn nears the
+        window) have one."""
         effort = self._effort(request)
         if effort and effort != request.effort:
             request = request.model_copy(update={"effort": effort})

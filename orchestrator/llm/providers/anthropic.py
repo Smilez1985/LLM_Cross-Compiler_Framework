@@ -27,8 +27,8 @@ from urllib.parse import urlparse
 from orchestrator.llm.auth.spec import CLAUDE_API_HOST
 from orchestrator.llm.errors import ANTHROPIC_WORKSPACE_INVALID, NotConfigured, Refused, map_anthropic_error
 from orchestrator.llm.providers.base import DEFAULT_MAX_TOKENS, ProviderAdapter
-from orchestrator.llm.types import (ChatRequest, ChatResult, Message, ModelInfo, NativeMessage, ToolCall,
-                                    ToolSpecLLM, Usage)
+from orchestrator.llm.types import (ChatRequest, ChatResult, Message, ModelInfo, NativeMessage, TokenCount,
+                                    ToolCall, ToolSpecLLM, Usage)
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"  # pairs with the scalar form fallbacks="default"
 CLAUDE_API_HOSTS = (CLAUDE_API_HOST,)
@@ -213,6 +213,36 @@ class AnthropicAdapter(ProviderAdapter):
             raise Refused(f"Claude declined this request{reason}.", category=category, explanation=explanation,
                           result=result, provider=self.provider)
         return result
+
+    # The fields of a request that messages.count_tokens takes (the rest only shapes the answer).
+    COUNT_FIELDS = ("model", "messages", "system", "tools", "tool_choice", "output_config")
+
+    def count_input_tokens(self, request: ChatRequest, model: str) -> TokenCount:
+        """Anthropic's own count of this request's input tokens (messages.count_tokens: free, with its own rate limit,
+        itself documented as an estimate that may differ slightly from the call), through this adapter's one SDK
+        client. The caller (LLMClient.count_input_tokens) has sanitized the request like a call."""
+        effort = self.preset.map_effort(request.effort or self.preset.efforts.get(request.task) or "medium")
+        params = self.build_params(request.model_copy(update={"cache": False}), model, effort)
+        try:
+            answer = self.client().messages.count_tokens(**{k: params[k] for k in self.COUNT_FIELDS if k in params})
+        except Exception as e:
+            raise self._map_error(e) from None
+        fields = sorted(answer.to_dict()) if hasattr(answer, "to_dict") else []
+        return TokenCount(input_tokens=int(getattr(answer, "input_tokens", 0) or 0), response_fields=fields)
+
+    def context_window(self, model: str):
+        """The Models API's answer for `model`: max_input_tokens (the context window) and max_tokens."""
+        from orchestrator.llm.context_window import ServerWindow
+        try:
+            info = self.client().models.retrieve(model)
+        except Exception as e:
+            raise self._map_error(e) from None
+        tokens = getattr(info, "max_input_tokens", None)
+        if not isinstance(tokens, int) or isinstance(tokens, bool):
+            return None
+        out = getattr(info, "max_tokens", None)
+        return ServerWindow(tokens=tokens, max_output=out if isinstance(out, int) and not isinstance(out, bool)
+                            else None, how="Anthropic Models API, max_input_tokens and max_tokens")
 
     def list_models(self) -> List[ModelInfo]:
         try:

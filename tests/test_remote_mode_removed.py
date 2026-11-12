@@ -143,7 +143,7 @@ def test_a_version_3_history_with_the_remote_fields_loads(tmp_path):
     history.apply(reply)
     assert history.save()
     saved = json.loads((tmp_path / "chat_history.json").read_text(encoding="utf-8"))
-    assert saved["version"] == 3 and all("place" not in t for t in saved["transcript"])
+    assert saved["version"] == 4 and all("place" not in t for t in saved["transcript"])
 
 
 def test_a_conversation_of_the_remote_mode_starts_anew_once(tmp_path):

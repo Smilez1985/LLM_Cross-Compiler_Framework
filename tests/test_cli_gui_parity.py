@@ -609,7 +609,7 @@ def test_the_menus_follow_the_language_by_object_name(qapp, window):
     assert ditto[:2] == ["act_ditto_setup", "act_ditto_settings"], "Set up Ditto... comes first"
     advanced = window.menu_ditto.actions()[-1].menu()
     assert [a.objectName() for a in advanced.actions()] == ["act_ditto_runtime_open", "act_ditto_models_open",
-                                                            "act_ditto_eval_open"]
+                                                            "act_ditto_eval_open", "act_ditto_context_open"]
 
 
 def test_a_steps_row_names_the_place_and_opens_it(qapp, window):
