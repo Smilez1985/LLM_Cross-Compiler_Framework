@@ -266,3 +266,99 @@ def test_against_the_conservative_default_a_long_question_is_not_refused(tmp_pat
     reply = ditto.chat("z" * 120000, history)
     assert not reply.budget.fits and reply.new_conversation and reply.kept_messages == []
     assert len(llm.requests) == 2, "everything earlier summarized, then the turn went out"
+
+
+# --- inside a turn: tool results that pile up in the tool loop (context_budget.fit_turn, T1 to T4) -----------------
+
+@pytest.fixture
+def huge_registry(tmp_path):
+    """A stand-in tool that returns a huge result, and a small one."""
+    from test_ditto import NoInput, TextOut
+    from orchestrator.tools.audit import AuditLog
+    from orchestrator.tools.policy import PolicyStore, ToolTier
+    from orchestrator.tools.registry import ToolRegistry, ToolSpec
+    reg = ToolRegistry(PolicyStore(tmp_path / "state"), AuditLog(tmp_path / "state" / "audit.db"))
+    reg.register(ToolSpec("read_big_log", "Read the big log", "Reads a log", ToolTier.READ, NoInput, TextOut,
+                          lambda _: TextOut(text="BEGIN " + "log line 0123456789\n" * 20000 + " END")))
+    reg.register(ToolSpec("list_targets", "List targets", "Lists targets", ToolTier.READ, NoInput, TextOut,
+                          lambda _: TextOut(text="Rockchip, Hailo")))
+    return reg
+
+
+def tool_answer(name, call_id):
+    from test_ditto import call
+    return answer(calls=[call(name, call_id=call_id)])
+
+
+def test_a_huge_tool_result_is_cut_to_its_share_with_a_marker(tmp_path, llm, huge_registry):
+    ditto = make_ditto(tmp_path, huge_registry, ai_context_window=7000)
+    llm.script += [tool_answer("read_big_log", "t1"), answer("The log ends well.")]
+    reply = ditto.chat("Read the log.", ChatHistory())
+    follow_up = llm.requests[1]
+    result = [m for m in follow_up.messages if m.role == "tool"][0].text()
+    assert "BEGIN" in result and "[... truncated ...]" not in result, "the beginning is kept"
+    assert "[cut by the framework:" in result and "Call read_big_log again with narrower arguments" in result
+    assert result.rstrip().endswith("</untrusted_data" + result.rstrip().rsplit("</untrusted_data", 1)[1]), \
+        "the untrusted block keeps its closing line"
+    keys = [key for key, _ in reply.context_lines]
+    assert keys == ["activity.context.tool_cut"]
+    params = reply.context_lines[0][1]
+    assert params["tool"] == "read_big_log" and params["window"] == "7000" and int(params["total"]) > len(result) // 2
+    stored = [m for m in reply.new_messages if m.role == "tool"][0]
+    assert stored.text() == result, "what was sent is what the turn keeps"
+
+
+def test_older_results_become_notes_and_the_latest_stays_whole(tmp_path, llm, huge_registry):
+    from orchestrator.llm.context_budget import fit_turn
+    window = 4000
+
+    def count(messages):
+        return sum(len(m.text()) for m in messages) // 4
+
+    from test_ditto import call
+    messages = [Message.user("q"),
+                Message(role="assistant", content="", tool_calls=[call("read_big_log", call_id="a")]),
+                Message.tool_result("a", "x" * 2400),
+                Message(role="assistant", content="", tool_calls=[call("read_big_log", call_id="b")]),
+                Message.tool_result("b", "y" * 2400),
+                Message(role="assistant", content="", tool_calls=[call("list_targets", call_id="c")]),
+                Message.tool_result("c", "z" * 2000)]
+    assert count(messages) > 1500
+    done = fit_turn(messages, 0, 1500, count, window, 4.0)
+    assert done == [("activity.context.tool_note", {"tool": "read_big_log", "chars": "2400", "window": "4000"})]
+    assert messages[2].text().startswith("[framework note: the result of read_big_log (2400 characters)")
+    assert messages[4].text() == "y" * 2400 and messages[6].text() == "z" * 2000, "the oldest goes first"
+    assert count(messages) <= 1500
+    assert fit_turn(messages, 0, 1500, count, window, 4.0) == [], "nothing more to do once it fits"
+
+
+def test_when_even_the_fixed_part_does_not_fit_it_is_said(tmp_path):
+    from orchestrator.llm.context_budget import fit_turn
+    messages = [Message.user("q" * 40000)]
+    done = fit_turn(messages, 0, 1000, lambda ms: sum(len(m.text()) for m in ms) // 4, 4000, 4.0)
+    assert done == [("activity.context.still_over", {"tokens": "10000", "window": "4000"})]
+
+
+def test_a_cut_result_is_never_pointed_at_as_a_duplicate(tmp_path, llm, huge_registry):
+    """The same huge result again is sent (and cut) itself, never as "same result as tool call #t1", which no longer
+    stands whole in the request."""
+    ditto = make_ditto(tmp_path, huge_registry, ai_context_window=7000)
+    llm.script += [tool_answer("read_big_log", "t1"), tool_answer("read_big_log", "t2"), answer("ok")]
+    ditto.chat("Read the log twice.", ChatHistory())
+    second = [m for m in llm.requests[2].messages if m.role == "tool"][-1].text()
+    assert "same result as tool call" not in second
+
+
+def test_the_tool_lines_read_in_the_console(tmp_path):
+    from orchestrator.Core.chat_feed import FeedSender, FeedStore, FeedWriter, StoredEntry
+    from orchestrator.Core.ditto_console import line_of_feed
+    writer = FeedWriter(FeedStore(tmp_path / "feed"), "gui")
+    for key, params, words in (
+            ("activity.context.tool_cut", {"tool": "read_build_log", "kept": "4000", "total": "90000",
+                                           "window": "8192"}, "Cut the result of read_build_log"),
+            ("activity.context.tool_note", {"tool": "read_build_log", "chars": "9000", "window": "8192"},
+             "Took the result of read_build_log"),
+            ("activity.context.still_over", {"tokens": "9000", "window": "8192"}, "still needs about 9000")):
+        entry = writer.entry("ai_action", FeedSender(role="ditto", caller="ditto"), text_key=key, params=params)
+        line = line_of_feed(StoredEntry(1, entry))
+        assert line.kind == "did" and words in line.text

@@ -139,6 +139,13 @@ TEXTS: Dict[str, Dict[str, str]] = {
                                      "The original is kept and can be read and restored.",
         "activity.context.excerpts": "Limited the knowledge-base excerpts to {tokens} tokens to fit the context "
                                      "window of {window} tokens.",
+        "activity.context.tool_cut": "Cut the result of {tool} to its first {kept} of {total} characters to fit the "
+                                     "context window of {window} tokens; the cut is marked, and the tool can be "
+                                     "called again for the rest.",
+        "activity.context.tool_note": "Took the result of {tool} ({chars} characters) out of the request and left a "
+                                      "note, to fit the context window of {window} tokens.",
+        "activity.context.still_over": "The request still needs about {tokens} tokens, more than the context window "
+                                       "of {window} tokens; it went out as it is.",
         "activity.tool.start_build": "Started a build.",
         "activity.tool.start_recipe_build": "Started a build from a recipe.",
         "activity.tool.cancel_build": "Cancelled a build.",
@@ -272,6 +279,13 @@ TEXTS: Dict[str, Dict[str, str]] = {
                                      "wiederherstellen.",
         "activity.context.excerpts": "Hat die Auszüge aus der Wissensdatenbank auf {tokens} Token begrenzt, damit "
                                      "sie ins Kontextfenster von {window} Token passen.",
+        "activity.context.tool_cut": "Hat das Ergebnis von {tool} auf seine ersten {kept} von {total} Zeichen gekürzt, "
+                                     "damit es ins Kontextfenster von {window} Token passt; die Kürzung ist markiert, "
+                                     "und das Tool kann für den Rest erneut aufgerufen werden.",
+        "activity.context.tool_note": "Hat das Ergebnis von {tool} ({chars} Zeichen) aus der Anfrage genommen und eine "
+                                      "Notiz hinterlassen, damit es ins Kontextfenster von {window} Token passt.",
+        "activity.context.still_over": "Die Anfrage braucht noch etwa {tokens} Token, mehr als das Kontextfenster von "
+                                       "{window} Token; sie ging so hinaus.",
         "activity.tool.start_build": "Hat einen Build gestartet.",
         "activity.tool.start_recipe_build": "Hat einen Build nach einem Rezept gestartet.",
         "activity.tool.cancel_build": "Hat einen Build abgebrochen.",

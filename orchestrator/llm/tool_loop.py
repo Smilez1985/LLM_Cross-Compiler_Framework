@@ -90,6 +90,11 @@ class ResultIndex:
         self._seen.setdefault(key, call.id)
         return text
 
+    def forget(self, call_id: str) -> None:
+        """A result that no longer stands whole in the request (the turn budget cut it or made it a note): a later
+        equal result is sent in full, never as a pointer to it."""
+        self._seen = {k: v for k, v in self._seen.items() if v != call_id}
+
 
 def open_tool_calls(messages: Sequence[Message]) -> List[ToolCall]:
     """The calls of the last assistant turn that no tool result after it answers (only at the end of a conversation:
@@ -140,7 +145,8 @@ class ToolLoopResult:
 
 def run_tool_loop(client: Any, request: ChatRequest, execute_tool: ExecuteTool, max_steps: int = 8,
                   extra_steps: int = 0, stop_after: int = 3, cancelled: Optional[Callable[[], bool]] = None,
-                  on_text: Optional[Callable[[str], None]] = None) -> ToolLoopResult:
+                  on_text: Optional[Callable[[str], None]] = None,
+                  fit: Optional[Callable[[List[Message]], None]] = None) -> ToolLoopResult:
     """Runs model turns and tool calls until the model answers, refuses, or the step budget is used up (max_steps
     model turns, plus up to `extra_steps` while the model fixes an input error, plus the one answer turn after an
     early stop). `execute_tool(name, arguments)` returns the result (text, dict or pydantic model) or raises on
@@ -149,7 +155,10 @@ def run_tool_loop(client: Any, request: ChatRequest, execute_tool: ExecuteTool, 
     `cancelled()` (read before every model turn and every tool call): once true, no further call runs and no further
     model turn starts; the open calls are answered with CALL_CANCELLED and the loop ends with stop "cancelled" (the
     pairs stay consistent). `on_text(text)`: the text of a model turn that also calls tools (what the model says
-    between its calls), for a caller that shows it as it comes; its failure never stops the loop."""
+    between its calls), for a caller that shows it as it comes; its failure never stops the loop. `fit(messages)`:
+    called before every follow-up request with the request's messages, which it may change in place (the turn budget
+    of llm/context_budget.fit_turn: a result too large for the window is cut or becomes a note); what it changed is
+    also what this turn keeps."""
     history = list(request.messages)
     seen = ResultIndex(history)  # results still in this request (a summarized conversation's are not)
     new: List[Message] = []
@@ -173,6 +182,16 @@ def run_tool_loop(client: Any, request: ChatRequest, execute_tool: ExecuteTool, 
             return ToolLoopResult(text=last.text if last else "", stop="cancelled", steps=step, new_messages=new,
                                   results=results, usage=usage)
         step += 1
+        if fit is not None and step > 1:
+            before = list(history)
+            try:
+                fit(history)
+            except Exception:  # noqa: BLE001 - a failed fit sends the request as it is
+                history[:] = before
+            for old_message, new_message in zip(before, history):
+                if old_message is not new_message:   # the same change in what this turn keeps
+                    new[:] = [new_message if m is old_message else m for m in new]
+                    seen.forget(new_message.tool_call_id or "")
         step_request = request.model_copy(update={"messages": list(history), "tools": tools})
         try:
             result = client.chat(step_request)

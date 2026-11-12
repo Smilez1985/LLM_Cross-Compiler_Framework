@@ -124,3 +124,112 @@ def turn_groups(messages: Sequence[Any]) -> List[Tuple[int, int]]:
         starts = [0] + starts
     ends = starts[1:] + [len(messages)]
     return list(zip(starts, ends))
+
+
+# --- inside a turn: the tool results that pile up in the tool loop ----------------------------------------------------
+#
+# Before every follow-up request of the tool loop the request is counted again (system text, tools, history and this
+# turn's calls and results) against the window less the answer's room and the margin (R1, R2). When it does not fit:
+# T1  a tool result of this turn larger than half of the room this turn's results have is cut to that half: its
+#     beginning is kept, with a marker that says how much was cut and how to get the rest;
+# T2  still too much: the older tool results of this turn (all but those of the latest model step) become short notes,
+#     the oldest first, until it fits; the latest results stay whole;
+# T3  still too much: the latest results are cut to an equal share of what is left (as T1);
+# T4  still too much (the fixed part alone): the request goes out as it is, and that is said.
+# Every step is a line of what was done (key and closed parameters); nothing is dropped silently.
+
+TOOL_SHARE = 0.5            # T1: the largest share one result may take of the room this turn's results have
+MIN_RESULT_CHARS = 400      # a cut result keeps at least this much
+_SAFE_NAME = r"^[A-Za-z0-9_-]{1,64}$"
+
+
+def _tool_name(messages: Sequence[Any], call_id: str) -> str:
+    import re
+    for message in reversed(messages):
+        for call in getattr(message, "tool_calls", None) or ():
+            if call.id == call_id:
+                return call.name if re.fullmatch(_SAFE_NAME, str(call.name)) else "a tool"
+    return "a tool"
+
+
+def cut_result(text: str, keep_chars: int, window: int, tool: str) -> str:
+    """`text` cut to its first `keep_chars` characters, with the framework's marker; an untrusted block keeps its
+    closing line, so the cut part still reads as data."""
+    keep_chars = max(MIN_RESULT_CHARS, int(keep_chars))
+    if len(text) <= keep_chars:
+        return text
+    lines = text.rstrip("\n").split("\n")
+    closing = lines[-1] if lines and lines[-1].startswith("</untrusted_data") else ""
+    marker = (f"\n[cut by the framework: {keep_chars} of {len(text)} characters kept; the rest did not fit the context "
+              f"window of {window} tokens. Call {tool} again with narrower arguments (a filter, a smaller range, "
+              "fewer lines) to read the rest.]")
+    return text[:keep_chars] + marker + (("\n" + closing) if closing else "")
+
+
+def result_note(tool: str, chars: int, window: int) -> str:
+    return (f"[framework note: the result of {tool} ({chars} characters) was taken out of this request to fit the "
+            f"context window of {window} tokens; call {tool} again if it is needed.]")
+
+
+def fit_turn(messages: List[Any], start: int, limit: int, count: Any, window: int,
+             chars_per_token: float) -> List[Tuple[str, dict]]:
+    """Fits a tool loop's next request into `limit` tokens by T1 to T4, replacing tool results of this turn (messages
+    from index `start` on) in place; `count(messages)` gives the request's tokens. Returns the lines of what was
+    done, as (text key, parameters)."""
+    done: List[Tuple[str, dict]] = []
+    total = count(messages)
+    if total <= limit:
+        return done
+    results = [i for i in range(start, len(messages)) if getattr(messages[i], "role", None) == "tool"]
+    if not results:
+        done.append(("activity.context.still_over", {"tokens": str(total), "window": str(window)}))
+        return done
+    last_step = [i for i in results if i > max((j for j in range(start, len(messages))
+                                                if getattr(messages[j], "role", None) == "assistant"), default=-1)]
+    latest = set(last_step or results[-1:])
+
+    def replace(i: int, content: str) -> None:
+        messages[i] = messages[i].model_copy(update={"content": content})
+
+    def text_of(i: int) -> str:
+        return messages[i].text()
+
+    emptied = [m.model_copy(update={"content": ""}) if idx in results else m for idx, m in enumerate(messages)]
+    room = max(0, limit - count(emptied))           # what this turn's results may take together
+    # T1: one result above half of that room is cut to it
+    share_chars = int(room * TOOL_SHARE * chars_per_token)
+    for i in results:
+        text = text_of(i)
+        if len(text) > max(share_chars, MIN_RESULT_CHARS):
+            tool = _tool_name(messages[:i], messages[i].tool_call_id or "")
+            replace(i, cut_result(text, share_chars, window, tool))
+            done.append(("activity.context.tool_cut", {"tool": tool, "kept": str(max(share_chars, MIN_RESULT_CHARS)),
+                                                       "total": str(len(text)), "window": str(window)}))
+    total = count(messages)
+    # T2: older results of this turn become notes, the oldest first
+    for i in results:
+        if total <= limit:
+            break
+        if i in latest or text_of(i).startswith("[framework note:"):
+            continue
+        tool = _tool_name(messages[:i], messages[i].tool_call_id or "")
+        chars = len(text_of(i))
+        replace(i, result_note(tool, chars, window))
+        done.append(("activity.context.tool_note", {"tool": tool, "chars": str(chars), "window": str(window)}))
+        total = count(messages)
+    # T3: the latest results share what is left
+    if total > limit:
+        others = [m.model_copy(update={"content": ""}) if idx in latest else m for idx, m in enumerate(messages)]
+        left = max(0, limit - count(others))
+        each = int(left / max(1, len(latest)) * chars_per_token)
+        for i in sorted(latest):
+            text = text_of(i)
+            if len(text) > max(each, MIN_RESULT_CHARS):
+                tool = _tool_name(messages[:i], messages[i].tool_call_id or "")
+                replace(i, cut_result(text, each, window, tool))
+                done.append(("activity.context.tool_cut", {"tool": tool, "kept": str(max(each, MIN_RESULT_CHARS)),
+                                                           "total": str(len(text)), "window": str(window)}))
+        total = count(messages)
+    if total > limit:   # T4
+        done.append(("activity.context.still_over", {"tokens": str(total), "window": str(window)}))
+    return done

@@ -1299,7 +1299,10 @@ bei der kostenlosen Zählung von Claude. Du siehst immer, welche Methode gezähl
 **Das Budget**: die Antwort behält ein Viertel des Fensters (höchstens 16.000 Token, höchstens die längste Antwort des
 Modells), 5 % bleiben als Reserve, dann kommen Systemtext, Tools und deine Frage; der Rest ist für Auszüge aus der
 Wissensbasis und das frühere Gespräch. `chat_context_limit` (0, die Vorgabe, heißt automatisch) senkt diesen Platz,
-wenn du willst. Eine Frage, die schon allein nicht passt, wird mit den Zahlen abgelehnt.
+wenn du willst. Eine Frage, die schon allein nicht passt, wird mit den Zahlen abgelehnt. Innerhalb eines Turns
+zählt Ditto vor jeder Folgeanfrage neu: ein Tool-Ergebnis, das zu groß für das Fenster ist, wird mit einer
+Markierung gekürzt, die sagt, wie der Rest zu bekommen ist, und ältere Ergebnisse des Turns werden zu kurzen Notizen,
+während die letzten ganz bleiben; die Konsole sagt es.
 
 **Verdichtung**: brauchen die früheren Turns mehr als 75 % ihres Platzes, behält Ditto die neuesten Turns Wort für
 Wort (bis zu 40 % des Platzes) und lässt das Modell die älteren zu einer kurzen Notiz aus Entscheidungen, offenen

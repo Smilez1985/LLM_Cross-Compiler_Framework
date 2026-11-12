@@ -1171,6 +1171,37 @@ class DittoCoder:
             self.logger.warning(f"Summarizing the chat failed ({type(e).__name__}); keeping its last exchange.")
         return render_transcript(messages[-4:])[-4000:]
 
+    def _turn_fitter(self, client: LLMClient, window: Any, budget: Any, system: str, tools: Sequence[Any],
+                     start: int, lines: List[Any]) -> Callable[[List[Message]], None]:
+        """The tool loop's budget inside one turn (llm/context_budget.fit_turn, T1 to T4): before every follow-up
+        request the request is counted again (the calibrated estimate; the exact count from half of the window on)
+        against the window less the answer's room and the margin; what was cut or made a note becomes a line."""
+        from orchestrator.llm import token_count
+        from orchestrator.llm.context_budget import fit_turn
+        family = token_count.family_of(window.model)
+        try:
+            factor = float(client.token_calibration().get(window.provider, window.model).get("factor") or 1.0)
+        except Exception:  # noqa: BLE001
+            factor = 1.0
+        fixed = token_count.estimate(system + "\n" + token_count.tools_text(tools), family)
+        limit = window.tokens - budget.answer - budget.margin
+
+        def count(messages: Sequence[Message]) -> int:
+            raw = fixed + sum(token_count.estimate(token_count.message_text(m), family) for m in messages)
+            tokens = int(raw * factor)
+            if tokens >= token_count.EXACT_SHARE * window.tokens:
+                exact = token_count.exact_total(client, ChatRequest(system=system, messages=list(messages),
+                                                                    tools=list(tools), task="chat"),
+                                                window.provider)
+                if exact is not None:
+                    return exact[0]
+            return tokens
+
+        def fit(messages: List[Message]) -> None:
+            lines.extend(fit_turn(messages, start, limit, count, window.tokens,
+                                  family.chars_per_token / max(factor, 0.5)))
+        return fit
+
     def _summary_chars(self, client: LLMClient, window: Any, summary_tokens: int) -> int:
         """How many characters of the transcript the summary request may carry: the window less its margin, the
         summary's own length and the summary instructions, in characters of the model's family (calibrated)."""
@@ -1340,7 +1371,9 @@ class DittoCoder:
                 loop = run_tool_loop(client, request, self._executor(registry, confirm, uses, on_tool, turn),
                                      max_steps=MAX_TOOL_STEPS, extra_steps=FIX_EXTRA_STEPS,
                                      cancelled=cancelled if turn.cancel is not None else None,
-                                     on_text=turn.on_text)
+                                     on_text=turn.on_text,
+                                     fit=self._turn_fitter(client, window, budget, system, tools,
+                                                           len(earlier) + len(repairs), context_lines))
                 if loop.stop == "refusal":
                     raise loop.refusal   # the same message as any other failed turn, with the tools that ran
                 results, new, text, stop, usage = loop.results, loop.new_messages, loop.text, loop.stop, loop.usage

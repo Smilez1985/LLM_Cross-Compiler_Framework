@@ -1184,7 +1184,9 @@ method counted.
 **The budget**: the answer keeps a quarter of the window (at most 16,000 tokens, at most the model's longest answer),
 5 % stay as a margin, then come the system text, the tools and your question; the rest is for knowledge excerpts
 and the earlier conversation. `chat_context_limit` (0, the default, means automatic) lowers that room if you want.
-A question that does not fit even alone is refused with the numbers.
+A question that does not fit even alone is refused with the numbers. Within a turn, before each
+follow-up request, Ditto counts again: a tool result too large for the window is cut with a marker that says how to
+get the rest, and older results of the turn become short notes while the latest stay whole; the console says so.
 
 **Compaction**: when the earlier turns need more than 75 % of their room, Ditto keeps the newest turns word for word
 (up to 40 % of the room) and has the model summarize the older ones into a short note of decisions, open tasks and
