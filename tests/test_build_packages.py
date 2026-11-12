@@ -496,6 +496,29 @@ def test_packages_the_recipe_does_not_name_are_refused(tmp_path, pack, monkeypat
         build_preload.take(plain.state, "Vendor", bad, client=None)
 
 
+def test_gpgv_gets_every_path_with_forward_slashes(tmp_path, pack, monkeypatch):
+    """gpg takes a --keyring name without a forward slash as a file in its home folder: a Windows path (Git for
+    Windows brings gpgv) has only backslashes, so every path goes in as C:/... (on every system); gpgv's own reason
+    is named when a Release does not verify."""
+    made = pack(recipe_with(apt_section()))
+    with tarfile.open(made.archive) as tar:
+        tar.extractall(tmp_path / "x", filter="data") if hasattr(tarfile, "data_filter") else tar.extractall(
+            tmp_path / "x")
+    folder = tmp_path / "x" / "llmcf-preload" / "packages"
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append(argv)
+        return SimpleNamespace(returncode=2, stdout="", stderr="gpgv: keyblock resource 'x': No such file")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(dp.PreloadError, match=r"does not verify with gpgv .*; it says: gpgv: keyblock resource"):
+        dp.gpgv_check(folder, gpgv="gpgv")
+    argv = seen[0]
+    paths = [argv[argv.index("--homedir") + 1], argv[argv.index("--keyring") + 1], argv[-2], argv[-1]]
+    assert all("/" in a and "\\" not in a for a in paths), argv
+
+
 @pytest.mark.skipif(not shutil.which("gpgv"), reason="needs gpgv")
 def test_gpgv_takes_only_the_pinned_keys_signatures(tmp_path, pack, distribution):
     made = pack(recipe_with(apt_section()))

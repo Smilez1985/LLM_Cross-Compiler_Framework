@@ -947,11 +947,16 @@ def gpgv_check(folder: Path, gpgv: str = "") -> bool:
             release = (top / "Release").read_bytes()
             signature = pinned_signature(release, (top / "Release.gpg").read_bytes(), keys)
             (Path(home) / "Release.gpg").write_bytes(signature)
-            result = subprocess.run([gpgv, "--homedir", home, "--ignore-time-conflict", "--status-fd", "1",
-                                     "--keyring", str(keyring), str(Path(home) / "Release.gpg"), str(top / "Release")],
-                                    capture_output=True, text=True)
+            # Every path with forward slashes: gpg takes a --keyring name without one as a file in its home folder,
+            # and a Windows path (Git for Windows brings gpgv) has only backslashes; C:/... is read as it is.
+            result = subprocess.run([gpgv, "--homedir", Path(home).as_posix(), "--ignore-time-conflict",
+                                     "--status-fd", "1", "--keyring", keyring.as_posix(),
+                                     (Path(home) / "Release.gpg").as_posix(), (top / "Release").as_posix()],
+                                    capture_output=True, text=True, errors="replace")
             if not signature or result.returncode != 0 or "[GNUPG:] VALIDSIG " not in result.stdout:
-                raise PreloadError(f"suite {top.name}: its Release does not verify with gpgv against the pinned keys")
+                said = " ".join((result.stderr or "").split())[-300:]
+                raise PreloadError(f"suite {top.name}: its Release does not verify with gpgv against the pinned keys"
+                                   + (f"; it says: {said}" if said else ""))
     return True
 
 
