@@ -510,8 +510,26 @@ sources/image-files/ /`). Offline, files that are not in that cache are a missin
 [build's preload](CLI_Usage.md#build-preload) brings them. `redistributable` defaults to no: such a file stays with
 the person (their cache, their image, their own preload, marked `personal=yes`), never in a pack or the repository;
 your pack carries only the reference. Change the block with `llm-cli module edit --variables FILE` (a file with
-`formats:` and `source_images:`; one with formats only keeps the source images). An image published only as a file,
-not in a registry, cannot be named yet.
+`formats:` and `source_images:`; one with formats only keeps the source images).
+
+An image its vendor publishes only as a file to download (a `docker save` archive or an OCI image layout archive, also
+gzip-compressed), not in a registry, is named by the file's sha256 in place of `image:`; never by a path:
+
+```yaml
+    - archive:
+        sha256: "<64 hex>"                 # the file exactly as the vendor publishes it
+        name: vendor-sdk-docker.tar.gz     # optional, only shown
+        config: "sha256:<64 hex>"          # optional: the image ID, needed when the file holds two images for the platform
+      platform: linux/amd64
+      files:
+        - {path: /opt/sdk/lib/libvendorrt.so, sha256: "<64 hex>", dest: /opt/vendor/lib/libvendorrt.so}
+```
+
+No build can fetch such a file, so the person gives it: `llm-cli build source-image take FILE --target TARGET`,
+**Build > Build Container Images... > Take from an image file...**, or the build's preload script with `--image-file
+FILE`. The file's sha256 is checked before anything in it is read; then the image of the platform is read with every
+layer checked against its digest and the config's `diff_ids`, the same way and with the same checks as an image from a
+registry, nothing loaded or run, and only the named files are kept.
 
 ## 4. target.yml and the capabilities block
 

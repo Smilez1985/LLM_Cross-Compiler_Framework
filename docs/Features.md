@@ -1099,7 +1099,11 @@ its support level is community.
   Build), the build image's distribution packages too: read from the target's Dockerfile per stage, fetched with
   their dependencies against what the base image already has, checked against the distribution's signed package
   lists with the archive keys llmcf pins (on the computer with a network, at take-in, gpgv included, and by apt in the
-  build), and installed in the build from a file repository with no package mirror and no network.
+  build), and installed in the build from a file repository with no package mirror and no network. A vendor image
+  published only as a file (a `docker save` or OCI archive) can be a target's source image, named by the file's
+  sha256: you give the file (`llm-cli build source-image take FILE --target TARGET`, **Take from an image file...** in
+  Build Container Images, or the preload script's `--image-file`), its sha256 is checked first, its layers are read
+  and checked like a registry image's, and only the named files are kept; nothing of it is run.
 - Requests to servers on 127.0.0.1 never go through an HTTP(S) proxy from the environment, so the proxy never sees
   prompts or the local server's key.
 - Errors are explained in plain words, for example that a Claude API key needs a workspace ID, that the key was

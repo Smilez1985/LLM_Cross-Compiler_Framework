@@ -1205,7 +1205,12 @@ die Annahmen; seine Unterstützungsstufe ist community.
   Build-Images: aus dem Dockerfile des Targets je Stufe gelesen, mit ihren Abhängigkeiten gegen das geholt, was das
   Basis-Image schon hat, gegen die signierten Paketlisten der Distribution mit den Archivschlüsseln geprüft, die llmcf
   festlegt (auf dem Rechner mit Netz, bei der Übernahme, gpgv eingeschlossen, und von apt im Build), und im Build aus
-  einem Datei-Repository installiert, ohne Paketspiegel und ohne Netz. Nur du setzt die Quellen und bringst Images hin
+  einem Datei-Repository installiert, ohne Paketspiegel und ohne Netz. Ein Hersteller-Image, das nur als Datei
+  veröffentlicht ist (ein Archiv aus `docker save` oder OCI), kann ein Quell-Image eines Targets sein, über den sha256
+  der Datei genannt: Du gibst die Datei an (`llm-cli build source-image take DATEI --target TARGET`, **Aus einer
+  Image-Datei nehmen...** in Build-Container-Images oder `--image-file` des Preload-Skripts), ihr sha256 wird zuerst
+  geprüft, ihre Schichten werden wie die eines Registry-Images gelesen und geprüft, und nur die genannten Dateien
+  bleiben; nichts davon wird ausgeführt. Nur du setzt die Quellen und bringst Images hin
   und her; eine KI bekommt `needs_person`.
 - Anfragen an Server auf 127.0.0.1 gehen nie über einen HTTP(S)-Proxy aus der Umgebung; der Proxy sieht also weder
   Prompts noch den Schlüssel des lokalen Servers.

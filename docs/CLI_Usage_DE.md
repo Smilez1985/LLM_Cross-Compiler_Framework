@@ -146,6 +146,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `build save` | Einen Build, der im Build-Ordner des Frameworks wartet, im Ausgabeordner oder einem anderen Ordner speichern |
 | `build image plan/sources/export/import` | Das Build-Container-Image eines Targets: Kann ein Offline-Build es bauen, die Build-Quellen in deinem Netz, auf einen anderen Offline-Rechner als geprüfte Datei bringen |
 | `build preload write/take` | Das Preload des Builds für einen Rechner ganz ohne Netz: Skripte für genau das, was einem Offline-Build fehlt, und das Archiv, das sie schreiben, aufgenommen |
+| `build source-image list/take` | Die Quell-Images eines Targets, und die Dateien aus einem Image, das sein Hersteller nur als Datei veröffentlicht |
 | `build deps` | Die Abhängigkeiten von CMake-Optionen der Module, die vor einem Build geholt werden, listen, holen und löschen |
 | `build interrupted list/continue/delete` | Ein Build, der mit aufbewahrten fertigen Stufen angehalten hat: fortsetzen oder löschen, was er hinterlassen hat |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | Fertige Builds auflisten / einen Build in eine ZIP-Datei packen / sie auf ein Board laden und installieren |
@@ -1151,6 +1152,39 @@ In der GUI: **Start Build** im Builder fragt im Offline-Modus dasselbe in einem 
 **Build > Build-Container-Images...** hat **Preload-Skripte schreiben...** und **Ein Preload aufnehmen...**. Ein
 KI-Client nennt ein Archiv nur über das Feld `preload` von `start_build`, als Verweis auf eine lokale Datei, und nur
 eins aus einem hier geschriebenen Rezept.
+
+Ein Quell-Image, das nur als Datei veröffentlicht ist (in den `source_images` der Vorlage über den sha256 der Datei
+genannt, siehe unten), steht im Rezept mit seinem sha256 und Namen; das Skript nimmt es nur aus der Datei, die du ihm
+gibst: `sh preload.sh --image-file DATEI` (`-ImageFile DATEI` in PowerShell; für mehrere Dateien wiederholen). Ohne sie
+hält das Skript an und nennt die Datei, die es braucht.
+
+### build source-image
+
+Die Images, aus denen die Vorlage eines Targets Dateien nimmt (`template_variables.source_images`): ein Image in einer
+Registry, über seinen Digest gepinnt, das ein Build mit Netz selbst liest, oder ein Image, das sein Hersteller nur als
+Datei veröffentlicht (ein Archiv aus `docker save` oder ein Archiv im OCI-Image-Layout, auch gzip-komprimiert), über
+den sha256 der Datei gepinnt, das kein Build holen kann, also gibst du es an.
+
+```
+llm-cli build source-image list --target TARGET
+llm-cli build source-image take DATEI --target TARGET
+```
+
+- `list` zeigt jedes Quell-Image, wie es genannt ist (Registry-Digest oder sha256 und Name der Datei), seine Plattform
+  und wie viele seiner Dateien in deinem Cache liegen (`build-preload/image-files/` in deinem Zustandsordner).
+- `take` prüft zuerst den sha256 von DATEI: Er muss einer sein, den das Target nennt, sonst wird nichts darin gelesen
+  (Exit-Code 1). Dann wird das Image der Plattform gewählt (einem OCI-Layout wird von `index.json` aus gefolgt, ein
+  Archiv aus `docker save` über seine `manifest.json`; eine Datei ohne Image für die Plattform wird abgelehnt, mit den
+  Plattformen, die sie hat), jedes Dokument und jede Schicht gegen ihren Digest und jede Schicht gegen die `diff_ids`
+  der Konfiguration geprüft (gzip-komprimierte und unkomprimierte Schichten), die Schichten von oben nach unten mit
+  beachteten Whiteouts gelesen, und nur die genannten regulären Dateien bleiben, jede gegen ihren sha256 geprüft. Ein
+  Pfad mit `..`, ein Link, eine Gerätedatei oder eine gelöschte Datei wird abgelehnt und genannt. Nichts wird
+  entpackt, in die Container-Engine geladen oder ausgeführt, und DATEI selbst wird nicht aufbewahrt.
+
+Ein Build mit Netz, dessen Cache die Dateien eines solchen Images fehlen, hält vor allem Langsamen mit diesem Schritt
+an; offline nennt der Plan sie als fehlende Quelle, und das Preload des Builds kann sie bringen (oben). In der GUI:
+**Build > Build-Container-Images...** hat **Quell-Images** und **Aus einer Image-Datei nehmen...** (ein Dateidialog).
+Ein KI-Client sieht nur die Labels des Plans und nennt die Datei nie.
 
 ---
 

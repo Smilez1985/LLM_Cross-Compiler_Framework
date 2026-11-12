@@ -534,8 +534,28 @@ nicht in diesem Cache liegen, eine fehlende Quelle des Plans, und das [Preload d
 bringt sie. `redistributable` ist standardmäßig nein: Eine solche Datei bleibt bei der Person (ihr Cache, ihr Image,
 ihr eigenes Preload, mit `personal=yes` markiert), nie in einem Pack oder dem Repository; dein Pack trägt nur den
 Verweis. Ändere den Block mit `llm-cli module edit --variables DATEI` (eine Datei mit `formats:` und
-`source_images:`; eine nur mit Formaten behält die Quell-Images). Ein Image, das nur als Datei veröffentlicht ist,
-nicht in einer Registry, lässt sich noch nicht nennen.
+`source_images:`; eine nur mit Formaten behält die Quell-Images).
+
+Ein Image, das sein Hersteller nur als Datei zum Herunterladen veröffentlicht (ein Archiv aus `docker save` oder ein
+Archiv im OCI-Image-Layout, auch gzip-komprimiert), nicht in einer Registry, wird an Stelle von `image:` über den sha256
+der Datei genannt; nie über einen Pfad:
+
+```yaml
+    - archive:
+        sha256: "<64 Hex>"                 # die Datei genau so, wie der Hersteller sie veröffentlicht
+        name: vendor-sdk-docker.tar.gz     # optional, nur angezeigt
+        config: "sha256:<64 Hex>"          # optional: die Image-ID, nötig, wenn die Datei zwei Images für die Plattform hält
+      platform: linux/amd64
+      files:
+        - {path: /opt/sdk/lib/libvendorrt.so, sha256: "<64 Hex>", dest: /opt/vendor/lib/libvendorrt.so}
+```
+
+Kein Build kann eine solche Datei holen, also gibt die Person sie an: `llm-cli build source-image take DATEI --target
+TARGET`, **Build > Build-Container-Images... > Aus einer Image-Datei nehmen...** oder das Preload-Skript des Builds mit
+`--image-file DATEI`. Der sha256 der Datei wird geprüft, bevor irgendetwas darin gelesen wird; dann wird das Image der
+Plattform gelesen, jede Schicht gegen ihren Digest und die `diff_ids` der Konfiguration geprüft, genauso und mit
+denselben Prüfungen wie ein Image aus einer Registry, nichts geladen oder ausgeführt, und nur die genannten Dateien
+bleiben.
 
 ## 4. target.yml und der Capabilities-Block
 

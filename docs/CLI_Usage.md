@@ -145,6 +145,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `build save` | Save a build that waits in the framework's build folder to the output folder or another folder |
 | `build image plan/sources/export/import` | The build container image of a target: can an offline build make it, the build sources in your network, move it to another offline computer as a checked file |
 | `build preload write/take` | The build's preload for a computer without any network: scripts for exactly what an offline build lacks, and the archive they write taken in |
+| `build source-image list/take` | A target's source images, and the files taken from an image its vendor publishes only as a file |
 | `build deps` | List, fetch and delete the dependencies of module CMake options that are fetched before a build |
 | `build interrupted list/continue/delete` | A build that stopped with finished stages kept: continue it, or delete what it left |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | List finished builds / pack a build into a ZIP / upload and install it on a board |
@@ -1103,6 +1104,38 @@ An archive that holds a file whose licence does not allow passing it on (`redist
 **Start Build** in offline mode asks the same in a dialog (**Take in and build**), and **Build > Build Container
 Images...** has **Write preload scripts...** and **Take in a preload...**. An AI client names an archive only through
 `start_build`'s field `preload`, as a local file reference, and only one made from a recipe written here.
+
+A source image published only as a file (named by the file's sha256 in the template's `source_images`, see below) is
+in the recipe by its sha256 and name; the script takes it only from the file you give it: `sh preload.sh
+--image-file FILE` (`-ImageFile FILE` in PowerShell; repeat it for several files). Without it the script stops and
+names the file it needs.
+
+### build source-image
+
+The images a target's template takes files from (`template_variables.source_images`): an image in a registry pinned by
+its digest, which a build with a network reads itself, or an image its vendor publishes only as a file (a `docker
+save` archive or an OCI image layout archive, also gzip-compressed), pinned by the file's sha256, which no build can
+fetch, so you give it.
+
+```
+llm-cli build source-image list --target TARGET
+llm-cli build source-image take FILE --target TARGET
+```
+
+- `list` shows each source image, how it is named (registry digest, or the file's sha256 and name), its platform and
+  how many of its files are in your cache (`build-preload/image-files/` of your state folder).
+- `take` checks FILE's sha256 first: it must be one the target names, else nothing in it is read (exit code 1). Then
+  the image of the platform is chosen (an OCI layout followed from `index.json`, a `docker save` archive from its
+  `manifest.json`; a file without an image for the platform is refused, naming the platforms it has), every document
+  and layer is checked against its digest and every layer against the config's `diff_ids` (gzip-compressed and
+  uncompressed layers), the layers are read from the top down with whiteouts honoured, and only the named regular
+  files are kept, each checked against its sha256. A path with `..`, a link, a device file or a deleted file is
+  refused, naming it. Nothing is unpacked, loaded into the container engine or run, and FILE itself is not kept.
+
+An online build whose cache lacks the files of such an image stops before anything slow with this step; offline, the
+plan names them as a missing source, and the build's preload can bring them (above). In the GUI: **Build > Build
+Container Images...** has **Source images** and **Take from an image file...** (a file dialog). An AI client sees only
+the plan's labels and never names the file.
 
 ---
 
