@@ -1094,7 +1094,12 @@ its support level is community.
   (`llm-cli build image plan TARGET` shows the same plan beforehand; an AI sees it as labels through
   `get_target_capabilities` with `check_image`). A finished image moves to another offline computer as a file with
   its sha256 (`llm-cli build image export` / `import`); the import refuses a file whose sha256 or whose labels do not
-  match a build there. Only you set the sources and move images; an AI gets `needs_person`.
+  match a build there. Only you set the sources and move images; an AI gets `needs_person`. Without any network,
+  the build's preload brings what is missing (`llm-cli build preload write TARGET`, or the dialog of an offline Start
+  Build), the build image's distribution packages too: read from the target's Dockerfile per stage, fetched with
+  their dependencies against what the base image already has, checked against the distribution's signed package
+  lists with the archive keys llmcf pins (on the computer with a network, at take-in, gpgv included, and by apt in the
+  build), and installed in the build from a file repository with no package mirror and no network.
 - Requests to servers on 127.0.0.1 never go through an HTTP(S) proxy from the environment, so the proxy never sees
   prompts or the local server's key.
 - Errors are explained in plain words, for example that a Claude API key needs a workspace ID, that the key was

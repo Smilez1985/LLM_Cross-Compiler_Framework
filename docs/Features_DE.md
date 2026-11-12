@@ -1200,8 +1200,13 @@ die Annahmen; seine Unterstützungsstufe ist community.
   (`llm-cli build image plan TARGET` zeigt denselben Plan vorher; eine KI sieht ihn als Labels über
   `get_target_capabilities` mit `check_image`). Ein fertiges Image kommt als Datei mit seiner sha256 auf einen
   anderen Offline-Rechner (`llm-cli build image export` / `import`); der Import lehnt eine Datei ab, deren sha256 oder
-  deren Labels nicht zu einem Build dort passen. Nur du setzt die Quellen und bringst Images hin und her; eine KI
-  bekommt `needs_person`.
+  deren Labels nicht zu einem Build dort passen. Ohne jedes Netz bringt das Preload des Builds, was fehlt
+  (`llm-cli build preload write TARGET` oder der Dialog eines Offline-Starts), auch die Distributionspakete des
+  Build-Images: aus dem Dockerfile des Targets je Stufe gelesen, mit ihren Abhängigkeiten gegen das geholt, was das
+  Basis-Image schon hat, gegen die signierten Paketlisten der Distribution mit den Archivschlüsseln geprüft, die llmcf
+  festlegt (auf dem Rechner mit Netz, bei der Übernahme, gpgv eingeschlossen, und von apt im Build), und im Build aus
+  einem Datei-Repository installiert, ohne Paketspiegel und ohne Netz. Nur du setzt die Quellen und bringst Images hin
+  und her; eine KI bekommt `needs_person`.
 - Anfragen an Server auf 127.0.0.1 gehen nie über einen HTTP(S)-Proxy aus der Umgebung; der Proxy sieht also weder
   Prompts noch den Schlüssel des lokalen Servers.
 - Fehler werden verständlich erklärt, zum Beispiel dass ein Claude-API-Schlüssel eine Workspace-ID braucht, dass

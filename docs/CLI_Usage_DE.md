@@ -1117,20 +1117,30 @@ llm-cli build start ... --preload DATEI
   keine Container-Engine nötig), llama.cpp beim gepinnten Commit (ein Git-Bundle; dort braucht es git), die
   Python-Pakete des Build-Images, wie das Target sie in `target.yml` `build_preload` erklärt (Wheels für das Python
   des Images und die Plattform dieses Rechners, mit ihren Abhängigkeiten), die gepinnten Downloads des Dockerfiles
-  (Größe und sha256 geprüft) und die Dateien, die die Vorlage des Targets aus Quell-Images nimmt. Was ein Preload
-  nicht tragen kann, wird mit seinem eigenen Weg genannt: apt-Pakete (ein apt-Spiegel oder -Cache in deinem Netz,
-  `build image sources`), andere Paketverwaltungen, ein über seinen Digest gepinntes Basis-Image, ein Download ohne
-  gepinntes sha256. Die Skripte brauchen nur Python 3 mit pip (und git für llama.cpp); sie schreiben
+  (Größe und sha256 geprüft), die Dateien, die die Vorlage des Targets aus Quell-Images nimmt, und die
+  Distributionspakete des Build-Images: die `apt-get install`-Pakete jeder Stufe des Dockerfiles des Targets (für die
+  Architektur dieses Rechners) mit ihren Abhängigkeiten, aufgelöst gegen das, was das Basis-Image der Stufe schon hat
+  (sein dpkg-Status, aus dem Image auf diesem Rechner oder aus dem, das das Preload holt, gelesen, nie ausgeführt),
+  aus dem Archiv der Distribution geholt und gegen ihre signierten Paketlisten mit den Archivschlüsseln geprüft, die
+  llmcf festlegt, im Ordner `packages/` des Board-Preloads. Was ein Preload nicht tragen kann, wird mit seinem eigenen
+  Weg genannt: apt-Pakete eines Dockerfiles, dessen Installationen nicht sicher gelesen werden können oder das kein
+  `ARG APT_PRELOAD` nimmt (ein apt-Spiegel oder -Cache in deinem Netz, `build image sources`), andere
+  Paketverwaltungen, ein über seinen Digest gepinntes Basis-Image, ein Download ohne gepinntes sha256. Die Skripte brauchen nur Python 3 mit pip (und git für llama.cpp); sie schreiben
   `llmcf-preload-build-TARGET-ARCH-REZEPT.tar.gz` und geben sein sha256 aus. Mach es auf einem Rechner mit derselben
   Architektur wie dieser: pip wählt die Abhängigkeiten der Pakete nach den Markern des Rechners, der lädt.
 - `take` prüft das Archiv, bevor etwas verändert wird: nur Dateien und Ordner unter `llmcf-preload/`, keine Links,
   jede Datei in `SHA256SUMS` mit ihrem sha256 (wie beim Preload des Installers), dann die Art `build`, das Target, die
   Plattform dieses Rechners, ein hier geschriebenes Rezept (ein Archiv aus dem Rezept eines anderen Rechners oder
   eines anderen Builds wird abgelehnt), jedes Image-Archiv, das genau sein Basis-Image nennt, llama.cpp über seinen
-  Commit und jeder Download und jede genommene Datei über ihr gepinntes sha256; `--sha256` vergleicht auch das sha256
-  des Archivs selbst. Dann werden die Basis-Images in die Container-Engine geladen, llama.cpp kommt in den
-  Quellspeicher, und die Wheels, Downloads und genommenen Dateien bleiben in `build-preload/` deines Zustandsordners
-  für jeden späteren Offline-Build des Targets. Exit-Code 1 bei einer Ablehnung.
+  Commit, jeder Download und jede genommene Datei über ihr gepinntes sha256 und die Distributionspakete, wie ein
+  Board-Preload geprüft wird (die Archivschlüssel nur mit festgelegtem Fingerabdruck, jede `Release` von einem davon
+  signiert, vom Release und der Architektur der Basis, jede Liste gegen ihre `Release`, jede `.deb` gegen ihre Liste,
+  keine andere Datei; noch einmal mit `gpgv`, wenn dieser Rechner es hat); `--sha256` vergleicht auch das sha256 des
+  Archivs selbst. Dann werden die Basis-Images in die Container-Engine geladen, llama.cpp kommt in den Quellspeicher,
+  und die Wheels, Downloads, genommenen Dateien und Distributionspakete bleiben in `build-preload/` deines
+  Zustandsordners für jeden späteren Offline-Build des Targets; der Build installiert die Pakete aus einem
+  Datei-Repository in seinem Build-Kontext, das die festgelegten Schlüssel signieren, ohne andere Paketquelle und ohne
+  Netz. Exit-Code 1 bei einer Ablehnung.
 - `build start` macht das im Offline-Modus von selbst: Ist das Image nicht hier und fehlen Quellen, schreibt er die
   Skripte, sagt, wo sie liegen und was sie holen, und fragt im Terminal nach dem Pfad des Archivs (Enter ohne Pfad
   startet nichts); `--preload DATEI` gibt es vorab; ohne Terminal hält der Lauf mit den Schritten an (Exit-Code 2).

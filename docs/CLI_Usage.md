@@ -1070,9 +1070,14 @@ llm-cli build start ... --preload FILE
   the computer with a network), llama.cpp at the pinned commit (a git bundle; git is needed there), the build image's
   Python packages as the target declares them in `target.yml` `build_preload` (wheels for the image's Python and this
   computer's platform, with their dependencies), the Dockerfile's pinned downloads (size and sha256 checked) and the
-  files the target's template takes from source images. What a preload cannot carry is named with its own way: apt
-  packages (an apt mirror or cache in your network, `build image sources`), other package managers, a base image
-  pinned by digest, a download without a pinned sha256. The scripts need only Python 3 with pip (and git for
+  files the target's template takes from source images, and the build image's distribution packages: the
+  `apt-get install` packages of every stage of the target's Dockerfile (for this computer's architecture) with their
+  dependencies, resolved against what the stage's base image already has (its dpkg status, read from the image on
+  this computer or from the one the preload fetches, never run), fetched from the distribution's archive and checked
+  against its signed package lists with the archive keys llmcf pins, in the board preload's `packages/` folder. What a
+  preload cannot carry is named with its own way: apt packages of a Dockerfile whose installs cannot be read for
+  certain or that takes no `ARG APT_PRELOAD` (an apt mirror or cache in your network, `build image sources`), other
+  package managers, a base image pinned by digest, a download without a pinned sha256. The scripts need only Python 3 with pip (and git for
   llama.cpp); they write `llmcf-preload-build-TARGET-ARCH-RECIPE.tar.gz` and print its sha256. Make it on a computer
   of the same architecture as this one: pip chooses the packages' dependencies by the markers of the computer that
   downloads.
@@ -1080,9 +1085,14 @@ llm-cli build start ... --preload FILE
   every file in `SHA256SUMS` with its sha256 (as the installer's preload), then the kind `build`, the target, this
   computer's platform, a recipe written here (an archive of another computer's or another build's recipe is refused),
   each image archive naming exactly its base image, llama.cpp by its commit and each download and taken file by its
-  pinned sha256; `--sha256` compares the archive's own sha256 too. Then the base images are loaded into the container
-  engine, llama.cpp goes into the source store, and the wheels, downloads and taken files are kept in
-  `build-preload/` of your state folder for every later offline build of the target. Exit code 1 on a refusal.
+  pinned sha256, and the distribution packages as a board preload is checked (the archive keys only with a pinned
+  fingerprint, each `Release` signed by one of them, of the base's release and architecture, each list against its
+  `Release`, each `.deb` against its list, no other file; again with `gpgv` when this computer has it); `--sha256`
+  compares the archive's own sha256 too. Then the base images are loaded into the container engine, llama.cpp goes
+  into the source store, and the wheels, downloads, taken files and distribution packages are kept in
+  `build-preload/` of your state folder for every later offline build of the target; the build installs the packages
+  from a file repository in its build context, signed by the pinned keys, with no other package source and no
+  network. Exit code 1 on a refusal.
 - `build start` in offline mode does this by itself: when the image is not here and sources are missing, it writes
   the scripts, says where they are and what they fetch, and asks at the terminal for the archive's path (Enter
   without a path starts nothing); `--preload FILE` gives it up front; without a terminal the run stops with the steps
