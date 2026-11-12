@@ -302,6 +302,11 @@ class TestHubLookUp:
         assert staged_files(["a.safetensors", "b.bin", "c.gguf", "original/x", "config.json"]) == \
             ["a.safetensors", "config.json"]
         assert staged_files(["b.bin", "config.json"]) == ["b.bin", "config.json"]
+        # what training left behind is never needed for a conversion (an archive or a staging would carry it for
+        # nothing): TensorBoard logs, the trainer's state, saved checkpoints
+        assert staged_files(["model.safetensors", "config.json", "runs/Jan01_00-00-00/events.out.tfevents.1.host.1.0",
+                             "events.out.tfevents.2", "trainer_state.json", "checkpoint-500/model.safetensors",
+                             "tokenizer.json"]) == ["model.safetensors", "config.json", "tokenizer.json"]
 
 
 # --- the build engine: staging per commit, no implicit token, cancel, watchdog, stdin, full disk ----------------

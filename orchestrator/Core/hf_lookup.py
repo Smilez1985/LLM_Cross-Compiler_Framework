@@ -22,7 +22,9 @@ from orchestrator.Core.hf_hub import HubFile, classify_license, gating, hub_api,
 from orchestrator.utils.helpers import redact_secrets
 
 # What the build engine leaves out when it stages a repository (one list for staging and for the size look-up).
-STAGE_IGNORE = ("*.gguf", "*.onnx", "*.onnx_data", "*.h5", "*.msgpack", "*.ot", "*.tflite", "original/*", "onnx/*")
+STAGE_IGNORE = ("*.gguf", "*.onnx", "*.onnx_data", "*.h5", "*.msgpack", "*.ot", "*.tflite", "original/*", "onnx/*",
+                # what training left in the repository: TensorBoard logs, the trainer's state, saved checkpoints
+                "runs/*", "*events.out.tfevents*", "trainer_state.json", "checkpoint-*/*")
 PICKLE_PATTERNS = ("*.bin", "*.pt", "*.pth")
 
 
