@@ -158,6 +158,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `ditto setup` | Die Tool-Berechtigungen festlegen (dieselbe Auswahl wie im Dialog beim ersten Start der GUI) |
 | `ditto ask` | Ditto eine Frage stellen |
 | `ditto console` | Was Ditto und KI-Apps tippen und tun, wie die Ditto-Konsole neben dem Chat es zeigt; `--follow` druckt weiter |
+| `ditto context` | Das Kontextfenster von Dittos Chat-Modell mit seiner Quelle, das Zählen der Token und die Verdichtungen (`original`, `undo`) |
 | `ditto eval` | Ditto anhand fester Testfälle bewerten, oder die Suche der Wissensbasis |
 | `ditto runtime install/start/status/stop/import/export/prune` | Der verwaltete lokale Modellserver (llama.cpp, auf diesem Rechner gebaut) für den Offline-Modus |
 | `ditto runtime ensure` | Dittos lokalen Modellserver installieren, wenn er fehlt, direkt oder in Docker; `--force` wechselt die Art |
@@ -1637,6 +1638,43 @@ llm-cli ditto console --json --limit 200
 In der GUI: **Ansicht > Ditto-Konsole** (Umschalt+F9) oder der Knopf **Konsole** der Werkzeugleiste zeigt die Konsole
 neben dem Chat, mit **Zeigen:** (`--source`), **Suchen:** (`--search`), **Mitlaufen anhalten**, **Ansicht leeren**
 (nur die Ansicht) und **Kopieren**.
+
+### ditto context
+
+```
+llm-cli ditto context [--refresh] [--json]
+llm-cli ditto context original [VERDICHTUNGS_ID]
+llm-cli ditto context undo [--yes]
+```
+
+Zeigt das Kontextfenster des Modells, das Dittos Chat nutzt, und woher die Zahl kommt: der eigene Bericht des lokalen
+Servers (`/props`, mit dem `-c`, mit dem er gestartet wurde), der Server des Anbieters (die Models-API von Claude;
+die Modellliste von OpenRouter oder vLLM; das geladene Modell von Ollama; LM Studio), die festgehaltene Tabelle mit
+Quelle und Datum, eine vorsichtige Vorgabe oder deine Einstellung `ai_context_window`. Dann, wie die Token für dieses
+Modell gezählt werden (die Schätzung seiner Familie, kalibriert an den eigenen Zahlen des Anbieters, oder sein
+Tokenizer), das gespeicherte Chat-Gespräch gemessen am Budget eines Turns und die Verdichtungen, die mit ihrem
+Original gespeichert sind.
+
+| Option | Bedeutung |
+|---|---|
+| `--refresh` | Den Server des Anbieters erneut fragen, statt seine Antwort der letzten 24 Stunden zu nehmen. |
+| `--json` | Dasselbe als JSON: `window`, `counting`, `calibration`, `messages`, `budget`, `compactions`. |
+
+`ditto context original` druckt das ursprüngliche Gespräch der neuesten Verdichtung (oder von `VERDICHTUNGS_ID`, etwa
+`c2`) mit der Zusammenfassung, mit der Ditto weitergemacht hat. `ditto context undo` setzt die ursprünglichen
+Nachrichten der neuesten Verdichtung nach deinem Ja wieder vor das, was danach gesagt wurde (`--yes` überspringt die
+Frage); die nächste Frage entscheidet neu, ob das Gespräch passt.
+
+```bash
+llm-cli ditto context
+llm-cli ditto context --refresh --json
+llm-cli ditto context original
+llm-cli ditto context undo
+```
+
+In der GUI: **Ditto > Erweitert > Kontextfenster...** öffnet Einstellungen > Sprachmodell > Kontextfenster, mit
+**Erneut prüfen** (`--refresh`), **Original zeigen...** und **Verdichtung rückgängig...** (fragt vorher, Nein als
+Vorgabe).
 
 ### ditto eval
 

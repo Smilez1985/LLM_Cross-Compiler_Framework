@@ -157,6 +157,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `ditto setup` | Set the tool permissions (the same choices as the GUI's first-start dialog) |
 | `ditto ask` | Ask Ditto one question |
 | `ditto console` | What Ditto and AI apps type and do, as the Ditto console beside the chat shows it; `--follow` keeps printing |
+| `ditto context` | The context window of Ditto's chat model with its source, the token counting, and the compactions (`original`, `undo`) |
 | `ditto eval` | Grade Ditto on fixed test cases, or the knowledge-base search |
 | `ditto runtime install/start/status/stop/import/export/prune` | The managed local model server (llama.cpp, built on this machine) for offline mode |
 | `ditto runtime ensure` | Install Ditto's local model server when it is not there, bare metal or in Docker; `--force` switches the mode |
@@ -1572,6 +1573,41 @@ llm-cli ditto console --json --limit 200
 In the GUI: **View > Ditto Console** (Shift+F9) or the toolbar's **Console** button shows the console beside the
 chat, with **Show:** (`--source`), **Search:** (`--search`), **Pause Scrolling**, **Clear View** (the view only) and
 **Copy**.
+
+### ditto context
+
+```
+llm-cli ditto context [--refresh] [--json]
+llm-cli ditto context original [COMPACTION_ID]
+llm-cli ditto context undo [--yes]
+```
+
+Shows the context window of the model Ditto's chat uses and where the number comes from: the local server's own
+report (`/props`, with the `-c` it was started with), the provider's server (Claude's Models API; the model list of
+OpenRouter or vLLM; Ollama's loaded model; LM Studio), the pinned table with its source and date, a conservative
+default, or your setting `ai_context_window`. Then how tokens are counted for that model (the estimate of its family,
+calibrated on the provider's own numbers, or its tokenizer), the saved chat conversation against the turn budget,
+and the compactions kept with their originals.
+
+| Option | Meaning |
+|---|---|
+| `--refresh` | Ask the provider's server again instead of using its answer of the last 24 hours. |
+| `--json` | The same as JSON: `window`, `counting`, `calibration`, `messages`, `budget`, `compactions`. |
+
+`ditto context original` prints the original conversation of the newest compaction (or of `COMPACTION_ID`, such as
+`c2`) with the summary Ditto continued with. `ditto context undo` puts the original messages of the newest compaction
+back in front of what was said after it, after your yes (`--yes` skips the question); the next question decides
+again whether the conversation fits.
+
+```bash
+llm-cli ditto context
+llm-cli ditto context --refresh --json
+llm-cli ditto context original
+llm-cli ditto context undo
+```
+
+In the GUI: **Ditto > Advanced > Context Window...** opens Settings > Language model > Context window, with
+**Check Again** (`--refresh`), **Show Original...** and **Undo Compaction...** (it asks first, No by default).
 
 ### ditto eval
 

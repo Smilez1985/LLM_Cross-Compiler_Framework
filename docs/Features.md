@@ -1162,10 +1162,37 @@ system prompt. The system prompt tells the model that such blocks are data, not 
 ### Chat history
 
 The GUI chat is saved per user in `~/.llm-framework/chat_history.json` (readable only by you). The conversation is
-append-only: earlier turns are never edited. When it grows beyond the setting `chat_context_limit` (default 4096
-tokens, estimated at four characters per token), Ditto summarizes it in a separate request and continues in a new
-conversation that starts with the summary. The window keeps up to 500 entries. Histories of earlier versions are
+append-only: earlier turns are never edited. The window keeps up to 500 entries. Histories of earlier versions are
 migrated. `llm-cli ditto ask` does not use the history.
+
+### The context window, counting and compaction
+
+Every turn fits the real context window of the model Ditto talks to. **The window** comes from the model's own
+server where it tells: Ditto's local server reports the context it was started with (`/props`; the context is what
+the measured memory leaves next to the model), Claude's Models API names each model's window, and OpenRouter, Ollama
+(the loaded model), LM Studio, vLLM and llama.cpp servers name theirs. An answer is kept for 24 hours. Where the
+server does not tell (OpenAI, Gemini), a table in the repository with its source and date is used, else a
+conservative default of 32768 tokens that says it is one (Ditto's tool definitions alone take about 20,000
+tokens; a question that seems too long for a guessed window is sent anyway, with everything earlier summarized). The setting `ai_context_window` sets the window of such a
+model yourself (it never goes above what a server reports).
+
+**Counting**: the tokens are estimated per model family with a ratio measured on llama.cpp's tokenizers, and every
+answer's own token numbers correct the estimate. When a turn reaches half of the window, the exact count is asked
+where it costs nothing: the local llama.cpp server's tokenizer, or Claude's free token count. You always see which
+method counted.
+
+**The budget**: the answer keeps a quarter of the window (at most 16,000 tokens, at most the model's longest answer),
+5 % stay as a margin, then come the system text, the tools and your question; the rest is for knowledge excerpts
+and the earlier conversation. `chat_context_limit` (0, the default, means automatic) lowers that room if you want.
+A question that does not fit even alone is refused with the numbers.
+
+**Compaction**: when the earlier turns need more than 75 % of their room, Ditto keeps the newest turns word for word
+(up to 40 % of the room) and has the model summarize the older ones into a short note of decisions, open tasks and
+facts, which stands in front of the kept turns. The chat shows a notice, and the Ditto console a line of what was
+done with the numbers. The original is never lost: **Ditto > Advanced > Context Window...** (Settings > Language
+model > Context window) shows the window, its source, the counting and the compactions, with **Show Original...** and
+**Undo Compaction...**; the same on the command line: `llm-cli ditto context`, `ditto context original`, `ditto
+context undo`. AI apps read the window, read-only, in `get_status`.
 
 ### The chat panel
 
@@ -2145,8 +2172,9 @@ and 1. Candidates below a relevance floor are dropped, so Ditto gets no excerpt 
 ### Excerpt budget
 
 When Ditto adds knowledge-base excerpts to a request itself (chat without tools, healing analyses, module proposals,
-build recommendations), they take at most a third of `chat_context_limit` (default 4096 tokens, so about 1365
-tokens, estimated at three characters per token). The best excerpts come first. One that does not fit is skipped,
+build recommendations), they take at most 2000 tokens, in a chat turn at most a third of the turn's room for excerpts
+and history, and with a `chat_context_limit` you set at most a third of it (estimated at three characters per
+token). The best excerpts come first. One that does not fit is skipped,
 so a smaller later one can still come along. If the first excerpt alone is too long, it is shortened at a line and
 marked `[…]`; a code block that is open at the cut is closed, so the rest of the prompt does not read as code.
 

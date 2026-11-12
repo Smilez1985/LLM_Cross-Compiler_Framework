@@ -1275,10 +1275,40 @@ sind, keine Anweisungen.
 ### Chatverlauf
 
 Der GUI-Chat wird pro Benutzer in `~/.llm-framework/chat_history.json` gespeichert (nur für dich lesbar). Das Gespräch
-wird nur fortgeschrieben: Frühere Turns werden nie bearbeitet. Wächst es über die Einstellung `chat_context_limit`
-hinaus (Standard 4096 Tokens, geschätzt mit vier Zeichen pro Token), fasst Ditto es in einer eigenen Anfrage
-zusammen und setzt in einem neuen Gespräch fort, das mit der Zusammenfassung beginnt. Das Fenster behält bis zu 500
-Einträge. Verläufe früherer Versionen werden übernommen. `llm-cli ditto ask` nutzt den Verlauf nicht.
+wird nur fortgeschrieben: Frühere Turns werden nie bearbeitet. Das Fenster behält bis zu 500 Einträge. Verläufe
+früherer Versionen werden übernommen. `llm-cli ditto ask` nutzt den Verlauf nicht.
+
+### Das Kontextfenster, das Zählen und die Verdichtung
+
+Jeder Turn passt ins echte Kontextfenster des Modells, mit dem Ditto spricht. **Das Fenster** kommt vom eigenen
+Server des Modells, wo er es sagt: Dittos lokaler Server meldet den Kontext, mit dem er gestartet wurde (`/props`;
+der Kontext ist, was der gemessene Speicher neben dem Modell übrig lässt), die Models-API von Claude nennt das
+Fenster jedes Modells, und Server von OpenRouter, Ollama (das geladene Modell), LM Studio, vLLM und llama.cpp nennen
+ihres. Eine Antwort wird 24 Stunden gemerkt. Wo der Server es nicht sagt (OpenAI, Gemini), gilt eine Tabelle im
+Repository mit Quelle und Datum, sonst eine vorsichtige Vorgabe von 32768 Token, die sagt, dass sie eine ist (die Tool-Definitionen
+von Ditto allein brauchen etwa 20.000 Token; eine Frage, die für ein geschätztes Fenster zu lang scheint, geht trotzdem
+hinaus, mit allem Früheren zusammengefasst). Mit der
+Einstellung `ai_context_window` setzt du das Fenster eines solchen Modells selbst (nie über dem, was ein Server
+meldet).
+
+**Zählen**: die Token werden je Modellfamilie mit einem Verhältnis geschätzt, das an den Tokenizern von llama.cpp
+gemessen wurde, und die eigenen Token-Zahlen jeder Antwort korrigieren die Schätzung. Erreicht ein Turn die Hälfte
+des Fensters, wird die genaue Zahl gefragt, wo sie nichts kostet: beim Tokenizer des lokalen llama.cpp-Servers oder
+bei der kostenlosen Zählung von Claude. Du siehst immer, welche Methode gezählt hat.
+
+**Das Budget**: die Antwort behält ein Viertel des Fensters (höchstens 16.000 Token, höchstens die längste Antwort des
+Modells), 5 % bleiben als Reserve, dann kommen Systemtext, Tools und deine Frage; der Rest ist für Auszüge aus der
+Wissensbasis und das frühere Gespräch. `chat_context_limit` (0, die Vorgabe, heißt automatisch) senkt diesen Platz,
+wenn du willst. Eine Frage, die schon allein nicht passt, wird mit den Zahlen abgelehnt.
+
+**Verdichtung**: brauchen die früheren Turns mehr als 75 % ihres Platzes, behält Ditto die neuesten Turns Wort für
+Wort (bis zu 40 % des Platzes) und lässt das Modell die älteren zu einer kurzen Notiz aus Entscheidungen, offenen
+Aufgaben und Fakten zusammenfassen, die vor den behaltenen Turns steht. Der Chat zeigt einen Hinweis, die
+Ditto-Konsole eine Zeile mit dem, was getan wurde, und den Zahlen. Das Original geht nie verloren: **Ditto > Erweitert
+> Kontextfenster...** (Einstellungen > Sprachmodell > Kontextfenster) zeigt das Fenster, seine Quelle, das Zählen und
+die Verdichtungen, mit **Original zeigen...** und **Verdichtung rückgängig...**; dasselbe auf der Kommandozeile:
+`llm-cli ditto context`, `ditto context original`, `ditto context undo`. KI-Apps lesen das Fenster, nur lesend, in
+`get_status`.
 
 ### Der Chat-Bereich
 
@@ -2364,8 +2394,9 @@ unpassenden.
 ### Budget für Auszüge
 
 Wenn Ditto einer Anfrage selbst Auszüge aus der Wissensbasis beifügt (Chat ohne Tools, Healing-Analysen,
-Modulvorschläge, Build-Empfehlungen), nehmen sie höchstens ein Drittel von `chat_context_limit` ein (Standard 4096
-Tokens, also etwa 1365 Tokens, geschätzt mit drei Zeichen pro Token). Die besten Auszüge kommen zuerst. Einer, der
+Modulvorschläge, Build-Empfehlungen), nehmen sie höchstens 2000 Token ein, in einem Chat-Turn höchstens ein Drittel
+seines Platzes für Auszüge und Verlauf und mit einem gesetzten `chat_context_limit` höchstens ein Drittel davon
+(geschätzt mit drei Zeichen pro Token). Die besten Auszüge kommen zuerst. Einer, der
 nicht mehr passt, wird übersprungen, sodass ein kleinerer späterer noch mitkommen kann. Ist schon der erste Auszug zu
 lang, wird er an einer Zeile gekürzt und mit `[…]` markiert; ein Codeblock, der an der Schnittstelle offen ist, wird
 geschlossen, damit der Rest des Prompts nicht als Code gelesen wird.
