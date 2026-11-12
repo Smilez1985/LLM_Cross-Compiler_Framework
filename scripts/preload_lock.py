@@ -22,11 +22,12 @@ this computer and wait for the archive's path. Needs only Python 3 (the standard
     preload_lock.py open --archive FILE --out FOLDER [--sha256 HEX] [--kind installer|build]
         checks a preload archive (only folders and files under llmcf-preload/, SHA256SUMS complete and right, the kind
         asked for) and unpacks it into FOLDER; prints its manifest and the archive's sha256 (install.bat reads it).
-    preload_lock.py pack-build --spec SPEC [--out FOLDER]
+    preload_lock.py pack-build --spec SPEC [--out FOLDER] [--image-file FILE ...]
         a build's preload (kind=build): the recipe SPEC (manifest.base, sources.json) that llmcf wrote for an offline
         build's missing sources; fetches its base images, llama.cpp, Python packages, downloads and the files taken
-        from source images (image_files.py, next to this file) and writes
-        llmcf-preload-build-TARGET-ARCH-RECIPE.tar.gz into FOLDER. The scripts llmcf writes for a build run it.
+        from source images (image_files.py, next to this file; a source image published only as a file is read from
+        the --image-file FILE whose sha256 it names) and writes llmcf-preload-build-TARGET-ARCH-RECIPE.tar.gz into
+        FOLDER. The scripts llmcf writes for a build run it.
     preload_lock.py pip-args --target T --python X.Y [--glibc 2.NN]     the pip download options, one per line
     preload_lock.py this-computer                                       target, Python version, glibc of this computer
 
@@ -756,8 +757,23 @@ def _bundle_llama(llama: dict, dest: Path, work: Path) -> None:
         raise PreloadError("git could not write the llama.cpp bundle")
 
 
-def pack_build(spec: Path, out: Path) -> Path:
-    """Fetches what a build's recipe names and writes the build's preload into `out`."""
+def _image_file_for(source: dict, given: dict) -> Path:
+    """The file given with --image-file whose sha256 is the one the recipe's source image names."""
+    archive = source.get("archive") or {}
+    pin = str(archive.get("sha256") or "")
+    path = given.get(pin)
+    if path is None:
+        name = f"{archive.get('name')} " if archive.get("name") else ""
+        raise PreloadError(f"the recipe takes files from the image file {name}(sha256 {pin}), which its vendor "
+                           "publishes only as a file: download it and give it with --image-file FILE (-ImageFile FILE "
+                           "in PowerShell)" + (f"; the {len(given)} file(s) given have other sha256 sums" if given
+                                               else ""))
+    return path
+
+
+def pack_build(spec: Path, out: Path, image_files_given=()) -> Path:
+    """Fetches what a build's recipe names and writes the build's preload into `out`. `image_files_given`: the files
+    of source images published only as a file (each matched by its sha256)."""
     for name in BUILD_SPEC_FILES:
         if not (spec / name).is_file():
             raise PreloadError(f"{name} is missing in {spec}")
@@ -812,13 +828,26 @@ def pack_build(spec: Path, out: Path) -> Path:
         for item in recipe.get("downloads") or []:
             say(f"fetching {item['name']} (size and sha256 pinned)...")
             _fetch(item["url"], top / "files" / item["name"], item["sha256"], int(item.get("size") or 0))
+        given = {}
+        for path in image_files_given or ():
+            if not Path(path).is_file():
+                raise PreloadError(f"--image-file {path}: no such file")
+            given[images.file_sha256(path)] = Path(path)
         for source in recipe.get("source_images") or []:
             wanted = {f["path"]: f["sha256"] for f in source.get("files") or []}
-            say(f"taking {len(wanted)} file(s) from {source['image']} (its layers read, nothing run; the rest "
-                "discarded)...")
+            archive = source.get("archive")
             try:
-                images.take_files(source["image"], wanted, top / "image-files", source.get("platform") or
-                                  platform_name)
+                if archive:
+                    path = _image_file_for(source, given)
+                    say(f"taking {len(wanted)} file(s) from the image file {path.name} (its sha256 checked, its layers "
+                        "read, nothing run or loaded; the rest discarded)...")
+                    images.take_archive_files(path, archive["sha256"], wanted, top / "image-files",
+                                              source.get("platform") or platform_name, archive.get("config") or "")
+                else:
+                    say(f"taking {len(wanted)} file(s) from {source['image']} (its layers read, nothing run; the rest "
+                        "discarded)...")
+                    images.take_files(source["image"], wanted, top / "image-files", source.get("platform") or
+                                      platform_name)
             except images.ImageFilesError as error:
                 raise PreloadError(str(error))
             personal = personal or any(not f.get("redistributable") for f in source.get("files") or [])
@@ -859,13 +888,23 @@ def write_build_scripts(spec: Path, out: Path, what: str):
     sh = ["#!/bin/sh",
           "# llmcf preload of a build, written by llmcf for the computer without a network.",
           "# Run it on a computer WITH a network (Linux or macOS, Python 3 with pip; git for llama.cpp):",
-          "#   sh preload.sh [--out FOLDER]",
+          "#   sh preload.sh [--out FOLDER] [--image-file FILE ...]",
           f"# It fetches: {what}.",
           "# It writes the archive (.tar.gz) into the current folder (or FOLDER); carry it back and give llmcf its",
           "# path. The recipe and the programs are inside this script.",
           "set -eu",
           'out="$PWD"',
-          'if [ "${1:-}" = "--out" ] && [ -n "${2:-}" ]; then out="$2"; fi',
+          # the options; each --image-file FILE is moved to the end of "$@" and handed on as it is
+          'n=$#',
+          'while [ "$n" -gt 0 ]; do',
+          '  if [ "$n" -lt 2 ]; then echo "preload: $1 needs a value" >&2; exit 2; fi',
+          '  case "$1" in',
+          '    --out) out="$2" ;;',
+          '    --image-file) set -- "$@" --image-file "$2" ;;',
+          '    *) echo "preload: unknown option $1 (--out FOLDER, --image-file FILE)" >&2; exit 2 ;;',
+          '  esac',
+          '  shift 2; n=$((n - 2))',
+          'done',
           'py="${PRELOAD_PYTHON:-}"',
           'if [ -z "$py" ]; then for c in python3 python; do if command -v "$c" > /dev/null 2>&1; then py="$c"; break; fi; '
           'done; fi',
@@ -877,15 +916,16 @@ def write_build_scripts(spec: Path, out: Path, what: str):
         sh += [f"cat > \"$work/spec/{name}\" <<'{end}'", text.rstrip("\n"), end]
     for name, text in programs.items():
         sh += [f"cat > \"$work/{name}\" <<'{end}'", text.rstrip("\n"), end]
-    sh += ['"$py" -I "$work/preload_lock.py" pack-build --spec "$work/spec" --out "$out"', ""]
+    sh += ['"$py" -I "$work/preload_lock.py" pack-build --spec "$work/spec" --out "$out" "$@"', ""]
     ps = ["# llmcf preload of a build, written by llmcf for the computer without a network.",
           "# Run it on a computer WITH a network (Windows, Python 3 with pip; git for llama.cpp):",
-          "#   powershell -ExecutionPolicy Bypass -File preload.ps1 [-Out FOLDER]",
+          "#   powershell -ExecutionPolicy Bypass -File preload.ps1 [-Out FOLDER] [-ImageFile FILE[,FILE...]]",
           f"# It fetches: {what}.",
           "# It writes the archive (.tar.gz) into the current folder (or FOLDER); carry it back and give llmcf its",
           "# path. The recipe and the programs are inside this script.",
-          "param([string]$Out = (Get-Location).Path)",
+          "param([string]$Out = (Get-Location).Path, [string[]]$ImageFile = @())",
           '$ErrorActionPreference = "Stop"',
+          '$Extra = @(); foreach ($F in $ImageFile) { $Extra += "--image-file"; $Extra += $F }',
           "$Py = $null; $PyArgs = @()",
           "if ($env:PRELOAD_PYTHON) { $Py = $env:PRELOAD_PYTHON }",
           'elseif (Get-Command "py" -ErrorAction SilentlyContinue) { $Py = "py"; $PyArgs = @("-3") }',
@@ -903,7 +943,7 @@ def write_build_scripts(spec: Path, out: Path, what: str):
     for name, text in programs.items():
         ps += [f'Write-Part (Join-Path $Work "{name}") @\'', text.rstrip("\n"), "'@"]
     ps += ["try {",
-           '    & $Py @PyArgs -I (Join-Path $Work "preload_lock.py") pack-build --spec $Spec --out $Out',
+           '    & $Py @PyArgs -I (Join-Path $Work "preload_lock.py") pack-build --spec $Spec --out $Out @Extra',
            "    $Code = $LASTEXITCODE",
            "} finally {",
            "    Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue",
@@ -944,6 +984,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("pack-build")
     p.add_argument("--spec", type=Path, required=True)
     p.add_argument("--out", type=Path, default=Path("."))
+    p.add_argument("--image-file", type=Path, action="append", default=[])
     p = sub.add_parser("pip-args")
     p.add_argument("--target", required=True)
     p.add_argument("--python", required=True)
@@ -966,7 +1007,7 @@ def main(argv=None) -> int:
             print("".join(f"{k}={v}\n" for k, v in open_archive(args.archive, args.out, args.sha256,
                                                                     args.kind).items()), end="")
         elif args.command == "pack-build":
-            pack_build(args.spec, args.out)
+            pack_build(args.spec, args.out, args.image_file)
         else:
             sh, ps, what = write_scripts(args.spec, args.out)
             print(f"{sh}\n{ps}\n{what}")

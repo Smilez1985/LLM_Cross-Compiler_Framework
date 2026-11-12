@@ -10,7 +10,8 @@ the one plan the build and the CLI use; in a worker thread, because the locality
 on the GUI thread), lets the person set the build sources in the own network (Core/local_network.set_build_source,
 person-only) and moves an image to or from a file with its sha256 (build_image.export_image / import_image, actor
 "gui"). It writes the build's preload scripts for what an offline build lacks and takes an archive in
-(Core/build_preload.py); PreloadDialog asks the same before the Builder starts an offline build. Every text is plain
+(Core/build_preload.py), lists the target's source images and takes the files of one published only as a file from
+the file the person chooses; PreloadDialog asks the same before the Builder starts an offline build. Every text is plain
 text; nothing is deleted here.
 """
 
@@ -94,6 +95,12 @@ class BuildImageDialog(QDialog):
         preload_row.addWidget(self.btn_preload_write)
         preload_row.addWidget(self.btn_preload_take)
         layout.addLayout(preload_row)
+        source_row = QHBoxLayout()
+        self.btn_source_list = self._button("btn_bimg_source_list", "bimg.source.list", self.list_source_images)
+        self.btn_image_file = self._button("btn_bimg_image_file", "bimg.source.take", self.take_image_file)
+        source_row.addWidget(self.btn_source_list)
+        source_row.addWidget(self.btn_image_file)
+        layout.addLayout(source_row)
         form_import = QFormLayout()
         self.txt_sha256 = QLineEdit(self)
         self.txt_sha256.setObjectName("txt_bimg_sha256")
@@ -152,7 +159,8 @@ class BuildImageDialog(QDialog):
     def _button(self, name: str, key: str, slot: Callable[[], Any]) -> QPushButton:
         button = QPushButton(button_text(self._t(key)), self)
         button.setObjectName(name)
-        button.clicked.connect(slot)
+        # without its `checked` argument: a slot with an optional path would take False for it and do nothing
+        button.clicked.connect(lambda _checked=False: slot())
         return button
 
     def _targets(self):
@@ -195,7 +203,7 @@ class BuildImageDialog(QDialog):
         self._requests.pop(kind, None)
         try:
             self.txt_result.setPlainText(str(result[1]))
-            if kind in ("import", "export", "preload-take"):
+            if kind in ("import", "export", "preload-take", "image-file"):
                 self.refresh_images()
         except RuntimeError:   # the window was closed meanwhile
             pass
@@ -312,6 +320,43 @@ class BuildImageDialog(QDialog):
             from orchestrator.Core.build_preload import take_in
             return "\n".join(take_in(framework, target, Path(path), actor="gui", sha256=sha256).lines())
         self._in_worker("preload-take", work)
+
+    def list_source_images(self) -> None:
+        """The target's source images: by registry digest or by the file's sha256, and the files in the cache."""
+        framework, target, lang = self.framework, self.target(), self.lang
+        self._in_worker("source-list", lambda: source_images_text(framework, target, lang))
+
+    def take_image_file(self, path: Optional[str] = None) -> None:
+        """Takes the named files from an image its vendor publishes only as a file (Core/build_preload.take_image_file):
+        the file's sha256 matched first, every layer checked, nothing loaded or run, the file not kept."""
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, self._t("bimg.source.take.title"), str(Path.home()),
+                                                  "Image archive (*.tar *.tar.gz *.tgz);;All files (*)")
+        if not path:
+            return
+        framework, target = self.framework, self.target()
+
+        def work() -> str:
+            from orchestrator.Core.build_preload import image_file_in
+            return "\n".join(image_file_in(framework, target, Path(path)).lines())
+        self._in_worker("image-file", work)
+
+
+def source_images_text(framework: Any, target: str, lang: Optional[str] = None) -> str:
+    """The target's source images as the person reads them."""
+    from orchestrator.Core.build_preload import source_images_of
+    rows = source_images_of(framework, target)
+    if not rows:
+        return ui_text("bimg.source.none", lang, target=target)
+    lines = []
+    for row in rows:
+        how = (ui_text("bimg.source.kind.file", lang, sha256=row["pin"]) if row["kind"] == "file"
+               else ui_text("bimg.source.kind.registry", lang))
+        lines.append(ui_text("bimg.source.row", lang, label=row["label"], how=how, platform=row["platform"],
+                             cached=row["cached"], files=row["files"]))
+        if row["kind"] == "file" and row["cached"] < row["files"]:
+            lines.append(ui_text("bimg.source.give", lang))
+    return "\n".join(lines)
 
 
 def written_text(framework: Any, target: str, gpu: bool, lang: Optional[str] = None) -> str:
@@ -463,4 +508,4 @@ def open_build_images(window, select: Optional[str] = None) -> BuildImageDialog:
 
 
 __all__ = ["BuildImageDialog", "PreloadDialog", "SOURCE_FIELDS", "open_build_images", "plan_text",
-           "preload_before_build", "written_text"]
+           "preload_before_build", "source_images_text", "written_text"]

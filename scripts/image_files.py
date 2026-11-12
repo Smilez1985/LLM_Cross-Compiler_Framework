@@ -15,11 +15,16 @@ a container engine; the build (Core/build_preload.reader) loads it for an online
   is decided. A named file must be a regular file (a hard link inside its layer counts); a symbolic link, a folder, a
   deleted or a missing file is refused, naming it. Each copy is checked against its pinned sha256 and stored under
   that sha256; the rest of the image is discarded (each layer is deleted once read).
+- take_archive_files(): the same for an image published only as a file (a `docker save` archive or an OCI image
+  layout archive), pinned by the file's sha256 (and optionally its config digest): the sha256 checked before anything
+  is read, the image of the platform chosen, every document and layer checked against its digest and the config's
+  diff_ids, the layers read from inside the archive by the same code (never unpacked, loaded or run).
 - read_files() and read_saved(): small text files of an image whose content is not pinned (its os-release and dpkg
   status, for the build's distribution packages), read the same way from its layers, from the layer files or from a
   `docker save` archive; a link inside the image is followed once.
 """
 
+import gzip
 import hashlib
 import json
 import os
@@ -298,6 +303,54 @@ def _decide(path: str, names: dict):
     return None
 
 
+def _wanted(files: dict) -> dict:
+    wanted = {normal_path(p): str(s).lower() for p, s in files.items()}
+    for path, sha in wanted.items():
+        if not path or not SHA256.match(sha):
+            raise ImageFilesError(f"{path or '/'}: a file path and its sha256 (64 hex characters)")
+    return wanted
+
+
+def _take_layers(label: str, wanted: dict, out: Path, layers) -> dict:
+    """The named files `wanted` ({path: sha256}) from `layers` (paths or readable file objects of layer tars, from the
+    top down, each checked by the caller before it is given): the top layer that decides a path wins, a whiteout or
+    an opaque folder hides it, only a regular file is taken, each copy checked against its sha256 into `out`. Reading
+    stops once every named file is decided."""
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    found, problems = {}, {}
+    remaining = iter(layers)
+    while True:
+        open_ = [p for p in wanted if p not in found and p not in problems]
+        layer = next(remaining, None) if open_ else None   # the next layer is fetched or checked only when needed
+        if layer is None:
+            break
+        try:
+            tar = tarfile.open(fileobj=layer, mode="r:*") if hasattr(layer, "read") else tarfile.open(layer, "r:*")
+            with tar:
+                names = {}
+                for member in tar.getmembers():
+                    names[normal_path(member.name)] = member
+                for wanted_path in open_:
+                    verdict = _decide(wanted_path, names)
+                    if verdict is None:
+                        continue
+                    kind, detail = verdict
+                    if kind != "file":
+                        problems[wanted_path] = detail
+                        continue
+                    found[wanted_path] = _copy(tar, detail, wanted[wanted_path], out, wanted_path, problems)
+        except (tarfile.TarError, OSError, EOFError) as error:
+            raise ImageFilesError(f"{label}: a layer is not a readable tar archive ({error})") from None
+    found = {p: v for p, v in found.items() if v is not None}
+    for path in wanted:
+        if path not in found and path not in problems:
+            problems[path] = "is not in the image"
+    if problems:
+        raise ImageFilesError(f"{label}: " + "; ".join(f"/{p} {why}" for p, why in sorted(problems.items())))
+    return found
+
+
 def take_files(ref: str, files: dict, out: Path, platform: str = "", opener=None, layer_source=None) -> dict:
     """Copies the files `files` ({path in the image: sha256}) of the image `ref` (pinned by digest) for `platform`
     into the folder `out`, each named by its sha256. Returns {path: {"sha256", "mode", "size"}}. ImageFilesError
@@ -305,56 +358,24 @@ def take_files(ref: str, files: dict, out: Path, platform: str = "", opener=None
     (tests): a callable giving (manifest digest, [layer files from the bottom up]) instead of the registry."""
     if not parse_reference(ref)[3]:
         raise ImageFilesError(f"{ref}: a source image is pinned by its digest (name@sha256:...)")
-    wanted = {normal_path(p): str(s).lower() for p, s in files.items()}
-    for path, sha in wanted.items():
-        if not path or not SHA256.match(sha):
-            raise ImageFilesError(f"{path or '/'}: a file path and its sha256 (64 hex characters)")
-    out = Path(out)
-    out.mkdir(parents=True, exist_ok=True)
-    found, problems = {}, {}
+    wanted = _wanted(files)
     with tempfile.TemporaryDirectory(prefix="llmcf-image-files-") as work:
         work = Path(work)
         if layer_source is not None:
-            layers = list(reversed(layer_source()))
-            fetch = None
-        else:
-            registry, manifest, _digest = resolve(ref, platform, opener)
-            layers = [str(layer.get("digest") or "") for layer in reversed(manifest.get("layers") or [])]
-            fetch = registry
-        for number, layer in enumerate(layers):
-            open_ = [p for p in wanted if p not in found and p not in problems]
-            if not open_:
-                break
-            if fetch is not None:
-                path = fetch.blob(layer, work / f"layer-{number}")
-            else:
-                path = Path(layer)
-            try:
-                with tarfile.open(path, "r:*") as tar:
-                    names = {}
-                    for member in tar.getmembers():
-                        names[normal_path(member.name)] = member
-                    for wanted_path in open_:
-                        verdict = _decide(wanted_path, names)
-                        if verdict is None:
-                            continue
-                        kind, detail = verdict
-                        if kind != "file":
-                            problems[wanted_path] = detail
-                            continue
-                        found[wanted_path] = _copy(tar, detail, wanted[wanted_path], out, wanted_path, problems)
-            except (tarfile.TarError, OSError, EOFError) as error:
-                raise ImageFilesError(f"{ref}: a layer is not a readable tar archive ({error})") from None
-            finally:
-                if fetch is not None:
-                    path.unlink(missing_ok=True)
-    found = {p: v for p, v in found.items() if v is not None}
-    for path in wanted:
-        if path not in found and path not in problems:
-            problems[path] = "is not in the image"
-    if problems:
-        raise ImageFilesError(f"{ref}: " + "; ".join(f"/{p} {why}" for p, why in sorted(problems.items())))
-    return found
+            return _take_layers(ref, wanted, out, list(reversed(layer_source())))
+        registry, manifest, _digest = resolve(ref, platform, opener)
+        digests = [str(layer.get("digest") or "") for layer in reversed(manifest.get("layers") or [])]
+
+        def fetched():
+            for number, digest in enumerate(digests):
+                path = registry.blob(digest, work / f"layer-{number}")
+                yield path
+                path.unlink(missing_ok=True)   # each layer is deleted once read
+        layers = fetched()
+        try:
+            return _take_layers(ref, wanted, out, layers)
+        finally:
+            layers.close()
 
 
 def _copy(tar, member, sha: str, out: Path, path: str, problems: dict):
@@ -376,6 +397,318 @@ def _copy(tar, member, sha: str, out: Path, path: str, problems: dict):
         return None
     os.replace(part, out / sha)
     return {"sha256": sha, "mode": member.mode & 0o777, "size": size}
+
+
+# --- an image published only as a file (a docker save or OCI image layout archive) -----------------------------------
+
+MAX_ARCHIVE_ENTRIES = 10000
+MAX_LAYERS = 512
+MAX_LAYER_BYTES = 64 * 1024 * 1024 * 1024    # one uncompressed layer
+OCI_INDEX = "application/vnd.oci.image.index.v1+json"
+GZIP_MAGIC = b"\x1f\x8b"
+ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
+
+
+def file_sha256(path) -> str:
+    """The sha256 (64 hex characters) of the file `path`."""
+    check = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            check.update(block)
+    return check.hexdigest()
+
+
+def _platform_of(config: dict) -> str:
+    parts = [str(config.get("os") or "?"), str(config.get("architecture") or "?")]
+    if config.get("variant"):
+        parts.append(str(config["variant"]))
+    return "/".join(parts)
+
+
+def _json(data: bytes, what: str):
+    try:
+        return json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise ImageFilesError(f"{what} is not JSON") from None
+
+
+class ArchiveImage:
+    """One image of a `docker save` archive or an OCI image layout archive, pinned by the archive's sha256 (and
+    optionally by its config's digest), for one platform. Nothing is read before the file's sha256 is checked; the
+    archive is never unpacked: its table of contents is read and each part is read from inside it, every document
+    and layer checked against the digest that names it and every layer against the config's diff_ids. Use it as a
+    context manager; layers() gives the layers from the top down, each checked when it is reached."""
+
+    def __init__(self, path, sha256: str, platform: str = "", config: str = ""):
+        self.path = Path(path)
+        pin = str(sha256 or "").lower()
+        if not SHA256.match(pin):
+            raise ImageFilesError("an image file is pinned by its sha256 (64 hex characters)")
+        if config and not DIGEST.match(config):
+            raise ImageFilesError(f"{config}: the config digest is not sha256:<64 hex characters>")
+        self.label = f"the image file {self.path.name}"
+        if not self.path.is_file():
+            raise ImageFilesError(f"{self.label} does not exist")
+        found = file_sha256(self.path)
+        if found != pin:
+            raise ImageFilesError(f"{self.label} has the sha256 {found}, not the pinned {pin}; nothing in it was read")
+        self.platform = platform or host_platform()
+        self.config_pin = config
+        try:
+            self.tar = tarfile.open(self.path, "r:*")
+        except (tarfile.TarError, OSError, EOFError) as error:
+            raise ImageFilesError(f"{self.label} is not a tar archive ({error})") from None
+        try:
+            self._contents()
+            if "index.json" in self.members:
+                self.kind = "oci"
+                self._choose_oci()
+            elif "manifest.json" in self.members:
+                self.kind = "docker-save"
+                self._choose_saved()
+            else:
+                raise ImageFilesError(f"{self.label} is neither a docker save archive (manifest.json) nor an OCI "
+                                      "image layout (index.json)")
+            diff_ids = (self.config.get("rootfs") or {}).get("diff_ids") if isinstance(self.config, dict) else None
+            if not isinstance(diff_ids, list) or len(diff_ids) != len(self.layer_parts) \
+                    or not all(isinstance(d, str) and DIGEST.match(d) for d in diff_ids):
+                raise ImageFilesError(f"{self.label}: the image's config does not list one sha256 diff_id for each "
+                                      "layer")
+            if len(self.layer_parts) > MAX_LAYERS:
+                raise ImageFilesError(f"{self.label}: more than {MAX_LAYERS} layers")
+            self.diff_ids = diff_ids
+        except BaseException:
+            self.tar.close()
+            raise
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        self.tar.close()
+
+    # the archive's own table of contents
+
+    def _contents(self) -> None:
+        self.members = {}
+        count = 0
+        try:
+            for member in self.tar:
+                count += 1
+                if count > MAX_ARCHIVE_ENTRIES:
+                    raise ImageFilesError(f"{self.label} has more than {MAX_ARCHIVE_ENTRIES} entries")
+                if member.isdir():
+                    continue
+                name = normal_path(member.name)
+                if name in self.members:
+                    raise ImageFilesError(f"{self.label} names {name} twice")
+                self.members[name] = member
+        except (tarfile.TarError, OSError, EOFError) as error:
+            raise ImageFilesError(f"{self.label} is not a readable tar archive ({error})") from None
+        except ImageFilesError as error:
+            raise ImageFilesError(f"{self.label}: {error}" if self.label not in str(error) else str(error)) from None
+
+    def _member(self, name: str):
+        """The regular file `name` of the archive; a link is followed once, only to a regular file inside it."""
+        path = normal_path(name)
+        member = self.members.get(path)
+        if member is None:
+            raise ImageFilesError(f"{self.label} lacks {path}")
+        if member.issym() or member.islnk():
+            link = member.linkname.replace("\\", "/")
+            if link.startswith("/"):
+                raise ImageFilesError(f"{self.label}: {path} links outside the archive")
+            joined = posixpath.normpath(posixpath.join(posixpath.dirname(path), link) if member.issym() else link)
+            if joined == ".." or joined.startswith("../") or joined.startswith("/"):
+                raise ImageFilesError(f"{self.label}: {path} links outside the archive")
+            member = self.members.get(normal_path(joined))
+            if member is None or not member.isfile():
+                raise ImageFilesError(f"{self.label}: {path} links to {joined}, which is no file in the archive")
+        if not member.isfile():
+            raise ImageFilesError(f"{self.label}: {path} is not a regular file")
+        return member
+
+    def _open(self, name: str):
+        handle = self.tar.extractfile(self._member(name))
+        if handle is None:
+            raise ImageFilesError(f"{self.label}: {name} cannot be read")
+        return handle
+
+    def _document(self, name: str, digest: str = ""):
+        """A JSON document of the archive, checked against `digest` when one names it."""
+        member = self._member(name)
+        if member.size > MAX_MANIFEST:
+            raise ImageFilesError(f"{self.label}: {name} is larger than {MAX_MANIFEST // (1024 * 1024)} MB")
+        with self._open(name) as handle:
+            data = handle.read(MAX_MANIFEST + 1)
+        if digest and _sha256(data) != digest:
+            raise ImageFilesError(f"{self.label}: {name} has the digest {_sha256(data)}, not {digest}")
+        return _json(data, f"{self.label}: {name}"), _sha256(data)
+
+    @staticmethod
+    def _blob_name(digest: str) -> str:
+        if not DIGEST.match(str(digest or "")):
+            raise ImageFilesError("a descriptor without a sha256 digest")
+        return f"blobs/sha256/{digest.split(':', 1)[1]}"
+
+    # choosing the image of the platform
+
+    def _pick(self, candidates: list, seen: list) -> None:
+        """candidates: [(config dict, config digest, layer parts)] of the wanted platform."""
+        if self.config_pin:
+            pinned = [c for c in candidates if c[1] == self.config_pin]
+            if not pinned:
+                has = f" (it has: {', '.join(sorted(set(seen)))})" if seen else ""
+                raise ImageFilesError(f"{self.label} has no image with the config {self.config_pin} for "
+                                      f"{self.platform}{has}")
+            candidates = pinned[:1]
+        unique = {c[1]: c for c in candidates}
+        if not unique:
+            raise ImageFilesError(f"{self.label} has no image for {self.platform}"
+                                  + (f" (it has: {', '.join(sorted(set(seen)))})" if seen else ""))
+        if len(unique) > 1:
+            raise ImageFilesError(f"{self.label} has {len(unique)} images for {self.platform}; name the one meant by "
+                                  "its config digest (config)")
+        self.config, self.config_digest, self.layer_parts = next(iter(unique.values()))
+
+    def _choose_saved(self) -> None:
+        listing, _digest = self._document("manifest.json")
+        if not isinstance(listing, list) or not listing or len(listing) > 64:
+            raise ImageFilesError(f"{self.label}: manifest.json lists no image")
+        candidates, seen = [], []
+        for entry in listing:
+            if not isinstance(entry, dict) or not isinstance(entry.get("Layers"), list):
+                raise ImageFilesError(f"{self.label}: manifest.json has an entry without its layers")
+            name = normal_path(str(entry.get("Config") or ""))
+            config, digest = self._document(name)
+            hexname = name[len("blobs/sha256/"):] if name.startswith("blobs/sha256/") else \
+                name[:-len(".json")] if name.endswith(".json") else ""
+            if SHA256.match(hexname) and digest != f"sha256:{hexname}":
+                raise ImageFilesError(f"{self.label}: the config {name} has the digest {digest}")
+            if not isinstance(config, dict):
+                raise ImageFilesError(f"{self.label}: the config {name} is not an image config")
+            seen.append(_platform_of(config))
+            if not _platform_matches(config, self.platform):
+                continue
+            parts = []
+            for layer in entry["Layers"]:
+                layer_name = normal_path(str(layer))
+                raw = layer_name[len("blobs/sha256/"):] if layer_name.startswith("blobs/sha256/") else ""
+                parts.append((layer_name, f"sha256:{raw}" if SHA256.match(raw) else "", ""))
+            candidates.append((config, digest, parts))
+        self._pick(candidates, seen)
+
+    def _choose_oci(self) -> None:
+        layout, _digest = self._document("oci-layout") if "oci-layout" in self.members else (None, "")
+        if not isinstance(layout, dict) or not layout.get("imageLayoutVersion"):
+            raise ImageFilesError(f"{self.label}: index.json without an oci-layout file")
+        index, _digest = self._document("index.json")
+        candidates, seen = [], []
+        self._walk(index, candidates, seen, 0)
+        self._pick(candidates, seen)
+
+    def _walk(self, index, candidates: list, seen: list, depth: int) -> None:
+        if not isinstance(index, dict) or not isinstance(index.get("manifests"), list):
+            raise ImageFilesError(f"{self.label}: an index without manifests")
+        for entry in index["manifests"]:
+            if not isinstance(entry, dict):
+                continue
+            media, digest = str(entry.get("mediaType") or ""), str(entry.get("digest") or "")
+            described = entry.get("platform")
+            if isinstance(described, dict):
+                seen.append(_platform_of(described))
+                if not _platform_matches(described, self.platform):
+                    continue   # another platform's image (its blobs need not even be in the file)
+            if media in INDEX_TYPES:
+                if depth >= 2:
+                    raise ImageFilesError(f"{self.label}: indexes nested deeper than two")
+                document, _found = self._document(self._blob_name(digest), digest)
+                self._walk(document, candidates, seen, depth + 1)
+                continue
+            if media and media not in MANIFEST_TYPES:
+                continue
+            if self._blob_name(digest) not in self.members:
+                continue   # named, but not in the file (an image saved for one platform of several)
+            manifest, _found = self._document(self._blob_name(digest), digest)
+            if not isinstance(manifest, dict) or not isinstance(manifest.get("layers"), list) \
+                    or not isinstance(manifest.get("config"), dict):
+                if isinstance(manifest, dict) and isinstance(manifest.get("manifests"), list) and depth < 2:
+                    self._walk(manifest, candidates, seen, depth + 1)
+                    continue
+                raise ImageFilesError(f"{self.label}: {digest} is not an image manifest")
+            config_digest = str(manifest["config"].get("digest") or "")
+            config, _found = self._document(self._blob_name(config_digest), config_digest)
+            if not isinstance(config, dict):
+                raise ImageFilesError(f"{self.label}: the config {config_digest} is not an image config")
+            if not isinstance(described, dict):
+                seen.append(_platform_of(config))
+            if not _platform_matches(config, self.platform):
+                continue
+            parts = []
+            for layer in manifest["layers"]:
+                if not isinstance(layer, dict):
+                    raise ImageFilesError(f"{self.label}: a layer without its descriptor")
+                layer_digest = str(layer.get("digest") or "")
+                parts.append((self._blob_name(layer_digest), layer_digest, str(layer.get("mediaType") or "")))
+            candidates.append((config, config_digest, parts))
+
+    # the layers
+
+    def _checked(self, number: int):
+        name, digest, media = self.layer_parts[number]
+        if "zstd" in media:
+            raise ImageFilesError(f"{self.label}: layer {number + 1} is zstd-compressed, which this reader cannot read")
+        where = f"{self.label}: layer {number + 1} ({name})"
+        if digest:
+            check = hashlib.sha256()
+            with self._open(name) as handle:
+                for block in iter(lambda: handle.read(1 << 20), b""):
+                    check.update(block)
+            if "sha256:" + check.hexdigest() != digest:
+                raise ImageFilesError(f"{where} does not have its digest {digest}")
+        handle = self._open(name)
+        magic = handle.read(4)
+        handle.seek(0)
+        if magic.startswith(ZSTD_MAGIC):
+            handle.close()
+            raise ImageFilesError(f"{where} is zstd-compressed, which this reader cannot read")
+        stream = gzip.GzipFile(fileobj=handle, mode="rb") if magic.startswith(GZIP_MAGIC) else handle
+        check, size = hashlib.sha256(), 0
+        try:
+            for block in iter(lambda: stream.read(1 << 20), b""):
+                check.update(block)
+                size += len(block)
+                if size > MAX_LAYER_BYTES:
+                    raise ImageFilesError(f"{where} is larger than {MAX_LAYER_BYTES >> 30} GB uncompressed")
+        except (OSError, EOFError) as error:
+            raise ImageFilesError(f"{where} cannot be read ({error})") from None
+        finally:
+            handle.close()
+        if "sha256:" + check.hexdigest() != self.diff_ids[number]:
+            raise ImageFilesError(f"{where} is not the layer its config names (diff_id {self.diff_ids[number]})")
+        return self._open(name)
+
+    def layers(self):
+        """The layers from the top down, each checked when it is reached (a readable file object of its tar)."""
+        for number in reversed(range(len(self.layer_parts))):
+            handle = self._checked(number)
+            try:
+                yield handle
+            finally:
+                handle.close()
+
+
+def take_archive_files(archive, sha256: str, files: dict, out: Path, platform: str = "", config: str = "") -> dict:
+    """take_files() for an image published as a file: `archive` (a docker save or OCI image layout archive, gzip
+    allowed) pinned by its `sha256` and optionally by its image `config` digest, the image of `platform` (default:
+    this computer's). The same layer reading, whiteouts and checks; the file is read, never unpacked, loaded or run."""
+    wanted = _wanted(files)
+    with ArchiveImage(archive, sha256, platform, config) as image:
+        layers = image.layers()
+        try:
+            return _take_layers(image.label, wanted, out, layers)
+        finally:
+            layers.close()
 
 
 # --- small files of an image whose content is not pinned (os-release, the dpkg status) --------------------------------
@@ -457,5 +790,6 @@ def copy_file(source: Path, dest: Path) -> None:
     shutil.copyfile(source, dest)
 
 
-__all__ = ["ImageFilesError", "Registry", "copy_file", "host_platform", "load_name", "normal_path",
-           "parse_reference", "read_files", "read_saved", "resolve", "save_image", "take_files"]
+__all__ = ["ArchiveImage", "ImageFilesError", "Registry", "copy_file", "file_sha256", "host_platform", "load_name",
+           "normal_path", "parse_reference", "read_files", "read_saved", "resolve", "save_image", "take_archive_files",
+           "take_files"]

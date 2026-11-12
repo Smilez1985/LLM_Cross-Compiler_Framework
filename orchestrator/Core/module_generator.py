@@ -617,7 +617,8 @@ def source_image_problems(images: Any) -> tuple:
     if images in (None, []):
         return [], []
     if not isinstance(images, list):
-        return [], ["source_images: a list of images, each with image, files and optional platform and licence_url"]
+        return [], ["source_images: a list of images, each with image (name@sha256:DIGEST) or archive (the sha256 "
+                    "of the file it is published as), files and optional platform and licence_url"]
     values, problems = [], []
     for n, entry in enumerate(images):
         try:

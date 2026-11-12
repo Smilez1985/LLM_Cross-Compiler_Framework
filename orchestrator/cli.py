@@ -2834,6 +2834,59 @@ def build_preload_take(ctx: FrameworkContext, archive: str, target: str, digest:
     _take_preload(_image_framework(ctx), target, archive, digest)
 
 
+# --- build source-image: the vendor's and community's images a target takes files from (Core/build_preload.py) ------
+
+@build.group('source-image')
+def build_source_image_group():
+    """The source images a target takes files from (template_variables.source_images): images in a registry pinned by
+    digest, and images published only as a file (a docker save or OCI image layout archive) pinned by the file's
+    sha256, which you give with `take`. Each is read without running it; only the named files are kept."""
+    pass
+
+
+@build_source_image_group.command('list')
+@click.option('--target', '-t', required=True, help='The target whose source images are shown')
+@pass_context
+def build_source_image_list(ctx: FrameworkContext, target: str):
+    """Shows TARGET's source images, how each is named (registry digest or the file's sha256) and how many of its files
+    are in your cache."""
+    from orchestrator.Core.build_preload import PreloadProblem, source_images_of
+    try:
+        rows = source_images_of(_image_framework(ctx), target)
+    except PreloadProblem as e:
+        console.print(f"[red]{escape(str(e))}[/red] {escape(e.next)}")
+        sys.exit(2)
+    if not rows:
+        console.print(f"The target {escape(target)} names no source images.")
+        return
+    for row in rows:
+        how = (f"published as a file, sha256 {row['pin']}" if row["kind"] == "file"
+               else "in a registry, pinned by digest")
+        console.print(f"{escape(row['label'])}: {how}; {row['platform']}; {row['cached']} of {row['files']} file(s) "
+                      "in your cache" + (f"; licence {escape(row['licence_url'])}" if row["licence_url"] else ""))
+        if row["kind"] == "file" and row["cached"] < row["files"]:
+            console.print(f"  Give the file: llm-cli build source-image take FILE --target {escape(target)}")
+
+
+@build_source_image_group.command('take')
+@click.argument('file', type=click.Path(exists=True, dir_okay=False))
+@click.option('--target', '-t', required=True, help='The target that names the image file')
+@pass_context
+def build_source_image_take(ctx: FrameworkContext, file: str, target: str):
+    """Takes the files TARGET names from FILE, an image its vendor publishes only as a file (a docker save or OCI image
+    layout archive, also gzip-compressed): FILE's sha256 must be one the target names; then the image of the platform
+    is read with every layer checked against its digest and the config's diff_ids, whiteouts honoured, and only the
+    named files are kept in your cache. Nothing is loaded into the container engine or run, and FILE is not kept."""
+    from orchestrator.Core.build_preload import PreloadProblem, image_file_in
+    try:
+        taken = image_file_in(_image_framework(ctx), target, Path(file), log=lambda text: console.print(escape(text)))
+    except PreloadProblem as e:
+        console.print(f"[red]{escape(str(e))}[/red] {escape(e.next)}")
+        sys.exit(1)
+    for line in taken.lines():
+        console.print(escape(line))
+
+
 def _preload_steps(written) -> List[str]:
     """The person's steps after the build's preload scripts were written (a run without a terminal prints them)."""
     return [f"On a computer with a network (Python 3 with pip; git for llama.cpp), run {written.scripts[0].name} "

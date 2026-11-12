@@ -523,7 +523,14 @@ def offline_plan(text: str, config: Any, client: Any, *, state_dir: Any = None, 
         plan.sources.append(_preload_pip(pip, text, preload, plan))
     plan.sources += downloads
     plan.sources += _other_package_sources(body)
+    labels = getattr(preload, "image_labels", None) or {}
     for image in getattr(preload, "images_missing", None) or []:
+        if image.startswith("file:"):   # published only as a file: no build fetches it, the person gives it
+            plan.sources.append(ImageSource("image_files", f"files taken from {labels.get(image) or 'an image file'}",
+                                            False, "give that file (Take from an image file... in Build Container "
+                                            "Images), or bring them with the build's preload (its script's "
+                                            "--image-file)", ref=image))
+            continue
         plan.sources.append(ImageSource("image_files", f"files taken from the source image {image.split('@')[0]}",
                                         False, "take them while online once, or bring them with the build's preload",
                                         ref=image))

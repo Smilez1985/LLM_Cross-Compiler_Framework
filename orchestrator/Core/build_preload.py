@@ -20,6 +20,8 @@ one llmcf-preload/ folder, manifest.txt, SHA256SUMS), of kind build.
   the target Dockerfiles use with the build argument APT_PRELOAD instead of the image's own package sources.
 - the build engine asks preload_sources() for the plan and stage() for the build context; image_files() takes the
   files of source images (online through the registry, offline from the person's cache).
+- take_image_file(): the files of a source image published only as a file (a docker save or OCI image layout archive
+  pinned by its sha256), from the file the person gives, read by the same reader with the same checks.
 
 Taking from source images reads the image without running it (scripts/image_files.py); a file whose
 licence forbids passing it on stays with the person (their cache, their image, their own preload).
@@ -39,7 +41,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from orchestrator.utils.next_steps import WithSteps
+from orchestrator.utils.next_steps import NextStep, WithSteps
 
 STORE = "build-preload"
 SCRIPTS = "llmcf-preload-scripts"
@@ -192,6 +194,7 @@ class PreloadSources:
     downloads: Dict[str, Path] = field(default_factory=dict)
     images_missing: List[str] = field(default_factory=list)
     apt: Optional[Path] = None
+    image_labels: Dict[str, str] = field(default_factory=dict)   # key of a missing image -> how the person reads it
 
 
 def apt_store(state_dir: Any, target: str, dockerfile_text: str, platform: str = "") -> Optional[Path]:
@@ -229,7 +232,9 @@ def preload_sources(state_dir: Any, target: str, target_dir: Path, dockerfile_te
         path = store / CONTEXT_FILES / item["name"]
         if path.is_file() and path.stat().st_size == item["size"]:
             found.downloads[item["url"]] = path
-    found.images_missing = [image.image for image in missing_image_files(state_dir, source_images(target_dir))]
+    for image in missing_image_files(state_dir, source_images(target_dir)):
+        found.images_missing.append(image.key)
+        found.image_labels[image.key] = image.label
     found.apt = _newest_apt(apt_store(state_dir, target, dockerfile_text))
     return found
 
@@ -314,8 +319,10 @@ def image_files(state_dir: Any, target_dir: Path, context: Path, *, online: bool
     for image in images:
         absent = {f.path: f.sha256 for f in image.files if not (cache / f.sha256).is_file()}
         if absent and not online:
-            missing.append(image.image)
+            missing.append(image.key)
             continue
+        if absent and image.archive is not None:
+            raise image_file_needed(image, Path(target_dir).name)
         if absent:
             if log:
                 log(f"Taking {len(absent)} file(s) from {image.image} (its layers read, nothing run; the rest of the "
@@ -331,6 +338,86 @@ def image_files(state_dir: Any, target_dir: Path, context: Path, *, online: bool
             images_reader.copy_file(cache / item.sha256, dest)
             os.chmod(dest, 0o755 if item.executable else 0o644)  # nosec B103 - a program of the image, no secret
     return missing
+
+
+def image_file_needed(image: Any, target: str) -> PreloadProblem:
+    """The stop of a build whose source image is published only as a file and whose files are not in the cache: no
+    build can fetch that file, the person gives it."""
+    return PreloadProblem(f"The files of {image.label} are not taken yet. It is published only as a file, which no "
+                          "build can fetch; nothing was started.", "needs_person",
+                          "Give that file: Take from an image file... in Build Container Images, or bring it with "
+                          "the build's preload (its script's --image-file).").with_steps(
+        NextStep("build.source_image_take", {"target": target}))
+
+
+@dataclass
+class TakenImageFile:
+    """What take_image_file() took: the file's sha256, the source images it is, the files taken into the cache."""
+    file: str
+    sha256: str
+    images: List[str]
+    files: int
+    personal: bool
+
+    def lines(self) -> List[str]:
+        out = [f"{self.file} (sha256 {self.sha256}) checked; {self.files} file(s) taken from "
+               f"{', '.join(self.images)} into your cache (its layers read, nothing run or loaded; the rest of the "
+               "image was discarded, the file itself is not kept)."]
+        if self.personal:
+            out.append("They include files whose licence does not allow passing them on: they stay with you.")
+        return out
+
+
+def take_image_file(state_dir: Any, target_dir: Path, archive: Path, *, log=None) -> TakenImageFile:
+    """Takes the named files of every source image of the target that the file `archive` is (a docker save or OCI image
+    layout archive pinned by its sha256) into the person's cache: the file's sha256 matched first, then read by the
+    image reader with every check (scripts/image_files.take_archive_files); nothing loaded, run or kept but the
+    named files."""
+    images_reader = reader()
+    archive = Path(archive).expanduser()
+    if not archive.is_file():
+        raise PreloadProblem("The image file does not exist.", "invalid_value", "Give the path of the file.")
+    named = [image for image in source_images(target_dir) if image.archive is not None]
+    if not named:
+        raise PreloadProblem(f"The target {Path(target_dir).name} names no source image published as a file.",
+                             "invalid_value")
+    if log:
+        log(f"Checking the sha256 of {archive.name}...")
+    digest = images_reader.file_sha256(archive)
+    matching = [image for image in named if image.archive.sha256 == digest]
+    if not matching:
+        raise PreloadProblem(f"{archive.name} has the sha256 {digest}, which is none of the image files the target "
+                             f"names ({', '.join(image.label for image in named)}); nothing in it was read.",
+                             "mismatch", "Give the file exactly as the vendor publishes it.")
+    cache = image_cache(state_dir)
+    count = 0
+    for image in matching:
+        if log:
+            log(f"Taking {len(image.files)} file(s) from {image.label} (its layers read, nothing run; the rest of the "
+                "image is discarded)")
+        try:
+            images_reader.take_archive_files(archive, image.archive.sha256, {f.path: f.sha256 for f in image.files},
+                                             cache, image.platform or "", image.archive.config or "")
+        except images_reader.ImageFilesError as e:
+            raise PreloadProblem(f"The files of the source image could not be taken: {e}", "mismatch",
+                                 "Check the file and the files' paths and sha256 in the target's template "
+                                 "variables.") from None
+        count += len(image.files)
+    return TakenImageFile(archive.name, digest, [image.label for image in matching], count,
+                          any(not f.redistributable for image in matching for f in image.files))
+
+
+def source_image_rows(state_dir: Any, target_dir: Path) -> List[Dict[str, Any]]:
+    """Each source image of the target as the person reads it: how it is named (registry or file), its platform, its
+    licence and how many of its files are in the cache."""
+    cache = image_cache(state_dir)
+    rows = []
+    for image in source_images(target_dir):
+        rows.append({"label": image.label, "kind": "file" if image.archive is not None else "registry",
+                     "pin": image.image or image.archive.sha256, "name": image.archive.name if image.archive else "",
+                     "platform": image.platform or reader().host_platform(), "licence_url": image.licence_url or "",
+                     "files": len(image.files), "cached": sum((cache / f.sha256).is_file() for f in image.files)})
+    return rows
 
 
 # --- the recipe ------------------------------------------------------------------------------------------------------
@@ -425,12 +512,16 @@ def recipe(plan: Any, target: str, target_dir: Path, dockerfile_text: str, *, gp
             out["not_covered"].append(f"{source.label}: {source.how}")
     for source in missing:
         if source.kind == "image_files":
-            image = next((i for i in source_images(target_dir) if i.image == _ref_of(source)), None)
+            image = next((i for i in source_images(target_dir) if i.key == _ref_of(source)), None)
             if image is not None:
-                out["source_images"].append({
-                    "image": image.image, "platform": image.platform or out["platform"],
-                    "files": [{"path": f.path, "sha256": f.sha256, "redistributable": f.redistributable}
-                              for f in image.files]})
+                entry = {"platform": image.platform or out["platform"],
+                         "files": [{"path": f.path, "sha256": f.sha256, "redistributable": f.redistributable}
+                                   for f in image.files]}
+                if image.archive is not None:
+                    entry["archive"] = image.archive.model_dump(exclude_none=True)
+                else:
+                    entry["image"] = image.image
+                out["source_images"].append(entry)
     return out
 
 
@@ -441,6 +532,16 @@ def recipe_bytes(data: Dict[str, Any]) -> bytes:
 def fetches(data: Dict[str, Any]) -> bool:
     return bool(data["images"] or data["llama_cpp_bundle"] or data["pip"] or data["downloads"]
                 or data["source_images"] or data.get("apt"))
+
+
+def recipe_image_label(entry: Dict[str, Any]) -> str:
+    """A source image of a recipe as the person reads it; an image file says that the script needs it."""
+    archive = entry.get("archive")
+    if isinstance(archive, dict):
+        from orchestrator.schemas.target_template import archive_label
+        return (archive_label(str(archive.get("name") or ""), str(archive.get("sha256") or "")) + ", which the script "
+                "takes only from the file you give it with --image-file")
+    return str(entry.get("image") or "").split("@")[0]
 
 
 def describe(data: Dict[str, Any]) -> str:
@@ -456,7 +557,7 @@ def describe(data: Dict[str, Any]) -> str:
     if data["downloads"]:
         parts.append("pinned downloads " + ", ".join(d["name"] for d in data["downloads"]))
     if data["source_images"]:
-        parts.append("files taken from " + ", ".join(i["image"].split("@")[0] for i in data["source_images"]))
+        parts.append("files taken from " + ", ".join(recipe_image_label(i) for i in data["source_images"]))
     apt = data.get("apt")
     if apt:
         words = sorted({p for s in apt["stages"] for p in s["packages"]})
@@ -670,8 +771,8 @@ def take(state_dir: Any, target: str, archive: Path, *, client: Any, sha256: str
             for item in image["files"]:
                 path = top / IMAGE_FILES / item["sha256"]
                 if not path.is_file() or _sha256_file(path) != item["sha256"]:
-                    raise PreloadProblem(f"A file taken from {image['image']} ({item['path']}) is missing or not its "
-                                         "pinned sha256.", "mismatch")
+                    raise PreloadProblem(f"A file taken from {recipe_image_label(image).split(', which')[0]} "
+                                         f"({item['path']}) is missing or not its pinned sha256.", "mismatch")
                 taken_files.append(path)
         bundle = top / "llama.cpp" / "llama.cpp.bundle"
         if data.get("llama_cpp_bundle") and not bundle.is_file():
@@ -789,7 +890,30 @@ def take_in(framework: Any, target: str, archive: Path, *, actor: str, sha256: s
                 client=build_image.docker_client(framework, engine), sha256=sha256, actor=actor, log=log)
 
 
-__all__ = ["PreloadProblem", "PreloadSources", "Taken", "Written", "apt_store", "deb_preload", "declared_pip",
-           "describe", "fetches", "file_repository", "image_cache", "image_files", "missing_image_files", "needed",
-           "pinned_downloads", "preload_sources", "reader", "recipe", "recipe_bytes", "scripts_folder",
-           "source_images", "stage", "store_root", "take", "take_in", "target_store", "write", "write_scripts"]
+def _target_folder(framework: Any, target: str) -> Path:
+    from orchestrator.Core import build_image
+    engine = build_image._engine(framework)
+    folder = engine.resolve_target_dir(target) if engine is not None and hasattr(engine, "resolve_target_dir") \
+        else None
+    if folder is None:
+        raise PreloadProblem(f"There is no target {target}.", "invalid_value", "List the targets and pick one.")
+    return Path(folder)
+
+
+def image_file_in(framework: Any, target: str, archive: Path, *, log=None) -> TakenImageFile:
+    """take_image_file() for an installed target (the CLI's source-image take, the window's Take from an image
+    file...)."""
+    return take_image_file(state_dir_of(framework), _target_folder(framework, target), archive, log=log)
+
+
+def source_images_of(framework: Any, target: str) -> List[Dict[str, Any]]:
+    """source_image_rows() for an installed target."""
+    return source_image_rows(state_dir_of(framework), _target_folder(framework, target))
+
+
+__all__ = ["PreloadProblem", "PreloadSources", "Taken", "TakenImageFile", "Written", "apt_store", "deb_preload",
+           "declared_pip", "describe", "fetches", "file_repository", "image_cache", "image_file_in",
+           "image_file_needed", "image_files", "missing_image_files", "needed", "pinned_downloads", "preload_sources",
+           "reader", "recipe", "recipe_bytes", "recipe_image_label", "scripts_folder", "source_image_rows",
+           "source_images", "source_images_of", "stage", "store_root", "take", "take_image_file", "take_in",
+           "target_store", "write", "write_scripts"]

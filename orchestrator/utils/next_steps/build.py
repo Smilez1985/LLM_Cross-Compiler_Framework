@@ -25,6 +25,9 @@ MOUSE_LABELS = {
     "btn_models_delete": ("models_tab", "models.delete"),
     "btn_models_bench": ("models_tab", "models.bench"),
     "btn_bench_run": ("act_build_benchmark", "bench.run"),
+    # Build > Build Container Images...: a source image published only as a file (Core/build_preload.take_image_file)
+    "btn_bimg_image_file": ("act_build_images", "bimg.source.take"),
+    "btn_bimg_source_list": ("act_build_images", "bimg.source.list"),
 }
 
 STEPS = (
@@ -53,6 +56,10 @@ STEPS = (
     # the kept F16 intermediates of GGUF builds (Core/f16_cache.py): listed for everyone, deleted by the person only
     Step("build.f16_list", cli="build f16 list", tool="get_status", target="act_build_f16", runnable=True),
     Step("build.f16_delete", cli="build f16 delete", person_only="deletion", target="btn_f16_delete"),
+    # a source image published only as a file: the person gives the file (an AI never names it)
+    Step("build.source_image_take", cli="build source-image take", cli_args=("{file}", "--target", "{target}"),
+         params={"file": Param("path"), "target": Param("id")}, person_only="permission",
+         target="btn_bimg_image_file"),
 )
 
 TEXTS = {
@@ -74,6 +81,12 @@ TEXTS = {
         "step.build.f16_list.what": "Lists the F16 intermediates kept for the next build of a model, with their size.",
         "step.build.f16_list.why": "A kept F16 intermediate saves converting the model again.",
         "step.build.f16_delete": "Delete kept F16 intermediates",
+        "step.build.source_image_take": "Give the image file the target's vendor publishes",
+        "step.build.source_image_take.what": "Reads the file you choose (a docker save or OCI archive): its sha256 "
+                                             "must be the one target {target} names; only the named files are kept, "
+                                             "nothing is run.",
+        "step.build.source_image_take.why": "A source image of the target is published only as a file, which no build "
+                                            "can fetch.",
         "step.build.f16_delete.what": "Lists the kept F16 intermediates and deletes the ones you pick "
                                       "({path:btn_f16_delete}).",
         "step.build.f16_delete.why": "They use space in the build cache until they are deleted.",
@@ -102,6 +115,12 @@ TEXTS = {
                                     "aufbewahrt sind, mit ihrer Größe.",
         "step.build.f16_list.why": "Eine aufbewahrte F16-Zwischenstufe erspart das erneute Umwandeln des Modells.",
         "step.build.f16_delete": "Aufbewahrte F16-Zwischenstufen löschen",
+        "step.build.source_image_take": "Die Image-Datei angeben, die der Hersteller des Targets veröffentlicht",
+        "step.build.source_image_take.what": "Liest die gewählte Datei (ein Archiv aus docker save oder OCI): Der "
+                                             "sha256 der Datei muss der sein, den Target {target} nennt; nur die "
+                                             "genannten Dateien bleiben, nichts wird ausgeführt.",
+        "step.build.source_image_take.why": "Ein Quell-Image des Targets ist nur als Datei veröffentlicht, die kein "
+                                            "Build holen kann.",
         "step.build.f16_delete.what": "Listet die aufbewahrten F16-Zwischenstufen und löscht die, die du wählst "
                                       "({path:btn_f16_delete}).",
         "step.build.f16_delete.why": "Sie belegen Platz im Build-Cache, bis sie gelöscht sind.",

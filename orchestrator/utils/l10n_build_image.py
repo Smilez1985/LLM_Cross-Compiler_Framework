@@ -75,6 +75,14 @@ TEXTS = {
         "bimg.preload.go": "Take in and build",
         "bimg.preload.taking": "Checking the archive and taking it in...",
         "bimg.preload.cancelled": "Nothing was started: the build's preload was not given.",
+        "bimg.source.list": "Source images",
+        "bimg.source.take": "Take from an image file...",
+        "bimg.source.take.title": "The image file its vendor publishes (docker save or OCI archive)",
+        "bimg.source.none": "The target {target} names no source images.",
+        "bimg.source.row": "{label}: {how}; {platform}; {cached} of {files} file(s) in your cache",
+        "bimg.source.kind.registry": "in a registry, pinned by digest",
+        "bimg.source.kind.file": "published as a file, sha256 {sha256}",
+        "bimg.source.give": "Give the file with {path:btn_bimg_image_file}.",
     },
     "de": {
         "bimg.menu": "Build-Container-Images...",
@@ -143,11 +151,21 @@ TEXTS = {
         "bimg.preload.go": "Aufnehmen und bauen",
         "bimg.preload.taking": "Prüfe das Archiv und nehme es auf...",
         "bimg.preload.cancelled": "Nichts wurde gestartet: Das Preload des Builds wurde nicht angegeben.",
+        "bimg.source.list": "Quell-Images",
+        "bimg.source.take": "Aus einer Image-Datei nehmen...",
+        "bimg.source.take.title": "Die Image-Datei, die ihr Hersteller veröffentlicht (Archiv aus docker save oder OCI)",
+        "bimg.source.none": "Das Target {target} nennt keine Quell-Images.",
+        "bimg.source.row": "{label}: {how}; {platform}; {cached} von {files} Datei(en) in deinem Cache",
+        "bimg.source.kind.registry": "in einer Registry, über den Digest gepinnt",
+        "bimg.source.kind.file": "als Datei veröffentlicht, sha256 {sha256}",
+        "bimg.source.give": "Gib die Datei mit {path:btn_bimg_image_file} an.",
     },
 }
 
 FORMAL = {
     "de": {
+        "bimg.source.row": "{label}: {how}; {platform}; {cached} von {files} Datei(en) in Ihrem Cache",
+        "bimg.source.give": "Geben Sie die Datei mit {path:btn_bimg_image_file} an.",
         "bimg.intro": "Das Build-Container-Image ist das Docker-Image mit der Werkzeugkette eines Targets, in dem seine "
                       "Builds laufen; das Target-Artefakt, Paket oder Bündel ist das, was aufs Board geht. Der "
                       "Offline-Modus baut dieses Image nur aus Quellen auf diesem Rechner oder in Ihrem eigenen Netz, "

@@ -10,9 +10,10 @@ the runtime libraries the board needs (with their versions, their path in the bu
 licence allows passing them on), the paths on the board, the format's `sdk:` needs for the pre-flight check and the
 vendor files that may not be passed on (only referenced; the person fetches them under their own licence acceptance).
 GGUF with llama.cpp is the pattern's built-in instance (converter `llama.cpp`). Next to the formats, `source_images`
-names a vendor's or a community's image pinned by digest and the files the build image takes from it (read without
-running it, Core/build_preload.py); BuildPreload is target.yml's `build_preload:` block, the Python packages of the
-build image for the build's preload of a computer without a network.
+names a vendor's or a community's image pinned by digest, or published only as a file and pinned by the file's
+sha256, and the files the build image takes from it (read without running it, Core/build_preload.py); BuildPreload is
+target.yml's `build_preload:` block, the Python packages of the build image for the build's preload of a computer
+without a network.
 
 Every value is a plain word or address: no quote, no `$`, no backtick, no space in a word, no bracket in a text
 (a bracketed text reads as a template placeholder). The module generator checks every value again with the shell
@@ -240,12 +241,28 @@ class ImageFile(BaseModel):
         return self
 
 
-class SourceImage(BaseModel):
-    """A vendor's or a community's image that already has files the build image needs: pinned by digest, read
-    without running it, only the named files taken (scripts/image_files.py, Core/build_preload.py)."""
+class ImageArchive(BaseModel):
+    """An image published only as a file (a docker save or OCI image layout archive), named by the file's sha256;
+    the person gives the file, a path is never part of the target."""
     model_config = ConfigDict(extra="forbid")
 
-    image: str = Field(pattern=IMAGE_PIN_RE, max_length=400, description="name@sha256:DIGEST (manifest or index)")
+    sha256: str = Field(pattern=SHA256_HEX_RE, description="The sha256 of the file as the vendor publishes it")
+    config: Optional[str] = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$",
+                                  description="The digest of the image's config (its image ID); needed when the file "
+                                              "holds more than one image for the platform")
+    name: Optional[str] = Field(default=None, pattern=FILE_NAME_RE,
+                                description="The file's name as the vendor publishes it (only shown)")
+
+
+class SourceImage(BaseModel):
+    """A vendor's or a community's image that already has files the build image needs: pinned by digest in a registry
+    (`image`) or by the sha256 of the file it is published as (`archive`), read without running it, only the named
+    files taken (scripts/image_files.py, Core/build_preload.py)."""
+    model_config = ConfigDict(extra="forbid")
+
+    image: Optional[str] = Field(default=None, pattern=IMAGE_PIN_RE, max_length=400,
+                                 description="name@sha256:DIGEST (manifest or index)")
+    archive: Optional[ImageArchive] = Field(default=None, description="An image published only as a file")
     platform: Optional[str] = Field(default=None, pattern=PLATFORM_RE,
                                     description="linux/amd64 or linux/arm64; default: the build computer's")
     licence_url: Optional[str] = Field(default=None, pattern=HTTPS_RE, max_length=500)
@@ -254,9 +271,29 @@ class SourceImage(BaseModel):
 
     @model_validator(mode="after")
     def _unique(self):
+        if (self.image is None) == (self.archive is None):
+            raise ValueError("a source image is named by image (name@sha256:DIGEST) or by archive (the file's "
+                             "sha256), one of the two")
         if len({f.path for f in self.files}) != len(self.files):
-            raise ValueError(f"{self.image}: each file path once")
+            raise ValueError(f"{self.key}: each file path once")
         return self
+
+    @property
+    def key(self) -> str:
+        """What names the image in a plan and a recipe: its pinned reference, or file:sha256:HEX for a file."""
+        return self.image if self.image else f"file:sha256:{self.archive.sha256}"
+
+    @property
+    def label(self) -> str:
+        """The image as the person reads it: its name without the digest, or the file by its name and sha256."""
+        if self.image:
+            return self.image.split("@")[0]
+        return archive_label(self.archive.name or "", self.archive.sha256)
+
+
+def archive_label(name: str, sha256: str) -> str:
+    """An image file as the person reads it: its name, when the target gives one, and the start of its sha256."""
+    return f"the image file {name + ' ' if name else ''}(sha256 {sha256[:12]}...)"
 
 
 class TemplateVariables(BaseModel):
