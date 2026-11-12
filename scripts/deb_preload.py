@@ -947,14 +947,17 @@ def gpgv_check(folder: Path, gpgv: str = "") -> bool:
             release = (top / "Release").read_bytes()
             signature = pinned_signature(release, (top / "Release.gpg").read_bytes(), keys)
             (Path(home) / "Release.gpg").write_bytes(signature)
-            # Every path with forward slashes: gpg takes a --keyring name without one as a file in its home folder,
-            # and a Windows path (Git for Windows brings gpgv) has only backslashes; C:/... is read as it is.
+            # The keyring by its bare name: gpg looks a --keyring name without a slash up in its home folder, the
+            # same on every system. A path would not do on Windows: the gpgv Git for Windows brings reads C:\... as
+            # a name in its home folder and C:/... as a URL ("invalid key resource URL"). The other paths with
+            # forward slashes, which it reads as they are.
             result = subprocess.run([gpgv, "--homedir", Path(home).as_posix(), "--ignore-time-conflict",
-                                     "--status-fd", "1", "--keyring", keyring.as_posix(),
+                                     "--status-fd", "1", "--keyring", keyring.name,
                                      (Path(home) / "Release.gpg").as_posix(), (top / "Release").as_posix()],
                                     capture_output=True, text=True, errors="replace")
             if not signature or result.returncode != 0 or "[GNUPG:] VALIDSIG " not in result.stdout:
-                said = " ".join((result.stderr or "").split())[-300:]
+                said = " ".join((result.stderr or "").split())
+                said = said if len(said) <= 400 else "..." + said[-400:]
                 raise PreloadError(f"suite {top.name}: its Release does not verify with gpgv against the pinned keys"
                                    + (f"; it says: {said}" if said else ""))
     return True
