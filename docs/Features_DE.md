@@ -3654,6 +3654,27 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   für diese Analyse** (`--provider`, `--model`, `DittoManager.for_run`): Die gespeicherten KI-Einstellungen bleiben
   unverändert. Ein regelbasierter Import einer Probe nach Dittos Vorschlag ersetzt jeden Wert des Vorschlags (auch seine
   Pakete, Setup-Befehle und Quantisierungslogik), sodass das Modul dann deines ist.
+- **Die Werte eines Formats von Ditto vorgeschlagen, einzeln abgefragt:** Für ein Board, dessen Beschleuniger Modelle
+  in ein eigenes Format umwandelt (eine NPU oder eine GPU), schlägt Ditto die Werte der Variablen der allgemeinen
+  Vorlage einzeln aus der Probe und der in die Wissensbasis gecrawlten Dokumentation des Herstellers vor: jeden Wert mit
+  Grund, Quelle (der Adresse der Seite, einem Schlüssel der Probe oder der Vorlage) und Sicherheit. Das Framework lässt
+  einen Wert ohne eine solche Quelle leer und nennt ihn als Lücke (ein Wert wird gelesen, nie geraten), lehnt einen
+  Pfad, den die Vorlage nicht hat, und einen gefährlichen Befehl ab und prüft jeden Wert; das Ergebnis ist ein
+  Entwurf, den du vervollständigst. Die KI-Analyse des Assistenten tut das, wenn die Probe einen Beschleuniger nennt,
+  **Ditto: Werte vorschlagen** auf der Flags-Seite fragt erneut, `llm-cli module generate-ai` gibt ihn aus, `llm-cli
+  module propose-values` gibt ihn als YAML oder JSON, und eine Reparatur eines solchen Moduls aus seinem Log schlägt
+  zuerst geänderte Werte vor. Die Flags-Seite und der Bearbeitungsschritt zeigen die Formate als Formular je Wert, aus
+  dem Schema erzeugt (Hilfetext, Pflichtfelder, der Grund unter seinem Feld, Dittos Vorschlag daneben; **YAML
+  (erweitert)** behält die Textansicht); am Terminal tun `--ask-values` und `--set FORMAT.PFAD=WERT` dasselbe.
+- **Herstellerdateien und Toolchains unter deiner eigenen Annahme der Lizenz:** Eine Datei, die ein Format nennt und
+  die ihr Hersteller nicht weitergeben lässt (das Wheel eines SDK, ein Compiler, eine Runtime-Bibliothek), wird nie
+  mitgeliefert und nie in ein Modul, ein Pack, ein Paket, einen Preload oder ein Bundle gelegt. **Build > Targets... >
+  Herstellerdateien...** oder `llm-cli vendor fetch` zeigt ihren ganzen Lizenztext, und nur dein eigenes Ja nimmt ihn an
+  (ein Häkchen und **Annehmen** oder ein getipptes Ja am Terminal; nie eine KI, nie ein Lauf ohne Terminal), mit dem
+  sha256 des Texts aufgezeichnet. Du lädst die Datei auf der Seite des Herstellers herunter und gibst sie an (nach
+  ihrem sha256 geprüft, in deinem eigenen Herstellerspeicher aufbewahrt), oder das Framework lädt eine Datei, die das
+  Target als öffentlich und direkt pinnt. Ein Build kopiert sie von dort in sein Image und hält an, mit dem Holen als
+  nächstem Schritt, solange eine fehlt.
 - **Die Geräte-Laufzeit im Modul:** Jede neue `target.yml` bekommt einen Block `runtime:`, den Plan des Build-Rezepts
   für die llama.cpp-Laufzeit des Boards aus der Probe des Targets (die im Assistenten eingelesene Probe-Datei, die
   Probe-Datei von `module generate-ai` oder `llm-cli module create --probe <Datei>`): Architektur, Betriebssystem, die

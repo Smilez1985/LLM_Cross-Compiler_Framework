@@ -32,7 +32,8 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [mcp](#mcp): `serve`, `config`, `token add|list|rotate|revoke`
 - [acp](#acp): Ditto als Agent von Editoren (`config`, `servers`)
 - [secrets](#secrets): `set`, `list`
-- [module](#module): `create`, `generate-ai`
+- [module](#module): `create`, `generate-ai`, `edit`, `repair`, `fields`, `propose-values`
+- [vendor](#vendor): Herstellerdateien, die nicht weitergegeben werden dürfen (`list`, `fetch`, `add`)
 - [scan](#scan): Hardware-Probe
 - [device](#device): `list`, `settings`, `runtime`
 - [bundle](#bundle): `plan`, `build`, `list`, `deploy`, `status`, `uninstall`, `rollback`, `delete`, `block`, `harness`
@@ -169,6 +170,8 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `acp` / `acp config` / `acp servers` | Ditto als Agent von Editoren, die ACP sprechen (der Editor startet es) / den Eintrag für den Editor zeigen / die MCP-Server, die Editoren übergeben haben, mit deiner Zustimmung je Eintrag |
 | `secrets set` / `secrets list` | Ein Token speichern (Hugging Face, GitHub) / die gespeicherten Namen auflisten |
 | `module create` / `module generate-ai` / `module edit` / `module repair` | Ein neues Hardware-Target anlegen, per Fragen oder mit Ditto aus einer Probe-Datei / seine Dateien mit Diff und Prüfungen bearbeiten / es nach einem gescheiterten Build reparieren, von Hand oder aus seinem Fehlerlog |
+| `module fields` / `module propose-values` | Die Variablen eines Target-Formats der allgemeinen Vorlage / Dittos Vorschlag ihrer Werte aus einer Probe und der gecrawlten Herstellerdokumentation, jeder mit Quelle und Sicherheit |
+| `vendor list` / `vendor fetch` / `vendor add` | Die Herstellerdateien, die ein Target nennt und die nicht weitergegeben werden dürfen / die Lizenz einer Datei zeigen und dein eigenes Ja nehmen / die heruntergeladene Datei angeben, nach ihrem sha256 geprüft |
 | `scan` | Die Hardware-Probe auf diesem Rechner oder mit `--device` auf einem Board per SSH ausführen, oder mit `--import` die Probe-Datei eines Boards ablegen, und ihre Probe-ID zeigen |
 | `device list` / `device settings` | Die untersuchten Boards / wie die Laufzeit auf einem Board installiert wird (Startskript oder systemd), vor einem Deployment entschieden |
 | `device runtime plan/build/deploy/verify/status` | Die selbst gebaute llama.cpp-Laufzeit eines Boards: aus seinem Profil planen, cross-kompilieren, per SSH installieren und dort prüfen |
@@ -2671,7 +2674,8 @@ Neue Hardware-Targets. Die vollständige Anleitung: [Module_Developer_Guide_DE.m
 llm-cli module create [--name TEXT] [--arch aarch64|x86_64|armv7l|riscv64] [--sdk TEXT] [--probe DATEI]
                       [--description TEXT] [--base-image IMAGE] [--packages TEXT] [--cpu-flags TEXT]
                       [--cmake-flags TEXT] [--setup-commands DATEI] [--quantization-logic DATEI]
-                      [--knowledge-root URL]... [--formats DATEI] [--edit]
+                      [--knowledge-root URL]... [--formats DATEI] [--set FORMAT.PFAD=WERT]... [--ask-values]
+                      [--edit]
 ```
 
 Legt ein neues Target mit den Werten des Modul-Assistenten an, als Optionen; was fehlt, wird gefragt: Name,
@@ -2697,6 +2701,8 @@ Target wird nie überschrieben. Das Target ist als ungetestet markiert, bis ein 
 | `--quantization-logic DATEI` | Die bash-`case`-Zweige der Convert-Stufe (`modules/convert_module.sh`). |
 | `--knowledge-root URL` | Die Seiten der Wissensbasis anhängen, die von dieser Adresse gecrawlt wurden (Datenschutz-Bereinigung angewendet); wiederholbar. Nur diese Seiten werden angehängt. |
 | `--formats DATEI` | Die Ausgabeformate des Moduls, die Variablen der allgemeinen Vorlage ([Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md#38-die-allgemeine-vorlage-formate-als-variablen)): eine YAML- oder JSON-Liste, deren Einträge der Name einer Vorgabe (`gguf`, `rknn`, `rkllm`) oder die Werte eines Formats sind (sein Konverter des Herstellers mit seinen Argumenten, die Eingabeformate, die Endung der Ausgabe, die Quantisierungstypen, die Runtime-Bibliotheken mit Version und der Angabe, ob sie weitergegeben werden dürfen, die Pfade auf dem Board, seine `sdk:`-Anforderungen, die Herstellerdateien, die nicht weitergegeben werden dürfen). Jeder Wert wird wie die übrigen Felder geprüft. Ohne die Option baut das Modul GGUF. |
+| `--set FORMAT.PFAD=WERT` | Einen Wert eines Ausgabeformats über seinen Pfad setzen ([`module fields`](#module-fields) listet sie), z. B. `hef.converter.command=/opt/vendor/bin/conv`, `hef.quantizations=int8,int16` oder eine Zeile einer Tabelle, `hef.runtime_libraries.0.version=4.20.0`; eine neue FORMAT-Kennung fügt ein Format hinzu. Wiederholbar, nach `--formats` angewendet. Ein Pfad, den die Vorlage nicht hat, wird abgelehnt. |
+| `--ask-values` | Jeden Wert jedes Ausgabeformats am Terminal abfragen, mit seiner Erklärung und dem aktuellen Wert als Vorgabe (Enter behält ihn, `-` leert ihn); nach dem letzten Wert eines Formats laufen seine Prüfungen, und eine scheiternde bietet an, seine Werte noch einmal durchzugehen. Ohne Terminal lehnt der Befehl ab. |
 | `--edit` | Der Schritt „alle Dateien bearbeiten“ des Assistenten: Das Modul wird in einem privaten Arbeitsordner erzeugt, seine Stage-Module, die `target.yml` und das Dockerfile öffnen nacheinander in `$EDITOR`, der Diff wird gezeigt und die Prüfungen laufen erneut ([`module edit`](#module-edit)); bei einer gescheiterten Prüfung lassen sich die Dateien noch einmal öffnen, und das Modul kommt erst in den Targets-Ordner, wenn jede Prüfung besteht und du Ja sagst. Sonst wird nichts geschrieben. |
 
 Das Target wird in den eingestellten Targets-Ordner geschrieben (Einstellung `targets_dir`; ein relativer Pfad
@@ -2712,7 +2718,7 @@ und wie man es teilt ([`zoo export`](#zoo-export)).
 In der GUI: **Tools > Create Hardware Module...**: Name, Architektur, SDK und **Beschreibung** auf der Hardware-Seite,
 Basis-Image und Pakete auf der Docker-Seite, CPU- und CMake-Flags, Quantisierungslogik und Einrichtungsbefehle auf der
 Flags-Seite, das Anhängen des Wissens und der Community-Export auf der letzten Seite; der Standard-Import auf der
-ersten Seite liest eine Probe-Datei (`--probe`). Die letzte Seite ist der Schritt „alle Dateien bearbeiten“
+ersten Seite liest eine Probe-Datei (`--probe`). Die Ausgabeformate auf der Flags-Seite sind ein Formular je Wert, aus dem Schema der Vorlage erzeugt (`--set`, `--ask-values`): ein Reiter je Format, jedes Feld mit seiner Erklärung als Tooltip, die Pflichtfelder mit `*` markiert, der Grund einer scheiternden Prüfung unter seinem Feld und neben jedem Feld Dittos vorgeschlagener Wert mit Quelle und Sicherheit; **YAML (erweitert)** zeigt dieselben Werte als YAML (`--formats`), und **Ditto: Werte vorschlagen** fragt Ditto aus der importierten Probe danach ([`module propose-values`](#module-propose-values)). Die letzte Seite ist der Schritt „alle Dateien bearbeiten“
 (`--edit`): Dort wird das Modul erzeugt, noch nicht gespeichert, und seine Dateien mit ihrem Diff gelistet; **Finish**
 führt die Prüfungen erneut aus, lehnt mit den Gründen ab, solange eine scheitert, und speichert dann das Modul. Nach
 **Finish** wird das neue Target wie mit `targets validate` geprüft.
@@ -2720,7 +2726,7 @@ führt die Prüfungen erneut aus, lehnt mit den Gründen ab, solange eine scheit
 ### module generate-ai
 
 ```
-llm-cli module generate-ai PROBE_FILE [--provider TEXT] [--model TEXT]
+llm-cli module generate-ai PROBE_FILE [--provider TEXT] [--model TEXT] [--formats-out DATEI]
 ```
 
 Ditto schlägt ein Target-Modul aus einer Hardware-Probe-Datei vor (`target_hardware_config.txt`, siehe
@@ -2738,6 +2744,9 @@ experimentell: Vor dem ersten Lauf an einem Terminal geht der Hinweis zu Ditto e
 |---|---|
 | `--provider TEXT` | Anbieter für diesen Lauf, z. B. `anthropic`, `openai`, `ollama`. Standard: KI-Einstellungen. |
 | `--model TEXT` | Modell für diesen Lauf. Standard: KI-Einstellungen. |
+| `--formats-out DATEI` | Dittos Vorschlag der Werte der Ausgabeformate in diese YAML-Datei schreiben, zur Prüfung und für `module create --formats DATEI --ask-values`. |
+
+Nennt die Probe einen eigenen Beschleuniger (eine NPU oder eine GPU), schlägt Ditto auch die Werte seines Ausgabeformats vor, Wert für Wert, aus der Probe und der gecrawlten Herstellerdokumentation (wie [`module propose-values`](#module-propose-values)); der Vorschlag wird je Wert mit Quelle und Sicherheit ausgegeben. Das Modul wird nur damit erzeugt, wenn er vollständig ist (keine Lücke, jede Prüfung bestanden) und du Ja sagst; sonst baut das Modul GGUF, und der Entwurf ist deiner zum Füllen.
 
 ```bash
 llm-cli scan
@@ -2749,10 +2758,52 @@ In der GUI: **Tools > Create Hardware Module...**, erste Seite: **AI Auto-Discov
 Basis-Image wird auf seinen Digest festgelegt, bevor du den Vorschlag siehst, und das Modul wird über dieselbe
 Funktion wie bei diesem Befehl gespeichert, mit denselben Ablehnungen.
 
+### module fields
+
+```
+llm-cli module fields [--json]
+```
+
+Die Variablen eines Ausgabeformats der allgemeinen Vorlage, aus ihrem Schema erzeugt: jeder Pfad (Tabellenzeilen über
+ihre Nummer, `runtime_libraries.N.version`) mit seiner Art (ein Wort, eine Liste von Wörtern, eine Auswahl, Häkchen,
+eine Tabelle), seiner Auswahl, ob er Pflicht ist, und seiner Erklärung. Das sind die Felder des Formulars im
+Assistenten, von `--ask-values` und von `--set`. `--json` gibt sie an Skripte.
+
+### module propose-values
+
+```
+llm-cli module propose-values PROBE_FILE [--provider TEXT] [--model TEXT] [--out DATEI] [--json]
+```
+
+Ditto schlägt die Werte der Ausgabeformate vor, die der Beschleuniger eines Boards braucht, Wert für Wert, aus der
+Hardware-Probe und den Auszügen der gecrawlten Herstellerdokumentation, die die Wissensbasis dazu findet ([Deep
+Ingest](#knowledge)): jeder Wert mit Grund, Quelle (der Adresse der Seite, einem Schlüssel der Probe oder der Vorlage
+selbst) und Sicherheit. Das Framework prüft die Antwort, bevor du sie siehst: Ein Wert, dessen Quelle kein Auszug ist,
+den Ditto bekam, und kein Schlüssel der Probe, bleibt leer und wird als Lücke genannt (ein Wert wird gelesen, nie
+geraten); ein Wert für einen Pfad, den die Vorlage nicht hat, oder mit einem gefährlichen Befehl wird abgelehnt; und
+jeder Wert geht durch die Prüfungen der Vorlage, jeder Grund an seinem Feld genannt. Das Ergebnis ist ein Entwurf, nie
+ein Modul: `--out DATEI` schreibt seine Formate als YAML für `module create --formats DATEI --ask-values`, `--json`
+gibt ihn ganz an Skripte.
+
+| Option | Bedeutung |
+|---|---|
+| `--provider TEXT`, `--model TEXT` | Anbieter und Modell für diesen Lauf. Standard: KI-Einstellungen. |
+| `--out DATEI` | Die vorgeschlagenen Formate als YAML in diese Datei schreiben. |
+| `--json` | Der Vorschlag als JSON: je Format seine Werte, jeder vorgeschlagene Wert mit Grund, Quelle und Sicherheit, die Lücken und die Prüfungen. |
+
+```bash
+llm-cli module propose-values target_hardware_config.txt --out formats.yml
+llm-cli module create --probe target_hardware_config.txt --formats formats.yml --ask-values
+```
+
+In der GUI: **Tools > Create Hardware Module...**, Flags-Seite, **Ditto: Werte vorschlagen**; Dittos KI-Analyse auf
+der ersten Seite schlägt sie von sich aus vor, wenn die Probe einen Beschleuniger nennt.
+
 ### module edit
 
 ```
-llm-cli module edit TARGET [--file DATEI]... [--apply DIFF_DATEI] [--variables DATEI]
+llm-cli module edit TARGET [--file DATEI]... [--apply DIFF_DATEI] [--variables DATEI] [--set FORMAT.PFAD=WERT]...
+                    [--ask-values]
 ```
 
 Der Schritt „alle Dateien bearbeiten“ für ein Target des Targets-Ordners (nach ID oder Ordnername), der Ort, an dem
@@ -2771,6 +2822,8 @@ wird nichts gespeichert, mit den Gründen; eine Änderung darf die Markierungen 
 | `--file DATEI` | Nur diese Datei des Schritts öffnen (z. B. `modules/config_module.sh`, `target.yml`, `Dockerfile`); wiederholbar. Standard: jede Datei, außer mit `--apply`. |
 | `--apply DIFF_DATEI` | Zuerst einen Unified Diff anwenden (den Vorschlag einer KI oder einen von Hand geschriebenen), ganz oder gar nicht; er wird gezeigt und geprüft wie jede Änderung und nur auf dein Ja gespeichert. Ein Diff, der eine Datei anlegt, löscht oder umbenennt oder den Runner berührt, wird abgelehnt. |
 | `--variables DATEI` | Für ein Modul aus der allgemeinen Vorlage: zuerst seine Variablen ändern (seine Ausgabeformate, YAML oder JSON); die Dateien, die sie enthalten (`template_variables` und Capabilities in `target.yml`, der Block in `config_module.sh`), werden aus der Vorlage neu erzeugt, als ihr Diff gezeigt und wie jede Änderung geprüft. Ein Format, das eine Datei bräuchte, die das Modul nicht hat, wird abgelehnt (dann das Modul neu erzeugen). Ohne `--file`, `--apply` oder `--variables` öffnen sich zuerst die Variablen in `$EDITOR`, dann die Dateien. |
+| `--set FORMAT.PFAD=WERT` | Einen Wert der Ausgabeformate des Moduls ändern, wie bei `module create --set`; wiederholbar. Die Dateien, die die Variablen enthalten, werden neu erzeugt und als ihr Diff gezeigt. |
+| `--ask-values` | Jeden Wert der Ausgabeformate des Moduls am Terminal abfragen, der aktuelle Wert als Vorgabe, statt sie als YAML zu öffnen. |
 
 ```bash
 llm-cli module edit my_board --file modules/config_module.sh
@@ -2781,7 +2834,7 @@ In der GUI: **Build > Targets...**, das Target wählen, **Dateien bearbeiten...*
 **Prüfungen ausführen**, **Diff anwenden...** (`--apply`) und **Speichern**, das mit den Gründen abgelehnt wird,
 solange eine Prüfung scheitert. Eine KI-App oder Ditto kann dort über die GUI-Werkzeuge eine Änderung vorschlagen, als
 Diff im Feld „Vorschlag“: Er wird im Fenster angewendet, markiert und mit einem Rückgängig gelistet, und nur dein
-**Speichern** schreibt ihn.
+**Speichern** schreibt ihn. Die Variablen der Vorlage sind dasselbe Formular je Wert wie im Assistenten (mit **YAML (erweitert)**); **Variablen anwenden** erzeugt die Dateien neu.
 
 ### module repair
 
@@ -2808,7 +2861,7 @@ aus, die die Einstellungen des gescheiterten Builds erneut baut.
 
 | Option | Bedeutung |
 |---|---|
-| `--propose` | Zuerst die Analyse der Selbstheilung um eine Reparatur aus dem Fehlerlog bitten: die Musterbibliothek, dann Ditto (das Log bereinigt, geschwärzt und als nicht vertrauenswürdiger Text eingepackt; die Dateien des Moduls als nicht vertrauenswürdiger Text). Eine bekannte Ursache gibt einen Schritt für dich als Text (nichts wird ausgeführt); Dittos Antwort ist ein Unified Diff der Dateien des Moduls, abgelehnt, wenn er nicht auf sie passt oder einen gefährlichen Befehl nennt. Braucht das Framework (und für Ditto einen KI-Anbieter). |
+| `--propose` | Zuerst die Analyse der Selbstheilung um eine Reparatur aus dem Fehlerlog bitten: die Musterbibliothek, dann bei einem Modul aus der allgemeinen Vorlage Dittos Vorschlag geänderter Werte seiner Variablen (das Log und die aktuellen Werte des Moduls; jeder geänderte Wert mit Quelle und Sicherheit, über den Weg des Bearbeitungsschritts zum Diff der Dateien gemacht), sonst Ditto (das Log bereinigt, geschwärzt und als nicht vertrauenswürdiger Text eingepackt; die Dateien des Moduls als nicht vertrauenswürdiger Text). Eine bekannte Ursache gibt einen Schritt für dich als Text (nichts wird ausgeführt); Dittos Antwort ist ein Unified Diff der Dateien des Moduls, abgelehnt, wenn er nicht auf sie passt oder einen gefährlichen Befehl nennt. Braucht das Framework (und für Ditto einen KI-Anbieter). |
 | `--apply DIFF_DATEI` | Zuerst einen Unified Diff statt des wartenden Vorschlags anwenden, wie bei `module edit --apply`. |
 | `--variables DATEI` | Stattdessen durch geänderte Variablen der Vorlage reparieren, wie bei `module edit --variables`. Eine KI-App schlägt dasselbe mit `propose_healing_fix` und seinem Feld `module_variables` vor (die geänderten Formate als YAML), das zum wartenden Diff der Dateien wird. |
 | `--file DATEI` | Diese Datei des Schritts in `$EDITOR` öffnen; wiederholbar. Ohne `--propose`, `--apply` oder einen wartenden Vorschlag öffnet jede Datei. |
@@ -2828,6 +2881,63 @@ Build eines Moduls an, seine Dateien mit dem Fehler zu öffnen. Eine KI-App lies
 `get_target_capabilities` (`build_test`; mit `module_files` auch die Dateien des Moduls und das Log des Fehlschlags)
 und schlägt eine Reparatur mit `propose_healing_fix` und seinem Feld `module_diff` vor; der Vorschlag wartet hier auf
 dich, und keine KI speichert ihn.
+
+## vendor
+
+Herstellerdateien, die nicht weitergegeben werden dürfen (das Wheel eines SDK, ein Compiler, eine
+Runtime-Bibliothek), wie die Ausgabeformate eines Targets sie in ihren Variablen nennen (`vendor_files`: die
+Download-Seite des Herstellers, der Dateiname, ihr sha256, wenn der Hersteller einen veröffentlicht, die Adresse der
+Lizenz und `dest`, wo das Build-Image sie bekommt). Das Framework liefert eine solche Datei nie mit und legt sie nie in
+ein Modul, ein Pack, ein Paket, einen Preload oder ein Bundle: Du holst sie unter deiner eigenen Annahme der Lizenz,
+und sie liegt in deinem eigenen Herstellerspeicher (`vendor-files/` des Zustandsordners, nach ihrem sha256). Ein Build
+legt jede Datei mit einem `dest` von dort in sein Build-Image, erneut nach ihrem sha256 geprüft; fehlt eine, hält der
+Build an, bevor etwas gebaut wird, und nennt `vendor fetch` als nächsten Schritt. Der Preload des Builds führt solche
+Dateien als nicht mitgenommen. Eine KI liest die Fakten (`get_target_capabilities`: `vendor_files`) und nimmt nie eine
+Lizenz an und holt nie eine solche Datei.
+
+### vendor list
+
+```
+llm-cli vendor list TARGET [--json]
+```
+
+Die Herstellerdateien, die das Target nennt: wofür jede ist, ob für das Build-Image oder das Board, ob ihre Lizenz
+angenommen ist und ob sie in deinem Herstellerspeicher liegt.
+
+### vendor fetch
+
+```
+llm-cli vendor fetch TARGET NAME [--file DATEI]
+```
+
+Zeigt die Fakten der Datei und ihren ganzen Lizenztext (aus `licences/` des Target-Ordners, wenn das Target ihn
+mitbringt, sonst von der Adresse der Lizenz gelesen; offline oder ohne Text kann nichts angenommen werden) und fragt
+dann, ob du ihn gelesen hast und selbst annimmst. Dein Ja am Terminal ist die Annahme; sie wird mit Kanal, deinem
+Konto, der Zeit und dem sha256 des gezeigten Texts aufgezeichnet, und ein geänderter Text wird neu gefragt. Keine
+Option überspringt die Frage, und ohne Terminal lehnt der Befehl ab. Danach: mit `--file` wird die heruntergeladene
+Datei übernommen; eine Datei, die das Target als öffentlich und direkt kennzeichnet (über sha256 und Größe gepinnt),
+lädt das Framework nach einem weiteren Ja; sonst nennt der Befehl die Download-Seite des Herstellers und die Zeile
+`vendor add`.
+
+### vendor add
+
+```
+llm-cli vendor add TARGET NAME DATEI
+```
+
+Gibt die heruntergeladene Datei an, nachdem ihre Lizenz angenommen wurde: Ihr sha256 muss der sein, den das Target
+nennt (eine Abweichung wird abgelehnt, und nichts bleibt); veröffentlicht der Hersteller keinen, siehst du den der
+Datei und bestätigst ihn an einem Terminal, und spätere Builds prüfen diesen sha256.
+
+```bash
+llm-cli vendor fetch my_npu_board vendor_sdk-1.0-py3-none-any.whl
+llm-cli vendor add my_npu_board vendor_sdk-1.0-py3-none-any.whl ~/Downloads/vendor_sdk-1.0-py3-none-any.whl
+```
+
+In der GUI: **Build > Targets...**, das Target wählen, **Herstellerdateien...**: die Dateien mit ihrem Zustand;
+**Lizenz zeigen und holen...** zeigt den ganzen Text, und **Annehmen** bleibt aus, bis du ankreuzt, dass du ihn
+gelesen hast und selbst annimmst; dann **Download-Seite öffnen**, **Datei angeben...** (nach ihrem sha256 geprüft)
+oder **Jetzt herunterladen** für eine direkte Datei.
 
 ---
 

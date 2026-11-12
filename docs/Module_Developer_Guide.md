@@ -446,7 +446,7 @@ packages and downloads), the flags, the setup commands, and for each **output fo
 | `runtime_libraries` | Each library the board needs: `name`, `version`, `image_path` (in the build image), `redistributable` (default no) and, when it may not be passed on, `source_url`, where the person fetches it under their own licence acceptance. |
 | `board_paths` | `install_dir`, `model_dir`, `lib_dir` on the board. |
 | `sdk` | The format's needs for the pre-flight check (as in [4.2](#42-capabilities)). |
-| `vendor_files` | Vendor files that may not be passed on (`name`, `url`, `licence_url`): only referenced, never copied. |
+| `vendor_files` | Vendor files that may not be passed on (`name`, `url`, `licence_url`, and optionally `sha256`, `size`, `dest`, `executable`, `direct`, `licence_file`): only referenced, never copied; the person fetches them under their own licence acceptance ([section 3.9](#39-values-proposed-by-ditto-a-form-per-value-vendor-files-under-their-licence)). |
 
 The generator keeps them in `target.yml` under `template_variables:` and writes them into `config_module.sh` as data
 (single-quoted words between `# >>> template variables` and `# <<< template variables`); the capabilities come from
@@ -530,6 +530,51 @@ No build can fetch such a file, so the person gives it: `llm-cli build source-im
 FILE`. The file's sha256 is checked before anything in it is read; then the image of the platform is read with every
 layer checked against its digest and the config's `diff_ids`, the same way and with the same checks as an image from a
 registry, nothing loaded or run, and only the named files are kept.
+
+### 3.9 Values proposed by Ditto, a form per value, vendor files under their licence
+
+**Ditto's proposal.** For a board with an accelerator of its own, nobody writes a format by hand: Ditto proposes its
+values one at a time from the hardware probe and the vendor's documentation crawled into the knowledge base (Deep
+Ingest, within its licences). Each value comes with its reason, its source (the page's address, a key of the probe,
+or the template itself for its board paths and the format's id, label and extension) and its confidence. The framework
+checks the answer: a value without such a source stays empty and is named as a gap, because a value is read, never
+guessed; a value for a path the template does not have, or with a dangerous command, is refused; every value goes
+through the checks of 3.8. It is a draft: you fill the gaps and correct what is wrong, and only your Finish makes the
+module (marked untested and AI-generated). The wizard's AI analysis proposes the values by itself when the probe names
+an accelerator, **Ditto: Propose the Values** on the flags page asks again, `llm-cli module generate-ai` prints them
+(and uses them only when the draft is complete and you say yes; `--formats-out FILE` keeps them), and `llm-cli module
+propose-values PROBE --out FILE` gives them for `module create --formats FILE`. A repair from the log of a module made
+from this template asks Ditto for changed values first ([section 3.7](#37-tested-by-a-build-repaired-after-a-failed-one)).
+
+**A form per value.** The flags page and the edit step show the formats as a form generated from the schema: a tab
+per format, one field per variable (a line for a word or a list of words, a choice, ticks for the inputs, a table for
+the runtime libraries and the vendor files), its explanation as its tooltip, the required ones marked, the reason of a
+failing check under its field and Ditto's proposal beside it. **YAML (advanced)** shows the same values as text. At a
+terminal, `--ask-values` asks each value and `--set FORMAT.PATH=VALUE` sets one; `llm-cli module fields` lists the
+paths.
+
+**Vendor files and toolchains.** A file the vendor's licence does not let you pass on (an SDK's wheel, a compiler, a
+runtime library) is named, never shipped:
+
+```yaml
+  vendor_files:
+    - name: vendor_sdk-2.1.0-py3-none-linux_x86_64.whl
+      url: "https://vendor.example.com/downloads"        # the download page (or the file itself with direct: true)
+      licence_url: "https://vendor.example.com/licence"
+      sha256: "<64 hex>"                                   # when the vendor publishes it
+      dest: /opt/vendor/vendor_sdk-2.1.0-py3-none-linux_x86_64.whl   # the build image gets it here
+      purpose: "the format's compiler"
+```
+
+`licence_file: licences/NAME.txt` names the licence text in the target folder when the licence allows shipping its
+text; otherwise it is read from `licence_url` when the person fetches the file. `direct: true` (with `sha256` and
+`size`) marks the address as the file itself on a public server, which the framework may then download after the
+person's yes; `executable: true` makes the copy in the image runnable. The person fetches each file with **Vendor
+Files...** in **Build > Targets...** or `llm-cli vendor fetch TARGET NAME`: the whole licence text is shown, their own
+yes accepts it (recorded with the text's sha256; never an AI's, never without a terminal), and the file they downloaded
+is checked by its sha256 and kept in their own vendor store. A build copies each file with a `dest` from there into
+its image and stops, naming the fetch, while one is missing. A pack, a package, a preload and a bundle never carry
+such a file.
 
 ## 4. target.yml and the capabilities block
 

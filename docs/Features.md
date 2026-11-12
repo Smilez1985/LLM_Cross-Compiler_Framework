@@ -3295,6 +3295,24 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   analysis only** (`--provider`, `--model`, `DittoManager.for_run`): the saved AI settings stay unchanged. A rule-based
   probe import after Ditto's proposal replaces every value of the proposal (also its packages, setup commands and
   quantization logic), so the module is then yours.
+- **A format's values proposed by Ditto, asked one by one:** for a board whose accelerator converts models into a
+  format of its own (an NPU or a GPU), Ditto proposes the values of the general template's variables one at a time
+  from the probe and the vendor's documentation crawled into the knowledge base: each value with its reason, its source
+  (the page's address, a probe key or the template) and its confidence. The framework leaves a value without such a
+  source empty and names it as a gap (a value is read, never guessed), refuses a path the template does not have and a
+  dangerous command, and checks every value; the result is a draft you complete. The wizard's AI analysis does it when
+  the probe names an accelerator, **Ditto: Propose the Values** on the flags page asks again, `llm-cli module
+  generate-ai` prints it, `llm-cli module propose-values` gives it as YAML or JSON, and a repair of such a module from
+  its log proposes changed values first. The flags page and the edit step show the formats as a form per value
+  generated from the schema (help text, required fields, the reason under its field, Ditto's proposal beside it;
+  **YAML (advanced)** keeps the text view); at a terminal `--ask-values` and `--set FORMAT.PATH=VALUE` do the same.
+- **Vendor files and toolchains under your own licence acceptance:** a file a format names that its vendor does not
+  let anyone pass on (an SDK's wheel, a compiler, a runtime library) is never shipped and never put into a module, a
+  pack, a package, a preload or a bundle. **Build > Targets... > Vendor Files...** or `llm-cli vendor fetch` shows its
+  whole licence text, and only your own yes accepts it (a tick and **Accept**, or a typed yes at a terminal; never an
+  AI, never a run without a terminal), recorded with the text's sha256. You download the file on the vendor's page and
+  give it (checked by its sha256, kept in your own vendor store), or the framework downloads a file the target pins as
+  public and direct. A build copies it from there into its image and stops, naming the fetch, while one is missing.
 - **The device runtime in the module:** every new `target.yml` gets a `runtime:` block, the build recipe's plan for
   the board's llama.cpp runtime from the target's probe (the wizard's imported probe file, the probe file of
   `module generate-ai`, or `llm-cli module create --probe <file>`): architecture, OS, the C library the cross build

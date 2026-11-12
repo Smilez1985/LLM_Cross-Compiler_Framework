@@ -32,7 +32,8 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [mcp](#mcp): `serve`, `config`, `token add|list|rotate|revoke`
 - [acp](#acp): Ditto as an agent of editors (`config`, `servers`)
 - [secrets](#secrets): `set`, `list`
-- [module](#module): `create`, `generate-ai`
+- [module](#module): `create`, `generate-ai`, `edit`, `repair`, `fields`, `propose-values`
+- [vendor](#vendor): vendor files that may not be passed on (`list`, `fetch`, `add`)
 - [scan](#scan): hardware probe
 - [device](#device): `list`, `settings`, `runtime`
 - [bundle](#bundle): `plan`, `build`, `list`, `deploy`, `status`, `uninstall`, `rollback`, `delete`, `block`, `harness`
@@ -168,6 +169,8 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `acp` / `acp config` / `acp servers` | Ditto as an agent of editors that speak ACP (the editor starts it) / show the editor entry / the MCP servers editors passed, with your consent per entry |
 | `secrets set` / `secrets list` | Store a token (Hugging Face, GitHub) / list the stored names |
 | `module create` / `module generate-ai` / `module edit` / `module repair` | Create a new hardware target, by questions or from a probe file with Ditto / edit its files with a diff and the checks / repair it after a failed build, by hand or from its error log |
+| `module fields` / `module propose-values` | The variables of a target format of the general template / Ditto's proposal of their values from a probe and the crawled vendor documentation, each with its source and confidence |
+| `vendor list` / `vendor fetch` / `vendor add` | The vendor files a target names that may not be passed on / show a file's licence and take your own yes / give the file you downloaded, checked by its sha256 |
 | `scan` | Run the hardware probe on this computer or, with `--device`, on a board over SSH, or with `--import` store a board's probe file, and print its probe id |
 | `device list` / `device settings` | The probed boards / how the runtime is installed on a board (start script or systemd), decided before a deployment |
 | `device runtime plan/build/deploy/verify/status` | The self-built llama.cpp runtime of a board: plan it from the board's profile, cross-build it, install it over SSH and check it there |
@@ -2559,7 +2562,8 @@ New hardware targets. The full guide: [Module_Developer_Guide.md](Module_Develop
 llm-cli module create [--name TEXT] [--arch aarch64|x86_64|armv7l|riscv64] [--sdk TEXT] [--probe FILE]
                       [--description TEXT] [--base-image IMAGE] [--packages TEXT] [--cpu-flags TEXT]
                       [--cmake-flags TEXT] [--setup-commands FILE] [--quantization-logic FILE]
-                      [--knowledge-root URL]... [--formats FILE] [--edit]
+                      [--knowledge-root URL]... [--formats FILE] [--set FORMAT.PATH=VALUE]... [--ask-values]
+                      [--edit]
 ```
 
 Creates a new target with the values of the module wizard, as options; what is not given is asked: name,
@@ -2584,6 +2588,8 @@ target is never overwritten. The target is marked untested until a run on its bo
 | `--quantization-logic FILE` | The bash `case` branches of the convert stage (`modules/convert_module.sh`). |
 | `--knowledge-root URL` | Attach the knowledge base's pages crawled from this address (privacy scrub applied); repeatable. Only these pages are attached. |
 | `--formats FILE` | The module's output formats, the general template's variables ([Module Developer Guide](Module_Developer_Guide.md#38-the-general-template-formats-as-variables)): a YAML or JSON list whose entries are a preset name (`gguf`, `rknn`, `rkllm`) or a format's values (its vendor converter with its arguments, the input formats, the output extension, the quantization types, the runtime libraries with their versions and whether they may be passed on, the board paths, its `sdk:` needs, the vendor files that may not be passed on). Every value is checked like the other fields. Without it the module builds GGUF. |
+| `--set FORMAT.PATH=VALUE` | Set one value of an output format by its path ([`module fields`](#module-fields) lists them), e.g. `hef.converter.command=/opt/vendor/bin/conv`, `hef.quantizations=int8,int16` or a row of a table, `hef.runtime_libraries.0.version=4.20.0`; a new FORMAT id adds a format. Repeatable, applied after `--formats`. A path the template does not have is refused. |
+| `--ask-values` | Ask for each value of each output format at the terminal, with its explanation and the current value as the default (Enter keeps it, `-` clears it); the format's checks run after its last value, and a failing one offers to go through its values again. Without a terminal the command refuses. |
 | `--edit` | The wizard's "edit all files" step: the module is made in a private scratch folder, its stage modules, `target.yml` and Dockerfile open in `$EDITOR` one after the other, the diff is shown and the checks run again ([`module edit`](#module-edit)); a failing check offers to open the files again, and the module goes into the targets folder only when every check passes and you say yes. Otherwise nothing is written. |
 
 The target is written to the configured targets folder (setting `targets_dir`; a relative path is relative to the
@@ -2599,14 +2605,14 @@ stages, where a new target fills in its conversion and quantization
 In the GUI: **Tools > Create Hardware Module...**: name, architecture, SDK and **Description** on the hardware page,
 base image and packages on the Docker page, CPU and CMake flags, quantization logic and setup commands on the flags
 page, the knowledge attachment and the community export on the last page; the standard import on the first page reads
-a probe file (`--probe`). The last page is the "edit all files" step (`--edit`): the module is made there, not saved
+a probe file (`--probe`). The output formats on the flags page are a form per value generated from the template's schema (`--set`, `--ask-values`): a tab per format, each field with its explanation as its tooltip, the required ones marked with `*`, the reason of a failing check under its field, and beside each field Ditto's proposed value with its source and confidence; **YAML (advanced)** shows the same values as YAML (`--formats`), and **Ditto: Propose the Values** asks Ditto for them from the imported probe ([`module propose-values`](#module-propose-values)). The last page is the "edit all files" step (`--edit`): the module is made there, not saved
 yet, its files listed with their diff; **Finish** runs the checks again, refuses with the reasons while one fails, and
 then saves the module. After **Finish** the new target is checked as with `targets validate`.
 
 ### module generate-ai
 
 ```
-llm-cli module generate-ai PROBE_FILE [--provider TEXT] [--model TEXT]
+llm-cli module generate-ai PROBE_FILE [--provider TEXT] [--model TEXT] [--formats-out FILE]
 ```
 
 Ditto proposes a target module from a hardware probe file (`target_hardware_config.txt`, see [scan](#scan)). The
@@ -2622,6 +2628,9 @@ terminal the notice on Ditto goes to stderr once ([ditto](#ditto)).
 |---|---|
 | `--provider TEXT` | Provider for this run, e.g. `anthropic`, `openai`, `ollama`. Default: AI settings. |
 | `--model TEXT` | Model for this run. Default: AI settings. |
+| `--formats-out FILE` | Write Ditto's proposal of the output formats' values to this YAML file, for review and `module create --formats FILE --ask-values`. |
+
+When the probe names an accelerator of its own (an NPU or a GPU), Ditto also proposes the values of its output format(s), one value at a time, from the probe and the crawled vendor documentation (as [`module propose-values`](#module-propose-values)); the proposal is printed per value with its source and confidence. The module is made with it only when it is complete (no gap, every check passed) and you say yes; otherwise the module builds GGUF and the draft is yours to fill.
 
 ```bash
 llm-cli scan
@@ -2633,10 +2642,51 @@ In the GUI: **Tools > Create Hardware Module...**, first page: **AI Auto-Discove
 to its digest before you see the proposal, and the module is saved through the same function as this command, with the
 same refusals.
 
+### module fields
+
+```
+llm-cli module fields [--json]
+```
+
+The variables of an output format of the general template, generated from its schema: each path (records by index,
+`runtime_libraries.N.version`) with its kind (a word, a list of words, a choice, ticks, a table), its choices, whether
+it is required and its explanation. These are the fields of the wizard's form, of `--ask-values` and of `--set`.
+`--json` gives them to scripts.
+
+### module propose-values
+
+```
+llm-cli module propose-values PROBE_FILE [--provider TEXT] [--model TEXT] [--out FILE] [--json]
+```
+
+Ditto proposes the values of the output format(s) a board's accelerator needs, one value at a time, from the hardware
+probe and the excerpts of the crawled vendor documentation the knowledge base retrieves for it ([Deep
+Ingest](#knowledge)): each value with its reason, its source (the page's address, a key of the probe, or the template
+itself) and its confidence. The framework checks the answer before you see it: a value whose source is no excerpt
+Ditto was given and no key of the probe is left empty and named as a gap (a value is read, never guessed), a value for
+a path the template does not have or with a dangerous command is refused, and every value goes through the template's
+checks, each reason named at its field. The result is a draft, never a module: `--out FILE` writes its formats as
+YAML for `module create --formats FILE --ask-values`, `--json` prints it whole for scripts.
+
+| Option | Meaning |
+|---|---|
+| `--provider TEXT`, `--model TEXT` | Provider and model for this run. Default: AI settings. |
+| `--out FILE` | Write the proposed formats as YAML to this file. |
+| `--json` | The proposal as JSON: per format its values, each proposed value with reason, source and confidence, the gaps and the checks. |
+
+```bash
+llm-cli module propose-values target_hardware_config.txt --out formats.yml
+llm-cli module create --probe target_hardware_config.txt --formats formats.yml --ask-values
+```
+
+In the GUI: **Tools > Create Hardware Module...**, flags page, **Ditto: Propose the Values**; Ditto's AI analysis on
+the first page proposes them by itself when the probe names an accelerator.
+
 ### module edit
 
 ```
-llm-cli module edit TARGET [--file FILE]... [--apply DIFF_FILE] [--variables FILE]
+llm-cli module edit TARGET [--file FILE]... [--apply DIFF_FILE] [--variables FILE] [--set FORMAT.PATH=VALUE]...
+                    [--ask-values]
 ```
 
 The "edit all files" step for a target of the targets folder (by id or folder name), the place where a module is
@@ -2654,6 +2704,8 @@ reasons; an edit may not drop the marks `untested` and `provenance` of `target.y
 | `--file FILE` | Open only this file of the step (e.g. `modules/config_module.sh`, `target.yml`, `Dockerfile`); repeatable. Default: every file, unless `--apply` is given. |
 | `--apply DIFF_FILE` | Apply a unified diff first (an AI's proposal, or one written by hand), all or nothing; it is shown and checked like any edit and saved only on your yes. A diff that adds, deletes or renames a file, or touches the runner, is refused. |
 | `--variables FILE` | For a module made from the general template: change its template variables (its output formats, YAML or JSON) first; the files that hold them (`target.yml`'s `template_variables` and capabilities, the block of `config_module.sh`) are made anew from the template, shown as their diff and checked like any edit. A format that would need a file the module does not have is refused (make the module again). Without `--file`, `--apply` or `--variables`, the variables open first in `$EDITOR`, then the files. |
+| `--set FORMAT.PATH=VALUE` | Change one value of the module's output formats, as in `module create --set`; repeatable. The files that hold the variables are made anew and shown as their diff. |
+| `--ask-values` | Ask for each value of the module's output formats at the terminal, the current value as the default, instead of opening them as YAML. |
 
 ```bash
 llm-cli module edit my_board --file modules/config_module.sh
@@ -2663,7 +2715,7 @@ llm-cli module edit my_board --apply proposal.diff
 In the GUI: **Build > Targets...**, select the target, **Edit Files...**: the same files with their diff, **Run the
 Checks**, **Apply a Diff...** (`--apply`) and **Save**, which is refused with the reasons while a check fails. An AI
 app or Ditto may propose a change there through the GUI tools, as a diff in the field "proposal": it is applied in the
-window, marked and listed with an Undo, and only your **Save** writes it.
+window, marked and listed with an Undo, and only your **Save** writes it. The template variables are the same form per value as in the wizard (with **YAML (advanced)**); **Apply the Variables** makes the files anew.
 
 ### module repair
 
@@ -2687,7 +2739,7 @@ command prints the `llm-cli build start` line that builds the failed build's set
 
 | Option | Meaning |
 |---|---|
-| `--propose` | Ask the self-healing analysis for a repair from the error log first: the pattern library, then Ditto (the log cleaned, scrubbed and wrapped as untrusted text; the module's files as untrusted text). A known cause gives a step for you as text (nothing is run); Ditto's answer is a unified diff of the module's files, refused when it does not fit them or names a dangerous command. Needs the framework (and an AI provider for Ditto). |
+| `--propose` | Ask the self-healing analysis for a repair from the error log first: the pattern library, then, for a module made from the general template, Ditto's proposal of changed values of its template variables (the log and the module's current values; each changed value with its source and confidence, made into the diff of the files by the edit step's own path), else Ditto (the log cleaned, scrubbed and wrapped as untrusted text; the module's files as untrusted text). A known cause gives a step for you as text (nothing is run); Ditto's answer is a unified diff of the module's files, refused when it does not fit them or names a dangerous command. Needs the framework (and an AI provider for Ditto). |
 | `--apply DIFF_FILE` | Apply a unified diff first instead of the waiting proposal, as in `module edit --apply`. |
 | `--variables FILE` | Repair by changed template variables instead, as in `module edit --variables`. An AI app proposes the same with `propose_healing_fix` and its field `module_variables` (the changed formats as YAML), which becomes the waiting diff of the files. |
 | `--file FILE` | Open this file of the step in `$EDITOR`; repeatable. Without `--propose`, `--apply` or a waiting proposal every file opens. |
@@ -2706,6 +2758,61 @@ build log when a build ends, and after a failed build of a module offers to open
 reads the state in `list_targets` and `get_target_capabilities` (`build_test`; with `module_files` also the module's
 files and the failed log) and proposes a repair with `propose_healing_fix` and its field `module_diff`; the proposal
 waits for you here, and no AI saves it.
+
+## vendor
+
+Vendor files that may not be passed on (an SDK's wheel, a compiler, a runtime library), as a target's output formats
+name them in their template variables (`vendor_files`: the vendor's download page, the file name, its sha256 when the
+vendor publishes one, the licence's address, and `dest`, where the build image takes it). The framework never ships
+such a file and never puts it into a module, a pack, a package, a preload or a bundle: you fetch it under your own
+licence acceptance, and it is kept in your own vendor store (the state folder's `vendor-files/`, by its sha256). A
+build stages each file with a `dest` from there into its build image, checked again by its sha256; a missing one stops
+the build before anything is built and names `vendor fetch` as the next step. The build's preload lists such files as
+not carried. An AI reads the facts (`get_target_capabilities`: `vendor_files`) and never accepts a licence or fetches
+such a file.
+
+### vendor list
+
+```
+llm-cli vendor list TARGET [--json]
+```
+
+The vendor files the target names: what each is for, whether it is for the build image or the board, whether its
+licence is accepted and whether it is in your vendor store.
+
+### vendor fetch
+
+```
+llm-cli vendor fetch TARGET NAME [--file FILE]
+```
+
+Shows the file's facts and its whole licence text (from the target folder's `licences/` when the target ships it,
+else read from the licence address; offline, or without a text, nothing can be accepted), then asks whether you read
+it and accept it yourself. Your yes at the terminal is the acceptance; it is recorded with the channel, your account,
+the time and the sha256 of the text you were shown, and a changed text is asked again. There is no option that skips
+the question, and without a terminal the command refuses. Then: with `--file`, the file you downloaded is taken in;
+for a file the target marks as public and direct (pinned by sha256 and size), the framework downloads it after another
+yes; otherwise the command names the vendor's download page and the `vendor add` line.
+
+### vendor add
+
+```
+llm-cli vendor add TARGET NAME FILE
+```
+
+Gives the file you downloaded, after its licence was accepted: its sha256 must be the one the target names (a mismatch
+is refused and nothing is kept); when the vendor publishes none, you are shown the file's own and confirm it at a
+terminal, and later builds check that sha256.
+
+```bash
+llm-cli vendor fetch my_npu_board vendor_sdk-1.0-py3-none-any.whl
+llm-cli vendor add my_npu_board vendor_sdk-1.0-py3-none-any.whl ~/Downloads/vendor_sdk-1.0-py3-none-any.whl
+```
+
+In the GUI: **Build > Targets...**, select the target, **Vendor Files...**: the files with their state; **Show the
+Licence and Fetch...** shows the whole text, and **Accept** stays off until you tick that you read and accept it
+yourself; then **Open the Download Page**, **Add the File...** (checked by its sha256), or **Download It Now** for a
+direct file.
 
 ---
 

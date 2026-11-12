@@ -466,7 +466,7 @@ gepinnte pip-Pakete und Downloads), die Flags, die Setup-Befehle und für jedes 
 | `runtime_libraries` | Jede Bibliothek, die das Board braucht: `name`, `version`, `image_path` (im Build-Image), `redistributable` (standardmäßig nein) und, wenn sie nicht weitergegeben werden darf, `source_url`, wo die Person sie mit ihrer eigenen Lizenzzustimmung holt. |
 | `board_paths` | `install_dir`, `model_dir`, `lib_dir` auf dem Board. |
 | `sdk` | Die Anforderungen des Formats für die Prüfung vor dem Build (wie in [4.2](#42-capabilities)). |
-| `vendor_files` | Herstellerdateien, die nicht weitergegeben werden dürfen (`name`, `url`, `licence_url`): nur referenziert, nie kopiert. |
+| `vendor_files` | Herstellerdateien, die nicht weitergegeben werden dürfen (`name`, `url`, `licence_url`): nur referenziert, nie kopiert; die Person holt sie unter ihrer eigenen Annahme der Lizenz, mit den optionalen Feldern `sha256`, `size`, `dest`, `executable`, `direct` und `licence_file` ([Abschnitt 3.9](#39-von-ditto-vorgeschlagene-werte-ein-formular-je-wert-herstellerdateien-unter-ihrer-lizenz)). |
 
 Der Generator hält sie in `target.yml` unter `template_variables:` fest und schreibt sie als Daten in
 `config_module.sh` (Wörter in einfachen Anführungszeichen zwischen `# >>> template variables` und
@@ -556,6 +556,52 @@ TARGET`, **Build > Build-Container-Images... > Aus einer Image-Datei nehmen...**
 Plattform gelesen, jede Schicht gegen ihren Digest und die `diff_ids` der Konfiguration geprüft, genauso und mit
 denselben Prüfungen wie ein Image aus einer Registry, nichts geladen oder ausgeführt, und nur die genannten Dateien
 bleiben.
+
+### 3.9 Von Ditto vorgeschlagene Werte, ein Formular je Wert, Herstellerdateien unter ihrer Lizenz
+
+**Dittos Vorschlag.** Für ein Board mit eigenem Beschleuniger schreibt niemand ein Format von Hand: Ditto schlägt seine
+Werte einzeln aus der Hardware-Probe und der in die Wissensbasis gecrawlten Dokumentation des Herstellers vor (Deep
+Ingest, im Rahmen ihrer Lizenzen). Jeder Wert kommt mit Grund, Quelle (der Adresse der Seite, einem Schlüssel der
+Probe oder der Vorlage selbst für ihre Board-Pfade und Kennung, Bezeichnung und Endung des Formats) und Sicherheit.
+Das Framework prüft die Antwort: Ein Wert ohne eine solche Quelle bleibt leer und wird als Lücke genannt, denn ein Wert
+wird gelesen, nie geraten; ein Wert für einen Pfad, den die Vorlage nicht hat, oder mit einem gefährlichen Befehl wird
+abgelehnt; jeder Wert geht durch die Prüfungen aus 3.8. Es ist ein Entwurf: Du füllst die Lücken und berichtigst, was
+falsch ist, und erst dein Finish erzeugt das Modul (als ungetestet und KI-erzeugt markiert). Die KI-Analyse des
+Assistenten schlägt die Werte von sich aus vor, wenn die Probe einen Beschleuniger nennt, **Ditto: Werte vorschlagen**
+auf der Flags-Seite fragt erneut, `llm-cli module generate-ai` gibt sie aus (und nimmt sie nur, wenn der Entwurf
+vollständig ist und du Ja sagst; `--formats-out DATEI` behält sie), und `llm-cli module propose-values PROBE --out
+DATEI` gibt sie für `module create --formats DATEI`. Eine Reparatur aus dem Log eines Moduls aus dieser Vorlage fragt
+Ditto zuerst nach geänderten Werten ([Abschnitt 3.7](#37-durch-einen-build-getestet-nach-einem-gescheiterten-repariert)).
+
+**Ein Formular je Wert.** Die Flags-Seite und der Bearbeitungsschritt zeigen die Formate als Formular, aus dem Schema
+erzeugt: ein Reiter je Format, ein Feld je Variable (eine Zeile für ein Wort oder eine Liste von Wörtern, eine
+Auswahl, Häkchen für die Eingaben, eine Tabelle für die Runtime-Bibliotheken und die Herstellerdateien), seine
+Erklärung als Tooltip, die Pflichtfelder markiert, der Grund einer scheiternden Prüfung unter seinem Feld und Dittos
+Vorschlag daneben. **YAML (erweitert)** zeigt dieselben Werte als Text. Am Terminal fragt `--ask-values` jeden Wert ab,
+und `--set FORMAT.PFAD=WERT` setzt einen; `llm-cli module fields` listet die Pfade.
+
+**Herstellerdateien und Toolchains.** Eine Datei, die die Lizenz des Herstellers nicht weitergeben lässt (das Wheel
+eines SDK, ein Compiler, eine Runtime-Bibliothek), wird genannt, nie mitgeliefert:
+
+```yaml
+  vendor_files:
+    - name: vendor_sdk-2.1.0-py3-none-linux_x86_64.whl
+      url: "https://vendor.example.com/downloads"        # die Download-Seite (oder die Datei selbst mit direct: true)
+      licence_url: "https://vendor.example.com/licence"
+      sha256: "<64 hex>"                                   # wenn der Hersteller ihn veröffentlicht
+      dest: /opt/vendor/vendor_sdk-2.1.0-py3-none-linux_x86_64.whl   # hier bekommt das Build-Image sie
+      purpose: "der Compiler des Formats"
+```
+
+`licence_file: licences/NAME.txt` nennt den Lizenztext im Target-Ordner, wenn die Lizenz erlaubt, ihren Text
+mitzuliefern; sonst wird er von `licence_url` gelesen, wenn die Person die Datei holt. `direct: true` (mit `sha256`
+und `size`) kennzeichnet die Adresse als die Datei selbst auf einem öffentlichen Server, die das Framework dann nach
+dem Ja der Person laden darf; `executable: true` macht die Kopie im Image ausführbar. Die Person holt jede Datei mit
+**Herstellerdateien...** in **Build > Targets...** oder `llm-cli vendor fetch TARGET NAME`: Der ganze Lizenztext wird
+gezeigt, ihr eigenes Ja nimmt ihn an (mit dem sha256 des Texts aufgezeichnet; nie das einer KI, nie ohne Terminal),
+und die heruntergeladene Datei wird nach ihrem sha256 geprüft und in ihrem eigenen Herstellerspeicher aufbewahrt. Ein
+Build kopiert jede Datei mit einem `dest` von dort in sein Image und hält an, mit dem Holen als nächstem Schritt,
+solange eine fehlt. Ein Pack, ein Paket, ein Preload und ein Bundle tragen eine solche Datei nie.
 
 ## 4. target.yml und der Capabilities-Block
 
