@@ -416,6 +416,22 @@ builds are never deleted here. The same list at the command line: `llm-cli model
 `--json`), `llm-cli models delete NAME`. An AI reads the same rows, read-only, through `list_artifacts` and
 `list_local_files`.
 
+### A model archive for a computer without a network
+
+A computer without a network cannot fetch its model from Hugging Face. **Model Archives...** in the **Models** tab (or
+`llm-cli models archive`) carries it there in one checked piece: on a computer with a network, enter the model
+(`owner/name`) and, if you want, a commit or branch, and **Write a Model Archive...** writes one `.llmcfmodel` file with
+exactly the files a build of that commit uses (the weights, `config.json`, `generation_config.json`, the tokenizer
+files, the chat template and the model card), the licence and gating of the model and of its base models, a sha256 per
+file and one over the whole, signed with your own key. A gated, restrictive or unknown licence is shown and asked first.
+Carry the file over yourself. On the other computer, **Take in a Model Archive...** checks it before anything uses it
+(its layout, its signature, every file's sha256, nothing unexpected; on any problem nothing of it stays), shows the
+licence, and takes it in only after your "Yes". A build then names the model as `owner/name@commit` and uses these
+files in its network-less sandbox without asking Hugging Face anything. The archive also appears as a row of kind
+"Model archive" in the list, and **Delete...** removes it. An archive is yours: it is never uploaded, and only recipes
+and target modules are shared. What the build runs with (images, wheels, the llama.cpp commit, packages) comes with the
+build's preload, one for many models.
+
 ### The Benchmark window
 
 **Build > Benchmark...** (or **Benchmark...** in the Models tab) measures a GGUF model with llama-bench: how fast it

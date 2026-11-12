@@ -39,7 +39,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [config](#config): `show`, `output-folder`, `repos`
 - [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`, `maintainer`
 - [trash](#trash): `list`, `restore`, `empty`
-- [models](#models): `take-over`
+- [models](#models): `take-over`, `list`, `delete`, `bench`, `archive`
 - [Known limitations](#known-limitations)
 
 ---
@@ -137,6 +137,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `models take-over` | Copy what earlier versions of the Hugging Face browser saved in the Hugging Face cache into the models folder, each file checked, then offer to remove the old copies |
 | `models list` / `models delete` | Every downloaded model and every build in one list (the Models tab) / delete rows of it, each through its own deletion |
 | `models bench` / `models bench-results` | Measure a GGUF model with llama-bench on this computer (the Benchmark window) / the kept runs |
+| `models archive write` / `take` / `list` / `delete` | A portable model archive for a computer without a network: write one from a Hugging Face model at its exact commit, take one in after its checks and your yes to its licence, list and delete the ones taken in (Model Archives... in the Models tab) |
 | `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
 | `targets boards` | Each board of a target with its optimization profile and its benchmark rows (measured, published or unmeasured) |
 | `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
@@ -615,7 +616,8 @@ target's defaults. A target without a capabilities block is built unchecked.
 | Option | Meaning |
 |---|---|
 | `--recipe ID` | Build with an installed community recipe (`zoo list --kind recipe`) as a target template: its target holds the build code, and every option you leave out takes the recipe's value (the model at the recipe's commit, format, board, quantization, importance matrix, optimization level; the context length is always the recipe's). `--model`, `--format`, `--board`, `--quantization`, `--imatrix/--no-imatrix`, `--dataset/--no-dataset` and `--optimization` change a value; `--target` may only name the recipe's target. A revoked or unreadable recipe stops with exit code 2. |
-| `-m, --model TEXT` | **Required** without `--recipe`. Hugging Face ID (e.g. `HuggingFaceTB/SmolLM2-135M-Instruct`) or a local folder or file. |
+| `-m, --model TEXT` | **Required** without `--recipe`. Hugging Face ID (e.g. `HuggingFaceTB/SmolLM2-135M-Instruct`), also with its commit as `OWNER/NAME@COMMIT` (a [model archive](#models) taken in), or a local folder or file. |
+| `--revision COMMIT` | The 40-character commit of the Hugging Face model. A model archive of that commit taken in is used without any request to Hugging Face; otherwise exactly that commit is fetched. Default: the commit the default branch points to now. |
 | `-t, --target TEXT` | **Required** without `--recipe`. Target id as listed by `targets list`, e.g. `Rockchip`, or the target's folder name. Not case-sensitive. An unknown target stops with exit code 2 and the list of known targets. |
 | `-f, --format FORMAT` | Output format (default `gguf`): one the target builds, as its `target.yml` capabilities declare it (the formats the Builder tab offers for it). `--help` and the shell completion list what each installed target builds (Rockchip: `gguf`, `rkllm`, `rknn`). A target without capabilities takes any format but `hf`, unchecked. A format the target does not build stops with exit code 2 and names what each installed target builds. Not case-sensitive. |
 | `-b, --board TEXT` | Board of the target family, e.g. `rk3588`, `rk3576`, `rk3566`. Default: the target's default board (Rockchip: `rk3588`). Not case-sensitive. |
@@ -3983,7 +3985,7 @@ downloads in the models folder and the folders the AI may use, Ditto's models, t
 models, the inputs of earlier builds, the kept F16 intermediates and the finished builds. Each row has its name, kind,
 format, quantization type (a GGUF file's own type from its header), size, place, date, target and board, the boards a
 build was tested on, its tokenizer check and the newest benchmark here, and the full path. `--kind` is one of
-`download`, `ditto`, `copy`, `input`, `f16`, `build`; `--search` keeps the rows whose name, type, target, board or path
+`download`, `ditto`, `copy`, `archive`, `input`, `f16`, `build`; `--search` keeps the rows whose name, type, target, board or path
 contain the text; `--json` prints the rows for scripts.
 
 ```
@@ -4016,6 +4018,41 @@ llm-cli models bench ~/llmcf/models/hf/owner--model-GGUF/0123456789ab/model-q8_0
 llm-cli models bench-results
 ```
 
+```
+llm-cli models archive write OWNER/NAME [--revision REV] --to FILE
+llm-cli models archive take FILE [--sha256 HEX] [--from KEYFILE]...
+llm-cli models archive list [--json]
+llm-cli models archive delete OWNER/NAME@COMMIT...
+```
+
+A model archive (`llmcf-model/1`, a `.llmcfmodel` file) carries one Hugging Face model at its exact commit to a
+computer without a network, as **Model Archives...** in the Models tab does. `write`, on a computer with a network,
+looks the commit up (`--revision`: a commit or a branch; left out, the default branch now), fetches exactly the files a
+build of it stages (no GGUF, ONNX or TensorFlow copies, no pickle weights beside safetensors, no hidden files: the
+weights, `config.json`, `generation_config.json`, the tokenizer files, the chat template and the model card) into the
+Builder's copy of that commit, and writes the archive: the files stored as they are, a manifest with the licence and
+gating of the model and of its base models and a sha256 per file and one over the whole, signed with your own key (the
+key packs are signed with; `zoo keys` prints its public half). A gated, restrictive or unknown licence is shown first
+and asked at a terminal ("No" is the default; without a terminal nothing is written); a gated model needs your stored
+Hugging Face token to have passed its gate. It prints the file's sha256 and the key id. Offline mode refuses it.
+
+`take`, on the computer without a network, checks the archive in a quarantine folder before anything uses it: the
+file's sha256 when you give `--sha256`, the zip's layout (no link, folder, encrypted or unlisted member, every size the
+manifest's), the manifest, the signature (required; with `--from` the public keys `zoo keys` printed on the writing
+computer, it must be that key), then every file's sha256. On any problem nothing stays. Then it shows the repository,
+commit, files, size, signer and the licences, and asks "Accept this licence and take the archive in? [y/N]", only at a
+terminal; there is no option that skips it. The files go to `models/archives/<owner>--<name>/<commit>/`; the same
+commit again is refused. A build then names the model as `OWNER/NAME@COMMIT` (or `--model OWNER/NAME --revision
+COMMIT`) and uses these files without any request to Hugging Face, also online. `list` shows the archives taken in
+(`--json` for scripts), `delete` removes them through the deletion question (trash or for good, "No" by default). An
+archive is never uploaded by any command, and no AI tool writes, takes in or deletes one.
+
+```bash
+llm-cli models archive write HuggingFaceTB/SmolLM2-135M-Instruct --revision 12fd25f77366fa6b3b4b768ec3050bf629380bac --to ./smollm2
+llm-cli models archive take ./smollm2.llmcfmodel --from ./online-keys.txt
+llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct@12fd25f77366fa6b3b4b768ec3050bf629380bac -t ARM64 -f gguf
+```
+
 ---
 
 ## Known limitations
@@ -4032,8 +4069,5 @@ llm-cli models bench-results
   workflow, signed index and maintainer key are not published yet (`community_index_url` is empty,
   `configs/community_keys.yml` lists no key): `zoo list` shows only installed packs, and `zoo install <id>` stops
   with a message. Packs can be shared as files.
-- `build start` has no option for a model commit: the pinned commit of a recipe is used when the Builder is filled
-  from the Community Hub, with `build start --recipe`, or when an AI client passes `revision` to the MCP tool
-  `start_build`.
 - There is no CLI command for Deep Ingest (adding documentation pages to the knowledge base); it runs in the GUI's
   module wizard (**Tools > Create Hardware Module...**).
