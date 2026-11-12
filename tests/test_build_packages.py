@@ -496,10 +496,11 @@ def test_packages_the_recipe_does_not_name_are_refused(tmp_path, pack, monkeypat
         build_preload.take(plain.state, "Vendor", bad, client=None)
 
 
-def test_gpgv_gets_the_keyring_by_name_and_every_path_with_forward_slashes(tmp_path, pack, monkeypatch):
-    """The keyring goes to gpgv by its bare name, looked up in its home folder on every system (Git for Windows'
-    gpgv reads C:\\... as a name in its home folder and C:/... as a URL), every other path with forward slashes;
-    gpgv's own reason is named when a Release does not verify."""
+def test_gpgv_runs_in_its_home_folder_and_gets_every_file_by_its_bare_name(tmp_path, pack, monkeypatch):
+    """gpgv runs in its home folder ("--homedir .") and gets every file by its bare name, so no path with a drive
+    letter reaches it (Git for Windows' gpgv reads C:\\... as a name in its home folder, C:/... as a URL and a
+    --homedir C:/... as a folder below the current one); gpgv's own reason is named when a Release does not
+    verify."""
     made = pack(recipe_with(apt_section()))
     with tarfile.open(made.archive) as tar:
         tar.extractall(tmp_path / "x", filter="data") if hasattr(tarfile, "data_filter") else tar.extractall(
@@ -508,16 +509,16 @@ def test_gpgv_gets_the_keyring_by_name_and_every_path_with_forward_slashes(tmp_p
     seen = []
 
     def run(argv, **kwargs):
-        seen.append(argv)
+        seen.append((argv, kwargs.get("cwd")))
         return SimpleNamespace(returncode=2, stdout="", stderr="gpgv: keyblock resource 'x': No such file")
 
     monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(dp.PreloadError, match=r"does not verify with gpgv .*; it says: gpgv: keyblock resource"):
         dp.gpgv_check(folder, gpgv="gpgv")
-    argv = seen[0]
-    assert argv[argv.index("--keyring") + 1] == "pinned.gpg", argv
-    paths = [argv[argv.index("--homedir") + 1], argv[-2], argv[-1]]
-    assert all("/" in a and "\\" not in a for a in paths), argv
+    argv, cwd = seen[0]
+    assert argv[1:] == ["--homedir", ".", "--ignore-time-conflict", "--status-fd", "1", "--keyring", "pinned.gpg",
+                        "Release.gpg", "Release"], argv
+    assert cwd and Path(cwd).name.startswith("llmcf-gpgv-")
 
 
 @pytest.mark.skipif(not shutil.which("gpgv"), reason="needs gpgv")

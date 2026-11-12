@@ -947,14 +947,14 @@ def gpgv_check(folder: Path, gpgv: str = "") -> bool:
             release = (top / "Release").read_bytes()
             signature = pinned_signature(release, (top / "Release.gpg").read_bytes(), keys)
             (Path(home) / "Release.gpg").write_bytes(signature)
-            # The keyring by its bare name: gpg looks a --keyring name without a slash up in its home folder, the
-            # same on every system. A path would not do on Windows: the gpgv Git for Windows brings reads C:\... as
-            # a name in its home folder and C:/... as a URL ("invalid key resource URL"). The other paths with
-            # forward slashes, which it reads as they are.
-            result = subprocess.run([gpgv, "--homedir", Path(home).as_posix(), "--ignore-time-conflict",
-                                     "--status-fd", "1", "--keyring", keyring.name,
-                                     (Path(home) / "Release.gpg").as_posix(), (top / "Release").as_posix()],
-                                    capture_output=True, text=True, errors="replace")
+            (Path(home) / "Release").write_bytes(release)
+            # No path at all: gpgv runs in its home folder ("--homedir .") and gets every file by its bare name, the
+            # same on every system. The gpgv Git for Windows brings reads a drive letter its own way: C:\... as a
+            # name in its home folder, C:/... as a URL ("invalid key resource URL"), and a --homedir C:/... as a
+            # folder below the current one.
+            result = subprocess.run([gpgv, "--homedir", ".", "--ignore-time-conflict", "--status-fd", "1",
+                                     "--keyring", keyring.name, "Release.gpg", "Release"],
+                                    cwd=home, capture_output=True, text=True, errors="replace")
             if not signature or result.returncode != 0 or "[GNUPG:] VALIDSIG " not in result.stdout:
                 said = " ".join((result.stderr or "").split())
                 said = said if len(said) <= 400 else "..." + said[-400:]

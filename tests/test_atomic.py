@@ -290,11 +290,15 @@ def test_write_file_opens_its_temporary_file_in_binary_mode_where_the_system_has
     monkeypatch.setattr(os, "O_BINARY", fake_binary, raising=False)
     real_open, flags_seen = os.open, []
 
+    target = tmp_path / "pack-a.released"
+
     def spy(path, flags, mode=MODE_777, **kwargs):
-        flags_seen.append(flags)
+        # only the files write_file opens in the target's folder: another thread of the same test process (a worker
+        # left by an earlier test) may open its own files meanwhile
+        if Path(os.fsdecode(path)).parent == target.parent:
+            flags_seen.append(flags)
         return real_open(path, (flags & ~fake_binary) | (real_binary if flags & fake_binary else 0), mode, **kwargs)
     monkeypatch.setattr(os, "open", spy)
-    target = tmp_path / "pack-a.released"
     atomic.write_file(target, "a\nb\n")
     assert flags_seen and all(f & fake_binary for f in flags_seen), "the temporary file is opened with O_BINARY"
     assert target.read_text(encoding="utf-8") == "a\nb\n"
