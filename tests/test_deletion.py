@@ -69,6 +69,13 @@ DELETION_SITES = {
     ("orchestrator/runtime/build/deps.py", "DependencyCache.delete"): PERSON,
     # the kept F16 intermediates of GGUF builds: the person's list (`build f16 delete`, F16 Intermediates...)
     ("orchestrator/Core/f16_cache.py", "F16Cache.delete"): PERSON,
+    # the model archives taken in (Core/model_archive.py): the person's list (Delete... in Model Archives..., the
+    # Models tab's Delete..., `models archive delete`); its quarantine of one take-in, its own .part file of one write
+    ("orchestrator/Core/model_archive.py", "delete"): PERSON,
+    ("orchestrator/Core/model_archive.py", "discard"): STAGING,
+    ("orchestrator/Core/model_archive.py", "prepare_take"): STAGING,
+    ("orchestrator/Core/model_archive.py", "write_archive"): TEMP,
+    ("orchestrator/Core/model_archive.py", "_write_zip"): TEMP,
     # the downloads in the models folder, from the Models tab and `models delete`: the person's list only, built again
     # first, audited first (tests/test_model_library.py covers an AI actor, a changed list and the trash)
     ("orchestrator/Core/model_library.py", "delete_downloads"): PERSON,

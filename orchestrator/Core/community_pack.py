@@ -84,6 +84,8 @@ _BAD_PATH_CHARS = re.compile(r'[\x00-\x1f\x7f\\:*?"<>|]')
 _MANIFEST_CONTEXT = b"lcf-pack-manifest/v1\n"
 _ENCRYPTED_CONTEXT = b"lcf-encrypted-pack/v2 signature\n"
 _INDEX_CONTEXT = b"lcf-community-index/v1\n"
+# The manifest of a portable model archive (Core/model_archive.py): never a pack, so never a pack's prefix.
+_MODEL_ARCHIVE_CONTEXT = b"llmcf-model/1 manifest\n"
 
 
 class PackError(WithSteps, Exception):
@@ -495,6 +497,18 @@ def sign_index(index_bytes: bytes, private_key: Ed25519PrivateKey) -> PackSignat
 def verify_index(index_bytes: bytes, signature: PackSignature,
                  keys: Iterable[Union[TrustedKey, Ed25519PublicKey]], *, now: Optional[datetime] = None) -> str:
     return _verify(_INDEX_CONTEXT + index_bytes, signature, keys, now, "community index")
+
+
+def sign_model_archive(manifest_bytes: bytes, private_key: Ed25519PrivateKey) -> PackSignature:
+    """Signature of a model archive's manifest (its canonical bytes, Core/model_archive.py), with its own purpose
+    prefix: it never verifies as a pack's or an index's signature, and theirs never as an archive's."""
+    return _sign(_MODEL_ARCHIVE_CONTEXT + manifest_bytes, private_key)
+
+
+def verify_model_archive(manifest_bytes: bytes, signature: PackSignature,
+                         keys: Iterable[Union[TrustedKey, Ed25519PublicKey]], *, now: Optional[datetime] = None) -> str:
+    """The key id of the valid signature of a model archive's manifest; PackError otherwise."""
+    return _verify(_MODEL_ARCHIVE_CONTEXT + manifest_bytes, signature, keys, now, "model archive")
 
 
 # --- Board signatures (DESIGN, decision of 2026-10-31: a board runs only what the framework's key signed) --------------------

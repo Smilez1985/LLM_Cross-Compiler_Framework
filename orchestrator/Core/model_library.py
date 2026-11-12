@@ -10,14 +10,15 @@ lists, so the tab, the command line and the AI tools cannot drift apart:
   copies of Hugging Face models, the local inputs of earlier builds; a file in the models folder's `ditto` folder is
   Ditto's catalogue model;
 - BuildService.artifact_entries: the finished builds with their artifact id (tuning reports are no models);
-- F16Cache.entries: the kept F16 intermediates.
+- F16Cache.entries: the kept F16 intermediates;
+- the model archives taken in (models_here lists them, Core/model_archive.py), named <repository>@<commit>.
 
 Each row carries what a person needs: name, kind, format, quantization type (a GGUF file's own general.file_type, a
 build's from its manifest), size, where it lies, date, target and board of a build, the boards it was tested on, its
 tokenizer check and the newest llama-bench run of this computer for the same file.
 
 Deletion stays with each thing's owner: a build through ArtifactStore, an F16 intermediate through F16Cache, a
-download in the models folder through delete_downloads() below (the person's accepted plan, built again first, audited
+model archive through model_archive.delete, a download in the models folder through delete_downloads() below (the person's accepted plan, built again first, audited
 first, into the models folder's trash or for good). Ditto's catalogue models, files in a folder the person lent the AI,
 the Builder's copies and the inputs of earlier builds are not deleted here.
 
@@ -31,8 +32,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-KINDS = ("download", "ditto", "copy", "input", "f16", "build")
-WHERE_CODES = ("models_folder", "folder", "build_cache", "earlier_build", "cache", "output", "builds", "saved")
+KINDS = ("download", "ditto", "copy", "archive", "input", "f16", "build")
+WHERE_CODES = ("models_folder", "folder", "build_cache", "earlier_build", "cache", "output", "builds", "saved",
+               "model_archive")
 AUDIT_TOOL = "delete_model_downloads"
 
 
@@ -192,6 +194,8 @@ def _downloads(framework: Any) -> List[LibraryRow]:
         path = Path(model.path)
         if model.where == "build_cache":
             kind, name = "copy", model.repo or model.label
+        elif model.where == "model_archive":
+            kind, name = "archive", model.label
         elif model.where == "earlier_build":
             kind, name = "input", path.name
         elif _inside(path, ditto):
@@ -204,7 +208,8 @@ def _downloads(framework: Any) -> List[LibraryRow]:
             quant=_gguf_type(path) if is_gguf else "", size_bytes=model.size_bytes if model.size_bytes is not None
             else _tree_size(path), where=model.where, path=path, date=_date(path),
             label=model.label if model.for_ai else "", gguf=path if is_gguf else None,
-            deletable=kind == "download" and model.where == "models_folder" and _inside(path, base)))
+            deletable=kind == "archive" or kind == "download" and model.where == "models_folder"
+            and _inside(path, base)))
     return rows
 
 
@@ -408,6 +413,18 @@ def f16_deletion(framework: Any, row: LibraryRow):
     if plan is None or row.path is None:
         return None
     index = [i for i, item in enumerate(plan.items) if item.full_path == str(row.path)]
+    return choose(plan, index) if index else None
+
+
+def archive_deletion(framework: Any, row: LibraryRow):
+    """The model archives' own plan narrowed to this row's archive (its folder holds the row's model folder), None
+    when it is gone."""
+    from orchestrator.Core import model_archive
+    from orchestrator.Core.deletion import choose
+    plan = model_archive.deletion_plan(model_archive.models_dir(framework))
+    if plan is None or row.path is None:
+        return None
+    index = [i for i, item in enumerate(plan.items) if item.full_path == str(Path(row.path).parent)]
     return choose(plan, index) if index else None
 
 

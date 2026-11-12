@@ -1870,6 +1870,9 @@ class BuildEngine:
 
         if not HF_REPO_ID.match(source) or ".." in source:
             raise ValueError(f"Model '{source}' is neither an existing local path nor a HuggingFace repo id (owner/name).")
+        archived = self._stage_archive_copy(config, progress, source)
+        if archived is not None:   # a model archive of exactly this commit: no request to Hugging Face at all
+            return archived
         from orchestrator.utils.locality import offline_mode
         if offline_mode(self.config):   # never a download in offline mode: the copy on this computer, or no build
             return self._stage_local_copy(config, progress, source)
@@ -1980,6 +1983,25 @@ class BuildEngine:
             if getattr(self, "_records", None) is not None:   # other processes see the stage too
                 self._save_record(progress.build_id)
         return SnapshotProgress(sizes, report, already=already)
+
+    def _stage_archive_copy(self, config: BuildConfiguration, progress: BuildProgress,
+                            source: str) -> Optional[Tuple[str, Dict[str, Dict[str, str]]]]:
+        """A build of repo@commit whose commit came in a model archive the person took in (Core/model_archive.py,
+        checked file by file on import): its files are mounted read-only, in offline mode and online alike, and
+        Hugging Face is not asked anything (not even the commit). None when the build names no full commit or no
+        complete archive copy of it is here."""
+        from orchestrator.Core.model_archive import copy_of
+        revision = str(config.model_branch or "")
+        if not COMMIT_ID.fullmatch(revision):
+            return None
+        archive = copy_of(self.models_dir, source, revision)
+        if archive is None:
+            return None
+        config.model_revision = archive.commit
+        progress.add_log(f"Using the model archive of {source} at commit {archive.commit[:12]} (taken in "
+                         f"{str(archive.taken.get('taken') or '')[:10] or 'earlier'}); nothing is downloaded.")
+        inner = "/build-cache/input-model"
+        return inner, {str(archive.model_folder): {"bind": inner, "mode": "ro"}}
 
     def _stage_local_copy(self, config: BuildConfiguration, progress: BuildProgress,
                           source: str) -> Tuple[str, Dict[str, Dict[str, str]]]:

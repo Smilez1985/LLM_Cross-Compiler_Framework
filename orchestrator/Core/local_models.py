@@ -17,7 +17,9 @@ What is "already here" (models_here), each with the label a person types or an A
 - the Builder's own copies of Hugging Face models (<cache>/models/hf/<owner>--<name>/<commit>/, what an earlier build
   downloaded); label: the repository id (its newest complete copy);
 - the inputs of earlier builds (their build records), when they still exist and lie outside those folders; label: the
-  path itself, shown to the person only (an AI never sees a host path).
+  path itself, shown to the person only (an AI never sees a host path);
+- the model archives taken in (Core/model_archive.py, models/archives/<owner>--<name>/<commit>/model/); label:
+  `<repository>@<commit>`, the form a build names it by.
 
 A copy counts only when it is complete: the Builder's copy has the record its staging writes once every file arrived
 (COMPLETE_MARKER, next to the folder, never mounted); a folder without it (a copy of an earlier version, a cache
@@ -42,7 +44,7 @@ WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth")
 UNFINISHED = (".part", ".incomplete", ".lock", ".tmp")
 INDEX_FILES = ("model.safetensors.index.json", "pytorch_model.bin.index.json")
 MAX_LISTED = 200
-WHERE = ("models_folder", "folder", "build_cache", "earlier_build")
+WHERE = ("models_folder", "folder", "build_cache", "earlier_build", "model_archive")
 
 
 @dataclass(frozen=True)
@@ -78,7 +80,7 @@ class LocalCopy:
     repo: str
     commit: str
     path: Path
-    where: str                       # build_cache, hf_download, old_cache
+    where: str                       # model_archive, build_cache, hf_download, old_cache
 
 
 def _size(value: Optional[int]) -> str:
@@ -176,13 +178,18 @@ def _newest(folders: Iterable[Path]) -> Optional[Path]:
 
 def local_copy(cache_dir: Path, models_dir: Path, repo: str, revision: Optional[str] = None) -> Optional[LocalCopy]:
     """A complete copy of Hugging Face repository `repo` on this computer, used instead of a download in offline mode:
-    the Builder's own copy (<cache>/models/hf/<owner>--<name>/<commit>/), a model folder the Hugging Face browser
+    a model archive taken in (Core/model_archive.copy_of: every listed file there with its size; first, because the
+    person brought it for exactly this), the Builder's own copy (<cache>/models/hf/<owner>--<name>/<commit>/), a model folder the Hugging Face browser
     downloaded (<models>/hf/<owner>--<name>/<commit[:12]>/) or one in the old huggingface_hub cache
     (<models>/models--<owner>--<name>/snapshots/<commit>/). `revision` a 40-character commit: only that commit's copy;
     a branch name or none: the newest complete copy. None when there is none."""
     if not REPO_RE.match(repo or "") or ".." in repo:
         return None
     commit = revision if revision and COMMIT_RE.match(revision) else None
+    from orchestrator.Core.model_archive import copy_of
+    archive = copy_of(Path(models_dir), repo, commit)
+    if archive is not None:
+        return LocalCopy(repo, archive.commit, archive.model_folder, "model_archive")
     places = [("build_cache", Path(cache_dir) / "models" / "hf" / owner_name(repo), lambda f: f.name),
               ("hf_download", Path(models_dir) / "hf" / owner_name(repo), lambda f: f.name),
               ("old_cache", Path(models_dir) / f"models--{owner_name(repo)}" / "snapshots", lambda f: f.name)]
@@ -231,6 +238,13 @@ def _build_cache_copies(cache_dir: Path) -> List[LocalModel]:
             found.append(LocalModel(repo, "build_cache", "folder", copy.path, "huggingface", repo, copy.commit,
                                     _folder_size(copy.path)))
     return found
+
+
+def _archive_copies(models_dir: Path) -> List[LocalModel]:
+    """The model archives taken in whose files are all there, each named `<repository>@<commit>`."""
+    from orchestrator.Core.model_archive import stored
+    return [LocalModel(a.label, "model_archive", "folder", a.model_folder, "huggingface", a.repo, a.commit,
+                       a.size_bytes) for a in stored(models_dir) if a.complete()]
 
 
 def _folder_size(folder: Path) -> Optional[int]:
@@ -303,7 +317,7 @@ def models_here(framework, *, for_ai: bool = False) -> List[LocalModel]:
     from orchestrator.Core.build_plan import folder
     cache_dir = folder(framework, "cache_dir", "cache")
     labelled = _labelled(framework)
-    found = labelled + _build_cache_copies(cache_dir)
+    found = labelled + _archive_copies(folder(framework, "models_dir", "models")) + _build_cache_copies(cache_dir)
     if not for_ai:
         found += _earlier_inputs(cache_dir, [m.path for m in labelled])
     return [m for m in found if m.for_ai or not for_ai][:MAX_LISTED]
@@ -318,6 +332,8 @@ def choice_for(framework, text: str) -> Optional[str]:
         return None
     for model in models_here(framework):
         if text == model.label:
+            if model.where == "model_archive":
+                return model.label    # repo@commit: the build takes the archive's copy of exactly that commit
             return model.repo if model.where == "build_cache" else str(model.path)
     path = Path(text).expanduser()
     return str(path.resolve()) if path.exists() else None

@@ -3,7 +3,10 @@
 
 from typing import Annotated, Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+import os
+import re
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from orchestrator.schemas.targets import (OPTIMIZATION_LEVELS, BenchmarkEntry, BoardVariant,  # noqa: F401
                                           OptimizationProfile, SupportLevel)  # OPTIMIZATION_LEVELS: its old place
@@ -19,9 +22,10 @@ class BuildRequestIn(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     model: str = Field(min_length=1, max_length=512,
-                       description="Hugging Face repo id (owner/name), or a local model as <label>:<relative path> "
-                                   "inside a folder the AI may use (e.g. models:qwen2.5-0.5b-instruct) or its file "
-                                   "id (lf_...); never a path")
+                       description="Hugging Face repo id (owner/name), also with its commit as owner/name@COMMIT "
+                                   "(the 40-character commit, e.g. a model archive taken in), or a local model as "
+                                   "<label>:<relative path> inside a folder the AI may use (e.g. "
+                                   "models:qwen2.5-0.5b-instruct) or its file id (lf_...); never a path")
     revision: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{40}$",
                                     description="Commit of the Hugging Face model (a recipe's pinned revision); "
                                                 "the default branch when omitted")
@@ -60,6 +64,28 @@ class BuildRequestIn(BaseModel):
                                                           "ffn_down=q6_k; output=TYPE and token_embd=TYPE set the "
                                                           "output and embedding tensors. Measure such a recipe with "
                                                           "start_tuning before building it")
+
+
+    @model_validator(mode="before")
+    @classmethod
+    def _repo_at_commit(cls, data: Any) -> Any:
+        """owner/name@COMMIT names the model and its commit in one value (the label of a model archive taken in):
+        split into model and revision; a different revision beside it stays and is refused by the revision's
+        check below."""
+        if isinstance(data, dict):
+            value = str(data.get("model") or "").strip()
+            m = _REPO_AT_COMMIT.match(value)
+            if m and not os.path.exists(value):
+                data = dict(data)
+                data["model"] = m.group(1)
+                if data.get("revision") in (None, "", m.group(2)):
+                    data["revision"] = m.group(2)
+                else:
+                    data["revision"] = f"{data.get('revision')} (and @{m.group(2)})"
+        return data
+
+
+_REPO_AT_COMMIT = re.compile(r"^([A-Za-z0-9][\w.-]*/[\w.-]+)@([0-9a-f]{40})$")
 
 
 class StartBuildIn(BuildRequestIn):

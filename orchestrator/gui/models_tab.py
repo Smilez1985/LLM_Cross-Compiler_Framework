@@ -7,8 +7,10 @@ A table with name, kind, format, type, size, where, date, target and board, and 
 tokenizer check, the newest llama-bench run here); a filter by kind, a search field and Refresh. The disk is read when
 the tab is first shown and on Refresh, never at the program's start. The actions of the selected row: Open Folder,
 Build Info..., Deploy... (the Deployment tab with the build selected), Benchmark... (the Benchmark window with the model
-chosen) and Delete..., which asks with the deletion dialog of the row's owner (the exact list, No by default). With
-nothing listed, an empty state with one button: the Hugging Face browser.
+chosen) and Delete..., which asks with the deletion dialog of the row's owner (the exact list, No by default). Model
+Archives... opens the window of the portable model archives (gui/model_archive_window.py: write one, take one in); an
+archive taken in is a row of its own (kind archive). With nothing listed, an empty state with one button: the Hugging
+Face browser.
 """
 
 from typing import Any, List, Optional
@@ -87,6 +89,8 @@ class ModelsTab(QWidget):
         self.btn_info = self._button(actions, "btn_models_info", "models.info", self.show_info)
         self.btn_deploy = self._button(actions, "btn_models_deploy", "models.deploy", self.deploy)
         self.btn_bench = self._button(actions, "btn_models_bench", "models.bench", self.benchmark)
+        self.btn_archives = self._button(actions, "btn_models_archives", "models.archive.button",
+                                         self.open_archives)
         actions.addStretch(1)
         self.btn_delete = self._button(actions, "btn_models_delete", "models.delete", self.delete)
         layout.addLayout(actions)
@@ -211,6 +215,13 @@ class ModelsTab(QWidget):
         dialog.show()
         return dialog
 
+    def open_archives(self):
+        """Model Archives...: the window of the portable model archives; the list is read again when it closes."""
+        from orchestrator.gui.model_archive_window import open_model_archives
+        dialog = open_model_archives(self, self.framework)
+        dialog.finished.connect(lambda *_: self.refresh())
+        return dialog
+
     def deploy(self) -> None:
         row = self.current()
         if row is not None and row.kind == "build" and callable(self._show_deploy):
@@ -254,6 +265,17 @@ class ModelsTab(QWidget):
                     return None
                 result = lib.delete_build(self.framework, row, target, accepted, trash=trash, audit=self._audit())
                 done = 1
+            elif row.kind == "archive":
+                plan = lib.archive_deletion(self.framework, row)
+                if plan is None:
+                    raise PlanChanged("the list of model archives")
+                accepted = ask_deletion(self, plan, title=title)
+                if accepted is None:
+                    return None
+                from orchestrator.Core import model_archive
+                result = model_archive.delete(model_archive.models_dir(self.framework), accepted, trash=trash,
+                                              audit=self._audit())
+                done = len(result.done)
             elif row.kind == "f16":
                 plan = lib.f16_deletion(self.framework, row)
                 if plan is None:

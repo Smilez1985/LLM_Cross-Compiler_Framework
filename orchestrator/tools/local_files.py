@@ -644,7 +644,9 @@ MODEL_SUFFIXES = {".gguf": "gguf", ".onnx": "onnx", ".tflite": "tflite", ".pt": 
                   ".bin": "pytorch", ".safetensors": "safetensors"}
 DATASET_SUFFIXES = {".txt": "text", ".json": "json", ".jsonl": "jsonl", ".csv": "csv"}
 SKIP_SUFFIXES = (".part", ".lock", ".tmp", ".incomplete")
-SKIP_TOP = {"models": ("embeddings",)}  # the knowledge base's own model cache is not a model to convert
+# the knowledge base's own model cache is not a model to convert; the model archives taken in are listed as archives
+# (local_models.models_here), never as loose model folders
+SKIP_TOP = {"models": ("embeddings", "archives")}
 
 
 def _candidates(root: Path, label: str):

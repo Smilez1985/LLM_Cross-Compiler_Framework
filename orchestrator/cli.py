@@ -1123,8 +1123,11 @@ class _FormatOption(click.Option):
 
 
 @build.command('start')
-@click.option('--model', '-m', help='Model name (HuggingFace) or local path. With --recipe: another model than the '
-                                    "recipe's (default: the recipe's model at its commit)")
+@click.option('--model', '-m', help='Model name (HuggingFace, also OWNER/NAME@COMMIT) or local path. With --recipe: '
+                                    "another model than the recipe's (default: the recipe's model at its commit)")
+@click.option('--revision', default=None, metavar='COMMIT',
+              help='The 40-character commit of the Hugging Face model (a model archive taken in is used for it '
+                   'without any network); default: the current commit')
 @click.option('--target', '-t', help="Target id or folder name in targets/ (llm-cli targets list). With --recipe: the "
                                      "recipe's target (another one is refused)")
 @click.option('--recipe', 'recipe_id', default=None, metavar='ID',
@@ -1198,7 +1201,8 @@ def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[st
                 imatrix: Optional[bool], dataset: Optional[str], no_dataset: bool = False,
                 module_flags: Optional[str] = None, remember_flags: bool = False, ignore_preflight: bool = False,
                 recipe_id: Optional[str] = None, preload: Optional[str] = None, imatrix_file: Optional[str] = None,
-                tensor_types: Tuple[str, ...] = (), accept_resource_risk: bool = False):
+                tensor_types: Tuple[str, ...] = (), accept_resource_risk: bool = False,
+                revision: Optional[str] = None):
     """Start a new build job. Ctrl+C cancels it (its container is stopped) and exits with code 130.
 
     When a finished build with exactly the same options exists, you are asked first, as in the Builder tab: use it
@@ -1294,7 +1298,8 @@ def start_build(ctx: FrameworkContext, model: Optional[str], target: Optional[st
                 return service.validate(request.model_copy(update={"probe": probe}) if probe else request,
                                         local_paths=True)
             return service.validate(service.request_in(
-                model=model_value, target=target, format=format, board=board, quantization=quantization,
+                model=model_value, revision=revision or None, target=target, format=format, board=board,
+                quantization=quantization,
                 use_imatrix=imatrix, use_gpu=gpu,
                 dataset_path=str(Path(dataset).resolve()) if dataset else ("" if no_dataset else None),
                 probe=probe, imatrix_file=imatrix_file or None,
@@ -6577,7 +6582,8 @@ def _remove_old_hf_copies(ctx: FrameworkContext, manager, plan, lang: Optional[s
 
 
 @models.command('list')
-@click.option('--kind', type=click.Choice(["download", "ditto", "copy", "input", "f16", "build"]), default=None,
+@click.option('--kind', type=click.Choice(["download", "ditto", "copy", "archive", "input", "f16", "build"]),
+              default=None,
               help='Only rows of this kind')
 @click.option('--search', default='', metavar='TEXT', help='Only rows whose name, type, target, board or place '
                                                            'contain TEXT')
@@ -6660,6 +6666,15 @@ def library_delete(ctx: FrameworkContext, names):
             accepted = confirm_deletion(plan, title="Delete downloaded models", again="llm-cli models delete")
             if accepted is not None:
                 _print_deletion_result(lib.delete_downloads(fm, accepted, trash=trash, audit=audit), accepted)
+        for row in [r for r in rows if r.kind == "archive"]:
+            plan = lib.archive_deletion(fm, row)
+            if plan is None:
+                raise PlanChanged("the list of model archives")
+            accepted = confirm_deletion(plan, title="Delete a model archive", again="llm-cli models delete")
+            if accepted is not None:
+                from orchestrator.Core import model_archive
+                _print_deletion_result(model_archive.delete(model_archive.models_dir(fm), accepted, trash=trash,
+                                                            audit=audit), accepted)
         for row in [r for r in rows if r.kind == "f16"]:
             plan = lib.f16_deletion(fm, row)
             if plan is None:
@@ -6685,6 +6700,183 @@ def library_delete(ctx: FrameworkContext, names):
         console.print(f"[yellow]{escape(ui_text('deletion.changed', lang))}[/yellow]")
         sys.exit(1)
     except Exception as e:  # noqa: BLE001 - refused by the owner (a build still writing, no audit log): one line
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+
+
+# --- the portable model archive (Core/model_archive.py) -------------------------------------------------------
+
+@models.group('archive')
+def models_archive():
+    """Portable model archives (llmcf-model/1) for a computer without a network: write one from a Hugging Face model
+    at its exact commit on a computer with a network, carry it over yourself, take it in there; a build then names
+    the model as OWNER/NAME@COMMIT. llmcf never uploads an archive. The same as Model Archives... in the Models tab"""
+    pass
+
+
+@models_archive.command('write')
+@click.argument('repo')
+@click.option('--revision', default=None, metavar='REV', help='Commit or branch (default: the default branch now)')
+@click.option('--to', 'dest', required=True, type=click.Path(dir_okay=False), metavar='FILE',
+              help='The archive file to write (.llmcfmodel is added when missing); it must not exist yet')
+@pass_context
+def models_archive_write(ctx: FrameworkContext, repo: str, revision: Optional[str], dest: str):
+    """Write the model archive of REPO (owner/name): the files a conversion needs at the exact commit, the licence and
+    gating of the model and its base models, a sha256 per file and one over the whole, signed with your own key. A
+    gated, restrictive or unknown licence is shown and asked first, at a terminal only."""
+    ctx.require_framework()
+    import threading
+    from orchestrator.Core import model_archive as ma
+    from orchestrator.Core.hf_hub import person_text
+    lang = _config_language(ctx)
+    fm = ctx.framework_manager
+    try:
+        plan = ma.plan_archive(fm, repo, revision)
+    except Exception as e:  # noqa: BLE001 - offline mode, no such model, no access: one plain line
+        console.print(f"[red]{escape(person_text(e, lang))}[/red]")
+        sys.exit(1)
+    console.print(escape(ma.plan_text(plan, lang)))
+    confirmed = False
+    if plan.ask_licence:
+        if not _interactive():
+            console.print("[yellow]Nothing was written: this licence needs your answer at a terminal "
+                          f"('llm-cli models archive write {escape(repo)} ...').[/yellow]")
+            sys.exit(2)
+        if not click.confirm("Write the archive of this model under this licence?", default=False):
+            console.print("Nothing was written.")
+            return
+        confirmed = True
+    stop = threading.Event()
+
+    def progress(stage: str, done: int, total: int) -> None:
+        words = {"fetch": "Fetching", "hash": "Hashing", "write": "Writing"}
+        if done == 0:
+            console.print(f"{words.get(stage, stage)} {total} files ...")
+    try:
+        with _ctrl_c_cancels(stop):
+            written = ma.write_archive(fm, plan, Path(dest), licence_confirmed=confirmed, stop=stop,
+                                       progress=progress)
+    except Exception as e:  # noqa: BLE001 - one plain line, never a traceback (no token is ever in it)
+        console.print(f"[red]{escape(person_text(e, lang))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]{escape(ma.written_text(written, lang))}[/green]")
+
+
+@models_archive.command('take')
+@click.argument('file', type=click.Path(exists=True, dir_okay=False))
+@click.option('--sha256', 'sha256', default='', metavar='HEX', help="The archive file's sha256 the writing "
+                                                                    "computer printed (checked first)")
+@click.option('--from', 'key_files', multiple=True, type=click.Path(exists=True, dir_okay=False), metavar='KEYFILE',
+              help="The public keys of the writing computer ('llm-cli zoo keys' there): its key must have signed it")
+@pass_context
+def models_archive_take(ctx: FrameworkContext, file: str, sha256: str, key_files: Tuple[str, ...]):
+    """Take a model archive in: checked in quarantine first (the file's sha256, the zip's layout, the manifest, the
+    signature, every file's sha256, nothing unexpected), then its licence and gating are shown and you accept them at
+    a terminal (there is no option that skips it). Nothing of a failed check stays."""
+    ctx.require_framework()
+    import threading
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    from orchestrator.Core import model_archive as ma
+    from orchestrator.Core.community_pack import read_public_key_files
+    lang = _config_language(ctx)
+    if not _interactive():
+        console.print("[yellow]Nothing was taken in: accepting the model's licence needs your answer at a terminal "
+                      "('llm-cli models archive take FILE').[/yellow]")
+        sys.exit(2)
+    stop = threading.Event()
+
+    def decide(prepared) -> bool:
+        facts, _, question = prepared.summary(lang).rpartition("\n")   # the question is asked, not printed
+        console.print(escape(facts))
+        return click.confirm(question, default=False)
+    try:
+        trusted = read_public_key_files(key_files, Ed25519PublicKey) if key_files else ()
+        with _ctrl_c_cancels(stop):
+            done = ma.take_archive(ctx.framework_manager, Path(file), actor="cli", decide=decide, sha256=sha256,
+                                   trusted=trusted, stop=stop)
+    except Exception as e:  # noqa: BLE001 - every refusal is one plain line; nothing of it stays
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    if done is None:
+        console.print(escape(_archive_text(lang, "models.archive.declined")))
+        return
+    archive = ma.copy_of(ma.models_dir(ctx.framework_manager), *_repo_commit(done))
+    label = archive.label if archive is not None else done.name
+    console.print(f"[green]{escape(_archive_text(lang, 'models.archive.taken', label=label))}[/green]")
+
+
+def _archive_text(lang, key: str, **params) -> str:
+    from orchestrator.utils.localization import ui_text
+    return ui_text(key, lang, **params)
+
+
+def _repo_commit(folder: Path) -> Tuple[str, str]:
+    """(repository, commit) of an archive folder models/archives/<owner>--<name>/<commit>."""
+    owner, _, name = folder.parent.name.partition("--")
+    return f"{owner}/{name}", folder.name
+
+
+@models_archive.command('list')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def models_archive_list(ctx: FrameworkContext, as_json: bool):
+    """The model archives taken in on this computer: repository@commit, size, licence, when, whether every file is
+    there. A build names one by its repository@commit."""
+    ctx.require_framework()
+    from orchestrator.Core import model_archive as ma
+    from orchestrator.Core.deletion import size_text
+    found = ma.stored(ma.models_dir(ctx.framework_manager))
+    if as_json:
+        click.echo(json.dumps([{"label": a.label, "repo": a.repo, "commit": a.commit, "size_bytes": a.size_bytes,
+                                "files": len(a.manifest.files), "files_sha256": a.manifest.files_sha256,
+                                "license": a.manifest.licence.license, "gating": a.manifest.licence.gating,
+                                "taken": a.taken.get("taken"), "complete": a.complete(), "path": str(a.folder)}
+                               for a in found], indent=2))
+        return
+    if not found:
+        console.print("No model archive taken in yet ('llm-cli models archive take FILE').")
+        return
+    table = Table(title=f"Model archives ({len(found)})")
+    for column in ("Model", "Size", "Licence", "Taken in", "Files", "Full path"):
+        table.add_column(column, overflow="fold")
+    for a in found:
+        table.add_row(escape(a.label), size_text(a.size_bytes), escape(a.manifest.licence.license),
+                      escape(str(a.taken.get("taken") or "")), "complete" if a.complete() else "INCOMPLETE",
+                      escape(str(a.folder)))
+    console.print(table)
+
+
+@models_archive.command('delete')
+@click.argument('labels', nargs=-1, required=True)
+@pass_context
+def models_archive_delete(ctx: FrameworkContext, labels):
+    """Delete model archives taken in (named by repository@commit, as 'list' shows them): the full list, the trash or
+    for good, "No" by default; only at a terminal."""
+    ctx.require_framework()
+    from orchestrator.Core import model_archive as ma
+    from orchestrator.Core.deletion import PlanChanged, choose
+    fm = ctx.framework_manager
+    models = ma.models_dir(fm)
+    plan = ma.deletion_plan(models)
+    wanted = {str(ma.archive_folder(models, *label.split("@", 1))) for label in labels if "@" in label}
+    index = [i for i, item in enumerate(plan.items if plan is not None else []) if item.full_path in wanted]
+    if plan is None or len(index) != len(labels):
+        raise click.UsageError("Name each archive by its repository@commit, as 'llm-cli models archive list' shows "
+                               "them.")
+    accepted = confirm_deletion(choose(plan, index), title="Delete model archives",
+                                again="llm-cli models archive delete")
+    if accepted is None:
+        return
+    try:
+        trash = _cli_trash(ctx)
+    except Exception:  # noqa: BLE001 - no per-user folder: only deleting for good works then
+        trash = None
+    try:
+        _print_deletion_result(ma.delete(models, accepted, trash=trash, audit=_cli_audit(ctx)), accepted)
+    except PlanChanged:
+        console.print("[yellow]The list changed meanwhile; nothing was deleted. Run the command again.[/yellow]")
+        sys.exit(1)
+    except Exception as e:  # noqa: BLE001 - refused (no trash, no audit log): one line
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
 
