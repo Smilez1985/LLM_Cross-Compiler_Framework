@@ -26,9 +26,9 @@ MOUSE_LABELS = {
     "btn_models_bench": ("models_tab", "models.bench"),
     # the portable model archives (gui/model_archive_window.py, Core/model_archive.py)
     "btn_models_archives": ("models_tab", "models.archive.button"),
-    "btn_archive_write": ("btn_models_archives", "models.archive.write"),
-    "btn_archive_take": ("btn_models_archives", "models.archive.take"),
-    "btn_archive_delete": ("btn_models_archives", "models.archive.delete"),
+    "btn_archive_write": ("act_build_model_archives", "models.archive.write"),
+    "btn_archive_take": ("act_build_model_archives", "models.archive.take"),
+    "btn_archive_delete": ("act_build_model_archives", "models.archive.delete"),
     "btn_bench_run": ("act_build_benchmark", "bench.run"),
     # Build > Build Container Images...: a source image published only as a file (Core/build_preload.take_image_file)
     "btn_bimg_image_file": ("act_build_images", "bimg.source.take"),

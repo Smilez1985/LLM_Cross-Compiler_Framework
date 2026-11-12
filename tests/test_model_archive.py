@@ -548,3 +548,21 @@ def test_the_window_asks_before_writing_an_unclear_licence(qapp, framework, hub,
     assert not list(tmp_path.glob("no*")) and "not on the list of permissive licences" in \
         dialog.txt_result.toPlainText()
     dialog.close()
+
+
+def test_build_menu_opens_the_model_archives_window(qapp, framework):
+    """Build > Model Archives... opens the same window (one at a time) with the fields of every CLI option."""
+    from PySide6.QtCore import QObject
+    from PySide6.QtWidgets import QWidget
+    from orchestrator.gui.menus import models as menu
+    window = QWidget()
+    window.framework = framework
+    dialog = menu.open_archives(window)
+    try:
+        assert dialog.objectName() == "dlg_model_archives" and menu.open_archives(window) is dialog
+        for name in ("txt_archive_repo", "txt_archive_revision", "txt_archive_sha256", "txt_archive_keys",
+                     "btn_archive_write", "btn_archive_take", "btn_archive_delete", "list_archives"):
+            assert dialog.findChild(QObject, name) is not None, name
+    finally:
+        dialog.close()
+        window.deleteLater()

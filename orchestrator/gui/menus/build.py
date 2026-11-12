@@ -60,6 +60,7 @@ CLI_PATHS: Dict[str, str] = {
     "module repair --retry": "btn_targets_edit",
     "build start": "btn_builder_start",
     "build start --model": "combo_builder_model",
+    "build start --revision": "combo_builder_model",          # typed as owner/name@commit (a model archive's label)
     "build start --target": "combo_builder_target",
     "build start --format": "combo_builder_format",
     "build start --board": "combo_builder_board",

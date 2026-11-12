@@ -4026,7 +4026,7 @@ llm-cli models archive delete OWNER/NAME@COMMIT...
 ```
 
 A model archive (`llmcf-model/1`, a `.llmcfmodel` file) carries one Hugging Face model at its exact commit to a
-computer without a network, as **Model Archives...** in the Models tab does. `write`, on a computer with a network,
+computer without a network, as **Build > Model Archives...** (also in the Models tab) does. `write`, on a computer with a network,
 looks the commit up (`--revision`: a commit or a branch; left out, the default branch now), fetches exactly the files a
 build of it stages (no GGUF, ONNX or TensorFlow copies, no pickle weights beside safetensors, no hidden files: the
 weights, `config.json`, `generation_config.json`, the tokenizer files, the chat template and the model card) into the

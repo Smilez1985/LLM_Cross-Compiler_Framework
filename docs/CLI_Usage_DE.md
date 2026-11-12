@@ -4218,7 +4218,7 @@ llm-cli models archive delete OWNER/NAME@COMMIT...
 ```
 
 Ein Modell-Archiv (`llmcf-model/1`, eine `.llmcfmodel`-Datei) bringt ein Hugging-Face-Modell in seinem genauen Commit
-auf einen Computer ohne Netz, wie **Modell-Archive…** im Reiter Modelle. `write` schlägt auf einem Computer mit Netz den
+auf einen Computer ohne Netz, wie **Build > Modell-Archive…** (auch im Reiter Modelle). `write` schlägt auf einem Computer mit Netz den
 Commit nach (`--revision`: ein Commit oder ein Branch; weggelassen der Standard-Branch von jetzt), holt genau die
 Dateien, die ein Build davon bereitstellt (keine Kopien als GGUF, ONNX oder TensorFlow, keine Pickle-Gewichte neben
 safetensors, keine versteckten Dateien: die Gewichte, `config.json`, `generation_config.json`, die Tokenizer-Dateien,

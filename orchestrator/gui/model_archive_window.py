@@ -50,6 +50,13 @@ class ModelArchiveDialog(QDialog):
         self.txt_revision = QLineEdit(self)
         self.txt_revision.setObjectName("txt_archive_revision")
         form.addRow(self._t("models.archive.revision"), self.txt_revision)
+        self.txt_sha256 = QLineEdit(self)
+        self.txt_sha256.setObjectName("txt_archive_sha256")
+        form.addRow(self._t("models.archive.sha256"), self.txt_sha256)
+        self.txt_keys = QLineEdit(self)
+        self.txt_keys.setObjectName("txt_archive_keys")
+        self.txt_keys.setPlaceholderText(self._t("models.archive.keys.hint"))
+        form.addRow(self._t("models.archive.keys"), self.txt_keys)
         layout.addLayout(form)
         row = QHBoxLayout()
         self.btn_write = self._button(row, "btn_archive_write", "models.archive.write", self.write_archive)
@@ -206,7 +213,16 @@ class ModelArchiveDialog(QDialog):
             return
         self._pending_accept = accept
         framework, stop = self.framework, self.stop
-        self._in_worker("take", lambda: ma.prepare_take(framework, Path(path), stop=stop))
+        sha256, key_file = self.txt_sha256.text().strip(), self.txt_keys.text().strip()
+
+        def work():
+            trusted = ()
+            if key_file:   # the writing computer's public keys (llm-cli zoo keys there): its key must have signed
+                from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+                from orchestrator.Core.community_pack import read_public_key_files
+                trusted = read_public_key_files([Path(key_file).expanduser()], Ed25519PublicKey)
+            return ma.prepare_take(framework, Path(path), sha256=sha256, trusted=trusted, stop=stop)
+        self._in_worker("take", work)
 
     def _checked(self, prepared) -> None:
         from orchestrator.Core import model_archive as ma

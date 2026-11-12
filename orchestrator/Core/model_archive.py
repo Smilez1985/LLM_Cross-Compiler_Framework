@@ -174,16 +174,31 @@ def convertible(names: Iterable[str]) -> bool:
     return "config.json" in names and any(n.lower().endswith(WEIGHT_SUFFIXES) for n in names)
 
 
+def _stopped(stop: Optional[threading.Event]) -> Callable[[], bool]:
+    def cancel() -> bool:
+        if stop is not None and stop.is_set():
+            raise ArchiveError("Stopped; nothing was written or taken in.", code="failed")
+        return False
+    return cancel
+
+
 def _sha256_file(path: Path, stop: Optional[threading.Event] = None) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as fh:
-        while True:
-            if stop is not None and stop.is_set():
-                raise ArchiveError("Stopped; nothing was written.", code="failed")
-            chunk = fh.read(CHUNK)
-            if not chunk:
-                return digest.hexdigest()
-            digest.update(chunk)
+    """The one hashing loop (utils/helpers.sha256_file), stopped between two chunks by `stop`."""
+    from orchestrator.utils.helpers import sha256_file
+    return sha256_file(path, chunk=CHUNK, cancel=_stopped(stop))
+
+
+class _Tee:
+    """A reader that hands every chunk it reads on to `out` as well: the archive gets exactly the bytes hashed."""
+
+    def __init__(self, src, out):
+        self.src, self.out = src, out
+
+    def read(self, size: int = -1) -> bytes:
+        data = self.src.read(size)
+        if data:
+            self.out.write(data)
+        return data
 
 
 # --- folders -----------------------------------------------------------------------------------------------------
@@ -457,18 +472,11 @@ def _write_zip(part: Path, root: Path, manifest: ModelManifest, signature: PackS
                 progress("write", i, total)
             info = _zip_info(f.path, 0o644, zipfile.ZIP_STORED)
             info.file_size = f.size
-            digest = hashlib.sha256()
+            from orchestrator.utils.helpers import sha256_fileobj
             with open(root.joinpath(*f.path.split("/")), "rb") as fh, \
                     zf.open(info, "w", force_zip64=f.size >= 0x7FFFFFFF) as out:
-                while True:
-                    if stop.is_set():
-                        raise ArchiveError("Stopped; nothing was written.")
-                    chunk = fh.read(CHUNK)
-                    if not chunk:
-                        break
-                    digest.update(chunk)
-                    out.write(chunk)
-            if digest.hexdigest() != f.sha256:
+                digest = sha256_fileobj(_Tee(fh, out), cancel=_stopped(stop), chunk=CHUNK)
+            if digest != f.sha256:
                 raise ArchiveError(f"{f.path} changed while the archive was written; nothing was written.",
                                    code="mismatch")
 
@@ -644,23 +652,16 @@ def _extract(zf: zipfile.ZipFile, manifest: ModelManifest, dest: Path, stop: thr
             progress("check", i, total)
         target = dest.joinpath(*f.path.split("/"))
         target.parent.mkdir(parents=True, exist_ok=True)
-        digest, size = hashlib.sha256(), 0
+        from orchestrator.utils.helpers import sha256_fileobj
         try:
             with zf.open(f.path) as src, os.fdopen(os.open(target, flags, 0o644), "wb") as out:
-                while True:
-                    if stop.is_set():
-                        raise ArchiveError("Stopped; nothing was taken in.")
-                    chunk = src.read(CHUNK)
-                    if not chunk:
-                        break
-                    size += len(chunk)
-                    if size > f.size:
-                        raise ArchiveError(f"{f.path}: larger than the manifest says", code="mismatch")
-                    digest.update(chunk)
-                    out.write(chunk)
+                # at most one byte more than listed: a larger member is found without reading all of it
+                digest = sha256_fileobj(_Tee(src, out), limit=f.size + 1, cancel=_stopped(stop), chunk=CHUNK)
+                out.flush()
+                size = os.fstat(out.fileno()).st_size
         except (zipfile.BadZipFile, OSError, EOFError) as e:   # a damaged member (its CRC) or a full disk
             raise ArchiveError(f"{f.path} cannot be extracted: {e}", code="mismatch") from None
-        if size != f.size or digest.hexdigest() != f.sha256:
+        if size != f.size or digest != f.sha256:
             raise ArchiveError(f"{f.path}: content differs from the manifest; nothing was taken in.", code="mismatch")
 
 

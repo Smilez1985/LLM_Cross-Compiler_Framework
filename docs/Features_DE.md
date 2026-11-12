@@ -447,14 +447,15 @@ dieselben Zeilen nur lesend über `list_artifacts` und `list_local_files`.
 
 ### Ein Modell-Archiv für einen Computer ohne Netz
 
-Ein Computer ohne Netz kann sein Modell nicht von Hugging Face holen. **Modell-Archive…** im Reiter **Modelle** (oder
-`llm-cli models archive`) bringt es in einem geprüften Stück dorthin: Auf einem Computer mit Netz gibst du das Modell
+Ein Computer ohne Netz kann sein Modell nicht von Hugging Face holen. **Modell-Archive…** im Reiter **Modelle** oder
+**Build > Modell-Archive…** (oder `llm-cli models archive`) bringt es in einem geprüften Stück dorthin: Auf einem Computer mit Netz gibst du das Modell
 (`owner/name`) und, wenn du willst, einen Commit oder Branch ein, und **Modell-Archiv schreiben…** schreibt eine
 `.llmcfmodel`-Datei mit genau den Dateien, die ein Build dieses Commits nutzt (die Gewichte, `config.json`,
 `generation_config.json`, die Tokenizer-Dateien, das Chat-Template und die Modellkarte), Lizenz und Gating des Modells
 und seiner Basismodelle, einem sha256 je Datei und einem über das Ganze, signiert mit deinem eigenen Schlüssel. Eine
 Lizenz mit Gating, eine einschränkende oder eine unbekannte wird zuerst gezeigt und gefragt. Die Datei trägst du selbst
-hinüber. Auf dem anderen Computer prüft **Modell-Archiv einlesen…** sie, bevor irgendetwas sie benutzt (ihren Aufbau,
+hinüber. Auf dem anderen Computer prüft **Modell-Archiv einlesen…** (mit dem sha256 der Datei und den öffentlichen
+Schlüsseln des schreibenden Computers, wenn du sie angibst) sie, bevor irgendetwas sie benutzt (ihren Aufbau,
 ihre Signatur, den sha256 jeder Datei, nichts Unerwartetes; bei jedem Problem bleibt nichts davon), zeigt die Lizenz und
 liest sie erst nach deinem „Ja“ ein. Ein Build nennt das Modell dann als `owner/name@commit` und nutzt diese Dateien in
 seiner Sandbox ohne Netz, ohne Hugging Face etwas zu fragen. Das Archiv erscheint auch als Zeile der Art

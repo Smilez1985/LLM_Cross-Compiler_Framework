@@ -135,9 +135,10 @@ def test_every_menu_of_the_design_once_in_its_order_with_every_entry_once(window
     assert file_texts[-2:] == ["Settings...", "Exit"]
     # Round 36 (on purpose): Build > Build Container Images... follows Build History...;
     # Build Dependencies... (build-flags-time) follows; F16 Intermediates... (the large models), then Benchmark...
-    # (the benchmark window, also opened from the Models tab) comes last
+    # (the benchmark window, also opened from the Models tab), then Model Archives... (the portable model archives,
+    # also opened from the Models tab) comes last
     assert entries["Build"] == ["act_build_targets", "act_build_history", "act_build_images", "act_build_deps",
-                                "act_build_f16", "act_build_benchmark"]
+                                "act_build_f16", "act_build_benchmark", "act_build_model_archives"]
     assert entries["Ditto"][-3:] == ["act_ditto_runtime_open", "act_ditto_models_open", "act_ditto_eval_open"]
     tools = entries["Tools"]
     assert tools.index("act_knowledge_sources") == tools.index("act_knowledge_snapshots") + 1

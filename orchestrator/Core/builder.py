@@ -1992,9 +1992,10 @@ class BuildEngine:
         complete archive copy of it is here."""
         from orchestrator.Core.model_archive import copy_of
         revision = str(config.model_branch or "")
-        if not COMMIT_ID.fullmatch(revision):
+        models_dir = getattr(self, "models_dir", None)
+        if not COMMIT_ID.fullmatch(revision) or models_dir is None:
             return None
-        archive = copy_of(self.models_dir, source, revision)
+        archive = copy_of(models_dir, source, revision)
         if archive is None:
             return None
         config.model_revision = archive.commit
