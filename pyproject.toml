@@ -127,6 +127,11 @@ resolve = [
 # (.github/workflows/deps-update.yml), on the machine (install.sh, install.bat through scripts/fresh_deps.py) and for
 # `uv lock --check` in CI. Needs a uv that reads relative values (0.11.32, the version CI uses, does).
 exclude-newer = "5 days"
+# Soup Sieve before 4.0 has CVE-2026-126190, and 4.0 needs Python 3.11.5 (Debian 12 and Raspberry Pi OS bring
+# 3.11.2). Beautiful Soup imports it only for CSS selectors, which llmcf never runs: on Python before 3.11.5 it is not
+# installed at all, from 3.11.5 on only 4.0 or newer. The fresh resolve (scripts/fresh_deps.py) locks this same file,
+# so it holds there too (docs/DESIGN.md, Security model).
+override-dependencies = ["soupsieve>=4.0 ; python_full_version >= '3.11.5'"]
 
 [tool.uv.exclude-newer-package]
 # Versions taken inside their cooldown on purpose, each up to the second after its upload. An entry ends once the

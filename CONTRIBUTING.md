@@ -108,6 +108,9 @@ separate quick-check script.
   computes now minus 5 days in UTC at every lock), for every `uv lock` and for `uv lock --check`. A version taken
   inside its cooldown on purpose goes into `[tool.uv.exclude-newer-package]` with the second after its upload; the
   scheduled update run and the installers drop such an entry once the cooldown has passed it. Needs a uv that reads such a relative value (0.11.32, the version CI uses, does).
+- `[tool.uv] override-dependencies` holds one entry: Soup Sieve only from Python 3.11.5 on, and only 4.0 or newer
+  (CVE-2026-126190 is in every older version, and 4.0 needs 3.11.5). Beautiful Soup imports it only for CSS
+  selectors, which llmcf never runs; on Python before 3.11.5 it is not installed, and pip check reports only that.
 - `requirements.txt` (runtime), `requirements-gui.txt` (runtime plus the optional extra `gui`, PySide6) and
   `requirements-dev.txt` (dev tools) are exports of `uv.lock` with hashes, and so is `requirements-resolve.txt` (uv
   and pip-audit, which the installers use for the fresh resolve). Their first lines name the command that

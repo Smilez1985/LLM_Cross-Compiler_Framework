@@ -13,3 +13,12 @@ INSTALL_READ_ONLY = True
 from orchestrator.utils.hf_env import seal as _seal_huggingface_hub  # noqa: E402
 
 _seal_huggingface_hub()
+
+# On Python before 3.11.5 Soup Sieve is not installed (CVE-2026-126190; pyproject.toml override-dependencies), and
+# Beautiful Soup says so once at import: "CSS selectors cannot be used". llmcf never runs one (it looks elements up
+# with find()), so exactly that message from bs4.css is not shown; every other warning is (docs/DESIGN.md, Security
+# model).
+import warnings as _warnings  # noqa: E402
+
+_warnings.filterwarnings("ignore", message=r"The soupsieve package is not installed\. CSS selectors cannot be used\.",
+                         category=UserWarning, module=r"bs4\.css$")

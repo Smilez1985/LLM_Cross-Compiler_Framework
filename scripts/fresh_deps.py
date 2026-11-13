@@ -27,7 +27,8 @@ Commands (standard library only; run with the Python the installer found, Python
 
   selfcheck --root DIR [--gui]
       Run with the new environment's Python: pip check, every direct dependency imports, the framework's core modules
-      import and `python -m orchestrator.cli --help` works. Exit 0 or 1 (the failing step is printed).
+      import and `python -m orchestrator.cli --help` works. Exit 0 or 1 (the failing step is printed). On Python
+      before 3.11.5 pip check may report exactly one line: Soup Sieve missing for Beautiful Soup (KNOWN_MISSING).
 """
 
 from __future__ import annotations
@@ -57,6 +58,26 @@ CORE_IMPORTS = ["orchestrator.cli", "orchestrator.Core.framework", "orchestrator
 GUI_IMPORTS = ["PySide6.QtCore"]
 
 TIMEOUT = 900   # seconds for one tool step (a slow index, a large wheel)
+
+# The one dependency pip check may report missing, and only on Python before 3.11.5: Beautiful Soup declares Soup Sieve,
+# but imports it only for CSS selectors, which llmcf never runs; pyproject.toml's override-dependencies leaves it out
+# there because every Soup Sieve that Python can install has CVE-2026-126190 (docs/DESIGN.md, Security model).
+KNOWN_MISSING = re.compile(r"^beautifulsoup4 \S+ requires soupsieve, which is not installed\.$")
+
+
+def python_version() -> tuple:
+    """The running Python as (major, minor, micro): the self-check runs with the new environment's Python."""
+    return tuple(sys.version_info[:3])
+
+
+def pip_check_passes(result: subprocess.CompletedProcess, version=None) -> bool:
+    """pip check's verdict, with the one known missing dependency allowed on Python before 3.11.5."""
+    if result.returncode == 0:
+        return True
+    if tuple(version or python_version()) >= (3, 11, 5):
+        return False
+    lines = [line.strip() for line in (result.stdout + "\n" + result.stderr).splitlines() if line.strip()]
+    return bool(lines) and all(KNOWN_MISSING.match(line) for line in lines)
 
 
 def say(text: str) -> None:
@@ -265,9 +286,11 @@ def selfcheck(root: Path, gui: bool) -> int:
         except (OSError, subprocess.SubprocessError) as error:
             say(f"self-check failed: {label}: {error}")
             return 1
-        if result.returncode != 0:
+        if not (pip_check_passes(result) if label == "pip check" else result.returncode == 0):
             say(f"self-check failed: {label}: {last_line(result)}")
             return 1
+        if result.returncode != 0:
+            say("pip check: Soup Sieve is left out on Python before 3.11.5 (CSS selectors only; CVE-2026-126190)")
     say("self-check passed")
     return OK
 

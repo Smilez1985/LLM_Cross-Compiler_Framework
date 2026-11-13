@@ -552,7 +552,7 @@ def _licenses_the_page(tag) -> bool:
 # an element with that data-testid, an article of class markdown-body, an element with itemprop "text", a table of
 # class highlight, a pre. Looked up with Beautiful Soup's find(), never a CSS selector: llmcf never calls Soup Sieve,
 # whose descendant combinator takes polynomial time on deeply nested untrusted pages (CVE-2026-126190, fixed in 4.0,
-# which needs Python 3.11.5; Debian 12 brings 3.11.2).
+# which needs Python 3.11.5; Debian 12 brings 3.11.2, and there Soup Sieve is not installed at all: pyproject.toml).
 _FILE_VIEWS = (
     {"name": "textarea", "attrs": {"id": "read-only-cursor-text-area"}},
     {"attrs": {"data-testid": "read-only-cursor-text-area"}},

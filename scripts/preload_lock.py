@@ -371,7 +371,7 @@ def pack(spec: Path, out: Path) -> Path:
         (top / "tools").mkdir()
         say(f"fetching {count} wheels (pip download, checked against the lock's hashes)...")
         # One pip call per round, each name once: with only X.Y a package can be in the lock twice, once per patch
-        # level (soupsieve for Python before and from 3.11.5), and pip refuses two versions of one name in one call.
+        # level (e.g. one pin before and one from Python 3.11.5), and pip refuses two versions of one name in one call.
         rounds, seen = [], {}
         for requirement, _, hashes in entries((spec / "lock.txt").read_text(encoding="utf-8")):
             index = seen.get(name_of(requirement), 0)

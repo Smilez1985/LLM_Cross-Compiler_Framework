@@ -131,10 +131,29 @@ def test_windows_gets_its_own_packages_and_linux_does_not():
 
 
 def test_without_a_patch_level_both_sides_of_a_patch_marker_are_kept():
-    text = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
-    soupsieve = [e for e in preload_lock.filter_lock(text, "linux-x86_64", "3.11") if e.startswith("soupsieve==")]
-    exact = [e for e in preload_lock.filter_lock(text, "linux-x86_64", "3.11.9") if e.startswith("soupsieve==")]
-    assert len(soupsieve) == 2 and len(exact) == 1
+    # The lock no longer pins a package per patch level (Soup Sieve did, before the override in pyproject.toml), so the
+    # export is written here in the form uv writes it.
+    text = ("demo==1.0 ; python_full_version < '3.11.5' \\\n    --hash=sha256:" + "a" * 64 + "\n"
+            "demo==2.0 ; python_full_version >= '3.11.5' \\\n    --hash=sha256:" + "b" * 64 + "\n")
+    both = [e for e in preload_lock.filter_lock(text, "linux-x86_64", "3.11") if e.startswith("demo==")]
+    exact = [e for e in preload_lock.filter_lock(text, "linux-x86_64", "3.11.9") if e.startswith("demo==")]
+    older = [e for e in preload_lock.filter_lock(text, "linux-x86_64", "3.11.2") if e.startswith("demo==")]
+    assert len(both) == 2 and len(exact) == 1 and exact[0].startswith("demo==2.0")
+    assert len(older) == 1 and older[0].startswith("demo==1.0")
+
+
+def test_a_preload_for_python_before_3_11_5_holds_no_soupsieve():
+    """On Python before 3.11.5 the lock leaves Soup Sieve out (CVE-2026-126190 in every version that Python can
+    install); from 3.11.5 on it holds only 4.0 or newer."""
+    for name in ("requirements.txt", "requirements-gui.txt"):
+        text = (REPO_ROOT / name).read_text(encoding="utf-8")
+        for target in ("linux-x86_64", "linux-aarch64", "windows-amd64"):
+            soupsieve = {python: [e.split(" ", 1)[0] for e in preload_lock.filter_lock(text, target, python)
+                                  if e.startswith("soupsieve==")] for python in ("3.11.2", "3.11.4", "3.11.5", "3.13")}
+            assert soupsieve["3.11.2"] == [] and soupsieve["3.11.4"] == [], (name, target, soupsieve)
+            for python in ("3.11.5", "3.13"):
+                assert len(soupsieve[python]) == 1, (name, target, soupsieve)
+                assert int(soupsieve[python][0].split("==")[1].split(".")[0]) >= 4, (name, target, soupsieve)
 
 
 def test_the_platform_tags_reach_back_to_manylinux2014():

@@ -114,6 +114,9 @@ eigenes Schnellprüf-Skript gibt es nicht.
   `uv lock --check`. Eine Version, die bewusst innerhalb ihrer Wartezeit genommen wird, steht in
   `[tool.uv.exclude-newer-package]` mit der Sekunde nach ihrem Hochladen; der geplante Update-Lauf und die Installer
   entfernen einen solchen Eintrag, sobald die Wartezeit sein Datum überholt hat. Braucht ein uv, das einen solchen relativen Wert liest (0.11.32, die Version der CI, tut es).
+- `[tool.uv] override-dependencies` hat einen Eintrag: Soup Sieve erst ab Python 3.11.5, und nur 4.0 oder neuer
+  (CVE-2026-126190 steckt in jeder älteren Version, und 4.0 braucht 3.11.5). Beautiful Soup importiert es nur für
+  CSS-Selektoren, die llmcf nie ausführt; auf Python vor 3.11.5 wird es nicht installiert, und pip check meldet nur das.
 - `requirements.txt` (Laufzeit), `requirements-gui.txt` (Laufzeit plus das optionale Extra `gui`, PySide6) und
   `requirements-dev.txt` (Entwicklungswerkzeuge) sind Exporte von `uv.lock` mit Hashes, ebenso
   `requirements-resolve.txt` (uv und pip-audit, mit denen die Installer frisch auflösen). Ihre ersten Zeilen nennen den

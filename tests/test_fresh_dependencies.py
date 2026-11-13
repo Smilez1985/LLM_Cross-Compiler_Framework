@@ -196,6 +196,46 @@ def test_the_self_check_passes_and_names_what_fails(tmp_path, monkeypatch, capsy
         capsys.readouterr().out
 
 
+def test_pip_check_allows_only_soupsieve_missing_for_beautifulsoup_and_only_before_python_3_11_5():
+    """pyproject.toml's override leaves Soup Sieve out on Python before 3.11.5 (CVE-2026-126190): that one line of
+    pip check is allowed there, nothing else and nowhere else."""
+    def result(code, out):
+        return fresh_deps.subprocess.CompletedProcess(["pip", "check"], code, out, "")
+    known = "beautifulsoup4 4.15.0 requires soupsieve, which is not installed.\n"
+    assert fresh_deps.pip_check_passes(result(0, "No broken requirements found.\n"), (3, 11, 9))
+    assert fresh_deps.pip_check_passes(result(1, known), (3, 11, 2))
+    assert fresh_deps.pip_check_passes(result(1, known), (3, 11, 4))
+    assert not fresh_deps.pip_check_passes(result(1, known), (3, 11, 5))
+    assert not fresh_deps.pip_check_passes(result(1, known), (3, 13, 0))
+    for other in ("beautifulsoup4 4.15.0 requires typing-extensions, which is not installed.\n",
+                  "beautifulsoup4 4.15.0 has requirement soupsieve>=1.6.1, but you have soupsieve 0.1.\n",
+                  "requests 2.33.0 requires soupsieve, which is not installed.\n",
+                  known + "pypdf 7.0.0 requires typing-extensions, which is not installed.\n", ""):
+        assert not fresh_deps.pip_check_passes(result(1, other), (3, 11, 2)), other
+
+
+def test_the_self_check_names_the_allowed_pip_check_line(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(fresh_deps, "DEPENDENCY_IMPORTS", ["json"])
+    monkeypatch.setattr(fresh_deps, "GUI_IMPORTS", [])
+    monkeypatch.setattr(fresh_deps, "CORE_IMPORTS", ["orchestrator.Core.doorbell"])
+    monkeypatch.setattr(fresh_deps, "has_qdrant_edge", lambda: False)
+    real_run = fresh_deps.run
+
+    def run(argv, **kwargs):
+        if "check" in [str(a) for a in argv]:
+            return fresh_deps.subprocess.CompletedProcess(argv, 1, "beautifulsoup4 4.15.0 requires soupsieve, which "
+                                                                   "is not installed.\n", "")
+        return real_run(argv, **kwargs)
+    monkeypatch.setattr(fresh_deps, "run", run)
+    monkeypatch.setattr(fresh_deps, "python_version", lambda: (3, 11, 2))
+    assert fresh_deps.selfcheck(REPO_ROOT, gui=False) == 0
+    said = capsys.readouterr().out
+    assert "Soup Sieve is left out on Python before 3.11.5" in said and "self-check passed" in said
+    monkeypatch.setattr(fresh_deps, "python_version", lambda: (3, 11, 5))
+    assert fresh_deps.selfcheck(REPO_ROOT, gui=False) == 1
+    assert "self-check failed: pip check: beautifulsoup4 4.15.0 requires soupsieve" in capsys.readouterr().out
+
+
 def test_the_self_check_imports_every_direct_dependency():
     """Each direct dependency of pyproject.toml has its import name in the self-check (a new one must be added)."""
     import tomllib

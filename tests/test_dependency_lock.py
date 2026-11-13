@@ -227,11 +227,13 @@ def test_installers_install_only_hash_pinned_exports():
 def test_pillow_needs_no_override_since_fastembed_allows_pillow_13():
     """fastembed up to 0.9.0 capped Pillow below 13, and pyproject.toml overrode that cap so the advisories fixed in
     Pillow 13 were gone. fastembed 0.9.1 allows Pillow 13 itself, so the override went: the lock keeps Pillow 13 or
-    newer on fastembed's own requirement, and no [tool.uv] override-dependencies come back without a reason here."""
+    newer on fastembed's own requirement, and no [tool.uv] override-dependencies come back without a reason here.
+    The one override with its reason: Soup Sieve only from Python 3.11.5 on, 4.0 or newer (CVE-2026-126190 in every
+    older version; checked in tests/test_no_css_selectors.py)."""
     import importlib.metadata as metadata
 
-    assert "override-dependencies" not in pyproject().get("tool", {}).get("uv", {}), \
-        "a new override needs its own reason and check here"
+    assert pyproject().get("tool", {}).get("uv", {}).get("override-dependencies", []) == \
+        ["soupsieve>=4.0 ; python_full_version >= '3.11.5'"], "a new override needs its own reason and check here"
     locked = {norm(p["name"]): p["version"] for p in lock()["package"] if p.get("source", {}).get("registry")}
     assert int(locked["pillow"].split(".")[0]) >= 13
     try:
