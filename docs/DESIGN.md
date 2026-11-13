@@ -2335,7 +2335,7 @@ One repository with layers enforced by a test; every change extends what exists.
 | The removal answers of the unwired audit: one implementation per job, the original one where it is adequate (the duplicate link question, old text keys, duplicate localization keys, menu-name lookups, the legacy Docker build path, the credential check, the old validation module, the smoke-test script, an unused probe worker), each wired to the kept one or removed with proof. | The consolidation chains of 3.1.0 (see the changelog's "One implementation per job" entry). | Two copies of the same job drift apart. |
 | Everything that exists but is not wired gets wired, then checked that it works, is complete or needs improving. | The wave-6 wiring and the consolidation stages. | Unwired code helps nobody. |
 | Work lands on the branch `development`; main moves only when the maintainer says so, and then by fast-forward to a green `development`: no pull request, no merge commit, no force push. When main has commits of its own (a merged Dependabot pull request), main is first merged into `development`, and nothing merged on main is dropped there. | `git merge --ff-only` of main onto `development` once CI, CodeQL and Security are green there and GitHub Actions is idle (row "A running CI run is never cancelled" under Tests, CI and the Windows hazards); CI runs on pushes to both branches. | Main stays the stable state and is always a tested commit of `development`; the maintainer decides when it moves; a merge that drops what main already had brings it back as a new pull request. |
-| The remote holds only `main`, `development`, one temporary branch `gate` for unfinished work and for a CI run before a merge (removed after each merge) and `deps/update` for the weekly dependency update's pull request; never a branch per piece of work or per run. | An old branch is deleted only after checking that each of its commits is in main or `development`; GitHub deletes a merged pull request's branch by itself (repository setting). | Some 130 branches of gate runs piled up and made the repository unusable. |
+| The remote holds only `main`, `development`, the backup branch `gate` and `deps/update` for the weekly dependency update's pull request; never a branch per piece of work or per run. `gate` stays for good: it holds the newest backup of the work environment, the same as `development` or ahead of it with unfinished work, and is never deleted. A branch Dependabot opens for its own pull request is removed once its content is in `development`. | An old branch is deleted only after checking that each of its commits is in main or `development`; GitHub deletes a merged pull request's branch by itself (repository setting). | Some 130 branches of gate runs piled up and made the repository unusable. |
 | No unnecessary commit; pushed history is never rewritten; a commit stages explicit paths. | `git add -- <paths>`, never all of the working tree; local commits are bundled and pushed together (Tests, CI and the Windows hazards). | Every push costs a CI run, and in a public repository a stray file or a rewritten history cannot be taken back. |
 | Zero tolerance for leaks: no token, password or personal data (names, e-mail addresses, hosts, addresses, local paths) ever reaches the repository; a leak scan of the outgoing commits runs before every push. A leak, like an unnecessary commit, makes the maintainer delete the repository. | The scan runs before every push as a script of the repository with its tests: `scripts/secret_scan.py` with two rule modules beside it, which it loads by path from a bare checkout, standard library only. The table in `orchestrator/security/secret_patterns.py` refuses tokens, passwords and keys in every mode, as before. `orchestrator/security/personal_data.py` holds the rules for personal data at two levels. The level "blueprint" is the blueprint's scrub test in `tests/test_docs.py`: the design, roadmap and changelog name no address outside the documentation ranges and a few special ones, no e-mail address and no home folder outside the default accounts of CI runners and board images. The level "code" checks, in the modes `--staged` (pre-commit) and `--push` (pre-push), every line a commit adds and only those, so the examples already in the repository are not reported again; a merge adds only the lines that differ from every parent. What counts as an example there and passes: e-mail addresses at domains reserved for examples (example.com, .org and .net, *.example, *.invalid, *.test, *.local, localhost) and the few fixed addresses the project itself uses (the commit trailer's no-reply address, the licence's contacts); IPv4 addresses in the documentation ranges (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24), private, loopback, link-local, shared (100.64.0.0/10), unspecified, multicast and other non-routable addresses, IPv6 outside the global unicast space or carrying such an IPv4 address, and a short list of well-known public examples (public DNS resolvers, example.com's addresses, the classic placeholder of four ascending digits); four dotted numbers that are a version (after `==`, `>=` or `v`, the word version, in a requirements or lock file) or an RFC section are never read as an address; home folders (`/home/<name>`, `/Users/<name>`, `C:\Users\<name>`) whose account name is one of the examples the documents and tests use (Jane, alice, bob, user, pi, radxa and the like) or a placeholder (`<name>`, `$USER`). Always reported: the paths of an AI session's sandbox (below `/tmp/claude…` and `/root/.ccr`); the marker `secret-scan: allow` spares a documented example but never such a path. The tracked-files mode and `--history` do not run the code level, because old commits cannot be fixed. The maintainer's own identifiers (names, accounts, hosts) are given only locally in `.git/info/secret-patterns`, never in the repository; the work environment fills that file before its first push, because private addresses and real account names cannot be told apart from examples by their shape. Neither module holds anything that looks like a secret or personal data: their patterns are assembled from parts when they run, and the sample values of the tests are generated when the tests run, so neither GitHub's push protection nor the scan flags the repository. It still lets nothing through: the tests prove that every rule catches its generated samples (public addresses, a real-looking e-mail address, a home folder of another account, a sandbox path) and passes the examples, and a rule that misses one fails CI. A finding stops the commit or push with the file and line and the value shown redacted; a local pattern's value is never shown. Beside it GitHub's secret scanning and push protection and the planned second secret scanner in CI (ROADMAP row "A second secret scanner in CI"). | The repository is public: what leaked once is copied and cannot be taken back. |
 | Unfinished work is backed up regularly to the temporary branch `gate`, so that a restart of the work environment loses nothing; finished, checked work goes to `development`. | The assistant pushes its local commits to `gate` at regular points of a longer piece of work (after each finished step and before a pause), always after the leak scan. `gate` holds work in progress and is never merged as it is: the work is finished and checked, then brought to `development` by the branch rule above, and `gate` is removed after that merge. | The work environment can be reset at any time, and local commits that exist nowhere else are then lost; one temporary branch on the remote keeps them without bringing back the piles of branches. |
@@ -4642,6 +4642,46 @@ roadmap endlich mal abzuarbeiten". Both gaps are planned; once every started tas
 roadmap is worked through.
 
 Now in: [Installer, platforms and dependencies](#installer-platforms-and-dependencies)
+
+### Round 87
+
+<a id="decision-round-87"></a>
+Decided 2026-11-10. Asked how the roadmap is worked through: "konzentrier dich auf eins nach dem anderen und priorisiere
+nach wichtigkeit und was worauf aufbaut". One item at a time, ordered by importance and by what builds on what; each is
+finished, wired and tested before the next starts.
+
+Now in: [Documentation and the blueprint](#documentation-and-the-blueprint)
+
+### Round 88
+
+<a id="decision-round-88"></a>
+Decided 2026-11-11. GitHub's Linux runners could not resolve the Ubuntu package servers, and every Linux test job failed
+at `apt-get install` before a single test ran: "Löse das problem smart". The test jobs install only the Qt libraries the
+runner image lacks, from the runner's own sources first and then from official Ubuntu mirrors on other hosts, checked
+against the same Ubuntu archive keyring; the Linux suites run on every core.
+
+Now in: [Tests, CI and the Windows hazards](#tests-ci-and-the-windows-hazards)
+
+### Round 89
+
+<a id="decision-round-89"></a>
+Decided 2026-11-13. Asked whether main moves to `development` and the branches are tidied: "ja, und alle branches dann mal
+prüfen und zusammenführen damit nur noch main und knowledge als branches da sind und einen neuen developement branch
+anlegen... erst prüfen ob das passt", and after the check: "gate kann bleiben, als backup" (the knowledge branch belongs to
+another repository). Main moved by fast-forward to `development`, which goes on from the same commit; `gate` stays for good
+as the backup branch; Dependabot's merged branches go.
+
+Now in: [Repository, layers and consolidation](#repository-layers-and-consolidation)
+
+### Round 90
+
+<a id="decision-round-90"></a>
+Decided 2026-11-13. GitHub reported three high alerts on main, Soup Sieve before 4.0 pinned for Python older than 3.11.5:
+"3 Lücken auf main , die Soup-Sieve-Lücke, bitte im repo prüfen und fixen (auf main)". Fixed instead of dismissed: no
+manifest holds a Soup Sieve before 4.0 on any Python, the Python minimum stays 3.11 for Debian 12 and Raspberry Pi OS, and
+pip-audit ignores nothing.
+
+Now in: [Security model](#security-model)
 
 ## Versioning and documentation policy
 

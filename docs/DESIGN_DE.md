@@ -2492,7 +2492,7 @@ Ein Repository mit Schichten, die ein Test durchsetzt; jede Änderung erweitert,
 | Die Antworten zum Entfernen aus der Prüfung auf Unverdrahtetes: eine Umsetzung je Aufgabe, die ursprüngliche, wo sie genügt (die doppelte Link-Frage, alte Textschlüssel, doppelte Übersetzungsschlüssel, Menünamen-Abfragen, der alte Docker-Build-Weg, die Prüfung der Zugangsdaten, das alte Prüfmodul, das Smoke-Test-Skript, ein ungenutzter Probe-Worker), jede mit der behaltenen verdrahtet oder mit Nachweis entfernt. | Die Konsolidierungsketten von 3.1.0 (siehe den Changelog-Eintrag „Eine Umsetzung je Aufgabe“). | Zwei Kopien derselben Aufgabe laufen auseinander. |
 | Alles, was existiert, aber nicht verdrahtet ist, wird verdrahtet und dann geprüft, ob es funktioniert, vollständig ist oder besser werden muss. | Die Verdrahtung von Welle 6 und die Konsolidierungsstufen. | Unverdrahteter Code hilft niemandem. |
 | Arbeit landet auf dem Zweig `development`; main bewegt sich nur, wenn der Maintainer es sagt, und dann per Fast-Forward auf einen grünen `development`: kein Pull Request, kein Merge-Commit, kein Force-Push. Hat main eigene Commits (ein gemergter Dependabot-Pull-Request), wird main zuerst in `development` gemergt, und nichts, was auf main gemergt ist, geht dabei verloren. | `git merge --ff-only` von main auf `development`, sobald CI, CodeQL und Security dort grün sind und GitHub Actions ruht (Zeile „Ein laufender CI-Lauf wird nie abgebrochen“ unter Tests, CI und die Windows-Fallen); die CI läuft bei Pushes auf beide Zweige. | Main bleibt der stabile Stand und ist immer ein getesteter Commit von `development`; wann er sich bewegt, entscheidet der Maintainer; ein Merge, der verliert, was main schon hatte, bringt es als neuen Pull Request zurück. |
-| Auf GitHub gibt es nur `main`, `development`, einen vorübergehenden Zweig `gate` für unfertige Arbeit und für einen CI-Lauf vor dem Zusammenführen (nach jedem Zusammenführen entfernt) und `deps/update` für den Pull Request des wöchentlichen Abhängigkeits-Updates; nie einen Zweig je Arbeit oder je Lauf. | Ein alter Zweig wird erst gelöscht, nachdem geprüft ist, dass jeder seiner Commits in main oder `development` steckt; GitHub löscht den Zweig eines gemergten Pull Requests selbst (Einstellung des Repositorys). | Rund 130 Zweige von Prüfläufen hatten sich angehäuft und das Repository unbrauchbar gemacht. |
+| Auf GitHub gibt es nur `main`, `development`, den Sicherungszweig `gate` und `deps/update` für den Pull Request des wöchentlichen Abhängigkeits-Updates; nie einen Zweig je Arbeit oder je Lauf. `gate` bleibt dauerhaft: Er hält die neueste Sicherung der Arbeitsumgebung, gleich mit `development` oder mit unfertiger Arbeit voraus, und wird nie gelöscht. Ein Zweig, den Dependabot für seinen eigenen Pull Request anlegt, wird entfernt, sobald sein Inhalt in `development` steckt. | Ein alter Zweig wird erst gelöscht, nachdem geprüft ist, dass jeder seiner Commits in main oder `development` steckt; GitHub löscht den Zweig eines gemergten Pull Requests selbst (Einstellung des Repositorys). | Rund 130 Zweige von Prüfläufen hatten sich angehäuft und das Repository unbrauchbar gemacht. |
 | Kein unnötiger Commit; gepushte Geschichte wird nie umgeschrieben; ein Commit nimmt ausdrücklich genannte Pfade auf. | `git add -- <Pfade>`, nie den ganzen Arbeitsbaum; lokale Commits werden gebündelt und zusammen gepusht (Tests, CI und die Windows-Fallen). | Jeder Push kostet einen CI-Lauf, und in einem öffentlichen Repository lassen sich eine verirrte Datei oder eine umgeschriebene Geschichte nicht zurücknehmen. |
 | Null Toleranz für Lecks: Kein Token, kein Passwort und keine persönlichen Daten (Namen, E-Mail-Adressen, Hosts, Adressen, lokale Pfade) gelangen je ins Repository; vor jedem Push läuft ein Leck-Scan über die ausgehenden Commits. Ein Leck führt wie ein unnötiger Commit dazu, dass der Maintainer das Repository löscht. | Der Scan läuft vor jedem Push als Skript des Repositorys mit seinen Tests: `scripts/secret_scan.py` mit zwei Regelmodulen daneben, die es aus einem bloßen Checkout über ihren Pfad lädt, nur Standardbibliothek. Die Tabelle in `orchestrator/security/secret_patterns.py` lehnt Token, Passwörter und Schlüssel in jedem Modus ab, wie bisher. `orchestrator/security/personal_data.py` enthält die Regeln für persönliche Daten in zwei Stufen. Die Stufe „blueprint“ ist der Bereinigungs-Test des Bauplans in `tests/test_docs.py`: Design, Roadmap und Changelog nennen keine Adresse außerhalb der Dokumentationsbereiche und einiger besonderer Adressen, keine E-Mail-Adresse und keinen Home-Ordner außerhalb der Standardkonten von CI-Runnern und Board-Images. Die Stufe „code“ prüft in den Modi `--staged` (vor dem Commit) und `--push` (vor dem Push) jede Zeile, die ein Commit hinzufügt, und nur diese, sodass die Beispiele, die schon im Repository stehen, nicht erneut gemeldet werden; ein Merge fügt nur die Zeilen hinzu, die sich von jedem Elternteil unterscheiden. Was dort als Beispiel gilt und durchgeht: E-Mail-Adressen an Domains, die für Beispiele reserviert sind (example.com, .org und .net, *.example, *.invalid, *.test, *.local, localhost), und die wenigen festen Adressen, die das Projekt selbst nutzt (die No-Reply-Adresse der Commit-Zeile, die Kontakte der Lizenz); IPv4-Adressen in den Dokumentationsbereichen (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24), private, Loopback-, Link-Local-, geteilte (100.64.0.0/10), unbestimmte, Multicast- und andere nicht routbare Adressen, IPv6 außerhalb des globalen Unicast-Bereichs oder mit einer solchen IPv4-Adresse darin, und eine kurze Liste bekannter öffentlicher Beispiele (öffentliche DNS-Resolver, die Adressen von example.com, der klassische Platzhalter aus vier aufsteigenden Ziffern); vier Zahlen mit Punkten, die eine Version sind (nach `==`, `>=` oder `v`, nach dem Wort version, in einer Requirements- oder Lock-Datei) oder ein Abschnitt eines RFC, werden nie als Adresse gelesen; Home-Ordner (`/home/<name>`, `/Users/<name>`, `C:\Users\<name>`), deren Kontoname eines der Beispiele ist, die Dokumente und Tests verwenden (Jane, alice, bob, user, pi, radxa und ähnliche), oder ein Platzhalter (`<name>`, `$USER`). Immer gemeldet: die Pfade der Sandbox einer KI-Sitzung (unter `/tmp/claude…` und `/root/.ccr`); die Markierung `secret-scan: allow` verschont ein dokumentiertes Beispiel, aber nie einen solchen Pfad. Der Modus für versionierte Dateien und `--history` führen die Stufe „code“ nicht aus, weil sich alte Commits nicht mehr berichtigen lassen. Die eigenen Kennungen des Maintainers (Namen, Konten, Hosts) stehen nur lokal in `.git/info/secret-patterns`, nie im Repository; die Arbeitsumgebung füllt diese Datei vor ihrem ersten Push, weil sich private Adressen und echte Kontonamen an ihrer Form nicht von Beispielen unterscheiden lassen. Keines der Module enthält etwas, was wie ein Geheimnis oder eine persönliche Angabe aussieht: Ihre Muster werden beim Lauf aus Teilen zusammengesetzt, und die Beispielwerte der Tests werden beim Testlauf erzeugt, sodass weder die Push Protection von GitHub noch der Scan das Repository anmerkt. Er lässt trotzdem nichts durch: Die Tests beweisen, dass jede Regel ihre erzeugten Beispiele fängt (öffentliche Adressen, eine echt aussehende E-Mail-Adresse, ein Home-Ordner eines anderen Kontos, ein Sandbox-Pfad) und die Beispiele durchlässt, und eine Regel, die eines verfehlt, macht die CI rot. Ein Fund hält Commit oder Push an, mit Datei und Zeile und dem Wert geschwärzt; der Wert eines lokalen Musters wird nie gezeigt. Daneben Secret Scanning und Push Protection von GitHub und der geplante zweite Secret-Scanner in der CI (ROADMAP-Zeile „Ein zweiter Secret-Scanner in der CI“). | Das Repository ist öffentlich: Was einmal durchgesickert ist, ist kopiert und lässt sich nicht zurückholen. |
 | Unfertige Arbeit wird regelmäßig auf den vorübergehenden Zweig `gate` gesichert, damit ein Neustart der Arbeitsumgebung nichts verliert; fertige, geprüfte Arbeit geht nach `development`. | Der Assistent schiebt seine lokalen Commits an festen Punkten einer längeren Arbeit nach `gate` (nach jedem fertigen Schritt und vor einer Pause), immer nach dem Leck-Scan. `gate` hält Arbeit, die noch läuft, und wird nie so, wie er ist, zusammengeführt: Die Arbeit wird fertig gemacht und geprüft, dann nach der Zweig-Regel oben nach `development` gebracht, und `gate` wird nach diesem Zusammenführen entfernt. | Die Arbeitsumgebung kann jederzeit zurückgesetzt werden, und lokale Commits, die es sonst nirgends gibt, sind dann verloren; ein vorübergehender Zweig auf GitHub hält sie, ohne die Haufen von Zweigen zurückzubringen. |
@@ -4934,6 +4934,47 @@ und comittet) dann fangen wir an die roadmap endlich mal abzuarbeiten“. Beide 
 angefangene Aufgabe verdrahtet, getestet und committet ist, wird die Roadmap abgearbeitet.
 
 Steht jetzt in: [Installer, Plattformen und Abhängigkeiten](#installer-plattformen-und-abhängigkeiten)
+
+### Runde 87
+
+<a id="decision-round-87"></a>
+Entschieden am 2026-11-10. Gefragt, wie die Roadmap abgearbeitet wird: „konzentrier dich auf eins nach dem anderen und
+priorisiere nach wichtigkeit und was worauf aufbaut“. Ein Punkt nach dem anderen, geordnet nach Wichtigkeit und danach,
+was worauf aufbaut; jeder ist fertig, verdrahtet und getestet, bevor der nächste beginnt.
+
+Steht jetzt in: [Dokumentation und der Bauplan](#dokumentation-und-der-bauplan)
+
+### Runde 88
+
+<a id="decision-round-88"></a>
+Entschieden am 2026-11-11. Die Linux-Runner von GitHub konnten die Ubuntu-Paketserver nicht auflösen, und jeder
+Linux-Testjob scheiterte bei `apt-get install`, bevor ein einziger Test lief: „Löse das problem smart“. Die Testjobs
+installieren nur die Qt-Bibliotheken, die dem Runner-Image fehlen, zuerst aus den eigenen Quellen des Runners und dann von
+offiziellen Ubuntu-Spiegeln auf anderen Hosts, gegen denselben Ubuntu-Archivschlüsselbund geprüft; die Linux-Suiten laufen
+auf allen Kernen.
+
+Steht jetzt in: [Tests, CI und die Windows-Fallen](#tests-ci-und-die-windows-fallen)
+
+### Runde 89
+
+<a id="decision-round-89"></a>
+Entschieden am 2026-11-13. Gefragt, ob main auf `development` vorrückt und die Zweige aufgeräumt werden: „ja, und alle
+branches dann mal prüfen und zusammenführen damit nur noch main und knowledge als branches da sind und einen neuen
+developement branch anlegen... erst prüfen ob das passt“, und nach der Prüfung: „gate kann bleiben, als backup“ (der Zweig
+knowledge gehört zu einem anderen Repository). Main ist per Fast-Forward auf `development` vorgerückt, das vom selben Commit
+aus weitergeht; `gate` bleibt dauerhaft als Sicherungszweig; die gemergten Zweige von Dependabot fallen weg.
+
+Steht jetzt in: [Repository, Schichten und Konsolidierung](#repository-schichten-und-konsolidierung)
+
+### Runde 90
+
+<a id="decision-round-90"></a>
+Entschieden am 2026-11-13. GitHub meldete drei hohe Warnungen auf main, Soup Sieve vor 4.0, festgelegt für Python älter als
+3.11.5: „3 Lücken auf main , die Soup-Sieve-Lücke, bitte im repo prüfen und fixen (auf main)“. Behoben statt abgetan: Keine
+Abhängigkeitsdatei hält ein Soup Sieve vor 4.0 auf irgendeinem Python, das Python-Minimum bleibt 3.11 für Debian 12 und
+Raspberry Pi OS, und pip-audit übergeht nichts.
+
+Steht jetzt in: [Sicherheitsmodell](#sicherheitsmodell)
 
 ## Versionierung und Dokumentationsregeln
 
