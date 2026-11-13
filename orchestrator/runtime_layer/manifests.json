@@ -1,0 +1,6 @@
+{
+ "comment": "The manifests of the runtime layer's scripts each framework version shipped (orchestrator/Core/runtime_layer.py manifest_digest: sha256 over the lines \"sha256  name\" sorted by name): a layer whose assembly record names one of these is assembled again after an update. A change of the scripts adds its digest; no entry is ever removed.",
+ "manifests": {
+  "63b68b36fe81ed4d4d11caf11f6b6b10012c0d320d16f1184ac9d9e248f98f41": "3.4.0"
+ }
+}

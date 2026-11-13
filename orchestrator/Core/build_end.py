@@ -94,7 +94,8 @@ STAGE_USER_TEXT = {
     "reads_runner": "A test child under the stage account could open the stage runner's memory or environment.",
     "folders": "The stage account cannot write a folder the stage modules write.",
     "inputs": "The stage account cannot read an input of the build (the model, the dataset, the importance matrix or "
-              "the hardware profile); its files must be readable for your group.",
+              "the hardware profile); its files must be readable for your group. The build log names the first "
+              "file it cannot read.",
 }
 STAGE_USER_REFUSED = ("The build sandbox refused the build before its first stage: {text} No stage module ran; the "
                       "modules never run as the stage runner itself.")

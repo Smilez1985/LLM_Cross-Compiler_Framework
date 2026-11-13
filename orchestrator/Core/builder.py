@@ -1873,10 +1873,12 @@ class BuildEngine:
             linked_name = link_name if link_name and local_files.cache_blob(local) else ""
             progress.add_log(f"Using local model {local}")
             if local.is_dir():
-                # A folder of links (a Hugging Face cache snapshot) file by file: its links lead out of it.
+                # A folder of links (a Hugging Face cache snapshot) file by file: its links lead out of it. The
+                # bookkeeping of `hf download --local-dir` (.cache/huggingface) stays out of the model's mount.
                 binds = local_files.linked_folder_binds(local, "/build-cache/input-model")
-                return "/build-cache/input-model", binds or {str(local): {"bind": "/build-cache/input-model",
-                                                                           "mode": "ro"}}
+                return "/build-cache/input-model", local_files.without_download_metadata(
+                    local, "/build-cache/input-model",
+                    binds or {str(local): {"bind": "/build-cache/input-model", "mode": "ro"}})
             # Only the file itself: the folder it lies in may hold anything else (G8).
             inner = f"/build-cache/input-model/{linked_name or local.name}"
             return inner, {str(local): {"bind": inner, "mode": "ro"}}
@@ -2449,11 +2451,20 @@ class BuildEngine:
             verdict = getattr(e, "verdict", "no_toolbox")
             self._audit_build(config, "runtime_layer", "refused", str(e), verdict=verdict)
             raise RuntimeError(str(e)) from e
+        if check.reassembled:
+            # an update changed the layer and the layer was exactly what the earlier version assembled (its record and
+            # the shipped history prove it): assembled again, shown and audited, never asked
+            if progress is not None:
+                progress.add_warning(check.notice)
+            else:
+                self.logger.warning(check.notice)
+            self._audit_build(config, "runtime_layer", "reassembled", check.notice, verdict="earlier")
         if progress is not None:
             progress.add_log(f"Runtime layer: {check.text}")
         self._audit_build(config, "runtime_layer", "checked", check.text, verdict=check.verdict)
         return {"verdict": check.verdict, "toolbox": check.toolbox_way or way,
-                "checks": ["shipped_copy", "toolbox", "layer_files"]}
+                "checks": ["shipped_copy", "toolbox", "layer_files"],
+                **({"reassembled_from": check.version} if check.reassembled else {})}
 
     @staticmethod
     def _layer_fetch(url: str) -> bytes:

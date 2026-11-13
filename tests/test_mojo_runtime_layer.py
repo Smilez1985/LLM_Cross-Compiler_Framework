@@ -177,3 +177,23 @@ def test_files_that_are_not_the_layers_are_counted_never_named_and_never_deleted
     assert offer.verdict == "not_automatic" and offer.plan is None
     assert apply_repair(fw, "runtime_layer.changed", actor="cli").outcome == "refused"
     assert planted.exists(), "no repair deletes"
+
+
+@POSIX
+def test_a_layer_of_an_earlier_version_is_information_without_a_repair(fw, tmp_path, monkeypatch):
+    """A layer an earlier version of the framework assembled (proven by its record and the shipped history) is no
+    fault: the next build assembles it again by itself, so Mojo Oracle shows it as information, with no Miracle."""
+    import json
+    cache = _cache(fw)
+    _change(fw, text="echo the runner of an earlier version\n")
+    folder = layer.layer_dir(cache)
+    files = {p.relative_to(folder).as_posix(): layer.sha256_file(p) for p in folder.rglob("*") if p.is_file()}
+    layer.write_assembly_record(cache, files, "3.3.9")
+    history = tmp_path / "manifests.json"
+    history.write_text(json.dumps({"manifests": {layer.manifest_digest(files): "3.3.9"}}), encoding="utf-8")
+    monkeypatch.setattr(layer, "HISTORY_PATH", history)
+    findings = check_runtime_layer(fw)
+    assert "runtime_layer.earlier" in codes(findings, Severity.INFO)
+    assert "runtime_layer.changed" not in codes(findings)
+    earlier = next(f for f in findings if f.code == "runtime_layer.earlier")
+    assert not earlier.repair_id and "3.3.9" in earlier.message and str(tmp_path) not in earlier.message

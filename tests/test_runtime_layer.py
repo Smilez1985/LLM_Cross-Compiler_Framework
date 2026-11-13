@@ -23,7 +23,8 @@ import pytest
 
 from orchestrator.Core import build_end
 from orchestrator.Core import runtime_layer as layer
-from tests.file_modes import MODE_444, MODE_4755, MODE_555, MODE_644, MODE_755, MODE_777
+from tests.conftest import POSIX_MODES_ONLY
+from tests.file_modes import MODE_444, MODE_4755, MODE_555, MODE_644, MODE_666, MODE_755, MODE_777
 from tests.hosts import names_host
 
 # These tests make and check the toolbox themselves: the real ensure_toolbox, never the test toolbox of conftest
@@ -920,3 +921,144 @@ def test_the_release_workflow_runs_on_a_tools_tag_only_and_signs_without_a_secre
         assert target in text
     assert '"../dist/$crate-$VERSION-$arch"' in text
     assert layer.release_asset("1.2.3", "arm64") == "llmcf-setpriv-1.2.3-aarch64"
+
+
+# --- a framework update that changes the runtime layer ---------------------------------------------------------------
+
+def _rewrite(path: Path, data: bytes) -> None:
+    """Changes one file of the read-only assembled layer (its folder made writable for the moment)."""
+    os.chmod(path.parent, MODE_755)
+    os.chmod(path, MODE_644)
+    path.write_bytes(data)
+    os.chmod(path, MODE_444)
+    os.chmod(path.parent, MODE_555)
+
+
+def _layer_files(cache: Path):
+    folder = layer.layer_dir(cache)
+    return {p.relative_to(folder).as_posix(): layer.sha256_file(p) for p in folder.rglob("*") if p.is_file()}
+
+
+def _earlier_version(cache: Path, monkeypatch, version: str = "3.3.9", known: bool = True) -> Path:
+    """The layer as an earlier version of the framework assembled it: its runner.sh as that version shipped it, its
+    assembly record written by that version, and (known) that version's manifest in the shipped history."""
+    assert layer.ready_layer(cache).ok
+    _rewrite(layer.layer_dir(cache) / "runner.sh", b"#!/bin/sh\necho the runner of an earlier version\n")
+    files = _layer_files(cache)
+    layer.write_assembly_record(cache, files, version)
+    history = dict(layer.read_history())
+    if known:
+        history[layer.manifest_digest(files)] = version
+    path = cache / "manifests.json"
+    path.write_text(json.dumps({"manifests": history}), encoding="utf-8")
+    monkeypatch.setattr(layer, "HISTORY_PATH", path)
+    return layer.layer_dir(cache) / "runner.sh"
+
+
+def test_the_shipped_history_holds_this_versions_manifest():
+    """The history of the shipped manifests is how an update recognises the layer an earlier version assembled: the
+    current scripts' manifest is in it under this version (a change of the scripts adds its digest)."""
+    current = {name: digest for name, digest in layer.read_manifest().items() if name in layer.SCRIPTS}
+    assert layer.read_history().get(layer.manifest_digest(current)) == layer.framework_version()
+
+
+@needs_posix
+def test_an_update_assembles_the_layer_of_the_earlier_version_again_with_a_notice(tmp_path, monkeypatch):
+    """Regression (found by the first build of a module made by the module wizard): an update that changed a script
+    of the runtime layer refused every build as 'changed' until Mojo Miracle restored the layer. A layer that is
+    exactly what an earlier version assembled (its record, protected like the layer, and the shipped history prove it)
+    is assembled again by itself, and the person is told."""
+    _toolbox(tmp_path)
+    runner = _earlier_version(tmp_path, monkeypatch)
+    check = layer.layer_check(tmp_path)
+    assert check.verdict == "earlier" and check.version == "3.3.9" and check.names == ["runner.sh"]
+    assert "3.3.9" in check.text and str(tmp_path) not in check.text
+    ready = layer.ready_layer(tmp_path)
+    assert ready.ok and ready.reassembled and ready.version == "3.3.9"
+    assert "assembled again" in ready.notice and "runner.sh" in ready.notice and str(tmp_path) not in ready.notice
+    assert runner.read_bytes() == (layer.SHIPPED_DIR / "runner.sh").read_bytes()
+    record = layer.read_assembly_record(tmp_path)
+    assert record is not None and record["framework"] == layer.framework_version()
+    assert record["files"] == layer.expected_files(tmp_path)
+    again = layer.ready_layer(tmp_path)
+    assert again.ok and not again.reassembled and again.notice == ""
+
+
+@needs_posix
+@pytest.mark.parametrize("case", ["hand_changed", "unknown_digest", "no_record", "other_version", "other_tool",
+                                  "linked_record"])
+def test_a_layer_not_proven_to_be_an_earlier_versions_stays_refused(tmp_path, monkeypatch, case):
+    """Only the framework's own record and shipped history prove a layer; anything else is refused as 'changed' with
+    the next step Mojo Miracle, as before: a file changed by hand after the earlier version assembled it, a manifest
+    no version shipped, no record (a layer from before records were kept), a record naming another version than the
+    one that shipped its manifest, a tool that is not the toolbox's, a record that is a link."""
+    _toolbox(tmp_path)
+    runner = _earlier_version(tmp_path, monkeypatch, known=case != "unknown_digest")
+    record = layer.assembly_record_path(tmp_path)
+    if case == "hand_changed":
+        _rewrite(layer.layer_dir(tmp_path) / "stage_env.sh", b"#!/bin/sh\necho changed by hand\n")
+    elif case == "no_record":
+        os.chmod(record, MODE_644)
+        record.unlink()
+    elif case == "other_version":
+        layer.write_assembly_record(tmp_path, _layer_files(tmp_path), "3.3.8")
+    elif case == "other_tool":
+        _rewrite(layer.layer_dir(tmp_path) / "bin" / "setpriv", b"\x7fELF-another-setpriv")
+        layer.write_assembly_record(tmp_path, _layer_files(tmp_path), "3.3.9")
+    elif case == "linked_record":
+        real = tmp_path / "elsewhere.json"
+        real.write_bytes(record.read_bytes())
+        os.chmod(record, MODE_644)
+        record.unlink()
+        record.symlink_to(real)
+    before = runner.read_bytes()
+    assert layer.layer_check(tmp_path).verdict == "changed"
+    with pytest.raises(layer.LayerRefused) as refused:
+        layer.ready_layer(tmp_path)
+    assert refused.value.verdict == "changed" and "Mojo Miracle" in str(refused.value)
+    assert runner.read_bytes() == before
+
+
+@POSIX_MODES_ONLY
+def test_an_assembly_record_others_may_write_is_no_record(tmp_path, monkeypatch):
+    """The record is protected like the layer: one that group or others may write proves nothing."""
+    _toolbox(tmp_path)
+    _earlier_version(tmp_path, monkeypatch)
+    os.chmod(layer.assembly_record_path(tmp_path), MODE_666)
+    assert layer.read_assembly_record(tmp_path) is None
+    assert layer.layer_check(tmp_path).verdict == "changed"
+
+
+@needs_posix
+def test_an_intact_layer_from_before_records_gets_its_record(tmp_path):
+    """A layer assembled before the record existed, and found intact by a build, gets the record of this version, so
+    the next update can assemble it again."""
+    _toolbox(tmp_path)
+    assert layer.ready_layer(tmp_path).ok
+    record = layer.assembly_record_path(tmp_path)
+    os.chmod(record, MODE_644)
+    record.unlink()
+    assert layer.ready_layer(tmp_path).ok
+    written = layer.read_assembly_record(tmp_path)
+    assert written is not None and written["files"] == layer.expected_files(tmp_path)
+    if os.name == "posix":
+        assert stat.S_IMODE(os.lstat(record).st_mode) == MODE_444
+
+
+def test_the_builder_shows_and_audits_a_layer_assembled_again(tmp_path, monkeypatch):
+    """The re-assembly is a notice, not a question: a build warning and an audit row 'reassembled'."""
+    from types import SimpleNamespace
+
+    from orchestrator.Core.builder import BuildEngine, BuildProgress
+    check = layer.LayerCheck("intact", ["runner.sh"], "build", version="3.3.9", reassembled=True)
+    monkeypatch.setattr(layer, "ensure_toolbox", lambda *a, **k: {})
+    monkeypatch.setattr(layer, "ready_layer", lambda _cache: check)
+    rows = []
+    engine = BuildEngine.__new__(BuildEngine)
+    engine.config, engine.cache_dir, engine.docker_client = None, tmp_path, None
+    engine._audit_build = lambda _config, what, outcome, detail, **extra: rows.append((what, outcome, extra))
+    progress = BuildProgress(build_id="b", status=None, current_stage="", progress_percent=0)
+    facts = engine._ready_runtime_layer(SimpleNamespace(build_id="b", target_arch="x"), progress)
+    assert facts["reassembled_from"] == "3.3.9"
+    assert any("assembled again" in w for w in progress.warnings)
+    assert ("runtime_layer", "reassembled", {"verdict": "earlier"}) in rows

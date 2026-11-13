@@ -596,10 +596,41 @@ def test_an_input_the_stage_account_cannot_read_refuses_the_build_before_any_mod
 
     assert refused.returncode == build_end.STAGE_USER_EXIT["inputs"], refused.stdout + refused.stderr
     assert "cannot read input-model" in refused.stderr and str(box.root) not in refused.stderr.split("read ")[-1]
+    # the check names the file, relative to the input
+    assert "cannot read input-model/weights.bin (an input of the build)" in refused.stderr
     assert not (box.work / "whoami").exists()
 
     os.chmod(model / "weights.bin", MODE_640)
     assert box.run("--to", "source", MODEL_SOURCE=str(model)).returncode == 0
+
+
+@needs_rights
+def test_the_input_check_names_a_file_deep_in_the_model_folder_and_a_folder_it_cannot_open(box):
+    """Regression (found by the first build of a module made by the module wizard): a metadata file of
+    `hf download --local-dir` that only its owner may read refused the whole model folder without naming the file.
+    The refusal names the first entry the stage account cannot read or open, relative to the input."""
+    box.module("source", WHOAMI)
+    model = box.root / "input-model"
+    metadata = model / ".cache" / "huggingface" / "download"
+    metadata.mkdir(parents=True)
+    (model / "config.json").write_text("{}", encoding="ascii")
+    (metadata / "config.json.metadata").write_text("x\n", encoding="ascii")
+    for path in (model, model / ".cache", model / ".cache" / "huggingface", metadata, model / "config.json",
+                 metadata / "config.json.metadata"):
+        os.chown(path, RUNNER, RUNNER)
+    os.chmod(metadata / "config.json.metadata", 0o600)
+
+    refused = box.run("--to", "source", MODEL_SOURCE=str(model))
+    assert refused.returncode == build_end.STAGE_USER_EXIT["inputs"], refused.stdout + refused.stderr
+    assert "cannot read input-model/.cache/huggingface/download/config.json.metadata (an input" in refused.stderr
+    assert str(box.root) not in refused.stderr.split("cannot read ")[-1]
+    assert not (box.work / "whoami").exists()
+
+    os.chmod(metadata / "config.json.metadata", MODE_640)
+    os.chmod(metadata, 0o700)   # a folder the stage account cannot open counts too
+    refused = box.run("--to", "source", MODEL_SOURCE=str(model))
+    assert refused.returncode == build_end.STAGE_USER_EXIT["inputs"], refused.stdout + refused.stderr
+    assert "cannot read input-model/.cache/huggingface/download (an input" in refused.stderr
 
 
 @needs_rights

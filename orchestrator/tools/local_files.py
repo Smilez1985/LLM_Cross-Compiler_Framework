@@ -385,11 +385,44 @@ def mount_plan(pin: LocalFilePin, inner: str) -> Tuple[str, Dict[str, Dict[str, 
         return target, {str(path): {"bind": target, "mode": "ro"}}
     entries, has_links = folder_entries(path)
     if not has_links:
-        return inner, {str(path): {"bind": inner, "mode": "ro"}}
+        return inner, without_download_metadata(path, inner, {str(path): {"bind": inner, "mode": "ro"}})
     root = Path(pin.root)
     denied = pin._denied()
-    return inner, file_binds(path, entries, inner, pin.ref,
-                             confine=lambda target, rel: _confine(target, root, denied, f"{pin.ref}/{rel}"))
+    return inner, without_download_metadata(path, inner, file_binds(
+        path, entries, inner, pin.ref, confine=lambda target, rel: _confine(target, root, denied, f"{pin.ref}/{rel}")))
+
+
+# The bookkeeping `hf download --local-dir` keeps inside the model folder (a lock and a metadata file per downloaded
+# file; files of it may be readable only by their owner): never part of the model, so never mounted into a build
+DOWNLOAD_METADATA = (".cache", "huggingface")
+
+
+def without_download_metadata(folder: Path, inner: str, binds: Dict[str, Dict[str, str]]
+                              ) -> Dict[str, Dict[str, str]]:
+    """The read-only volumes `binds` of the model folder `folder` at `inner` without the download tool's bookkeeping
+    (DOWNLOAD_METADATA). A folder bound whole is bound entry by entry instead (each entry at its top, within .cache
+    every entry but huggingface); file-by-file binds drop the files below it. A folder without that bookkeeping, a
+    link among the entries that would be bound one by one (a bind follows a link on the host), or more than
+    MAX_LINKED_BINDS of them keeps `binds` as they are."""
+    folder = Path(folder)
+    cache = folder / DOWNLOAD_METADATA[0]
+    metadata = cache / DOWNLOAD_METADATA[1]
+    if cache.is_symlink() or metadata.is_symlink() or not metadata.is_dir():
+        return binds
+    whole = {str(folder): {"bind": inner, "mode": "ro"}}
+    if binds != whole:
+        hidden = f"{inner.rstrip('/')}/{'/'.join(DOWNLOAD_METADATA)}"
+        return {source: volume for source, volume in binds.items()
+                if volume.get("bind") != hidden and not str(volume.get("bind", "")).startswith(hidden + "/")}
+    try:
+        entries = [entry for entry in sorted(folder.iterdir()) if entry.name != DOWNLOAD_METADATA[0]]
+        entries += [entry for entry in sorted(cache.iterdir()) if entry.name != DOWNLOAD_METADATA[1]]
+    except OSError:
+        return binds
+    if len(entries) > MAX_LINKED_BINDS or any(entry.is_symlink() for entry in entries):
+        return binds
+    return {str(entry): {"bind": f"{inner.rstrip('/')}/{entry.relative_to(folder).as_posix()}", "mode": "ro"}
+            for entry in entries}
 
 
 def cache_blob(path: Path) -> bool:

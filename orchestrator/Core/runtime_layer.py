@@ -31,8 +31,12 @@ message naming the ways (ToolboxMissing).
 
 Before every build the assembled layer (<cache>/runtime-layer/current) is checked file by file against the shipped
 copy (layer_check, a fixed vocabulary of verdicts); a changed layer refuses the build and Mojo Miracle restores it
-from the shipped copy (repair runtime_layer.restore). The remaining limit: a bug of the kernel or of the container
-engine.
+from the shipped copy (repair runtime_layer.restore). A framework update that changed the shipped scripts is no hand
+change: every assembly (and every build that finds the layer intact) writes the assembly record (ASSEMBLY_RECORD, beside
+the layer, protected like it), and a layer that matches its record byte for byte, whose tools are the toolbox's and
+whose scripts' manifest digest the shipped history (HISTORY_NAME) knows under the record's version, gets the verdict
+"earlier" and is assembled again by ready_layer, shown and audited (earlier_assembly). Anything else stays "changed".
+The remaining limit: a bug of the kernel or of the container engine.
 
 Qt-free and import-light: the builder, Mojo, the CLI, the GUI and the MCP tools read it from here. No text here names a
 host path or an account (they may reach an AI): labels only.
@@ -61,6 +65,18 @@ SHIPPED_DIR = Path(__file__).resolve().parents[1] / "runtime_layer"
 SCRIPTS = ("tools.sh", "entrypoint.sh", "runner.sh", "stage_user.sh", "stage_env.sh", "cleanup.sh", "tune.sh")
 TOOLS = ("busybox", "setpriv")
 MANIFEST_NAME = "MANIFEST.sha256"
+# The history of the shipped manifests (manifest digest -> the framework version that shipped it): a layer whose record
+# names one of these, and only such a layer, is assembled again after an update (earlier_assembly)
+HISTORY_NAME = "manifests.json"
+HISTORY_PATH = Path(__file__).resolve().parents[1] / "runtime_layer" / HISTORY_NAME
+# The assembly record beside the assembled layer (<cache>/runtime-layer/assembled.json): the framework version, the
+# scripts' manifest digest and every file's sha256 as assembled
+ASSEMBLY_RECORD = "assembled.json"
+ASSEMBLY_RECORD_VERSION = 1
+MAX_ASSEMBLY_RECORD = 64 * 1024
+_VERSION = re.compile(r"^\d{1,4}\.\d{1,4}\.\d{1,6}$")
+_SCRIPT_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}\.sh$")
+_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 TOOLBOX_RECORD = "toolbox.json"
 LAYER_MOUNT = "/llmcf"
 END_MOUNT = "/llmcf-end"
@@ -165,10 +181,12 @@ PREBUILT_MISSING = ("No release of llmcf-setpriv is pinned for this computer yet
                     "framework builds busybox and setpriv itself from pinned sources.")
 
 # --- Fixed vocabulary of the layer check (what Mojo, the CLI, the GUI, the audit log and an AI read) -----------------
-VERDICTS = ("intact", "missing", "changed", "shipped_changed", "no_toolbox", "toolbox_changed")
+VERDICTS = ("intact", "missing", "earlier", "changed", "shipped_changed", "no_toolbox", "toolbox_changed")
 VERDICT_TEXT = {
     "intact": "The framework's runtime layer is intact: every file matches the shipped copy.",
     "missing": "The framework's runtime layer is not assembled yet; the next build assembles it.",
+    "earlier": "The framework's runtime layer is the one version {version} of the framework assembled ({names} changed "
+               "with the update); the next build assembles it again from the shipped copy.",
     "changed": "The framework's runtime layer was changed ({names}); builds are refused until it is restored from "
                "the shipped copy.",
     "shipped_changed": "The framework's own shipped copy of the runtime layer does not match its manifest ({names}); "
@@ -178,6 +196,10 @@ VERDICT_TEXT = {
                        "they are made again.",
 }
 RESTORE_WAY = "Mojo Miracle restores it from the shipped copy."
+# The notice of a layer assembled again after an update (a notice, not a question: only the framework's own earlier
+# output is replaced by its current output)
+REASSEMBLED = ("The framework's runtime layer was the one version {version} of the framework assembled; it was "
+               "assembled again from the shipped copy of this version ({names} changed with the update).")
 # The next step of a changed layer (orchestrator/utils/next_steps): Mojo Miracle, in the CLI, the GUI and for an AI
 RESTORE_STEP = "mojo.miracle"
 TOOLBOX_WAY_TEXT = ("Three ways: the framework builds them itself from pinned sources (setting runtime_layer_toolbox "
@@ -225,6 +247,10 @@ class LayerCheck:
     verdict: str
     names: List[str] = field(default_factory=list)
     toolbox_way: str = ""
+    # the framework version that assembled the layer (verdict "earlier"), or that assembled the layer ready_layer
+    # assembled again (`reassembled`), from the shipped history
+    version: str = ""
+    reassembled: bool = False
 
     @property
     def ok(self) -> bool:
@@ -232,10 +258,20 @@ class LayerCheck:
 
     @property
     def text(self) -> str:
-        return VERDICT_TEXT[self.verdict].format(names=", ".join(label_names(self.names)) or "-")
+        return VERDICT_TEXT[self.verdict].format(names=", ".join(label_names(self.names)) or "-",
+                                                 version=self.version or "-")
+
+    @property
+    def notice(self) -> str:
+        """The notice of a layer ready_layer assembled again after an update (empty otherwise)."""
+        if not self.reassembled:
+            return ""
+        return REASSEMBLED.format(version=self.version or "-", names=", ".join(label_names(self.names)) or "-")
 
     def facts(self) -> Dict[str, Any]:
-        return {"verdict": self.verdict, "names": label_names(self.names), "toolbox": self.toolbox_way or None}
+        return {"verdict": self.verdict, "names": label_names(self.names), "toolbox": self.toolbox_way or None,
+                **({"version": self.version} if self.version else {}),
+                **({"reassembled": True} if self.reassembled else {})}
 
 
 def layer_names() -> Tuple[str, ...]:
@@ -717,6 +753,9 @@ def layer_check(cache_dir: Path) -> LayerCheck:
         return LayerCheck("missing", toolbox_way=record.get("way", ""))
     changed = _layer_changes(folder, expected)
     if changed:
+        version = earlier_assembly(cache_dir, expected)
+        if version:
+            return LayerCheck("earlier", changed, record.get("way", ""), version=version)
         return LayerCheck("changed", changed, record.get("way", ""))
     return LayerCheck("intact", toolbox_way=record.get("way", ""))
 
@@ -776,7 +815,119 @@ def assemble(cache_dir: Path) -> LayerCheck:
     os.replace(fresh, folder)
     if old.exists():
         _remove_layer_folder(old)
-    return layer_check(cache_dir)
+    check = layer_check(cache_dir)
+    if check.ok:
+        write_assembly_record(cache_dir, expected_files(cache_dir))
+    return check
+
+
+# --- The assembly record and the shipped history ------------------------------------------------------------------
+
+def framework_version() -> str:
+    """The version of this framework (orchestrator.__version__): what an assembly record names."""
+    from orchestrator import __version__
+    return str(__version__)
+
+
+def manifest_digest(files: Dict[str, str]) -> str:
+    """The digest of the scripts' manifest of a layer (`files`: name -> sha256; the tools under bin/ are left out):
+    sha256 over the lines 'sha256  name' sorted by name. The shipped history and the assembly record speak in it."""
+    lines = "".join(f"{files[name]}  {name}\n" for name in sorted(n for n in files if not n.startswith("bin/")))
+    return _sha_bytes(lines.encode("ascii"))
+
+
+def read_history(path: Optional[Path] = None) -> Dict[str, str]:
+    """The shipped history of the layer's manifests (HISTORY_PATH): manifest digest -> the framework version that
+    shipped it. Entries that are not a digest and a version are left out; an unreadable file is an empty history."""
+    try:
+        data = json.loads(Path(path or HISTORY_PATH).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    manifests = data.get("manifests") if isinstance(data, dict) else None
+    if not isinstance(manifests, dict):
+        return {}
+    return {str(d): str(v) for d, v in manifests.items()
+            if isinstance(d, str) and _DIGEST.fullmatch(d) and isinstance(v, str) and _VERSION.fullmatch(v)}
+
+
+def assembly_record_path(cache_dir: Path) -> Path:
+    return Path(cache_dir) / "runtime-layer" / ASSEMBLY_RECORD
+
+
+def _record_body(files: Dict[str, str], version: Optional[str] = None) -> Dict[str, Any]:
+    return {"version": ASSEMBLY_RECORD_VERSION, "framework": version or framework_version(),
+            "manifest": manifest_digest(files), "files": dict(sorted(files.items()))}
+
+
+def write_assembly_record(cache_dir: Path, files: Dict[str, str], version: Optional[str] = None) -> None:
+    """Writes the assembly record of the layer just assembled or checked (`files`: name -> sha256 of every file of the
+    layer): the framework version, the scripts' manifest digest and the files, read-only like the layer. A record
+    that cannot be written leaves the layer as it is (the next update then refuses it as before)."""
+    from orchestrator.utils.atomic import write_file
+    path = assembly_record_path(cache_dir)
+    try:
+        # write_file renames its new file over the name (a link there is replaced, never followed); Windows refuses
+        # to replace a read-only file
+        if path.exists() and not path.is_symlink():
+            os.chmod(path, SHARED_READ)
+        write_file(path, json.dumps(_record_body(files, version), indent=1, sort_keys=True) + "\n")
+        os.chmod(path, READ_ONLY)
+    except OSError:
+        pass
+
+
+def read_assembly_record(cache_dir: Path) -> Optional[Dict[str, Any]]:
+    """The assembly record when it is one the framework can trust as its own: a plain file (never a link) of at most
+    MAX_ASSEMBLY_RECORD bytes, on a POSIX computer owned by this account and writable by nobody else, of the current
+    record version, with a framework version, script names of the layer's form, exactly the layer's tools under bin/
+    and a sha256 for each. None otherwise (no record: the old behaviour, refused as changed)."""
+    path = assembly_record_path(cache_dir)
+    try:
+        st = os.lstat(path)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_ASSEMBLY_RECORD:
+            return None
+        if os.name == "posix" and (st.st_uid != os.geteuid() or stat.S_IMODE(st.st_mode) & 0o022):
+            return None
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(record, dict) or record.get("version") != ASSEMBLY_RECORD_VERSION:
+        return None
+    files = record.get("files")
+    if not isinstance(files, dict) or not isinstance(record.get("framework"), str) \
+            or not _VERSION.fullmatch(record["framework"]):
+        return None
+    tools = {name for name in files if str(name).startswith("bin/")}
+    if tools != {f"bin/{tool}" for tool in TOOLS}:
+        return None
+    if any(not (n in tools or _SCRIPT_NAME.fullmatch(str(n))) or not _DIGEST.fullmatch(str(d))
+           for n, d in files.items()):
+        return None
+    return record
+
+
+def earlier_assembly(cache_dir: Path, expected: Optional[Dict[str, str]] = None) -> Optional[str]:
+    """The framework version that assembled the layer as it is now, when that is proven by what the framework keeps
+    itself, None otherwise: the assembly record (read_assembly_record: protected like the layer) matches every file of
+    the layer byte for byte with its modes and nothing extra, its tools are exactly the toolbox record's (`expected`:
+    what the layer of this version must hold), and the manifest digest computed from its scripts (never the one it
+    states) is in the shipped history under the version the record names, and is not this version's manifest. The
+    layer's own files are never asked what they are."""
+    record = read_assembly_record(cache_dir)
+    if record is None:
+        return None
+    files: Dict[str, str] = {str(n): str(d) for n, d in record["files"].items()}
+    if expected is None:
+        expected = expected_files(cache_dir)
+    if any(files.get(f"bin/{tool}") != expected.get(f"bin/{tool}") for tool in TOOLS):
+        return None
+    digest = manifest_digest(files)
+    if digest == manifest_digest(expected) or read_history().get(digest) != record["framework"]:
+        return None
+    folder = layer_dir(cache_dir)
+    if not folder.is_dir() or folder.is_symlink() or _layer_changes(folder, files):
+        return None
+    return record["framework"]
 
 
 def _remove_layer_folder(folder: Path) -> None:
@@ -795,11 +946,23 @@ def _remove_layer_folder(folder: Path) -> None:
 
 
 def ready_layer(cache_dir: Path) -> LayerCheck:
-    """Before every build: the layer as it must be. Assembles it when it is missing (the first build); a changed
-    layer is NOT replaced silently: LayerRefused("changed") names the files and the way (Mojo Miracle restores it)."""
+    """Before every build: the layer as it must be. Assembles it when it is missing (the first build), and again when
+    it is exactly what an earlier version of the framework assembled (verdict "earlier": the returned check is
+    `reassembled`, with that version and the files the update changed, for the notice). A changed layer is NOT
+    replaced silently: LayerRefused("changed") names the files and the way (Mojo Miracle restores it). An intact layer
+    whose assembly record is missing or stale gets its record (the layer was just checked against this version)."""
     check = layer_check(cache_dir)
     if check.verdict == "missing":
         check = assemble(cache_dir)
+    elif check.verdict == "earlier":
+        earlier = check
+        check = assemble(cache_dir)
+        if check.ok:
+            check.version, check.names, check.reassembled = earlier.version, earlier.names, True
+    elif check.ok:
+        expected = expected_files(cache_dir)
+        if read_assembly_record(cache_dir) != _record_body(expected):
+            write_assembly_record(cache_dir, expected)
     if not check.ok:
         if check.verdict == "changed":
             raise LayerRefused(check.verdict, check.text + " " + RESTORE_WAY).with_steps(RESTORE_STEP)

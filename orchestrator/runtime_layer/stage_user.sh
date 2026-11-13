@@ -199,8 +199,9 @@ run_as_stage() {
 
 # The test child of the preflight (run as the stage account): its ids, capability sets, whether it could open the
 # runner's memory and environment, whether it could write the end folder, then "write-fail NAME" for a folder it
-# cannot write in and "read-fail NAME" for an input it cannot read. Arguments: BUSYBOX, RUNNER_PID, END_DIR, folders,
-# "--", then inputs.
+# cannot write in and "read-fail NAME" for an input it cannot read (in a folder input the first entry it cannot read or
+# open, as INPUT/relative path without control characters, at most 200 characters). Arguments: BUSYBOX, RUNNER_PID,
+# END_DIR, folders, "--", then inputs.
 STAGE_PROBE='b="$1"; pid="$2"; end="$3"; shift 3
 cd / 2>/dev/null || true   # the working folder of the runner may be closed to this account, and find needs one
 if [ -x "$b" ]; then t="$b"; else t=""; fi
@@ -222,11 +223,17 @@ for input in "$@"; do
     if [ -d "$input" ]; then
         bad=""
         if [ -r "$input" ] && [ -x "$input" ]; then
-            bad="$(run find "$input" ! -type l -exec $t sh -c "for f; do [ -r \"\$f\" ] || { echo x; exit; }; done" _ {} + 2>/dev/null | run head -n 1)"
+            bad="$(run find "$input" ! -type l -exec $t sh -c "for f; do if [ -d \"\$f\" ]; then [ -r \"\$f\" ] && [ -x \"\$f\" ]; else [ -r \"\$f\" ]; fi || { echo \"\$f\"; exit; }; done" _ {} + 2>/dev/null | run head -n 1)"
         else
-            bad=x
+            bad="$input"
         fi
-        [ -z "$bad" ] || echo "read-fail ${input##*/}"
+        if [ -n "$bad" ]; then
+            case "$bad" in
+                "$input") name="${input##*/}" ;;
+                *) name="${input##*/}/${bad#"$input"/}" ;;
+            esac
+            echo "read-fail $(printf "%s" "$name" | run tr -d "\001-\037\177" | run head -c 200)"
+        fi
     elif [ -e "$input" ]; then
         [ -r "$input" ] || echo "read-fail ${input##*/}"
     fi

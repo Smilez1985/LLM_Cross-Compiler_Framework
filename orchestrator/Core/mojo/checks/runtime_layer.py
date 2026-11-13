@@ -55,7 +55,9 @@ def check_runtime_layer(framework, platform_name: Optional[str] = None) -> List[
     way = layer.toolbox_way(getattr(framework, "config", None)) if getattr(framework, "config", None) else ""
     if check.verdict == "intact":
         findings.append(_ok(AREA, "runtime_layer.intact", check.text))
-    elif check.verdict in ("missing", "no_toolbox"):
+    elif check.verdict in ("missing", "earlier", "no_toolbox"):
+        # "earlier": the layer an earlier version of the framework assembled, proven by the framework's own record and
+        # shipped history; the next build assembles it again by itself (no repair, nothing to decide)
         extra = f" {layer.TOOLBOX_WAY_TEXT}" if check.verdict == "no_toolbox" else ""
         findings.append(Finding(AREA, f"runtime_layer.{check.verdict}", Severity.INFO, check.text + extra))
     elif check.verdict == "changed":

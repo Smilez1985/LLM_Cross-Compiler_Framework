@@ -314,6 +314,65 @@ class TestMounts:
         assert (path, volumes) == ("/build-cache/input-model",
                                    {str(folder.resolve()): {"bind": "/build-cache/input-model", "mode": "ro"}})
 
+    @staticmethod
+    def _local_dir_download(folder: Path) -> None:
+        """A model folder as `hf download --local-dir` writes it: the model's files, and its own bookkeeping in
+        .cache/huggingface (a lock and a metadata file per file); here one more entry of .cache that is not it."""
+        write(folder / "config.json", b"{}")
+        write(folder / "sub" / "model.safetensors", b"weights")
+        write(folder / ".cache" / "huggingface" / "download" / "config.json.metadata", b"commit\netag\n")
+        write(folder / ".cache" / "huggingface" / "download" / "config.json.lock", b"")
+        write(folder / ".cache" / "other" / "keep.txt", b"x")
+
+    def test_the_download_bookkeeping_of_a_pinned_model_folder_stays_out_of_the_mount(self, area, engine):
+        """Regression (found by the first build of a module made by the module wizard): the bookkeeping of
+        `hf download --local-dir` (.cache/huggingface, a file of it readable only by its owner) was mounted with the
+        model, and the stage account's input check refused the whole model. The folder is now bound entry by entry
+        without it; nothing of the model is left out."""
+        folder = area.models / "qwen"
+        self._local_dir_download(folder)
+        pin = area.files.resolve("models:qwen")
+        path, volumes = engine._stage_model(self.config(model_source=pin.path, local_inputs=LocalInputs(model=pin)),
+                                            BuildProgress("b1", BuildStatus.QUEUED, ""))
+        real = folder.resolve()
+        assert path == "/build-cache/input-model"
+        assert volumes == {str(real / "config.json"): {"bind": "/build-cache/input-model/config.json", "mode": "ro"},
+                           str(real / "sub"): {"bind": "/build-cache/input-model/sub", "mode": "ro"},
+                           str(real / ".cache" / "other"): {"bind": "/build-cache/input-model/.cache/other",
+                                                            "mode": "ro"}}
+
+    def test_the_download_bookkeeping_of_a_persons_model_folder_stays_out_of_the_mount(self, tmp_path, engine):
+        folder = tmp_path / "my-model"
+        self._local_dir_download(folder)
+        path, volumes = engine._stage_model(self.config(model_source=str(folder)),
+                                            BuildProgress("b1", BuildStatus.QUEUED, ""))
+        assert path == "/build-cache/input-model"
+        assert sorted(v["bind"] for v in volumes.values()) == [
+            "/build-cache/input-model/.cache/other", "/build-cache/input-model/config.json",
+            "/build-cache/input-model/sub"]
+        assert not any("huggingface" in source for source in volumes)
+
+    def test_bound_file_by_file_the_download_bookkeeping_is_dropped(self, tmp_path):
+        folder = tmp_path / "m"
+        binds = {str(tmp_path / "blob1"): {"bind": "/in/config.json", "mode": "ro"},
+                 str(tmp_path / "blob2"): {"bind": "/in/.cache/huggingface/download/x.lock", "mode": "ro"},
+                 str(tmp_path / "blob3"): {"bind": "/in/.cache/huggingface", "mode": "ro"}}
+        assert local_files.without_download_metadata(folder, "/in", binds) == binds   # no bookkeeping: as it was
+        (folder / ".cache" / "huggingface").mkdir(parents=True)
+        assert local_files.without_download_metadata(folder, "/in", binds) == {
+            str(tmp_path / "blob1"): {"bind": "/in/config.json", "mode": "ro"}}
+
+    def test_a_folder_with_a_link_at_its_top_is_bound_whole_as_before(self, tmp_path):
+        """A bind follows a link on the host, so entries are bound one by one only when none of them is a link."""
+        folder = tmp_path / "m"
+        self._local_dir_download(folder)
+        try:
+            (folder / "linked.json").symlink_to(folder / "config.json")
+        except OSError:
+            pytest.skip("this computer does not let the test make a link")
+        whole = {str(folder): {"bind": "/in", "mode": "ro"}}
+        assert local_files.without_download_metadata(folder, "/in", whole) == whole
+
     def test_a_hard_link_inside_a_model_folder_is_refused_at_the_mount(self, area, engine):
         folder = area.models / "qwen"
         write(folder / "config.json", b"{}")

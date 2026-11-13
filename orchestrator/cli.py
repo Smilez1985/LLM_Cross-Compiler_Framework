@@ -3063,7 +3063,7 @@ def build_image_layer(ctx: FrameworkContext, toolbox: Optional[str]):
         console.print(f"[green]runtime_layer_toolbox set to {toolbox}.[/green] A toolbox made before stays until "
                       "it is made again; the next build without one uses this way.")
     status = runtime_layer.layer_status(runtime_layer.cache_dir_of(config, resolve), config)
-    colour = "green" if status["verdict"] in ("intact", "missing") else "red"
+    colour = "green" if status["verdict"] in ("intact", "missing", "earlier") else "red"
     console.print(f"[{colour}]{escape(status['text'])}[/{colour}]")
     made = (f" (the tools here were made: {status['toolbox_made']}, setpriv: {status['toolbox_setpriv']})"
             if status["toolbox_setpriv"] else f" (the tools here were made: {status['toolbox_made']})"
