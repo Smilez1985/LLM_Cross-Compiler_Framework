@@ -2437,15 +2437,22 @@ class BuildEngine:
 
     def _ready_runtime_layer(self, config: BuildConfiguration, progress: Optional[BuildProgress]) -> Dict[str, Any]:
         """The runtime layer before a stage container: its tools made the person's way when none are cached
-        (refused offline with both ways named), the layer assembled or checked against the shipped copy. A refusal
-        is shown and written to the audit log; the checks passed go into the build's result."""
+        (offline from the sources the build's preload brought, else refused with the ways named), the layer assembled
+        or checked against the shipped copy. A refusal is shown and written to the audit log; the checks passed go into
+        the build's result."""
         from orchestrator.Core import runtime_layer as layer
         from orchestrator.utils.locality import offline_mode
         way = layer.toolbox_way(self.config)
         log = (progress.add_log if progress is not None else self.logger.info)
+        offline = bool(offline_mode(self.config))
+        # offline, the sources of the tools the build's preload brought (Core/toolbox_preload.py), when kept here
+        preload = None
+        if offline:
+            from orchestrator.Core.toolbox_preload import kept
+            preload = kept(getattr(self.config, "user_state_dir", None))
         try:
-            layer.ensure_toolbox(Path(self.cache_dir), way, offline=bool(offline_mode(self.config)),
-                                 fetch=self._layer_fetch, build=self._layer_builder(), log=log)
+            layer.ensure_toolbox(Path(self.cache_dir), way, offline=offline, fetch=self._layer_fetch,
+                                 build=self._layer_builder(), log=log, preload=preload)
             check = layer.ready_layer(Path(self.cache_dir))
         except (layer.ToolboxMissing, layer.LayerRefused) as e:
             verdict = getattr(e, "verdict", "no_toolbox")
@@ -2480,7 +2487,8 @@ class BuildEngine:
         if self.docker_client is None:
             return None
         from orchestrator.Core.runtime_layer import engine_builder
-        return engine_builder(self.docker_client, self._layer_fetch, log=self.logger.info)
+        from orchestrator.Core.toolbox_preload import prepare
+        return engine_builder(self.docker_client, self._layer_fetch, log=self.logger.info, prepare=prepare)
 
     def _end_owner(self) -> Optional[int]:
         """The host uid that owns what the stage runner writes (the end folder's rightful owner)."""

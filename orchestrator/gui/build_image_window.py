@@ -365,8 +365,9 @@ def written_text(framework: Any, target: str, gpu: bool, lang: Optional[str] = N
     plan = build_preload.needed(framework, target, gpu=gpu)
     if plan is None:
         from orchestrator.Core.build_image import target_plan
+        from orchestrator.Core.toolbox_preload import missing_for
         plan = target_plan(framework, target, gpu=gpu)
-        if plan.ready:
+        if plan.ready and not missing_for(framework):
             return ui_text("bimg.preload.not_needed", lang, target=target)
     written = build_preload.write(framework, target, gpu=gpu, plan=plan)
     lines = [ui_text("bimg.preload.written", lang, folder=str(written.folder), what=written.what)]

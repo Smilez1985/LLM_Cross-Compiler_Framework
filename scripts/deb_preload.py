@@ -671,6 +671,13 @@ class _VersionKey:
         return compare_versions(self.v, other.v) < 0
 
 
+def source_of(st: dict):
+    """(source package, its version) a stanza was built from: its Source field ("NAME" or "NAME (VERSION)" for a
+    binary-only rebuild), else its own name and version."""
+    name, _, rest = (st.get("Source") or st.get("Package", "")).partition(" (")
+    return name.strip(), (rest.rstrip(")").strip() if rest else st.get("Version", ""))
+
+
 def resolve(index: Index, words, installed=None) -> list:
     """The stanzas to fetch for the package words (NAME or NAME=VERSION): each with its Depends and Pre-Depends (no
     Recommends), the first alternative that can be had; what `installed` (NAME -> VERSION) already satisfies is left
@@ -702,6 +709,20 @@ def resolve(index: Index, words, installed=None) -> list:
         queue.append(found[0])
     while queue:
         st = queue.pop(0)
+        if installed:
+            # apt upgrades the installed packages built from the same source together with a package it installs or
+            # upgrades (APT::Get::Upgrade-By-Source-Package, apt 2.7 and newer: xz-utils took liblzma5 along in
+            # debian:13-slim although liblzma5's version satisfied every dependency), so those come along too
+            source = source_of(st)
+            for name, have in installed.items():
+                if name in chosen:
+                    continue
+                for other in index.real.get(name, ()):
+                    if other.get("Package") == name and source_of(other) == source and other.get("Version") != have \
+                            and compare_versions(other.get("Version", ""), have) > 0:
+                        chosen[name] = other
+                        queue.append(other)
+                        break
         for field in ("Pre-Depends", "Depends"):
             for group in relations(st.get(field, "")):
                 if any(present(*alt) for alt in group):

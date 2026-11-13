@@ -10,13 +10,25 @@
 # static setpriv dlopened libnss_systemd.so.2 of glibc 2.39 into its glibc 2.41 and died with SIGFPE. musl has no
 # loadable NSS modules, so nothing of the image or the host is ever loaded; the check at the end stops the build if
 # a tool still names nsswitch.conf.
-FROM debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
+#
+# On a computer without a network (Core/toolbox_preload.py) the same Dockerfile builds from the build's preload: the
+# host loads the base image it checked against this pin under a local name and passes that name as BUILDER_BASE, and
+# stages the builder's distribution packages as a file repository signed by the pinned archive keys (APT_PRELOAD,
+# scripts/build_apt_preload.sh); the build runs with the network "none". Everywhere else both stay at their defaults.
+ARG BUILDER_BASE=debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
+FROM ${BUILDER_BASE}
+
+ARG APT_PRELOAD
+COPY sources/apt/ /tmp/llmcf-apt/
+RUN if [ -n "${APT_PRELOAD:-}" ]; then sh /tmp/llmcf-apt/llmcf-apt.sh use; fi
 
 # hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gcc make libc6-dev linux-libc-dev musl-tools xz-utils bzip2 \
         pkg-config binutils \
     && rm -rf /var/lib/apt/lists/*
+
+RUN if [ -n "${APT_PRELOAD:-}" ]; then sh /tmp/llmcf-apt/llmcf-apt.sh restore; fi; rm -rf /tmp/llmcf-apt
 
 WORKDIR /src
 COPY util-linux-2.40.4.tar.xz busybox-1.37.0.tar.bz2 libcap-ng-0.8.5.tar.gz ./

@@ -24,10 +24,10 @@ this computer and wait for the archive's path. Needs only Python 3 (the standard
         asked for) and unpacks it into FOLDER; prints its manifest and the archive's sha256 (install.bat reads it).
     preload_lock.py pack-build --spec SPEC [--out FOLDER] [--image-file FILE ...]
         a build's preload (kind=build): the recipe SPEC (manifest.base, sources.json) that llmcf wrote for an offline
-        build's missing sources; fetches its base images, llama.cpp, Python packages, downloads and the files taken
+        build's missing sources; fetches its base images, llama.cpp, Python packages, downloads, the files taken
         from source images (image_files.py, next to this file; a source image published only as a file is read from
-        the --image-file FILE whose sha256 it names) and writes llmcf-preload-build-TARGET-ARCH-RECIPE.tar.gz into
-        FOLDER. The scripts llmcf writes for a build run it.
+        the --image-file FILE whose sha256 it names) and the sources of the runtime layer's tools, and writes
+        llmcf-preload-build-TARGET-ARCH-RECIPE.tar.gz into FOLDER. The scripts llmcf writes for a build run it.
     preload_lock.py pip-args --target T --python X.Y [--glibc 2.NN]     the pip download options, one per line
     preload_lock.py this-computer                                       target, Python version, glibc of this computer
 
@@ -560,7 +560,8 @@ def write_scripts(spec: Path, out: Path):
 # --- the build's preload (kind=build) ------------------------------------------------------------------------------
 # A build's preload carries exactly the sources an offline build of one target's build container image lacks
 # (Core/build_preload.py writes the recipe, BUILD_SPEC_FILES): base images, the pinned llama.cpp commit, the image's
-# Python packages, pinned downloads, the files taken from source images and the image's distribution packages; same
+# Python packages, pinned downloads, the files taken from source images and the image's distribution packages, and the
+# sources of the runtime layer's tools when that computer has none (toolbox/, Core/toolbox_preload.py); same
 # folder, manifest, SHA256SUMS and checks as the installer's preload. The image reader is scripts/image_files.py and
 # the distribution packages are scripts/deb_preload.py's (the board preload's packages/ folder), both standard library
 # only, next to this file in the scripts the build writes.
@@ -771,6 +772,36 @@ def _image_file_for(source: dict, given: dict) -> Path:
     return path
 
 
+def _gather_toolbox(toolbox: dict, platform_name: str, folder: Path) -> dict:
+    """The sources of the runtime layer's tools (the recipe's section `toolbox`) into folder (llmcf-preload/toolbox/):
+    the builder's base image pinned by digest as a docker save archive with its documents (image_files.save_pinned,
+    every document and blob checked against its digest), the pinned source tarballs (sha256) and the builder's
+    distribution packages (as the build image's, checked against the signed lists). Returns the manifest's lines of
+    the packages (toolbox_packages_*). The computer that takes the archive in checks all of it against its own pins."""
+    images = _image_files()
+    base = str(toolbox.get("base") or "")
+    say(f"fetching the runtime layer's tools' sources: the builder's base image {base.split('@')[0]} (pinned by "
+        "digest; every document and blob checked)...")
+    try:
+        images.save_pinned(base, folder / "base", str(toolbox.get("base_name") or ""), platform_name)
+    except images.ImageFilesError as error:
+        raise PreloadError(str(error))
+    (folder / "sources").mkdir()
+    for pin in toolbox.get("sources") or []:
+        name = str(pin.get("file") or "")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name) or not str(pin.get("url", "")).startswith(
+                "https://") or not re.fullmatch(r"[0-9a-f]{64}", str(pin.get("sha256", ""))):
+            raise PreloadError(f"the recipe names a source of the runtime layer's tools without a file name, an https "
+                               f"address and a sha256: {name or '?'}")
+        say(f"fetching {name} (sha256 pinned)...")
+        _fetch(pin["url"], folder / "sources" / name, pin["sha256"])
+    if not toolbox.get("apt"):
+        return {}
+    found = _gather_packages(toolbox["apt"], {base: folder / "base" / "image.tar"}, folder)
+    say(f"{found['packages_resolved'].count('=')} distribution packages for the builder of the runtime layer's tools")
+    return {f"toolbox_{key}": value for key, value in found.items()}
+
+
 def pack_build(spec: Path, out: Path, image_files_given=()) -> Path:
     """Fetches what a build's recipe names and writes the build's preload into `out`. `image_files_given`: the files
     of source images published only as a file (each matched by its sha256)."""
@@ -814,6 +845,9 @@ def pack_build(spec: Path, out: Path, image_files_given=()) -> Path:
             saved = {ref: top / "images" / f"{number:02d}.tar" for number, ref in enumerate(recipe.get("images") or [])}
             packages = _gather_packages(recipe["apt"], saved, top)
             say(f"{packages['packages_resolved'].count('=')} distribution packages for the build image")
+        if recipe.get("toolbox"):
+            (top / "toolbox").mkdir()
+            packages.update(_gather_toolbox(recipe["toolbox"], platform_name, top / "toolbox"))
         llama = recipe.get("llama_cpp") or {}
         if recipe.get("llama_cpp_bundle") and llama:
             say(f"fetching llama.cpp at the pinned commit {llama['commit'][:12]} (git)...")

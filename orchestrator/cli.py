@@ -3130,7 +3130,7 @@ def build_preload_group():
     """The build's preload for a computer without any network: preload scripts for exactly the sources an offline
     build of a target lacks (base images, llama.cpp, the build image's Python and distribution packages, pinned
     downloads, files taken from source images), run on a computer with a network, and the archive they write taken in
-    as local sources."""
+    as local sources; also the sources of the runtime layer's tools when this computer has none."""
     pass
 
 
@@ -3161,14 +3161,16 @@ def _take_preload(fm, target: str, archive: str, sha256: str = "") -> None:
 @pass_context
 def build_preload_write(ctx: FrameworkContext, target: str, gpu: bool):
     """Writes preload.sh and preload.ps1 for what an offline build of TARGET's build container image lacks (the
-    offline plan's missing sources), into llmcf-preload-scripts/build-TARGET of your state folder. Run one on a
-    computer with a network; it writes an archive to bring back (llm-cli build preload take FILE)."""
+    offline plan's missing sources) and, when this computer has neither the runtime layer's tools nor their sources,
+    those sources too, into llmcf-preload-scripts/build-TARGET of your state folder. Run one on a computer with a
+    network; it writes an archive to bring back (llm-cli build preload take FILE)."""
     from orchestrator.Core import build_image
     from orchestrator.Core.build_preload import PreloadProblem, write
+    from orchestrator.Core.toolbox_preload import missing_for
     fm = _image_framework(ctx)
     try:
         plan = build_image.target_plan(fm, target, gpu=gpu)
-        if plan.ready:
+        if plan.ready and not missing_for(fm):
             console.print("Nothing is missing: an offline build can make this image from local sources.")
             return
         _print_written(write(fm, target, gpu=gpu, plan=plan))
@@ -3273,8 +3275,8 @@ def _offline_preload(ctx: FrameworkContext, target: str, gpu: bool, preload: Opt
     except build_preload.PreloadProblem as e:   # nothing a preload brings: the build's own stop names the rest
         console.print(f"[yellow]{escape(str(e))}[/yellow]")
         return
-    console.print("[yellow]Offline mode: the build container image of this target is not on this computer, and an "
-                  "offline build lacks sources.[/yellow]")
+    console.print("[yellow]Offline mode: an offline build of this target lacks sources (its build container image's, "
+                  "or the runtime layer's tools').[/yellow]")
     _print_written(written)
     if sys.stdin is None or not sys.stdin.isatty():
         for number, step in enumerate(_preload_steps(written), 1):

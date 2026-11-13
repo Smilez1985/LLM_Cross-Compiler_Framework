@@ -10,6 +10,9 @@ a container engine; the build (Core/build_preload.reader) loads it for an online
   it), every blob against its digest; nothing is trusted that was not checked.
 - save_image(): one base image for one platform as a `docker save` archive (manifest.json, the config, the layers as
   the registry serves them), which `docker load` and `podman load` read; it names only its reference.
+- save_pinned() and check_pinned(): an image pinned by digest (the builder of the runtime layer's tools) as a
+  `docker save` archive under a local name, with the documents from the pinned digest down to the platform's image
+  manifest beside it, and the check of all of it against the pin of the installation that takes it in.
 - take_files(): the named files of an image pinned by digest. The layers are read from the top down, a whiteout
   (`.wh.NAME`) and an opaque folder (`.wh..wh..opq`) hide what is below them, and reading stops once every named file
   is decided. A named file must be a regular file (a hard link inside its layer counts); a symbolic link, a folder, a
@@ -233,8 +236,23 @@ def save_image(ref: str, out: Path, platform: str = "", opener=None) -> dict:
     {ref, name, digest, config, platform}."""
     name = load_name(ref)
     registry, manifest, digest = resolve(ref, platform, opener)
+    config = _write_saved(registry, manifest, ref, name, out)
+    return {"ref": ref, "name": name, "digest": digest, "config": config, "platform": platform or host_platform()}
+
+
+def _saved_names(manifest: dict):
+    """(config digest, [layer digests], the config's member name, [the layers' member names]) of an image manifest as
+    save_image() writes its archive."""
     config = str((manifest.get("config") or {}).get("digest") or "")
     layers = [str(layer.get("digest") or "") for layer in manifest.get("layers") or [] if isinstance(layer, dict)]
+    if not DIGEST.match(config) or not layers or not all(DIGEST.match(d) for d in layers):
+        raise ImageFilesError("the image manifest names its config or a layer without a sha256 digest")
+    return config, layers, f"{config.split(':', 1)[1]}.json", [f"{d.split(':', 1)[1]}/layer.tar" for d in layers]
+
+
+def _write_saved(registry, manifest: dict, ref: str, name: str, out: Path) -> str:
+    """The image of `manifest` as a `docker save` archive `out` named `name`, every blob checked; its config digest."""
+    config, layers, config_name, members = _saved_names(manifest)
     with tempfile.TemporaryDirectory(prefix="llmcf-image-") as work:
         work = Path(work)
         registry.blob(config, work / "config.json")
@@ -244,9 +262,8 @@ def save_image(ref: str, out: Path, platform: str = "", opener=None) -> dict:
         entries = []
         for number, layer in enumerate(layers):
             registry.blob(layer, work / f"layer-{number}")
-            entries.append((work / f"layer-{number}", f"{layer.split(':', 1)[1]}/layer.tar"))
-        config_name = f"{config.split(':', 1)[1]}.json"
-        listing = [{"Config": config_name, "RepoTags": [name], "Layers": [n for _, n in entries]}]
+            entries.append((work / f"layer-{number}", members[number]))
+        listing = [{"Config": config_name, "RepoTags": [name], "Layers": members}]
         (work / "manifest.json").write_text(json.dumps(listing), encoding="utf-8")
         part = Path(str(out) + ".part")
         with tarfile.open(part, "w") as archive:
@@ -255,7 +272,110 @@ def save_image(ref: str, out: Path, platform: str = "", opener=None) -> dict:
             for path, member in entries:
                 archive.add(path, member)
         os.replace(part, out)
-    return {"ref": ref, "name": name, "digest": digest, "config": config, "platform": platform or host_platform()}
+    return config
+
+
+# --- an image pinned by digest, carried with its documents (the builder of the runtime layer's tools) ---------------
+# A loaded image cannot carry a reference pinned by digest, so the archive names it by a local name; the documents
+# from the pinned digest down to the platform's image manifest are kept beside it, so the computer that takes the
+# archive in checks every byte against the pin in its own installation (check_pinned), never against the archive.
+PINNED_DOCUMENT = "pinned.json"     # the document the pinned digest names (an index, or the image manifest itself)
+PLATFORM_MANIFEST = "manifest.json"  # the image manifest of the platform
+SAVED_IMAGE = "image.tar"           # the docker save archive
+
+
+def save_pinned(ref: str, folder: Path, name: str, platform: str = "", opener=None) -> dict:
+    """The image `ref` (pinned by digest) for `platform` into `folder`: PINNED_DOCUMENT, PLATFORM_MANIFEST and
+    SAVED_IMAGE named `name`. Returns {ref, name, config, platform}."""
+    registry_name, repository, _tag, digest = parse_reference(ref)
+    if not digest:
+        raise ImageFilesError(f"{ref} is not pinned by digest")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9_][A-Za-z0-9._-]{0,127}", name or ""):
+        raise ImageFilesError(f"not a local image name: {name!r}")
+    wanted = platform or host_platform()
+    registry = Registry(registry_name, repository, opener)
+    data, media, _found = registry.manifest(digest)
+    document = json.loads(data)
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / PINNED_DOCUMENT).write_bytes(data)
+    if media in INDEX_TYPES or "manifests" in document:
+        entry = _platform_entry(document, wanted, ref)
+        data, _media, _found = registry.manifest(entry)
+        document = json.loads(data)
+    (folder / PLATFORM_MANIFEST).write_bytes(data)
+    if "layers" not in document or "config" not in document:
+        raise ImageFilesError(f"{ref}: not an image manifest")
+    config = _write_saved(registry, document, ref, name, folder / SAVED_IMAGE)
+    return {"ref": ref, "name": name, "config": config, "platform": wanted}
+
+
+def _platform_entry(index: dict, platform: str, ref: str) -> str:
+    """The digest of the image manifest an index names for `platform`."""
+    entries = [m for m in index.get("manifests") or [] if isinstance(m, dict)
+               and _platform_matches(m.get("platform") or {}, platform)]
+    if not entries:
+        raise ImageFilesError(f"{ref} has no image for {platform}")
+    digest = str(entries[0].get("digest") or "")
+    if not DIGEST.match(digest):
+        raise ImageFilesError(f"{ref}: the index names its image without a digest")
+    return digest
+
+
+def check_pinned(folder: Path, ref: str, name: str, platform: str = "") -> dict:
+    """Checks what save_pinned() wrote into `folder` against the pin `ref` of this installation: the pinned document's
+    sha256 is the pinned digest, the platform's image manifest is the one it names (by its sha256), the archive holds
+    exactly the manifest listing, the config and the layers save_pinned() writes, named `name`, the config and every
+    layer with the manifest's digests, and the config lists one diff_id per layer. Returns {config, diff_ids,
+    architecture}. ImageFilesError with the plain reason otherwise; nothing is loaded or run."""
+    _registry, _repository, _tag, digest = parse_reference(ref)
+    folder = Path(folder)
+    if not digest:
+        raise ImageFilesError(f"{ref} is not pinned by digest")
+    try:
+        pinned = (folder / PINNED_DOCUMENT).read_bytes()
+        data = (folder / PLATFORM_MANIFEST).read_bytes()
+    except OSError:
+        raise ImageFilesError("the documents of the pinned image are missing") from None
+    if _sha256(pinned) != digest:
+        raise ImageFilesError(f"the pinned document of {ref.split('@')[0]} does not have the pinned digest")
+    try:
+        document = json.loads(pinned)
+        if "manifests" in document:
+            if _sha256(data) != _platform_entry(document, platform or host_platform(), ref):
+                raise ImageFilesError(f"the image manifest of {ref.split('@')[0]} is not the one its index names")
+        elif data != pinned:
+            raise ImageFilesError(f"the image manifest of {ref.split('@')[0]} is not the pinned one")
+        manifest = json.loads(data)
+    except (ValueError, AttributeError):
+        raise ImageFilesError(f"the documents of {ref.split('@')[0]} are not JSON") from None
+    config, layers, config_name, members = _saved_names(manifest)
+    wanted = {"manifest.json", config_name, *members}
+    try:
+        with tarfile.open(folder / SAVED_IMAGE, "r") as tar:
+            names = tar.getnames()
+            files = [m for m in tar.getmembers() if m.isfile()]
+            if sorted(names) != sorted(wanted) or len(files) != len(wanted):
+                raise ImageFilesError("the image archive does not hold exactly the image's config and layers")
+            handle = tar.extractfile("manifest.json")
+            listing = json.loads(handle.read(MAX_MANIFEST).decode("utf-8")) if handle else None
+            if listing != [{"Config": config_name, "RepoTags": [name], "Layers": members}]:
+                raise ImageFilesError("the image archive's listing is not the one the preload writes")
+            for member, want in [(config_name, config), *zip(members, layers)]:
+                check, handle = hashlib.sha256(), tar.extractfile(member)
+                for block in iter(lambda: handle.read(1 << 20), b""):
+                    check.update(block)
+                if "sha256:" + check.hexdigest() != want:
+                    raise ImageFilesError(f"a part of the image archive ({member[:19]}...) does not have its digest")
+            body = tar.extractfile(config_name).read(MAX_MANIFEST)
+    except (tarfile.TarError, OSError, EOFError, KeyError, UnicodeDecodeError, ValueError) as error:
+        raise ImageFilesError(f"the image archive is not readable ({error})") from None
+    facts = json.loads(body)
+    diff_ids = (facts.get("rootfs") or {}).get("diff_ids") if isinstance(facts, dict) else None
+    if not isinstance(diff_ids, list) or len(diff_ids) != len(layers) or not all(DIGEST.match(str(d))
+                                                                                 for d in diff_ids):
+        raise ImageFilesError("the image's config does not list one diff_id for each layer")
+    return {"config": config, "diff_ids": [str(d) for d in diff_ids], "architecture": str(facts.get("architecture"))}
 
 
 # --- the named files of an image -------------------------------------------------------------------------------------
@@ -790,6 +910,6 @@ def copy_file(source: Path, dest: Path) -> None:
     shutil.copyfile(source, dest)
 
 
-__all__ = ["ArchiveImage", "ImageFilesError", "Registry", "copy_file", "file_sha256", "host_platform", "load_name",
-           "normal_path", "parse_reference", "read_files", "read_saved", "resolve", "save_image", "take_archive_files",
-           "take_files"]
+__all__ = ["ArchiveImage", "ImageFilesError", "Registry", "check_pinned", "copy_file", "file_sha256", "host_platform",
+           "load_name", "normal_path", "parse_reference", "read_files", "read_saved", "resolve", "save_image",
+           "save_pinned", "take_archive_files", "take_files"]

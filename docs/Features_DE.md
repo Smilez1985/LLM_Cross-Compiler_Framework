@@ -1223,7 +1223,11 @@ die Annahmen; seine Unterstützungsstufe ist community.
   Build-Images: aus dem Dockerfile des Targets je Stufe gelesen, mit ihren Abhängigkeiten gegen das geholt, was das
   Basis-Image schon hat, gegen die signierten Paketlisten der Distribution mit den Archivschlüsseln geprüft, die llmcf
   festlegt (auf dem Rechner mit Netz, bei der Übernahme, gpgv eingeschlossen, und von apt im Build), und im Build aus
-  einem Datei-Repository installiert, ohne Paketspiegel und ohne Netz. Ein Hersteller-Image, das nur als Datei
+  einem Datei-Repository installiert, ohne Paketspiegel und ohne Netz. Es bringt auch die Quellen des statischen
+  busybox und setpriv der Laufzeit-Schicht, wenn dieser Rechner weder die Werkzeuge noch diese Quellen hat (das
+  Basis-Image des Builders über seinen festgelegten Digest, die festgelegten Tarballs, die Pakete des Builders), bei
+  der Übernahme gegen die Festlegungen dieser Installation geprüft; der nächste Offline-Build macht daraus die
+  Werkzeuge ohne Netz. Ein Hersteller-Image, das nur als Datei
   veröffentlicht ist (ein Archiv aus `docker save` oder OCI), kann ein Quell-Image eines Targets sein, über den sha256
   der Datei genannt: Du gibst die Datei an (`llm-cli build source-image take DATEI --target TARGET`, **Aus einer
   Image-Datei nehmen...** in Build-Container-Images oder `--image-file` des Preload-Skripts), ihr sha256 wird zuerst

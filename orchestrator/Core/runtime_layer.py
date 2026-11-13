@@ -26,8 +26,9 @@ llmcf-setpriv (rust/llmcf-setpriv: exactly the setpriv options the layer uses) f
 builder image (toolbox/Dockerfile.rust); "fetch" takes prebuilt static binaries from the one pinned table (PREBUILT):
 busybox from snapshot.debian.org with the sha256 of the archive and of the extracted binary, setpriv only as
 llmcf-setpriv, a release asset of this project built by its CI (a prebuilt C setpriv is never taken). The toolbox
-record says which setpriv it holds (SETPRIV_KINDS). Offline with nothing cached the build is refused with a plain
-message naming the ways (ToolboxMissing).
+record says which setpriv it holds (SETPRIV_KINDS). Offline with nothing cached the toolbox is made the way "build"
+from the sources the build's preload brought (Core/toolbox_preload.py), and without them the build is refused with a
+plain message naming the ways and the preload (ToolboxMissing).
 
 Before every build the assembled layer (<cache>/runtime-layer/current) is checked file by file against the shipped
 copy (layer_check, a fixed vocabulary of verdicts); a changed layer refuses the build and Mojo Miracle restores it
@@ -207,8 +208,13 @@ TOOLBOX_WAY_TEXT = ("Three ways: the framework builds them itself from pinned so
                     "llmcf-setpriv; both need the network once), or it fetches pinned prebuilt files (setting "
                     "runtime_layer_toolbox 'fetch': busybox from snapshot.debian.org, llmcf-setpriv from a pinned "
                     "release of this project once one is published). Then they are kept and used offline.")
+# Offline, a computer that never had a network makes them from the sources the build's preload brought
+# (Core/toolbox_preload.py): the refusal names it
+PRELOAD_WAY_TEXT = ("Without any network, the build's preload brings their sources: it is offered when an offline "
+                    "build starts, made on a computer with a network and taken in here; the next offline build then "
+                    "makes the tools from it.")
 OFFLINE_REFUSAL = ("The build is refused: offline mode is on and the runtime layer's tools (a static busybox and a "
-                   "static setpriv) are not on this computer yet. " + TOOLBOX_WAY_TEXT)
+                   "static setpriv) are not on this computer yet. " + TOOLBOX_WAY_TEXT + " " + PRELOAD_WAY_TEXT)
 OWN_RUNNER_NOTE = ("This target ships its own stage runner ({names}); it is ignored and the framework's stage runner "
                    "is used. The target's stage modules, target.yml and Dockerfile stay as they are.")
 END_UNPROTECTED = ("End folder unprotected: this host's mounts keep no owner or mode (Docker Desktop on Windows or "
@@ -530,11 +536,15 @@ def layer_status(cache_dir: Path, config: Any = None, platform_name: Optional[st
 def ensure_toolbox(cache_dir: Path, way: str, *, offline: bool,
                    fetch: Optional[Callable[[str], bytes]] = None,
                    build: Optional[Callable[[Path], Dict[str, Path]]] = None,
-                   log: Callable[[str], None] = lambda _t: None) -> Dict[str, Any]:
+                   log: Callable[[str], None] = lambda _t: None,
+                   preload: Optional[Path] = None) -> Dict[str, Any]:
     """The toolbox record for this computer, making the toolbox the person's way when none is cached. `fetch(url)`
     returns the bytes of a pinned URL (through the framework's checked downloader); `build(work)` builds both tools
     in the builder image and returns their paths, `build(work, setpriv="llmcf-setpriv")` for the way "build-rust".
-    Offline with nothing cached: ToolboxMissing (OFFLINE_REFUSAL). A toolbox made here replaces the tools an
+    Offline with nothing cached the toolbox is made the way "build" from the sources the build's preload brought
+    (`preload`: the kept folder, Core/toolbox_preload.kept; `build(work, preload=folder)` builds without a network),
+    whatever way the setting names, because only that way works without a network; with no such sources:
+    ToolboxMissing (OFFLINE_REFUSAL). A toolbox made here replaces the tools an
     assembled layer still holds when that layer was whole for the old record (the shipped scripts and the tools it
     named): it is assembled again from the shipped copy and the new tools. Any other layer is left for ready_layer,
     which refuses it as 'changed' (never replaced silently)."""
@@ -542,12 +552,14 @@ def ensure_toolbox(cache_dir: Path, way: str, *, offline: bool,
     record = read_toolbox(folder)
     if record is not None:
         return record
-    if offline:
+    if offline and (preload is None or build is None):
         raise ToolboxMissing(OFFLINE_REFUSAL)
-    if way not in TOOLBOX_WAYS:
+    if offline:
+        way = "build"   # the only way a computer without a network can take, from the build's preload
+    elif way not in TOOLBOX_WAYS:
         way = DEFAULT_TOOLBOX_WAY
     was_whole = _layer_whole_for_old_record(cache_dir)
-    record = _make_toolbox(cache_dir, way, fetch, build, log)
+    record = _make_toolbox(cache_dir, way, fetch, build, log, preload if offline else None)
     if was_whole:
         # the assembled layer held exactly the shipped scripts and the tools of the old record (an older recipe):
         # it is assembled again with the new tools. Any other layer (changed by hand, or tools no record names) is
@@ -578,8 +590,10 @@ def _layer_whole_for_old_record(cache_dir: Path) -> bool:
 
 
 def _make_toolbox(cache_dir: Path, way: str, fetch: Optional[Callable[[str], bytes]],
-                  build: Optional[Callable[..., Dict[str, Path]]], log: Callable[[str], None]) -> Dict[str, Any]:
-    """Makes the toolbox `way` (TOOLBOX_WAYS) in a fresh working folder and writes it with its record."""
+                  build: Optional[Callable[..., Dict[str, Path]]], log: Callable[[str], None],
+                  preload: Optional[Path] = None) -> Dict[str, Any]:
+    """Makes the toolbox `way` (TOOLBOX_WAYS) in a fresh working folder and writes it with its record; `preload`: the
+    kept sources of the build's preload (way "build", no network)."""
     folder = toolbox_dir(cache_dir)
     setpriv = WAY_SETPRIV[way]
     work = Path(cache_dir) / "runtime-layer" / "work"
@@ -612,7 +626,11 @@ def _make_toolbox(cache_dir: Path, way: str, fetch: Optional[Callable[[str], byt
             if build is None:
                 raise ToolboxMissing("The container engine is not available, so the runtime layer's tools cannot be "
                                      "built. " + TOOLBOX_WAY_TEXT)
-            if setpriv == "llmcf-setpriv":
+            if preload is not None:
+                log("Runtime layer: offline, building a static busybox and a static setpriv from the pinned sources "
+                    "the build's preload brought (once, without a network) ...")
+                files = build(work, preload=preload)
+            elif setpriv == "llmcf-setpriv":
                 log("Runtime layer: building a static busybox from pinned sources and the framework's static "
                     "llmcf-setpriv (once) ...")
                 files = build(work, setpriv=setpriv)
@@ -623,6 +641,9 @@ def _make_toolbox(cache_dir: Path, way: str, fetch: Optional[Callable[[str], byt
                        "setpriv": ({"way": way, "source": "rust/llmcf-setpriv (Cargo.lock)",
                                     "builder": RUST_BUILDER_BASE} if setpriv == "llmcf-setpriv"
                                    else {"way": way, "source": BUILD_SOURCES["util-linux"]["url"]})}
+            if preload is not None:
+                for tool in TOOLS:
+                    sources[tool]["from"] = "the build's preload"
         for tool in TOOLS:
             data = Path(files[tool]).read_bytes()
             if not is_static_elf(data):
@@ -647,6 +668,8 @@ def builder_context(work: Path, fetch: Callable[[str], bytes]) -> Path:
     context = Path(work) / "context"
     context.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(BUILDER_DOCKERFILE, context / "Dockerfile")
+    # the folder the Dockerfile copies the preload's file repository from: empty here (APT_PRELOAD is not set)
+    (context / "sources" / "apt").mkdir(parents=True, exist_ok=True)
     for pin in BUILD_SOURCES.values():
         data = fetch(pin["url"])
         if _sha_bytes(data) != pin["sha256"]:
@@ -669,14 +692,28 @@ def rust_context(work: Path) -> Path:
 
 
 def engine_builder(client: Any, fetch: Callable[[str], bytes],
-                   log: Callable[[str], None] = lambda _t: None) -> Callable[..., Dict[str, Path]]:
+                   log: Callable[[str], None] = lambda _t: None,
+                   prepare: Optional[Callable[..., Tuple[Path, str]]] = None) -> Callable[..., Dict[str, Path]]:
     """The ways 'build' and 'build-rust' over the container engine `client` (docker-py): the builder image from
     builder_context (and for setpriv="llmcf-setpriv" also llmcf-setpriv's builder image from rust_context), then
-    /out/busybox and /out/setpriv copied out of a container of each that never runs."""
-    def build(work: Path, setpriv: str = "util-linux") -> Dict[str, Path]:
-        context = builder_context(work, fetch)
-        log("Runtime layer: building the builder image (pinned base, pinned sources) ...")
-        image, _logs = client.images.build(path=str(context), tag=BUILDER_TAG, rm=True, pull=False)
+    /out/busybox and /out/setpriv copied out of a container of each that never runs. With `preload` (the kept sources
+    of the build's preload) the builder image is built from them: `prepare(work, preload, client, log)`
+    (Core/toolbox_preload.prepare, passed in by the caller) gives the checked build context and the name of the checked
+    base image (BUILDER_BASE), its packages come from the signed file repository (APT_PRELOAD), and the network is
+    "none"."""
+    def build(work: Path, setpriv: str = "util-linux", preload: Optional[Path] = None) -> Dict[str, Path]:
+        if preload is not None:
+            if prepare is None:
+                raise ValueError("the build's preload cannot be used here")
+            context, base = prepare(work, preload, client, log)
+            log("Runtime layer: building the builder image from the build's preload (no network) ...")
+            image, _logs = client.images.build(path=str(context), tag=BUILDER_TAG, rm=True, pull=False,
+                                               network_mode="none",
+                                               buildargs={"BUILDER_BASE": base, "APT_PRELOAD": "1"})
+        else:
+            context = builder_context(work, fetch)
+            log("Runtime layer: building the builder image (pinned base, pinned sources) ...")
+            image, _logs = client.images.build(path=str(context), tag=BUILDER_TAG, rm=True, pull=False)
         made_in = {tool: image.id for tool in TOOLS}
         if setpriv == "llmcf-setpriv":
             rust = rust_context(work)

@@ -225,6 +225,9 @@ DELETION_SITES = {
     ("orchestrator/Core/runtime_layer.py", "_remove_layer_folder"): STAGING,
     ("orchestrator/Core/runtime_layer.py", "prepare_end_folder"): STAGING,
     ("orchestrator/Core/runtime_layer.py", "_remove_work"): STAGING,
+    # the kept sources of the runtime layer's tools (the build's preload) and their partial copy, replaced only by a
+    # copy of a newer archive that was checked against the same pins first
+    ("orchestrator/Core/toolbox_preload.py", "keep"): STAGING,
     # llmcf-install's working folder in the framework's cache (the build's output before it is kept)
     ("orchestrator/runtime/bundle/root_helper.py", "ensure_helper"): STAGING,
     ("orchestrator/Core/community_manager.py", "CommunityManager.discard"): STAGING,

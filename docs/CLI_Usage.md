@@ -1100,10 +1100,19 @@ llm-cli build start ... --preload FILE
   `build-preload/` of your state folder for every later offline build of the target; the build installs the packages
   from a file repository in its build context, signed by the pinned keys, with no other package source and no
   network. Exit code 1 on a refusal.
-- `build start` in offline mode does this by itself: when the image is not here and sources are missing, it writes
-  the scripts, says where they are and what they fetch, and asks at the terminal for the archive's path (Enter
-  without a path starts nothing); `--preload FILE` gives it up front; without a terminal the run stops with the steps
-  (exit code 2).
+- The runtime layer's tools: when this computer has neither the runtime layer's static busybox and setpriv nor
+  their sources, `write` adds those sources (even when the build container image is already here): the builder's
+  base image by the digest llmcf pins, the util-linux, busybox and libcap-ng tarballs by their pinned sha256, and the
+  builder's distribution packages, checked like the build image's. `take` checks them against the pins of this
+  installation (the base image's documents, config and every layer, each tarball, the packages for the release of
+  the checked base) and keeps them in `build-preload/runtime-toolbox/` of your state folder; a tampered or missing
+  file refuses the whole archive. The next offline build makes both tools from them in the builder image with no
+  network (the way `build`, util-linux setpriv), checks and records them as always, and the runtime layer's check
+  passes.
+- `build start` in offline mode does this by itself: when the image is not here and sources are missing, or the
+  runtime layer's tools and their sources are missing, it writes the scripts, says where they are and what they
+  fetch, and asks at the terminal for the archive's path (Enter without a path starts nothing); `--preload FILE` gives
+  it up front; without a terminal the run stops with the steps (exit code 2).
 
 An archive that holds a file whose licence does not allow passing it on (`redistributable: false` in the template's
 `source_images`) is marked `personal=yes`: it is for your own computers; do not share it. In the GUI: the Builder's

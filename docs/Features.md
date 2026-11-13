@@ -1116,7 +1116,11 @@ its support level is community.
   Build), the build image's distribution packages too: read from the target's Dockerfile per stage, fetched with
   their dependencies against what the base image already has, checked against the distribution's signed package
   lists with the archive keys llmcf pins (on the computer with a network, at take-in, gpgv included, and by apt in the
-  build), and installed in the build from a file repository with no package mirror and no network. A vendor image
+  build), and installed in the build from a file repository with no package mirror and no network. It also brings the
+  sources of the runtime layer's static busybox and setpriv when this computer has neither the tools nor those
+  sources (the builder's base image by its pinned digest, the pinned tarballs, the builder's packages), checked
+  against this installation's pins at take-in; the next offline build makes the tools from them with no network. A
+  vendor image
   published only as a file (a `docker save` or OCI archive) can be a target's source image, named by the file's
   sha256: you give the file (`llm-cli build source-image take FILE --target TARGET`, **Take from an image file...** in
   Build Container Images, or the preload script's `--image-file`), its sha256 is checked first, its layers are read

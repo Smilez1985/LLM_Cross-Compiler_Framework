@@ -1148,9 +1148,19 @@ llm-cli build start ... --preload DATEI
   Zustandsordners für jeden späteren Offline-Build des Targets; der Build installiert die Pakete aus einem
   Datei-Repository in seinem Build-Kontext, das die festgelegten Schlüssel signieren, ohne andere Paketquelle und ohne
   Netz. Exit-Code 1 bei einer Ablehnung.
-- `build start` macht das im Offline-Modus von selbst: Ist das Image nicht hier und fehlen Quellen, schreibt er die
-  Skripte, sagt, wo sie liegen und was sie holen, und fragt im Terminal nach dem Pfad des Archivs (Enter ohne Pfad
-  startet nichts); `--preload DATEI` gibt es vorab; ohne Terminal hält der Lauf mit den Schritten an (Exit-Code 2).
+- Die Werkzeuge der Laufzeit-Schicht: Hat dieser Rechner weder das statische busybox und setpriv der Laufzeit-Schicht
+  noch ihre Quellen, nimmt `write` diese Quellen dazu (auch wenn das Build-Container-Image schon hier ist): das
+  Basis-Image des Builders über den Digest, den llmcf festlegt, die Tarballs von util-linux, busybox und libcap-ng über
+  ihr festgelegtes sha256 und die Distributionspakete des Builders, geprüft wie die des Build-Images. `take` prüft sie
+  gegen die Festlegungen dieser Installation (die Dokumente, die Config und jede Schicht des Basis-Images, jeden
+  Tarball, die Pakete für das Release der geprüften Basis) und bewahrt sie in `build-preload/runtime-toolbox/` deines
+  Zustandsordners auf; eine manipulierte oder fehlende Datei lehnt das ganze Archiv ab. Der nächste Offline-Build macht
+  daraus beide Werkzeuge im Builder-Image ohne Netz (der Weg `build`, util-linux setpriv), prüft und trägt sie wie
+  immer ein, und die Prüfung der Laufzeit-Schicht besteht.
+- `build start` macht das im Offline-Modus von selbst: Ist das Image nicht hier und fehlen Quellen, oder fehlen die
+  Werkzeuge der Laufzeit-Schicht und ihre Quellen, schreibt er die Skripte, sagt, wo sie liegen und was sie holen, und
+  fragt im Terminal nach dem Pfad des Archivs (Enter ohne Pfad startet nichts); `--preload DATEI` gibt es vorab; ohne
+  Terminal hält der Lauf mit den Schritten an (Exit-Code 2).
 
 Ein Archiv, das eine Datei enthält, deren Lizenz die Weitergabe nicht erlaubt (`redistributable: false` in den
 `source_images` der Vorlage), ist mit `personal=yes` markiert: Es ist für deine eigenen Rechner; gib es nicht weiter.

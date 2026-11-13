@@ -10,11 +10,13 @@ one llmcf-preload/ folder, manifest.txt, SHA256SUMS), of kind build.
   build image's Python packages (target.yml build_preload), pinned downloads of the Dockerfile, the files taken from
   source images (target.yml template_variables.source_images), the image's distribution packages (read from its
   Dockerfile by Core/image_packages.py, each stage against what its base image has, in the board preload's packages/
-  folder, scripts/deb_preload.py); and what it cannot carry (not_covered).
+  folder, scripts/deb_preload.py), the sources of the runtime layer's tools when this computer has none
+  (Core/toolbox_preload.py); and what it cannot carry (not_covered).
 - write(): preload.sh and preload.ps1 for that recipe into the person's folder, the recipe's sha256 recorded.
 - take(): checks an archive (the installer's checks, then kind, target, platform, a recipe written here, the image
   names, the llama.cpp commit, every pinned sha256, and the distribution packages as a board preload is checked:
-  pinned keys, gpgv where it is, lists and .deb files) and takes it in: images loaded into the container engine,
+  pinned keys, gpgv where it is, lists and .deb files; the runtime layer's tools' sources against this installation's
+  pins, Core/toolbox_preload.check) and takes it in: images loaded into the container engine,
   llama.cpp into the source store, wheels, downloads, taken files and packages into the person's state folder.
 - stage() puts the packages into the build context as a file repository signed by the pinned keys (sources/apt), which
   the target Dockerfiles use with the build argument APT_PRELOAD instead of the image's own package sources.
@@ -462,16 +464,18 @@ def _apt_section(text: str, platform: str, client: Any, fetched: List[str]) -> T
 
 
 def recipe(plan: Any, target: str, target_dir: Path, dockerfile_text: str, *, gpu: bool = False,
-           platform: str = "", client: Any = None) -> Dict[str, Any]:
+           platform: str = "", client: Any = None, toolbox: bool = False) -> Dict[str, Any]:
     """The build's preload recipe (sources.json) for the plan's missing sources. `client`: the container engine, which
-    saves a base image on this computer so its os-release and dpkg status are read (never run)."""
+    saves a base image on this computer so its os-release and dpkg status are read (never run). `toolbox`: this
+    computer has no runtime layer tools and no sources for them, so the recipe also carries those sources (section
+    `toolbox`, Core/toolbox_preload.section)."""
     from orchestrator.utils.locality import url_host
     images_reader = reader()
     missing = [s for s in plan.sources if not s.local]
     kinds = {s.kind for s in missing}
     out: Dict[str, Any] = {"format": "1", "target": target, "platform": platform or images_reader.host_platform(),
                            "images": [], "llama_cpp": None, "llama_cpp_bundle": False, "pip": None, "downloads": [],
-                           "source_images": [], "apt": None, "not_covered": []}
+                           "source_images": [], "apt": None, "toolbox": None, "not_covered": []}
     for source in missing:
         if source.kind != "base_image":
             continue
@@ -530,6 +534,11 @@ def recipe(plan: Any, target: str, target_dir: Path, dockerfile_text: str, *, gp
             out["not_covered"].append(f"vendor file {vendor.file.name}: it may not be passed on, so no preload carries "
                                       "it; the build takes it from your own vendor store, where you put it under its "
                                       "licence")
+    if toolbox:
+        from orchestrator.Core import toolbox_preload
+        out["toolbox"], why = toolbox_preload.section(out["platform"], client)
+        if out["toolbox"] is None:
+            out["not_covered"].append(why)
     return out
 
 
@@ -539,7 +548,7 @@ def recipe_bytes(data: Dict[str, Any]) -> bytes:
 
 def fetches(data: Dict[str, Any]) -> bool:
     return bool(data["images"] or data["llama_cpp_bundle"] or data["pip"] or data["downloads"]
-                or data["source_images"] or data.get("apt"))
+                or data["source_images"] or data.get("apt") or data.get("toolbox"))
 
 
 def recipe_image_label(entry: Dict[str, Any]) -> str:
@@ -572,6 +581,9 @@ def describe(data: Dict[str, Any]) -> str:
         base = f"{apt['distribution']} {apt['release']}" if apt.get("distribution") else "its base image"
         parts.append(f"the build image's distribution packages with their dependencies ({', '.join(words)}; for "
                      f"{base} on {apt['arch']}, checked against the signed package lists)")
+    if data.get("toolbox"):
+        from orchestrator.Core import toolbox_preload
+        parts.append(toolbox_preload.describe(data["toolbox"]))
     return "; ".join(parts) + f" (for {data['platform']})"
 
 
@@ -646,6 +658,8 @@ class Taken:
     packages: List[str] = field(default_factory=list)   # NAME=VERSION of the build image's distribution packages
     packages_for: str = ""                              # "debian bookworm amd64"
     packages_gpgv: bool = False                         # their signatures checked with gpgv too
+    toolbox: bool = False                               # the runtime layer's tools' sources kept
+    toolbox_packages: int = 0                           # the builder's distribution packages among them
 
     def lines(self) -> List[str]:
         out = [f"Preload of {self.target} checked (sha256 {self.archive_sha256}) and taken in:"]
@@ -663,6 +677,12 @@ class Taken:
             out.append(f"{len(self.packages)} distribution packages for the build image ({self.packages_for}), checked "
                        "against the distribution's signed package lists with the pinned archive keys"
                        + (" (and with gpgv)" if self.packages_gpgv else ""))
+        if self.toolbox:
+            out.append("the runtime layer's tools' sources kept (the builder's base image checked against its pinned "
+                       "digest, the pinned source tarballs"
+                       + (f", {self.toolbox_packages} distribution packages for the builder checked against the signed "
+                          "package lists" if self.toolbox_packages else "")
+                       + "): the next offline build makes busybox and setpriv from them without a network")
         if self.personal:
             out.append("It holds files whose licence does not allow passing them on: they stay with you (never share "
                        "the archive).")
@@ -786,6 +806,8 @@ def take(state_dir: Any, target: str, archive: Path, *, client: Any, sha256: str
         if data.get("llama_cpp_bundle") and not bundle.is_file():
             raise PreloadProblem("The preload lacks llama.cpp, which its recipe names.", "mismatch")
         packages, packages_for, gpgv = _check_packages(top, manifest, data.get("apt"))
+        from orchestrator.Core import toolbox_preload
+        tools = toolbox_preload.check(top, manifest, data.get("toolbox"))
         # taken in
         if images and client is None:
             raise PreloadProblem("The container engine is not available, so the base images cannot be loaded.",
@@ -828,10 +850,13 @@ def take(state_dir: Any, target: str, archive: Path, *, client: Any, sha256: str
                 shutil.copytree(top / "packages", part, dirs_exist_ok=True, copy_function=shutil.copyfile)
                 os.replace(part, kept)
             os.utime(kept)   # the newest taken in is the one a build uses
+        if tools is not None:
+            say("Keeping the runtime layer's tools' sources (checked)...")
+            toolbox_preload.keep(state_dir, top, str(manifest.get("archive_sha256")), tools)
     return Taken(str(manifest.get("target")), str(manifest.get("archive_sha256")), [n for _, n in images],
                  bool(data.get("llama_cpp_bundle")), wheel_count, [d["name"] for d in data.get("downloads") or []],
                  len(taken_files), manifest.get("personal") == "yes", list(data.get("not_covered") or []),
-                 packages, packages_for, gpgv)
+                 packages, packages_for, gpgv, tools is not None, len(tools.packages) if tools else 0)
 
 
 # --- the framework's view (CLI, GUI, the build service) --------------------------------------------------------------
@@ -855,8 +880,9 @@ def state_dir_of(framework: Any) -> Path:
 
 def needed(framework: Any, target: str, *, gpu: bool = False):
     """The offline plan of `target` when an offline build would need a source that is not local and no build
-    container image for these settings is on this computer; None otherwise (offline mode off, an image here, or every
-    source local)."""
+    container image for these settings is on this computer, or when this computer has neither the runtime layer's
+    tools nor their sources (Core/toolbox_preload.missing; with an image here the plan is empty); None otherwise
+    (offline mode off, an image here and the tools too, or every source local)."""
     from orchestrator.Core import build_image
     from orchestrator.Core.builder import INPUTS_LABEL
     from orchestrator.utils.locality import offline_mode
@@ -864,19 +890,22 @@ def needed(framework: Any, target: str, *, gpu: bool = False):
     config = getattr(framework, "config", None) or getattr(engine, "config", None)
     if not offline_mode(config):
         return None
+    from orchestrator.Core.toolbox_preload import missing_for
+    tools = missing_for(framework)
     client = build_image.docker_client(framework, engine)
     try:
         wanted = build_image.expected_labels(framework, target, gpu=gpu).get(INPUTS_LABEL)
     except Exception:  # noqa: BLE001 - the labels cannot be computed: the plan decides
         wanted = None
     if wanted and any(i.inputs == wanted for i in build_image.target_images(client, target)):
-        return None
+        return build_image.ImagePlan() if tools else None
     plan = build_image.target_plan(framework, target, gpu=gpu)
-    return None if plan.ready else plan
+    return None if plan.ready and not tools else plan
 
 
 def write(framework: Any, target: str, *, gpu: bool = False, plan: Any = None) -> Written:
-    """Writes the preload scripts for what an offline build of `target` lacks (the plan's missing sources)."""
+    """Writes the preload scripts for what an offline build of `target` lacks (the plan's missing sources, and the
+    runtime layer's tools' sources when this computer has neither those tools nor their sources)."""
     from orchestrator.Core import build_image
     engine = build_image._engine(framework)
     folder, dockerfile = build_image.target_dockerfile(engine, target, gpu)
@@ -884,8 +913,9 @@ def write(framework: Any, target: str, *, gpu: bool = False, plan: Any = None) -
     text = dockerfile.read_text(encoding="utf-8", errors="replace")
     name = getattr(engine.target_manager, "resolve", lambda t: t)(target) if getattr(engine, "target_manager", None) \
         else target
+    from orchestrator.Core.toolbox_preload import missing_for
     data = recipe(plan, str(name or target), folder, text, gpu=gpu,
-                  client=build_image.docker_client(framework, engine))
+                  client=build_image.docker_client(framework, engine), toolbox=missing_for(framework))
     return write_scripts(state_dir_of(framework), data, _version())
 
 

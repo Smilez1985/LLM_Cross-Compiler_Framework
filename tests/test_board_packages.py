@@ -242,6 +242,28 @@ def test_the_resolver_takes_depends_alternatives_and_providers_and_leaves_out_wh
         dp.resolve(index, ["libdep=3.0"], {})
 
 
+def test_the_installed_packages_of_the_same_source_come_along_as_apt_upgrades_them():
+    """apt (2.7 and newer) upgrades the installed packages built from the same source together with a package it
+    installs, although the installed version satisfies every dependency: debian:13-slim's liblzma5 was upgraded with
+    xz-utils, and the build without its .deb in the preload failed. Only the same source and version come along."""
+    index = dp.Index([], "amd64")
+
+    def add(package, version, depends="", source=""):
+        st = {"Package": package, "Version": version, "Depends": depends, "Architecture": "amd64", "_suite": 1,
+              "Filename": f"pool/{package}_{version}.deb", **({"Source": source} if source else {})}
+        index.real.setdefault(package, []).append(st)
+    add("xz-utils", "5.8.1-1+deb13u2", "liblzma5 (>= 5.6.2)")
+    add("liblzma5", "5.8.1-1+deb13u2", source="xz-utils")
+    add("libother", "2.0", source="other")
+    add("xz-extra", "5.8.1-1+deb13u2+b1", source="xz-utils (5.8.1-1+deb13u2)")
+    names = lambda stanzas: sorted(f"{s['Package']}={s['Version']}" for s in stanzas)  # noqa: E731
+    assert names(dp.resolve(index, ["xz-utils"], {"liblzma5": "5.8.1-1+deb13u1", "libother": "1.0",
+                                                  "xz-extra": "5.8.1-1+deb13u1"})) == \
+        ["liblzma5=5.8.1-1+deb13u2", "xz-extra=5.8.1-1+deb13u2+b1", "xz-utils=5.8.1-1+deb13u2"]
+    assert names(dp.resolve(index, ["xz-utils"], {"liblzma5": "5.8.1-1+deb13u2"})) == ["xz-utils=5.8.1-1+deb13u2"]
+    assert dp.source_of({"Package": "a", "Version": "1+b2", "Source": "src (1)"}) == ("src", "1")
+
+
 def test_a_recipe_takes_only_checked_values():
     good = dp.make_recipe("board", "debian", "bookworm", "arm64", ["fake-hwclock"], ["raspberrypi"],
                           {"libc6": "2.36-9", "bad name": "1", "x": "not a version"})
