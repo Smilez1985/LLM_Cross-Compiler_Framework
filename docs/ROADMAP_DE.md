@@ -1,4 +1,4 @@
-Version 3.4.0 · Stand 2026-11-10
+Version 3.4.0 · Stand 2026-11-13
 
 [English](ROADMAP.md) · **Deutsch**
 
@@ -74,7 +74,7 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
 |---|---|
 | **Echte Token-Zahlen: der bezahlte Lauf der Person.** Die Messung ist gebaut (die `tokens`-Fälle der Evaluation und der bezahlte Test `openai_paid`); übrig ist der Lauf selbst: Die Person startet den bezahlten OpenAI-Test einmal in ihrem eigenen llmcf mit ihrem eigenen Schlüssel (nie aus einer Sandbox oder der CI; der Schlüssel verlässt den Rechner nie), und seine `openai_cache_check.json` klärt die 12-Stunden-Lebensdauer des Caches und die Token-Zählung von OpenAI. | geplant |
 | **Cloud-Caching so, wie der Anbieter es vorsieht: der gemessene Lauf.** Gebaut: Claudes Cache-Punkte, wie Anthropics Anleitung sie setzt, OpenRouters Weitergabe für `anthropic/`-Modelle, OpenAI und die übrigen automatisch mit stabilem Präfix, die Lebensdauer `ai_cache_ttl` (Vorgabe 5 Minuten) und die weiche Obergrenze `ai_cache_cost_limit` (siehe Changelog). Rest: Ein Lauf der `tokens`-Fälle der Evaluation mit dem eigenen Claude-Schlüssel der Person (und einmal über OpenRouter), in ihrem eigenen llmcf, zeigt mit echten Zahlen, dass der Cache ab dem zweiten Turn gelesen wird; eine Sandbox hat nur die dokumentierten Anfrage- und Antwortformen geprüft. | in Arbeit |
-| **Dittos Archiv, Phase 1: Fakten aus Tool-Ergebnissen.** Ein durchsuchbares Archiv dessen, was Ditto über llmcf und das Bauen gelernt hat (nie die privaten Gespräche der Person), lesbar für alle, die den Harness nutzen, in einer eigenen Collection des vorhandenen Speichers der Wissensbasis; ein neuerer Fakt ersetzt den älteren. Ein Eintrag, den die Person geprüft hat, wird auch ersetzt, aber sein Text bleibt als Kopie, mit Hinweis und Rückgängig. | geplant |
+| **Dittos Archiv, Phase 1: Fakten aus Tool-Ergebnissen.** Ein durchsuchbares Archiv dessen, was Ditto über llmcf und das Bauen gelernt hat (nie die privaten Gespräche der Person), lesbar für alle, die den Harness nutzen, in einer eigenen Collection des vorhandenen Speichers der Wissensbasis; ein neuerer Fakt ersetzt den älteren. Ein Eintrag, den die Person geprüft hat, wird auch ersetzt, aber sein Text bleibt als Kopie, mit Hinweis und Rückgängig. | in Arbeit |
 | **LLMLingua-2 bei Bedarf**, standardmäßig aus: etwa 150 Zeilen der MIT-Methode übernommen (ein numpy-Runner in der App), das Modell bei Bedarf von seiner Originalquelle geholt und nur, wenn es fehlt, nie im Repository mitgeliefert. | geplant |
 | **Dittos Archiv, Phase 2**: Fakten aus Dittos eigenen Antworten, Export und Import, Schnappschüsse. | geplant |
 | **Gespeicherte Gesprächs-Caches auf der Platte**, nur wenn die Messung zeigt, dass Leute oft zurückkommen, nachdem der Server geschlafen hat. | geplant |

@@ -1,4 +1,4 @@
-Version 3.4.0 · Last updated 2026-11-10
+Version 3.4.0 · Last updated 2026-11-13
 
 **English** · [Deutsch](ROADMAP_DE.md)
 
@@ -72,7 +72,7 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 |---|---|
 | **Real token numbers: the person's paid run.** The measurement is built (the evaluation's `tokens` cases and the paid test `openai_paid`); what is left is the run itself: the person starts the paid OpenAI test once in their own llmcf with their own key (never from a sandbox or CI; the key never leaves the computer), and its `openai_cache_check.json` settles the 12-hour cache lifetime and the token count of OpenAI. | planned |
 | **Cloud caching the provider's way: the measured run.** Built: Claude's cache points as Anthropic's guide places them, OpenRouter's pass-through for `anthropic/` models, OpenAI and the rest automatic with a stable prefix, the lifetime `ai_cache_ttl` (5 minutes by default) and the soft cap `ai_cache_cost_limit` (see the changelog). Rest: one run of the evaluation's `tokens` cases with the person's own Claude key (and once through OpenRouter), in their own llmcf, shows the cache read from the second turn on with real numbers; a sandbox only checked the documented request and answer shapes. | in progress |
-| **Ditto's archive, phase 1: facts from tool results.** A searchable archive of what Ditto learned about llmcf and building (never the person's private talk), readable by everyone who uses the harness, in its own collection of the existing knowledge-base storage; a newer fact replaces the older one. An entry the person verified is replaced too, but its text is kept as a copy, with a notice and Undo. | planned |
+| **Ditto's archive, phase 1: facts from tool results.** A searchable archive of what Ditto learned about llmcf and building (never the person's private talk), readable by everyone who uses the harness, in its own collection of the existing knowledge-base storage; a newer fact replaces the older one. An entry the person verified is replaced too, but its text is kept as a copy, with a notice and Undo. | in progress |
 | **LLMLingua-2 on demand**, off by default: about 150 lines of the MIT method ported (a numpy runner in the app), the model fetched on demand from its original source and only when it is missing, never shipped in the repository. | planned |
 | **Ditto's archive, phase 2**: facts from Ditto's own answers, export and import, snapshots. | planned |
 | **Saved conversation caches on disk**, only if the measurement shows that people often come back after the server slept. | planned |
