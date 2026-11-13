@@ -1474,6 +1474,7 @@ class TestMainWindowWiring:
                                            "Folders the AI May Use...", "Pending Approvals...",
                                            "Fix Proposals from AI Apps...",
                                            "Agents...",   # acp-client: the ACP agents the person picks
+                                           "Ditto's Archive...",   # what Ditto learned from tool results
                                            "&Advanced"]
             assert menus["menu_ditto_advanced"] == ["Local Runtime...", "Local Models...", "Evaluation...",
                                                      "Context Window..."]
