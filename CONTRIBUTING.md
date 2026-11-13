@@ -1,4 +1,4 @@
-Version 3.4.0 · Last updated 2026-11-09
+Version 3.4.0 · Last updated 2026-11-13
 
 **English** · [Deutsch](CONTRIBUTING_DE.md)
 
@@ -27,8 +27,11 @@ Ways to contribute:
 - [ ] New behaviour is covered by tests in `tests/`
 - [ ] A new CLI command or option has its mouse path in the GUI and a `CLI_PATHS` entry, or a `MACHINE_ONLY` reason
   ([section 8](#8-code-guidelines))
-- [ ] Changelog entry under the version the change lands in, with its stamp, in `CHANGELOG.md` and `CHANGELOG_DE.md`;
-  the decision in `docs/DESIGN.md` (+ `_DE`); the finished roadmap row removed from `docs/ROADMAP.md` (+ `_DE`)
+- [ ] The decision was written into `docs/DESIGN.md` (+ `_DE`) and committed **before** the code; a change of the design
+  found during the build is committed first, then the code (the design is the template the code is compared with)
+- [ ] The changelog entry (under the version the change lands in, with its stamp, in `CHANGELOG.md` and
+  `CHANGELOG_DE.md`) is in the same commit as the code it describes, and in no other; the finished roadmap row is
+  removed from `docs/ROADMAP.md` (+ `_DE`) in that commit
 - [ ] Documentation updated in English and German
 - [ ] No secrets, personal state, binaries or model files in the diff
 
@@ -1010,12 +1013,23 @@ text:
   (files that cannot be deleted while read-only, sparse files that take real room). A red run blocks the merge;
   read its log, fix and run again. Bundle related work on one branch and run the CI once for it, not once per
   commit: the Actions minutes are shared.
+- **Backup to `gate`:** a working environment can be temporary, and commits that exist only there are lost with it.
+  After every commit that passed the local checks (tests, ruff, secret scan) push the local commits to the branch
+  `gate`, and never to a new branch for the piece of work: the remote holds only `main`, `development`, `gate` and
+  `deps/update`. `gate` holds work in progress and is never merged as it is; finished, checked work goes to
+  `development` (the CI above is the gate before that), and `gate` is brought level with it afterwards.
 - Commit messages: a summary line in English, in the imperative, sentence case, no type prefix, ideally no longer
   than about 72 characters. Examples from the history: `Add a secret scan: pre-commit and pre-push hooks and a CI
   job` and `Pin the provider SDKs and local embeddings, drop LiteLLM and tiktoken`. The body explains why.
+  **No model identifier** in a commit message, a pull request, a comment or any other file of the repository: no
+  model name, no model ID, no `Co-Authored-By` line naming a model.
 - Stage files with explicit paths (`git add path/to/file`), not with `git add -A` or `git add .`, so that no local
   state slips in.
-- Code, tests, documentation (English and German) and the changelog entry belong in the same pull request.
+- Order of the commits of one topic: first the design commit (`docs/DESIGN.md` + `_DE`, and the roadmap row's
+  status where it changes), then the code commit with its tests and the changelog entry (`CHANGELOG.md` +
+  `CHANGELOG_DE.md`) and the removal of the finished roadmap row, then the documentation commit when the user
+  documents change. All belong in the same pull request. The changelog entry is never in a commit other than the one
+  with the code it describes.
 - Describe in the pull request how you tested, for example which board and which model.
 - Never commit secrets or personal state: `configs/config.yml`, `secrets.store`, API keys, tokens, or files from
   `~/.llm-framework`.
@@ -1029,7 +1043,9 @@ text:
   [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 - **The blueprint is three files**: [docs/DESIGN.md](docs/DESIGN.md) (what, how and why of every part and decision),
   [docs/ROADMAP.md](docs/ROADMAP.md) (what comes) and `CHANGELOG.md` (what was), each with its German twin. Read all
-  three before you design a change, and update all three in the same commit as the code.
+  three before you design a change. The design (and a roadmap status that changes) is committed **before** the code,
+  because the code is compared with it; the changelog entry (and the removal of the finished roadmap row) goes into
+  the commit of the code it describes, never earlier and never later.
 - **The changelog says what was done, and only that.** There is no `[Unreleased]` section. Finished work (wired,
   tested, committed) gets its entry in the same commit as its code, under the version it lands in
   (`## [x.y.z] - YYYY-MM-DD`), in `CHANGELOG.md` and the same entry in German in `CHANGELOG_DE.md`. Every entry starts
@@ -1041,10 +1057,11 @@ text:
 - **The roadmap says what comes.** Planned or unfinished work belongs in the roadmap
   ([docs/ROADMAP.md](docs/ROADMAP.md)), with the status "in progress" or "planned", never in the changelog. When you
   finish a roadmap item, remove its row (or narrow it to what is missing) in both languages in the same commit as the
-  changelog entry.
+  changelog entry, which is the commit of the code.
 - **Decisions go into the design.** Every decision a change implements is written into `docs/DESIGN.md` (+ `_DE`) at
-  the component it concerns, with what it says, how the code does it and why, in the same commit; a replaced decision
-  stays as one history line. No private data: no secrets, addresses, host or account names, no details of anyone's
+  the component it concerns, with what it says, how the code does it and why, in a commit **before** the code (the
+  design is the template the code is compared with); when the build shows that the design has to change, the design
+  is corrected and committed first, then the code follows. A replaced decision stays as one history line. No private data: no secrets, addresses, host or account names, no details of anyone's
   own devices.
 
 ---

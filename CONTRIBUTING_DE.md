@@ -1,4 +1,4 @@
-Version 3.4.0 · Stand 2026-11-09
+Version 3.4.0 · Stand 2026-11-13
 
 [English](CONTRIBUTING.md) · **Deutsch**
 
@@ -29,9 +29,12 @@ Möglichkeiten mitzuhelfen:
 - [ ] Neues Verhalten ist durch Tests in `tests/` abgedeckt
 - [ ] Ein neuer CLI-Befehl oder eine neue Option hat ihren Weg mit der Maus in der GUI und einen Eintrag in
   `CLI_PATHS`, oder einen Grund in `MACHINE_ONLY` ([Abschnitt 8](#8-regeln-für-den-code))
-- [ ] Changelog-Eintrag unter der Version, in der die Änderung landet, mit Stempel, in `CHANGELOG.md` und
-  `CHANGELOG_DE.md`; die Entscheidung in `docs/DESIGN.md` (+ `_DE`); die fertige Roadmap-Zeile aus `docs/ROADMAP.md`
-  (+ `_DE`) entfernt
+- [ ] Die Entscheidung wurde in `docs/DESIGN.md` (+ `_DE`) eingetragen und **vor** dem Code committet; eine Änderung
+  des Designs, die sich beim Bauen zeigt, wird zuerst committet, dann der Code (das Design ist die Vorlage, gegen die
+  der Code verglichen wird)
+- [ ] Der Changelog-Eintrag (unter der Version, in der die Änderung landet, mit Stempel, in `CHANGELOG.md` und
+  `CHANGELOG_DE.md`) steht im selben Commit wie der Code, den er beschreibt, und in keinem anderen; die fertige
+  Roadmap-Zeile ist in diesem Commit aus `docs/ROADMAP.md` (+ `_DE`) entfernt
 - [ ] Dokumentation auf Englisch und Deutsch aktualisiert
 - [ ] Keine Secrets, kein persönlicher Zustand, keine Binärdateien und keine Modelldateien im Diff
 
@@ -1084,13 +1087,25 @@ Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
   lassen, dünn besetzte Dateien, die echten Platz brauchen). Ein roter Lauf sperrt das Zusammenführen; lies sein Log,
   behebe den Fehler und starte neu. Bündle zusammengehörige Arbeit auf einem Zweig und lass die CI einmal dafür
   laufen, nicht für jeden Commit: Die Actions-Minuten werden geteilt.
+- **Sicherung auf `gate`:** Eine Arbeitsumgebung kann flüchtig sein, und Commits, die nur dort liegen, gehen mit ihr
+  verloren. Pushe die lokalen Commits nach jedem Commit, der die lokalen Prüfungen bestanden hat (Tests, ruff,
+  Secret-Scan), auf den Zweig `gate`, nie auf einen neuen Zweig für das Stück Arbeit: Das Remote hält nur `main`,
+  `development`, `gate` und `deps/update`. `gate` hält Arbeit in Arbeit und wird nie so zusammengeführt; fertige,
+  geprüfte Arbeit geht nach `development` (die CI oben ist das Tor davor), und danach wird `gate` auf dessen Stand
+  gebracht.
 - Commit-Nachrichten: eine Zusammenfassungszeile auf Englisch, im Imperativ, nur der erste Buchstabe groß, ohne
   Typ-Präfix, möglichst nicht länger als etwa 72 Zeichen. Beispiele aus der Historie: `Add a secret scan:
   pre-commit and pre-push hooks and a CI job` und `Pin the provider SDKs and local embeddings, drop LiteLLM and
-  tiktoken`. Der Text darunter erklärt das Warum.
+  tiktoken`. Der Text darunter erklärt das Warum. **Keine Modellkennung** in einer Commit-Nachricht, einem
+  Pull-Request, einem Kommentar oder einer anderen Datei des Repositorys: kein Modellname, keine Modell-ID, keine
+  `Co-Authored-By`-Zeile, die ein Modell nennt.
 - Nimm Dateien mit ausdrücklichen Pfaden auf (`git add pfad/zur/datei`), nicht mit `git add -A` oder `git add .`,
   damit kein lokaler Zustand hineinrutscht.
-- Code, Tests, Dokumentation (Englisch und Deutsch) und der Changelog-Eintrag gehören in denselben Pull-Request.
+- Reihenfolge der Commits eines Themas: zuerst der Design-Commit (`docs/DESIGN.md` + `_DE`, und der Status der
+  Roadmap-Zeile, wo er sich ändert), dann der Code-Commit mit seinen Tests, dem Changelog-Eintrag (`CHANGELOG.md` +
+  `CHANGELOG_DE.md`) und dem Entfernen der fertigen Roadmap-Zeile, dann der Dokumentations-Commit, wenn sich die
+  Benutzerdokumente ändern. Alle gehören in denselben Pull-Request. Der Changelog-Eintrag steht nie in einem anderen
+  Commit als dem mit dem Code, den er beschreibt.
 - Beschreibe im Pull-Request, wie du getestet hast, etwa mit welchem Board und welchem Modell.
 - Committe nie Secrets oder persönlichen Zustand: `configs/config.yml`, `secrets.store`, API-Schlüssel, Tokens oder
   Dateien aus `~/.llm-framework`.
@@ -1105,8 +1120,9 @@ Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
   [Semantic Versioning 2.0.0](https://semver.org/lang/de/spec/v2.0.0.html).
 - **Der Bauplan besteht aus drei Dateien**: [docs/DESIGN_DE.md](docs/DESIGN_DE.md) (Was, Wie und Warum jedes Teils
   und jeder Entscheidung), [docs/ROADMAP_DE.md](docs/ROADMAP_DE.md) (was kommt) und `CHANGELOG_DE.md` (was war), jede
-  mit ihrem englischen Zwilling. Lies alle drei, bevor du eine Änderung entwirfst, und aktualisiere alle drei im selben
-  Commit wie den Code.
+  mit ihrem englischen Zwilling. Lies alle drei, bevor du eine Änderung entwirfst. Das Design (und ein Roadmap-Status,
+  der sich ändert) wird **vor** dem Code committet, weil der Code gegen es verglichen wird; der Changelog-Eintrag (und
+  das Entfernen der fertigen Roadmap-Zeile) kommt in den Commit des Codes, den er beschreibt, nie früher und nie später.
 - **Der Changelog sagt, was war, und nur das.** Es gibt keinen Abschnitt `[Unreleased]`. Fertige Arbeit (verdrahtet,
   getestet, committet) bekommt ihren Eintrag im selben Commit wie ihr Code, unter der Version, in der sie landet
   (`## [x.y.z] - JJJJ-MM-TT`), in `CHANGELOG.md` und denselben Eintrag auf Deutsch in `CHANGELOG_DE.md`. Jeder Eintrag
@@ -1118,10 +1134,12 @@ Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
 - **Die Roadmap sagt, was kommt.** Geplante oder unfertige Arbeit gehört in die Roadmap
   ([docs/ROADMAP_DE.md](docs/ROADMAP_DE.md)), mit dem Status „in Arbeit“ oder „geplant“, nie in den Changelog. Wenn du
   einen Roadmap-Punkt fertigstellst, entferne seine Zeile (oder verkleinere sie auf das, was fehlt) in beiden Sprachen
-  im selben Commit wie den Changelog-Eintrag.
+  im selben Commit wie den Changelog-Eintrag, also im Commit des Codes.
 - **Entscheidungen kommen ins Design.** Jede Entscheidung, die eine Änderung umsetzt, wird in `docs/DESIGN_DE.md`
   (+ englisch) beim Baustein eingetragen, den sie betrifft, mit dem, was sie sagt, wie der Code sie umsetzt und warum,
-  im selben Commit; eine ersetzte Entscheidung bleibt als eine Zeile Geschichte stehen. Keine privaten Daten: keine
+  in einem Commit **vor** dem Code (das Design ist die Vorlage, gegen die der Code verglichen wird); zeigt sich beim
+  Bauen, dass das Design sich ändern muss, wird zuerst das Design korrigiert und committet, dann folgt der Code. Eine
+  ersetzte Entscheidung bleibt als eine Zeile Geschichte stehen. Keine privaten Daten: keine
   Secrets, Adressen, Host- oder Kontonamen, keine Details der eigenen Geräte von irgendwem.
 
 ---
