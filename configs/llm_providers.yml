@@ -7,6 +7,7 @@
 # label       name shown in the AI settings; group: the vendor (GUI grouping)
 # category    cloud_api | cloud_platform | aggregator | local_engine | mcp_reverse
 # adapter     anthropic | openai_responses | openai_compat
+# prompt_caching  breakpoints | openrouter | automatic | none: how the provider caches (llm/cloud_cache.py)
 # location    cloud (privacy filter applies) | local (never filtered) | auto (decided from the base_url host)
 # secret      the name earlier versions stored the API key under (the AI settings and `llm-cli secrets set` still
 #             accept it); the vault keeps the key as cred/<provider>/<method>
@@ -42,6 +43,7 @@ version: 2
 providers:
   anthropic:
     label: "Anthropic Claude (API)"
+    prompt_caching: breakpoints
     group: anthropic
     category: cloud_api
     adapter: anthropic
@@ -94,6 +96,7 @@ providers:
 
   openai:
     label: "OpenAI (Responses API)"
+    prompt_caching: automatic
     group: openai
     category: cloud_api
     adapter: openai_responses
@@ -124,6 +127,7 @@ providers:
 
   google:
     label: "Google Gemini (OpenAI-compatible endpoint)"
+    prompt_caching: automatic
     group: google
     category: cloud_api
     adapter: openai_compat
@@ -147,6 +151,7 @@ providers:
 
   openrouter:
     label: "OpenRouter"
+    prompt_caching: openrouter
     group: openrouter
     category: aggregator
     adapter: openai_compat

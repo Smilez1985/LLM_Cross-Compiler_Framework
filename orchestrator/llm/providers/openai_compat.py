@@ -7,6 +7,10 @@ LM Studio, OpenRouter and Google Gemini's OpenAI-compatible endpoint.
   the schema allows it), validated locally with one repair attempt.
 - effort is sent only where the preset says the server understands it (llama-server: reasoning_effort, where
   "none" turns thinking off; Ollama and Gemini: reasoning_effort; OpenRouter: the reasoning object).
+- prompt caching through OpenRouter (llm/cloud_cache.py): for an anthropic/ model the system message carries a
+  cache_control block and the request the top-level cache_control, as OpenRouter documents for Anthropic; every other
+  upstream and server gets nothing (they cache by themselves or not at all). Cached and written tokens are read from
+  usage.prompt_tokens_details (cached_tokens, cache_write_tokens) and taken out of prompt_tokens.
 - llama-server takes the schema branch when tools and response_format arrive together and ignores the tools,
   so for presets with no_tools_with_response_format the schema moves into the system prompt while tools are on.
 - the SDK's environment fallbacks (OPENAI_API_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_BASE_URL) never
@@ -149,6 +153,16 @@ class OpenAICompatAdapter(ProviderAdapter):
                 params["reasoning_effort"] = effort
             elif self.preset.reasoning == "reasoning_object":
                 params["extra_body"] = {"reasoning": {"effort": effort}}
+        from orchestrator.llm.cloud_cache import cache_way
+        from orchestrator.llm.providers.anthropic import cache_point
+        point = cache_point(request)
+        if point and cache_way(self.preset, model) == "openrouter_breakpoints":
+            first = params["messages"][0] if params["messages"] else None
+            if first and first.get("role") == "system" and isinstance(first.get("content"), str) and first["content"]:
+                # the stable prefix ends with the system text (the tools come before it on Anthropic's side)
+                params["messages"][0] = {"role": "system", "content": [{"type": "text", "text": first["content"],
+                                                                        "cache_control": dict(point)}]}
+            params["extra_body"] = {**params.get("extra_body", {}), "cache_control": point}  # the moving tail
         return params
 
     def _complete(self, request: ChatRequest, model: str) -> ChatResult:
@@ -191,12 +205,20 @@ class OpenAICompatAdapter(ProviderAdapter):
             stop = "tool_use"  # some servers report "stop" together with tool calls
         usage = getattr(response, "usage", None)
         details = getattr(usage, "prompt_tokens_details", None) if usage else None
-        cached = getattr(details, "cached_tokens", None) or 0
+        cached = _count(getattr(details, "cached_tokens", None))
+        # OpenRouter names the tokens written to the cache (only where the upstream charges for writes); the SDK keeps
+        # the field it does not type among the extras
+        written = _count(getattr(details, "cache_write_tokens", None)
+                         if details is not None and not isinstance(details, dict) else None)
+        if not written and details is not None:
+            extra = details if isinstance(details, dict) else (getattr(details, "model_extra", None) or {})
+            written = _count(extra.get("cache_write_tokens"))
         result = ChatResult(
             text=text, tool_calls=calls, stop=stop, model=getattr(response, "model", None) or requested_model,
             provider=self.provider,
-            usage=Usage(input_tokens=max(0, (getattr(usage, "prompt_tokens", 0) or 0) - cached),
-                        output_tokens=getattr(usage, "completion_tokens", 0) or 0, cache_read_tokens=cached),
+            usage=Usage(input_tokens=max(0, (getattr(usage, "prompt_tokens", 0) or 0) - cached - written),
+                        output_tokens=getattr(usage, "completion_tokens", 0) or 0, cache_read_tokens=cached,
+                        cache_write_tokens=written),
             message=Message(role="assistant", content=text, tool_calls=calls,
                             native=NativeMessage(family=self.family, payload=payload)),
         )
@@ -371,6 +393,10 @@ class OpenAICompatAdapter(ProviderAdapter):
         except Exception as e:
             raise map_openai_error(e, label=self.label, provider=self.provider, preset=self.preset,
                                    base_url=self.base_url, during="models", secret=self._api_key) from None
+
+
+def _count(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
 
 def _content(content) -> Any:

@@ -1317,6 +1317,21 @@ die Verdichtungen, mit **Original zeigen...** und **Verdichtung rückgängig...*
 `llm-cli ditto context`, `ditto context original`, `ditto context undo`. KI-Apps lesen das Fenster, nur lesend, in
 `get_status`.
 
+**Der Cloud-Cache**: Jede Anfrage beginnt mit denselben Tools und demselben Systemtext, und ein Anbieter, der cacht,
+berechnet für diesen wiederkehrenden Anfang viel weniger. Ditto macht es auf die eigene Art des Anbieters: Claude
+bekommt Cache-Punkte auf dem Systemtext und auf dem neuesten Block des Gesprächs, wie Anthropics Anleitung sie setzt
+(auch ein Modell `anthropic/...` über OpenRouter); OpenAI, Google und jeder andere Upstream von OpenRouter cachen von
+selbst und bekommen nichts zusätzlich; eine lokale Engine hat keinen Cloud-Cache. Die Tools bleiben sortiert und der
+Systemtext enthält keinen Zeitstempel, so bleibt dieser Anfang von Turn zu Turn gleich, und eine Verdichtung ändert nur
+das Gespräch dahinter. Der Cache lebt als Vorgabe 5 Minuten, von jedem Treffer kostenlos erneuert; `ai_cache_ttl = 1h`
+hält ihn eine Stunde, zum doppelten Eingabepreis je Schreibvorgang. Jeder Turn schreibt eine Zeile in die
+Ditto-Konsole mit den aus dem Cache gelesenen, geschriebenen und nicht gecachten Token, und das Zählen der Token lernt
+daraus. `ai_cache_cost_limit` (Vorgabe 1,00 US-Dollar; 0 ist aus) ist eine weiche Obergrenze für die geschätzten
+Cache-Schreibvorgänge eines Gesprächs: Wird sie überschritten, kommt ein Hinweis mit den Zahlen und deinen
+Möglichkeiten (die kürzere Lebensdauer, Chat leeren, eine höhere Grenze), und das Caching geht weiter. Der Kasten
+**Cloud-Cache** unter dem Kontextfenster, `llm-cli ditto context cache --ttl ... --cost-limit ...` und
+`llmcf config set` setzen beides; KI-Apps lesen es in `get_status` und ändern es nie.
+
 ### Der Chat-Bereich
 
 Der Chat sitzt in einem Bereich rechts im Hauptfenster; der frühere Reiter **AI Chat** ist dorthin umgezogen, und

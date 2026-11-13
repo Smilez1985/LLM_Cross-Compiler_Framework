@@ -45,6 +45,10 @@ CLI_PATHS: Dict[str, str] = {
     "ditto context show --refresh": "btn_context_refresh",
     "ditto context original": "btn_context_original",
     "ditto context undo": "btn_context_undo",
+    # the cloud cache (the same section's Cloud cache box): the way, the lifetime and the soft cap
+    "ditto context cache": "grp_cloud_cache",
+    "ditto context cache --ttl": "cb_cloud_cache_ttl",
+    "ditto context cache --cost-limit": "spn_cloud_cache_limit",
     "ditto eval": "btn_ditto_eval_run",
     "ditto eval --cases": "btn_ditto_eval_cases_file",
     "ditto eval --provider": "cb_ditto_eval_provider",
@@ -84,6 +88,10 @@ WINDOW_OBJECTS: Dict[str, str] = {
     "btn_context_refresh": CONTEXT_ACTION,
     "btn_context_original": CONTEXT_ACTION,
     "btn_context_undo": CONTEXT_ACTION,
+    "grp_cloud_cache": CONTEXT_ACTION,
+    "cb_cloud_cache_ttl": CONTEXT_ACTION,
+    "spn_cloud_cache_limit": CONTEXT_ACTION,
+    "btn_cloud_cache_apply": CONTEXT_ACTION,
 }
 WINDOW_OBJECTS["btn_ditto_eval_cancel"] = EVAL_ACTION
 MACHINE_ONLY: Dict[str, str] = {
@@ -96,6 +104,7 @@ MACHINE_ONLY: Dict[str, str] = {
     "ditto context --json": "machine output for scripts; the Context window section shows the same values",
     "ditto context show --json": "machine output for scripts; the Context window section shows the same values",
     "ditto context undo --yes": "skips the question; the GUI always asks (No by default)",
+    "ditto context cache --json": "machine output for scripts; the Cloud cache box shows the same values",
 }
 
 

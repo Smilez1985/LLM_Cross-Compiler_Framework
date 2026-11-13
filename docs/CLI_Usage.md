@@ -157,7 +157,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `ditto setup` | Set the tool permissions (the same choices as the GUI's first-start dialog) |
 | `ditto ask` | Ask Ditto one question |
 | `ditto console` | What Ditto and AI apps type and do, as the Ditto console beside the chat shows it; `--follow` keeps printing |
-| `ditto context` | The context window of Ditto's chat model with its source, the token counting, and the compactions (`original`, `undo`) |
+| `ditto context` | The context window of Ditto's chat model with its source, the token counting, the compactions (`original`, `undo`) and the cloud cache (`cache`) |
 | `ditto eval` | Grade Ditto on fixed test cases, or the knowledge-base search |
 | `ditto runtime install/start/status/stop/import/export/prune` | The managed local model server (llama.cpp, built on this machine) for offline mode |
 | `ditto runtime ensure` | Install Ditto's local model server when it is not there, bare metal or in Docker; `--force` switches the mode |
@@ -184,6 +184,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `config set default_enable_imatrix` | Build defaults: the importance matrix, the calibration text file and the shipped text's languages |
 | `config set language` | The language of the program (en or de) and the German form of address (`form_of_address`: du or sie) |
 | `config set ai_provider` | Ditto's AI settings (provider, model, address, effort, privacy, fallback chain, knowledge base, offline mode), checked as in the window |
+| `config set ai_cache_ttl` | Ditto's cloud cache: Claude's cache lifetime (5m or 1h) and the soft cap `ai_cache_cost_limit` in US dollars |
 | `zoo list` / `zoo show` | List the community zoo and the installed packs / show one entry |
 | `zoo install` / `zoo verify` | Install a community pack after checks and your confirmation / check installed packs or a pack file |
 | `zoo uninstall` | Uninstall an installed pack after the exact list and your confirmation ("No" by default) |
@@ -1589,6 +1590,7 @@ chat, with **Show:** (`--source`), **Search:** (`--search`), **Pause Scrolling**
 llm-cli ditto context [--refresh] [--json]
 llm-cli ditto context original [COMPACTION_ID]
 llm-cli ditto context undo [--yes]
+llm-cli ditto context cache [--ttl 5m|1h] [--cost-limit USD] [--json]
 ```
 
 Shows the context window of the model Ditto's chat uses and where the number comes from: the local server's own
@@ -1596,12 +1598,12 @@ report (`/props`, with the `-c` it was started with), the provider's server (Cla
 OpenRouter or vLLM; Ollama's loaded model; LM Studio), the pinned table with its source and date, a conservative
 default, or your setting `ai_context_window`. Then how tokens are counted for that model (the estimate of its family,
 calibrated on the provider's own numbers, or its tokenizer), the saved chat conversation against the turn budget,
-and the compactions kept with their originals.
+and the compactions kept with their originals; last, the cloud cache (below).
 
 | Option | Meaning |
 |---|---|
 | `--refresh` | Ask the provider's server again instead of using its answer of the last 24 hours. |
-| `--json` | The same as JSON: `window`, `counting`, `calibration`, `messages`, `budget`, `compactions`. |
+| `--json` | The same as JSON: `window`, `counting`, `calibration`, `messages`, `budget`, `compactions`, `cache`. |
 
 `ditto context original` prints the original conversation of the newest compaction (or of `COMPACTION_ID`, such as
 `c2`) with the summary Ditto continued with. `ditto context undo` puts the original messages of the newest compaction
@@ -1615,8 +1617,31 @@ llm-cli ditto context original
 llm-cli ditto context undo
 ```
 
+`ditto context cache` shows how the provider of Ditto's chat model caches the repeated start of every request: Claude
+gets cache points on the system text and on the conversation's newest block, as Anthropic's guide places them; through
+OpenRouter an `anthropic/...` model gets the same; OpenAI, Google and every other OpenRouter upstream cache by
+themselves and get nothing extra; a local engine has no cloud cache. It also shows the model's minimum cacheable
+length, your lifetime and soft cap, and the saved conversation's numbers (tokens read from the cache, written, not
+cached, and the estimated cost of the writes). No request goes to the provider for it.
+
+| Option | Meaning |
+|---|---|
+| `--ttl 5m\|1h` | The lifetime of Claude's cache (`ai_cache_ttl`): 5 minutes, the default, renewed at no cost by every hit; 1 hour costs twice the input price per write. |
+| `--cost-limit USD` | The soft cap (`ai_cache_cost_limit`, default 1.00): when the estimated cache writes of one conversation cross it, the chat shows a notice and the Ditto console a line, once; caching goes on. 0 turns the notice off. |
+| `--json` | The same as JSON: `way`, `ttl`, `cost_limit`, `min_tokens`, `totals`, `cap_reached`. |
+
+Every turn adds a line to the Ditto console with the tokens read from the cache, written and not cached; `ditto ask`
+prints it to stderr. Both settings can also be set with `llmcf config set ai_cache_ttl 1h` and
+`llmcf config set ai_cache_cost_limit 2.5`.
+
+```bash
+llm-cli ditto context cache
+llm-cli ditto context cache --ttl 1h --cost-limit 2.5
+```
+
 In the GUI: **Ditto > Advanced > Context Window...** opens Settings > Language model > Context window, with
-**Check Again** (`--refresh`), **Show Original...** and **Undo Compaction...** (it asks first, No by default).
+**Check Again** (`--refresh`), **Show Original...** and **Undo Compaction...** (it asks first, No by default), and
+below it the **Cloud cache** box with the lifetime, the soft cap and **Apply** (`ditto context cache`).
 
 ### ditto eval
 
@@ -3564,6 +3589,8 @@ llmcf config set form_of_address sie
 llmcf config set ai_provider ollama
 llmcf config set ai_effort high
 llmcf config set offline_mode true
+llmcf config set ai_cache_ttl 1h
+llmcf config set ai_cache_cost_limit 2.5
 ```
 
 Sets one of your own settings in config.yml. Every setting here is also set in **File > Settings...**, the one
@@ -3599,6 +3626,12 @@ never goes on the command line: sign in with [ditto login](#ditto-login) first, 
 permissions, the folders an AI may use, the local runtime, the key storage and the update keep their own commands
 (`tools permissions`, `tools folders`, `ditto runtime ensure`, `ditto cache set`, `ditto auth storage`, `update`);
 the window has a page for each.
+
+Ditto's cloud cache (**File > Settings...**, page **Language model**, section **Context window**, the box **Cloud
+cache**; also [ditto context cache](#ditto-context)): `ai_cache_ttl` is `5m` (the default) or `1h`, the lifetime of
+Claude's prompt cache, directly and through OpenRouter; `ai_cache_cost_limit` is a soft cap in US dollars (default
+1.00, 0 turns it off) on the estimated cache writes of one conversation: crossing it brings a notice, and caching goes
+on. Exit code 2 for another value. Only you set them; an AI reads them in `get_status`, never changes them.
 
 ### config local-network
 

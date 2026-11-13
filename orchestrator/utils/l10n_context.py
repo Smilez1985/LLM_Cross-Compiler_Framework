@@ -44,6 +44,31 @@ TEXTS = {
         "context.source.table": "the pinned table",
         "context.source.default": "a conservative default",
         "context.source.setting": "your setting ai_context_window",
+        "cloud_cache.title": "Cloud cache",
+        "cloud_cache.intro": "How the provider of Ditto's chat model caches the repeated start of every request, how "
+                             "long Claude's cache lives, and a soft cap on what writing to it may cost in one "
+                             "conversation. Crossing the cap brings a notice; caching goes on.",
+        "cloud_cache.ttl": "Lifetime (Claude):",
+        "cloud_cache.ttl.5m": "5 minutes (default; every hit renews it at no cost)",
+        "cloud_cache.ttl.1h": "1 hour (a write costs twice the input price)",
+        "cloud_cache.limit": "Soft cap per conversation (0 = no notice):",
+        "cloud_cache.apply": "Apply",
+        "cloud_cache.failed": "The cloud cache could not be read: {reason}",
+        "cloud_cache.not_saved": "Not saved: {reason}",
+        "cloud_cache.way.breakpoints": "Anthropic's prompt caching: cache points on the system text and on the "
+                                       "conversation's newest block.",
+        "cloud_cache.way.openrouter_breakpoints": "OpenRouter passes Anthropic's cache points on: the system text and "
+                                                  "the conversation's newest block.",
+        "cloud_cache.way.automatic": "The provider caches a stable start of the request by itself; nothing is sent "
+                                     "for it, and the lifetime is the provider's.",
+        "cloud_cache.way.none": "No cloud cache: a local engine keeps its own prompt cache.",
+        "cloud_cache.minimum": "This model caches a prompt of at least {tokens} tokens.",
+        "cloud_cache.ttl_not_here": "The lifetime above applies to Claude only; this provider sets its own.",
+        "cloud_cache.totals": "This conversation: {calls} call(s), {read} tokens read from the cache, {written} "
+                              "written, {uncached} not cached; cache writes about {cost} USD.",
+        "cloud_cache.unpriced": "{tokens} written tokens have no price in the table and are not counted in USD.",
+        "cloud_cache.cap_off": "The soft cap is off.",
+        "cloud_cache.cap_reached": "The soft cap of {limit} USD is reached; caching goes on.",
     },
     "de": {
         "context.menu": "Kontextfenster...",
@@ -86,6 +111,33 @@ TEXTS = {
         "context.source.table": "der festgehaltenen Tabelle",
         "context.source.default": "einer vorsichtigen Vorgabe",
         "context.source.setting": "deiner Einstellung ai_context_window",
+        "cloud_cache.title": "Cloud-Cache",
+        "cloud_cache.intro": "Wie der Anbieter von Dittos Chat-Modell den wiederkehrenden Anfang jeder Anfrage cacht, "
+                             "wie lange Claudes Cache lebt, und eine weiche Obergrenze dafür, was das Schreiben in "
+                             "ihn in einem Gespräch kosten darf. Wird sie überschritten, kommt ein Hinweis; das "
+                             "Caching geht weiter.",
+        "cloud_cache.ttl": "Lebensdauer (Claude):",
+        "cloud_cache.ttl.5m": "5 Minuten (Vorgabe; jeder Treffer erneuert sie kostenlos)",
+        "cloud_cache.ttl.1h": "1 Stunde (ein Schreibvorgang kostet das Doppelte des Eingabepreises)",
+        "cloud_cache.limit": "Weiche Obergrenze je Gespräch (0 = kein Hinweis):",
+        "cloud_cache.apply": "Übernehmen",
+        "cloud_cache.failed": "Der Cloud-Cache konnte nicht gelesen werden: {reason}",
+        "cloud_cache.not_saved": "Nicht gespeichert: {reason}",
+        "cloud_cache.way.breakpoints": "Anthropics Prompt-Caching: Cache-Punkte auf dem Systemtext und auf dem "
+                                       "neuesten Block des Gesprächs.",
+        "cloud_cache.way.openrouter_breakpoints": "OpenRouter gibt Anthropics Cache-Punkte weiter: den Systemtext und "
+                                                  "den neuesten Block des Gesprächs.",
+        "cloud_cache.way.automatic": "Der Anbieter cacht einen gleichbleibenden Anfang der Anfrage von selbst; dafür "
+                                     "geht nichts hinaus, und die Lebensdauer bestimmt der Anbieter.",
+        "cloud_cache.way.none": "Kein Cloud-Cache: eine lokale Engine hält ihren eigenen Prompt-Cache.",
+        "cloud_cache.minimum": "Dieses Modell cacht einen Prompt ab {tokens} Token.",
+        "cloud_cache.ttl_not_here": "Die Lebensdauer oben gilt nur für Claude; dieser Anbieter setzt seine eigene.",
+        "cloud_cache.totals": "Dieses Gespräch: {calls} Aufruf/Aufrufe, {read} Token aus dem Cache gelesen, "
+                              "{written} geschrieben, {uncached} nicht gecacht; Cache-Schreibvorgänge etwa {cost} USD.",
+        "cloud_cache.unpriced": "{tokens} geschriebene Token haben keinen Preis in der Tabelle und sind nicht in USD "
+                                "gezählt.",
+        "cloud_cache.cap_off": "Die weiche Obergrenze ist aus.",
+        "cloud_cache.cap_reached": "Die weiche Obergrenze von {limit} USD ist erreicht; das Caching geht weiter.",
     },
 }
 

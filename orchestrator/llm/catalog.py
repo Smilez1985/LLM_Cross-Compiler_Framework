@@ -77,6 +77,9 @@ class ProviderPreset(BaseModel):
     headers: Dict[str, str] = Field(default_factory=dict)
     live_models: bool = True
     docs_url: Optional[str] = None
+    # How the provider caches (llm/cloud_cache.py): breakpoints (Anthropic's cache points), openrouter (passed on for an
+    # anthropic/ upstream, automatic for the others), automatic (a stable prefix, nothing sent) or none.
+    prompt_caching: Literal["breakpoints", "openrouter", "automatic", "none"] = "none"
 
     @model_validator(mode="before")
     @classmethod

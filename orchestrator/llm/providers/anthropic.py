@@ -9,7 +9,9 @@ Request rules for the current models (Claude Opus 5.5, Sonnet 5.5, Haiku 5.5, Fa
 - tool_choice is always auto: forced tool choice is a 400 on Opus 5.5, Sonnet 5.5 and Fable 5.1. Tools are
   strict with closed schemas, so arguments match the schema.
 - JSON answers use output_config.format (json_schema), validated locally with one repair attempt.
-- automatic prompt caching via the top-level cache_control, plus a breakpoint on the static system prompt.
+- prompt caching as Anthropic's guide places it (llm/cloud_cache.py): a breakpoint on the system text, which closes
+  the stable prefix (tools, then system), and the top-level cache_control (automatic caching of the conversation's
+  newest block); two of the four allowed, both with the same lifetime (ChatRequest.cache_ttl, "5m" or "1h").
 - server-side refusal fallback (fallbacks: "default") for the models listed in the preset, Claude API only.
 - assistant turns are passed back unchanged (thinking blocks are bound to the conversation prefix).
 
@@ -25,6 +27,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from orchestrator.llm.auth.spec import CLAUDE_API_HOST
+from orchestrator.llm.cloud_cache import MAX_BREAKPOINTS
 from orchestrator.llm.errors import ANTHROPIC_WORKSPACE_INVALID, NotConfigured, Refused, map_anthropic_error
 from orchestrator.llm.providers.base import DEFAULT_MAX_TOKENS, ProviderAdapter
 from orchestrator.llm.types import (ChatRequest, ChatResult, Message, ModelInfo, NativeMessage, TokenCount,
@@ -131,11 +134,7 @@ class AnthropicAdapter(ProviderAdapter):
 
     # --- request ------------------------------------------------------------------------------------------
     def build_params(self, request: ChatRequest, model: str, effort: Optional[str]) -> Dict[str, Any]:
-        cache_control = None
-        if request.cache:
-            cache_control = {"type": "ephemeral"}
-            if request.cache_ttl == "1h":
-                cache_control["ttl"] = "1h"
+        cache_control = cache_point(request)
 
         system_parts, messages = render_messages(request.messages, self.family)
         system_text = "\n\n".join(p for p in [request.system, *system_parts] if p)
@@ -165,6 +164,8 @@ class AnthropicAdapter(ProviderAdapter):
             params["output_config"] = output_config
         if cache_control:
             params["cache_control"] = cache_control  # automatic caching of the growing conversation
+            if count_breakpoints(params) > MAX_BREAKPOINTS:  # never: two are placed here
+                raise NotConfigured("Too many cache points for one request.", provider=self.provider)
         probe = request.cache_probe
         if probe is not None and probe.anthropic_diagnostics:
             # Evaluation only: the answer names why the prompt cache missed against the previous response (the API
@@ -199,7 +200,8 @@ class AnthropicAdapter(ProviderAdapter):
             text=text, tool_calls=calls, stop=stop, model=response.model or requested_model, provider=self.provider,
             usage=Usage(input_tokens=usage.input_tokens or 0, output_tokens=usage.output_tokens or 0,
                         cache_read_tokens=getattr(usage, "cache_read_input_tokens", None) or 0,
-                        cache_write_tokens=getattr(usage, "cache_creation_input_tokens", None) or 0),
+                        cache_write_tokens=getattr(usage, "cache_creation_input_tokens", None) or 0,
+                        cache_write_1h_tokens=one_hour_writes(usage)),
             message=Message(role="assistant", content=text, tool_calls=calls,
                             native=NativeMessage(family=self.family, payload={"role": "assistant", "content": blocks})),
             response_id=str(getattr(response, "id", "") or ""),
@@ -255,6 +257,37 @@ class AnthropicAdapter(ProviderAdapter):
             return models
         except Exception as e:
             raise self._map_error(e) from None
+
+
+def cache_point(request: ChatRequest) -> Optional[Dict[str, Any]]:
+    """The cache_control of a request's cache points (None when caching is off): ephemeral, with "ttl": "1h" only for
+    the 1-hour lifetime (5 minutes is Anthropic's default and is sent without a ttl)."""
+    if not request.cache:
+        return None
+    point: Dict[str, Any] = {"type": "ephemeral"}
+    if request.cache_ttl == "1h":
+        point["ttl"] = "1h"
+    return point
+
+
+def count_breakpoints(value: Any) -> int:
+    """How many cache_control fields a request body carries (the top-level one included)."""
+    if isinstance(value, dict):
+        return int("cache_control" in value) + sum(count_breakpoints(v) for k, v in value.items()
+                                                   if k != "cache_control")
+    if isinstance(value, list):
+        return sum(count_breakpoints(v) for v in value)
+    return 0
+
+
+def one_hour_writes(usage: Any) -> int:
+    """The tokens written to the 1-hour cache (usage.cache_creation.ephemeral_1h_input_tokens), 0 when not named."""
+    creation = getattr(usage, "cache_creation", None)
+    if isinstance(creation, dict):
+        value = creation.get("ephemeral_1h_input_tokens")
+    else:
+        value = getattr(creation, "ephemeral_1h_input_tokens", None)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
 
 def cache_miss(response: Any):

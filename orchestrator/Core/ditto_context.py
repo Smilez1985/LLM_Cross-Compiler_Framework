@@ -37,6 +37,7 @@ class ContextOverview(BaseModel):
     budget: Dict[str, Any] = Field(default_factory=dict)
     budget_lines: List[str] = Field(default_factory=list)
     compactions: List[CompactionRow] = Field(default_factory=list)
+    cache: Dict[str, Any] = Field(default_factory=dict)   # llm/cloud_cache.CacheView: the provider's way, the settings
 
     def data(self) -> Dict[str, Any]:
         return self.model_dump()
@@ -56,6 +57,9 @@ class ContextOverview(BaseModel):
                            f"({row.reason}{numbers})")
         else:
             out.append("Compactions: none")
+        if self.cache:
+            from orchestrator.llm.cloud_cache import CacheView
+            out.extend(CacheView.model_validate(self.cache).lines())
         return out
 
 
@@ -82,9 +86,31 @@ def context_overview(ditto: Any, history: ChatHistory, *, refresh: bool = False)
                           kept=int(r.get("kept") or 0), window=r.get("window"), before=r.get("before"),
                           after=r.get("after"))
             for r in history.compactions]
+    cache = cloud_cache_view(ditto, history, getattr(ditto, "config", None), provider=window.provider,
+                             model=window.model)
     return ContextOverview(window=window.data(), counting=tally.detail, family=tally.family,
                            calibration=dict(calibration), messages=len(messages),
-                           budget=budget.model_dump(), budget_lines=budget.lines()[1:], compactions=rows)
+                           budget=budget.model_dump(), budget_lines=budget.lines()[1:], compactions=rows,
+                           cache=cache.model_dump())
+
+
+def cloud_cache_view(ditto: Any, history: Optional[ChatHistory], config: Any, *, provider: Optional[str] = None,
+                     model: Optional[str] = None):
+    """The cloud cache of `ditto`'s chat model (llm/cloud_cache.CacheView): the provider's way, the person's lifetime
+    and soft cap, and the sums `history` kept. No request is sent: without `provider` the chat's target is resolved
+    from the settings."""
+    from orchestrator.llm.cloud_cache import CacheTally, cache_view
+    client = getattr(ditto, "client", None)
+    catalog = getattr(client, "catalog", None)
+    if provider is None or model is None:
+        try:
+            target = client.resolve("chat")
+            provider, model = target.provider, target.model
+        except Exception:  # noqa: BLE001 - no provider configured: no cloud cache to show
+            provider, model = provider or "", model or ""
+    preset = catalog.get(provider) if catalog is not None and provider else None
+    totals = CacheTally.read_from(getattr(history, "cache", None)) if history is not None else CacheTally()
+    return cache_view(preset, model or "", config, totals)
 
 
 def compaction_record(history: ChatHistory, compaction_id: Optional[str] = None) -> Optional[Dict[str, Any]]:

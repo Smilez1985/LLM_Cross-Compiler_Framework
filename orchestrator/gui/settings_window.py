@@ -279,6 +279,9 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(inner)
         self.context_box = ContextWindowBox(self.framework, inner, lang=self.lang)
         layout.addWidget(self.context_box)
+        from orchestrator.gui.cloud_cache_box import CloudCacheBox
+        self.cloud_cache_box = CloudCacheBox(self.framework, inner, lang=self.lang)   # `llm-cli ditto context cache`
+        layout.addWidget(self.cloud_cache_box)
         layout.addStretch(1)
         return self._scrolled(page, inner)
 

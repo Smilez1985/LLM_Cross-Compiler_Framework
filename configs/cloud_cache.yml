@@ -1,0 +1,48 @@
+# Cloud caching for Ditto (read by orchestrator/llm/cloud_cache.py; docs/DESIGN.md, Ditto, the row "Cloud caching
+# follows each provider's own caching").
+#
+# anthropic   Claude's prompt caching, from Anthropic's prompt caching guide and pricing page (sources below, read on
+#             the date in `checked`). Each entry: model (exact id, or a prefix ending in *; OpenRouter's
+#             anthropic/<name> with dots is matched as the same id with dashes), min_tokens (the minimum cacheable
+#             prompt length: shorter prompts are not cached, without an error), write_5m and write_1h (US dollars per
+#             million tokens written to the 5-minute and the 1-hour cache), and for a model priced by prompt length
+#             long_over (prompt tokens) with long_write_5m and long_write_1h above it.
+# default     a Claude model the table does not name: the smallest documented minimum (so a breakpoint is never
+#             withheld for it), and no price (the cost is called unpriced, never guessed).
+# breakpoints_max  the number of cache breakpoints a request may carry.
+
+version: 1
+
+checked: "2026-11-13"
+sources:
+  - https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+  - https://platform.claude.com/docs/en/about-claude/pricing
+  - https://openrouter.ai/docs/guides/best-practices/prompt-caching
+  - https://openrouter.ai/docs/guides/guides/usage-accounting
+  - https://developers.openai.com/api/docs/guides/prompt-caching
+
+breakpoints_max: 4
+
+default:
+  min_tokens: 512
+
+anthropic:
+  - {model: "claude-fable-5-2", min_tokens: 512, write_5m: 10.0, write_1h: 16.0}
+  - {model: "claude-mythos-5-2", min_tokens: 512, write_5m: 10.0, write_1h: 16.0}
+  - {model: "claude-fable-5-1", min_tokens: 512, write_5m: 12.5, write_1h: 20.0}
+  - {model: "claude-mythos-5-1", min_tokens: 512, write_5m: 12.5, write_1h: 20.0}
+  - {model: "claude-fable-5", min_tokens: 512, write_5m: 12.5, write_1h: 20.0}
+  - {model: "claude-mythos-5", min_tokens: 512, write_5m: 12.5, write_1h: 20.0}
+  - {model: "claude-opus-5-5", min_tokens: 512, write_5m: 5.0, write_1h: 8.0}
+  - {model: "claude-opus-5", min_tokens: 512, write_5m: 6.25, write_1h: 10.0}
+  - {model: "claude-sonnet-5-5", min_tokens: 512, write_5m: 2.5, write_1h: 4.0}
+  - {model: "claude-sonnet-5", min_tokens: 1024, write_5m: 2.5, write_1h: 4.0}
+  - {model: "claude-haiku-5-5", min_tokens: 512, write_5m: 0.125, write_1h: 0.2,
+     long_over: 100000, long_write_5m: 0.625, long_write_1h: 1.0}
+  - {model: "claude-opus-4-8", min_tokens: 1024, write_5m: 6.25, write_1h: 10.0}
+  - {model: "claude-opus-4-7", min_tokens: 2048, write_5m: 6.25, write_1h: 10.0}
+  - {model: "claude-opus-4-6", min_tokens: 4096, write_5m: 6.25, write_1h: 10.0}
+  - {model: "claude-opus-4-5*", min_tokens: 4096, write_5m: 6.25, write_1h: 10.0}
+  - {model: "claude-sonnet-4-6", min_tokens: 1024, write_5m: 3.75, write_1h: 6.0}
+  - {model: "claude-sonnet-4-5*", min_tokens: 1024, write_5m: 3.75, write_1h: 6.0}
+  - {model: "claude-haiku-4-5*", min_tokens: 4096, write_5m: 1.25, write_1h: 2.0}

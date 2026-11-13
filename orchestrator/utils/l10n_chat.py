@@ -111,6 +111,10 @@ TEXTS = {
         "chat.notice.new_conversation_no_tools": "Answered without tools: Ditto summarized the conversation, which "
                                                  "used tools, and continues in a new conversation.",
         "chat.notice.source_local": "Ditto now uses its own tools: a new conversation.",
+        "chat.notice.cache_cap": "This conversation's estimated cache writes reached about {cost} USD, the soft "
+                                 "cap of {limit} USD. Caching goes on. The choice is yours: the 5-minute lifetime "
+                                 "(1 hour costs twice per write), Clear chat, or a higher limit "
+                                 "({path:grp_cloud_cache}).",
         "chat.notice.build_turn": "Ditto looks at how its build {request_id} ended.",
         # LEGACY: the removed remote mode wrote these keys into feed rows; they stay so stored rows still render.
         # Nothing writes them any more.
@@ -305,6 +309,10 @@ TEXTS = {
         "chat.notice.new_conversation_no_tools": "Ohne Werkzeuge beantwortet: Ditto hat das Gespräch, in dem Werkzeuge "
                                                  "liefen, zusammengefasst und macht in einem neuen Gespräch weiter.",
         "chat.notice.source_local": "Ditto nutzt jetzt seine eigenen Werkzeuge: ein neues Gespräch.",
+        "chat.notice.cache_cap": "Die geschätzten Cache-Schreibvorgänge dieses Gesprächs haben etwa {cost} USD "
+                                 "erreicht, die weiche Obergrenze von {limit} USD. Das Caching geht weiter. Zur Wahl "
+                                 "stehen: die 5-Minuten-Lebensdauer (1 Stunde kostet je Schreibvorgang das "
+                                 "Doppelte), Chat leeren oder eine höhere Grenze ({path:grp_cloud_cache}).",
         "chat.notice.build_turn": "Ditto schaut, wie sein Build {request_id} geendet hat.",
         # LEGACY (see the English block): stored rows of the removed remote mode still render.
         "chat.notice.source_remote": "Ditto nutzt jetzt die Werkzeuge des Frameworks auf {name}: ein neues Gespräch.",

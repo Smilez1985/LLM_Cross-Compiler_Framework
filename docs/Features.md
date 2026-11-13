@@ -1200,6 +1200,19 @@ model > Context window) shows the window, its source, the counting and the compa
 **Undo Compaction...**; the same on the command line: `llm-cli ditto context`, `ditto context original`, `ditto
 context undo`. AI apps read the window, read-only, in `get_status`.
 
+**The cloud cache**: every request starts with the same tools and system text, and a provider that caches charges
+much less for that repeated start. Ditto does it the provider's own way: Claude gets cache points on the system text
+and on the conversation's newest block, as Anthropic's guide places them (also an `anthropic/...` model through
+OpenRouter); OpenAI, Google and every other OpenRouter upstream cache by themselves and get nothing extra; a local
+engine has no cloud cache. The tools stay sorted and the system text holds no time stamp, so that start stays the same
+from turn to turn, and a compaction changes only the conversation behind it. The cache lives 5 minutes by default,
+renewed at no cost by every hit; `ai_cache_ttl = 1h` keeps it an hour, at twice the input price per write. Every turn
+adds a line to the Ditto console with the tokens read from the cache, written and not cached, and the token counting
+learns from them. `ai_cache_cost_limit` (1.00 US dollars by default; 0 is off) is a soft cap on the estimated cache
+writes of one conversation: crossing it brings a notice with the numbers and your choices (the shorter lifetime, Clear
+chat, a higher limit), and caching goes on. The **Cloud cache** box below the context window, `llm-cli ditto context
+cache --ttl ... --cost-limit ...` and `llmcf config set` set both; AI apps read them in `get_status`, never change them.
+
 ### The chat panel
 
 The chat sits in a panel on the right of the main window; the former **AI Chat** tab moved there and nothing it did

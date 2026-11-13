@@ -146,6 +146,16 @@ TEXTS: Dict[str, Dict[str, str]] = {
                                       "note, to fit the context window of {window} tokens.",
         "activity.context.still_over": "The request still needs about {tokens} tokens, more than the context window "
                                        "of {window} tokens; it went out as it is.",
+        # The cloud cache of a turn (llm/cloud_cache.py; numbers only).
+        "activity.cache.turn": "Cache: {read} tokens read from the provider's cache ({share} % of the input), "
+                               "{written} written, {uncached} not cached.",
+        "activity.cache.none_breakpoints": "Cache: nothing read or written; {uncached} tokens not cached (the model "
+                                           "caches a prompt of at least {minimum} tokens, and the first turn only "
+                                           "writes).",
+        "activity.cache.none_automatic": "Cache: nothing read; {uncached} tokens not cached (the provider caches a "
+                                         "repeated prefix by itself, usually from about {minimum} tokens on).",
+        "activity.cache.cap": "The estimated cache writes of this conversation reached about {cost} USD ({written} "
+                              "tokens written), the soft cap of {limit} USD; caching goes on.",
         "activity.tool.start_build": "Started a build.",
         "activity.tool.start_recipe_build": "Started a build from a recipe.",
         "activity.tool.cancel_build": "Cancelled a build.",
@@ -286,6 +296,16 @@ TEXTS: Dict[str, Dict[str, str]] = {
                                       "Notiz hinterlassen, damit es ins Kontextfenster von {window} Token passt.",
         "activity.context.still_over": "Die Anfrage braucht noch etwa {tokens} Token, mehr als das Kontextfenster von "
                                        "{window} Token; sie ging so hinaus.",
+        "activity.cache.turn": "Cache: {read} Token aus dem Cache des Anbieters gelesen ({share} % der Eingabe), "
+                               "{written} geschrieben, {uncached} nicht gecacht.",
+        "activity.cache.none_breakpoints": "Cache: nichts gelesen oder geschrieben; {uncached} Token nicht gecacht "
+                                           "(das Modell cacht einen Prompt ab {minimum} Token, und der erste Turn "
+                                           "schreibt nur).",
+        "activity.cache.none_automatic": "Cache: nichts gelesen; {uncached} Token nicht gecacht (der Anbieter cacht "
+                                         "einen wiederholten Präfix von selbst, meist ab etwa {minimum} Token).",
+        "activity.cache.cap": "Die geschätzten Cache-Schreibvorgänge dieses Gesprächs haben etwa {cost} USD erreicht "
+                              "({written} Token geschrieben), die weiche Obergrenze von {limit} USD; das Caching "
+                              "geht weiter.",
         "activity.tool.start_build": "Hat einen Build gestartet.",
         "activity.tool.start_recipe_build": "Hat einen Build nach einem Rezept gestartet.",
         "activity.tool.cancel_build": "Hat einen Build abgebrochen.",

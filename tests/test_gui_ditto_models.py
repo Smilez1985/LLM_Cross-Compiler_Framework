@@ -245,7 +245,9 @@ class TestMenu:
                     "ditto cache set": cli.ditto_cache_set,
                     # Settings > Language model > Context window (Ditto > Context Window...)
                     "ditto context": cli.ditto_context, "ditto context show": cli.ditto_context_show,
-                    "ditto context original": cli.ditto_context_original, "ditto context undo": cli.ditto_context_undo}
+                    "ditto context original": cli.ditto_context_original, "ditto context undo": cli.ditto_context_undo,
+                    # the Cloud cache box of the same section
+                    "ditto context cache": cli.ditto_context_cache}
         assert "ditto models" in menu.CLI_PATHS
         assert set(cli.ditto_models.commands) == {"list", "download"}
         for path, command in commands.items():

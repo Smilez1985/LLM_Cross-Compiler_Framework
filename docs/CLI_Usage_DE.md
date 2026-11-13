@@ -158,7 +158,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `ditto setup` | Die Tool-Berechtigungen festlegen (dieselbe Auswahl wie im Dialog beim ersten Start der GUI) |
 | `ditto ask` | Ditto eine Frage stellen |
 | `ditto console` | Was Ditto und KI-Apps tippen und tun, wie die Ditto-Konsole neben dem Chat es zeigt; `--follow` druckt weiter |
-| `ditto context` | Das Kontextfenster von Dittos Chat-Modell mit seiner Quelle, das Zählen der Token und die Verdichtungen (`original`, `undo`) |
+| `ditto context` | Das Kontextfenster von Dittos Chat-Modell mit seiner Quelle, das Zählen der Token, die Verdichtungen (`original`, `undo`) und der Cloud-Cache (`cache`) |
 | `ditto eval` | Ditto anhand fester Testfälle bewerten, oder die Suche der Wissensbasis |
 | `ditto runtime install/start/status/stop/import/export/prune` | Der verwaltete lokale Modellserver (llama.cpp, auf diesem Rechner gebaut) für den Offline-Modus |
 | `ditto runtime ensure` | Dittos lokalen Modellserver installieren, wenn er fehlt, direkt oder in Docker; `--force` wechselt die Art |
@@ -183,6 +183,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `config set default_enable_imatrix` | Build-Vorgaben: die Importance Matrix, die Kalibrier-Textdatei und die Sprachen des mitgelieferten Texts |
 | `config set language` | Die Sprache des Programms (en oder de) und die deutsche Anrede (`form_of_address`: du oder sie) |
 | `config set ai_provider` | Dittos KI-Einstellungen (Anbieter, Modell, Adresse, Aufwand, Datenschutz, Ausweichkette, Wissensdatenbank, Offline-Modus), geprüft wie im Fenster |
+| `config set ai_cache_ttl` | Dittos Cloud-Cache: die Lebensdauer von Claudes Cache (5m oder 1h) und die weiche Obergrenze `ai_cache_cost_limit` in US-Dollar |
 | `config output-folder` | Den Ausgabeordner zeigen oder festlegen, in dem fertige Modelle gespeichert werden |
 | `config take-over` | Was eine frühere Version im Installationsordner abgelegt hat, in deine eigenen Ordner verschieben |
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
@@ -1655,6 +1656,7 @@ neben dem Chat, mit **Zeigen:** (`--source`), **Suchen:** (`--search`), **Mitlau
 llm-cli ditto context [--refresh] [--json]
 llm-cli ditto context original [VERDICHTUNGS_ID]
 llm-cli ditto context undo [--yes]
+llm-cli ditto context cache [--ttl 5m|1h] [--cost-limit USD] [--json]
 ```
 
 Zeigt das Kontextfenster des Modells, das Dittos Chat nutzt, und woher die Zahl kommt: der eigene Bericht des lokalen
@@ -1663,12 +1665,12 @@ die Modellliste von OpenRouter oder vLLM; das geladene Modell von Ollama; LM Stu
 Quelle und Datum, eine vorsichtige Vorgabe oder deine Einstellung `ai_context_window`. Dann, wie die Token für dieses
 Modell gezählt werden (die Schätzung seiner Familie, kalibriert an den eigenen Zahlen des Anbieters, oder sein
 Tokenizer), das gespeicherte Chat-Gespräch gemessen am Budget eines Turns und die Verdichtungen, die mit ihrem
-Original gespeichert sind.
+Original gespeichert sind; zuletzt der Cloud-Cache (unten).
 
 | Option | Bedeutung |
 |---|---|
 | `--refresh` | Den Server des Anbieters erneut fragen, statt seine Antwort der letzten 24 Stunden zu nehmen. |
-| `--json` | Dasselbe als JSON: `window`, `counting`, `calibration`, `messages`, `budget`, `compactions`. |
+| `--json` | Dasselbe als JSON: `window`, `counting`, `calibration`, `messages`, `budget`, `compactions`, `cache`. |
 
 `ditto context original` druckt das ursprüngliche Gespräch der neuesten Verdichtung (oder von `VERDICHTUNGS_ID`, etwa
 `c2`) mit der Zusammenfassung, mit der Ditto weitergemacht hat. `ditto context undo` setzt die ursprünglichen
@@ -1682,9 +1684,33 @@ llm-cli ditto context original
 llm-cli ditto context undo
 ```
 
+`ditto context cache` zeigt, wie der Anbieter von Dittos Chat-Modell den wiederkehrenden Anfang jeder Anfrage cacht:
+Claude bekommt Cache-Punkte auf dem Systemtext und auf dem neuesten Block des Gesprächs, wie Anthropics Anleitung sie
+setzt; über OpenRouter bekommt ein Modell `anthropic/...` dasselbe; OpenAI, Google und jeder andere Upstream von
+OpenRouter cachen von selbst und bekommen nichts zusätzlich; eine lokale Engine hat keinen Cloud-Cache. Dazu die
+Mindestlänge, ab der das Modell cacht, deine Lebensdauer und weiche Obergrenze und die Zahlen des gespeicherten
+Gesprächs (aus dem Cache gelesene, geschriebene und nicht gecachte Token und die geschätzten Kosten der
+Schreibvorgänge). Dafür geht keine Anfrage an den Anbieter.
+
+| Option | Bedeutung |
+|---|---|
+| `--ttl 5m\|1h` | Die Lebensdauer von Claudes Cache (`ai_cache_ttl`): 5 Minuten, die Vorgabe, von jedem Treffer kostenlos erneuert; 1 Stunde kostet je Schreibvorgang das Doppelte des Eingabepreises. |
+| `--cost-limit USD` | Die weiche Obergrenze (`ai_cache_cost_limit`, Vorgabe 1,00): Überschreiten die geschätzten Cache-Schreibvorgänge eines Gesprächs sie, zeigt der Chat einen Hinweis und die Ditto-Konsole eine Zeile, einmal; das Caching geht weiter. 0 schaltet den Hinweis aus. |
+| `--json` | Dasselbe als JSON: `way`, `ttl`, `cost_limit`, `min_tokens`, `totals`, `cap_reached`. |
+
+Jeder Turn schreibt eine Zeile in die Ditto-Konsole mit den aus dem Cache gelesenen, geschriebenen und nicht
+gecachten Token; `ditto ask` gibt sie auf stderr aus. Beide Einstellungen lassen sich auch mit
+`llmcf config set ai_cache_ttl 1h` und `llmcf config set ai_cache_cost_limit 2.5` setzen.
+
+```bash
+llm-cli ditto context cache
+llm-cli ditto context cache --ttl 1h --cost-limit 2.5
+```
+
 In der GUI: **Ditto > Erweitert > Kontextfenster...** öffnet Einstellungen > Sprachmodell > Kontextfenster, mit
 **Erneut prüfen** (`--refresh`), **Original zeigen...** und **Verdichtung rückgängig...** (fragt vorher, Nein als
-Vorgabe).
+Vorgabe), und darunter der Kasten **Cloud-Cache** mit Lebensdauer, weicher Obergrenze und **Übernehmen**
+(`ditto context cache`).
 
 ### ditto eval
 
@@ -3729,6 +3755,8 @@ llmcf config set form_of_address sie
 llmcf config set ai_provider ollama
 llmcf config set ai_effort high
 llmcf config set offline_mode true
+llmcf config set ai_cache_ttl 1h
+llmcf config set ai_cache_cost_limit 2.5
 ```
 
 Setzt eine deiner eigenen Einstellungen in config.yml. Jede Einstellung hier stellst du auch in **Datei >
@@ -3766,6 +3794,13 @@ schon haben, blockiert keine andere Änderung. Ein Schlüssel kommt nie auf die 
 darf, die lokale Laufzeit, der Schlüsselspeicher und das Update behalten ihre eigenen Befehle (`tools permissions`,
 `tools folders`, `ditto runtime ensure`, `ditto cache set`, `ditto auth storage`, `update`); das Fenster hat für jeden
 eine Seite.
+
+Dittos Cloud-Cache (**Datei > Einstellungen...**, Seite **Sprachmodell**, Abschnitt **Kontextfenster**, der Kasten
+**Cloud-Cache**; auch [ditto context cache](#ditto-context)): `ai_cache_ttl` ist `5m` (die Vorgabe) oder `1h`, die
+Lebensdauer von Claudes Prompt-Cache, direkt und über OpenRouter; `ai_cache_cost_limit` ist eine weiche Obergrenze in
+US-Dollar (Vorgabe 1,00, 0 schaltet sie aus) für die geschätzten Cache-Schreibvorgänge eines Gesprächs: Wird sie
+überschritten, kommt ein Hinweis, und das Caching geht weiter. Exit-Code 2 für einen anderen Wert. Nur du setzt sie;
+eine KI liest sie in `get_status`, ändert sie nie.
 
 ### config local-network
 

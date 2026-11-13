@@ -36,6 +36,7 @@ MOUSE_LABELS = {
     "btn_prompt_cache_apply": ("act_ditto_models_open", "prompt_cache.apply"),
     "btn_context_original": ("act_ditto_context_open", "context.original"),
     "btn_context_undo": ("act_ditto_context_open", "context.undo"),
+    "grp_cloud_cache": ("act_ditto_context_open", "cloud_cache.title"),
 }
 
 STEPS = (
@@ -99,6 +100,9 @@ STEPS = (
          target="btn_context_original"),
     Step("context.undo", cli="ditto context undo", person_only="permission", window="settings",
          target="btn_context_undo"),
+    # the cloud cache's lifetime and soft cap: the person's alone (an AI reads them in get_status)
+    Step("cloud_cache.set", cli="ditto context cache", person_only="permission", window="settings",
+         target="grp_cloud_cache"),
     Step("cache.auto", cli="ditto cache set", cli_args=("{name}", "auto"),
          params={"name": Param("choice", ("local_cache_ram_mib", "local_cache_keep_minutes"))},
          person_only="permission", window="ditto_models", target="btn_prompt_cache_apply"),
@@ -160,6 +164,11 @@ TEXTS = {
         "step.cache.auto.what": "Sets the prompt cache and the keep time of Ditto's local server back to auto: the "
                                 "values measured on this computer.",
         "step.cache.auto.why": "A saved value is above what this computer has to spare now.",
+        "step.cloud_cache.set": "Choose the cloud cache's lifetime and soft cap",
+        "step.cloud_cache.set.what": "Shows how the provider caches and this conversation's cache numbers; sets "
+                                     "Claude's cache lifetime (5 minutes or 1 hour) and the soft cap in US dollars.",
+        "step.cloud_cache.set.why": "The estimated cache writes of this conversation reached the soft cap; caching "
+                                    "goes on until you decide.",
         "step.context.original": "Read the original conversation of the newest compaction",
         "step.context.original.what": "Shows the conversation as it was before the newest compaction, with the "
                                       "summary Ditto continued with.",
@@ -226,6 +235,12 @@ TEXTS = {
         "step.cache.auto.what": "Setzt den Prompt-Cache und die Haltezeit von Dittos lokalem Server zurück auf auto: "
                                 "die Werte, die auf diesem Computer gemessen werden.",
         "step.cache.auto.why": "Ein gespeicherter Wert liegt über dem, was dieser Computer gerade übrig hat.",
+        "step.cloud_cache.set": "Lebensdauer und weiche Obergrenze des Cloud-Caches wählen",
+        "step.cloud_cache.set.what": "Zeigt, wie der Anbieter cacht, und die Cache-Zahlen dieses Gesprächs; setzt "
+                                     "die Lebensdauer von Claudes Cache (5 Minuten oder 1 Stunde) und die weiche "
+                                     "Obergrenze in US-Dollar.",
+        "step.cloud_cache.set.why": "Die geschätzten Cache-Schreibvorgänge dieses Gesprächs haben die weiche "
+                                    "Obergrenze erreicht; das Caching geht weiter, bis die Entscheidung fällt.",
         "step.context.original": "Das ursprüngliche Gespräch der neuesten Verdichtung lesen",
         "step.context.original.what": "Zeigt das Gespräch, wie es vor der neuesten Verdichtung war, mit der "
                                       "Zusammenfassung, mit der Ditto weitergemacht hat.",

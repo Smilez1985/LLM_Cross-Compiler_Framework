@@ -29,6 +29,7 @@ import os
 import re
 import tempfile
 import unicodedata
+from types import SimpleNamespace
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Type, Union
@@ -550,6 +551,13 @@ class ChatReply:
     # text keys with closed parameters (the chat panel's did lines in the Ditto console).
     budget: Any = None
     context_lines: List[Any] = field(default_factory=list)
+    # The cloud cache (llm/cloud_cache.py): the conversation's sums after this turn (CacheTally, kept by
+    # ChatHistory.apply), the turn's own numbers, and the did lines of the turn (the soft cap's line among them);
+    # cache_cap is True in the turn that crossed the person's ai_cache_cost_limit (a notice; caching goes on).
+    cache: Any = None
+    cache_turn: Any = None
+    cache_lines: List[Any] = field(default_factory=list)
+    cache_cap: bool = False
 
 
 # The transcript notice of a conversation summarized into a new one, by ChatReply.new_conversation_reason (the chat
@@ -598,6 +606,8 @@ class ChatHistory:
         # Every compaction, oldest first (version 4): id, at, reason, summary, the original messages (as saved), how
         # many messages of the conversation it made ("made") and whether the summary sits in the question's turn.
         self.compactions: List[Dict[str, Any]] = []
+        # The cloud cache's sums of this conversation (llm/cloud_cache.CacheTally as a dict; Clear chat clears them).
+        self.cache: Dict[str, Any] = {}
 
     @classmethod
     def in_state_dir(cls, state_dir: Path) -> "ChatHistory":
@@ -641,6 +651,8 @@ class ChatHistory:
                 self.transcript.append(TranscriptEntry.model_validate(entry))
             except ValidationError:
                 continue
+        cache = raw.get("cache")
+        self.cache = dict(cache) if isinstance(cache, dict) else {}
         compactions = raw.get("compactions")
         for record in compactions if isinstance(compactions, list) else []:
             if (isinstance(record, dict) and isinstance(record.get("messages"), list)
@@ -678,6 +690,8 @@ class ChatHistory:
                 "transcript": [t.model_dump() for t in self.transcript]}
         if self.compactions:
             data["compactions"] = self.compactions
+        if self.cache:
+            data["cache"] = self.cache
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=f".{self.path.name}.")
@@ -715,6 +729,8 @@ class ChatHistory:
             notice = NEW_CONVERSATION_NOTICES.get(reply.new_conversation_reason, NEW_CONVERSATION_NOTICES["long"])
             self.transcript.append(TranscriptEntry(role="notice", text=notice))
         self.tool_source = "local"
+        if reply.cache is not None:
+            self.cache = reply.cache.model_dump() if hasattr(reply.cache, "model_dump") else dict(reply.cache)
         self.messages.extend(reply.new_messages)
         self.transcript.append(TranscriptEntry(role="user", text=reply.question))
         for use in reply.tools:
@@ -1154,7 +1170,7 @@ class DittoCoder:
         return budget, groups
 
     def _summarize(self, client: LLMClient, messages: Sequence[Message], max_tokens: int = 2000,
-                   max_chars: int = 40000) -> str:
+                   max_chars: int = 40000, spent: Optional[List[Any]] = None) -> str:
         """A summary of the conversation for the start of a new one (a separate request; the conversation
         itself is not changed). `max_chars`: the end of the transcript that fits the window next to the summary
         (summary_chars)."""
@@ -1164,7 +1180,10 @@ class DittoCoder:
             Message.user("Summarize this conversation:\n" + wrap_untrusted(transcript, "conversation",
                                                                             max_len=max_chars))])
         try:
-            summary = client.chat(request).text.strip()
+            answer = client.chat(request)
+            if spent is not None:
+                spent.append(answer)   # its cache numbers count with the turn (llm/cloud_cache.py)
+            summary = answer.text.strip()
             if summary:
                 return summary
         except LLMError as e:
@@ -1215,6 +1234,28 @@ class DittoCoder:
         overhead = token_count.estimate(SUMMARY_SYSTEM, family) + 200   # the request's wrapping words and markers
         room = window.tokens - int(window.tokens * MARGIN_SHARE) - summary_tokens - int(overhead * factor)
         return int(max(0, room) * family.chars_per_token / max(factor, 0.5))
+
+    def _cache_turn(self, client: LLMClient, history: Optional["ChatHistory"], results: Sequence[Any]):
+        """The cloud cache after a turn (llm/cloud_cache.py): (the conversation's sums, the turn's numbers, the did
+        lines, whether the turn crossed the soft cap). The sums start from the conversation's own (`history.cache`);
+        crossing ai_cache_cost_limit is told once per conversation and limit, and caching goes on."""
+        from orchestrator.llm.cloud_cache import CacheTally, cache_way, cap_crossed, cost_limit, turn_lines
+        before = CacheTally.read_from(getattr(history, "cache", None)) if history is not None else CacheTally()
+        after, turn, way, model = before, CacheTally(), "none", ""
+        catalog = getattr(client, "catalog", None)
+        for result in results:
+            usage = getattr(result, "usage", None)
+            if usage is None:
+                continue
+            model = str(getattr(result, "model", "") or "")
+            preset = catalog.get(getattr(result, "provider", "")) if catalog is not None else None
+            way = cache_way(preset, model) if preset is not None else way
+            turn, after = turn.plus(usage, model), after.plus(usage, model)
+        limit = cost_limit(SimpleNamespace(get=self._cfg))
+        crossed = cap_crossed(before, after, limit)
+        if crossed:
+            after = after.model_copy(update={"cap_told": limit})
+        return after, turn, turn_lines(way, turn, after, limit, crossed, model), crossed
 
     def _tool_specs(self, registry):
         if registry is None:
@@ -1313,6 +1354,7 @@ class DittoCoder:
         context_lines: List[Any] = []
         compaction: Optional[Dict[str, Any]] = None
         kept: List[Message] = []
+        spent: List[Any] = []   # the summary call's answer, for the cloud cache's numbers
         # Without tools Ditto cannot search the knowledge base itself, so matching excerpts come along (R5: their
         # tokens are counted with the turn and cut to its share).
         excerpts = "" if tools else self._knowledge(question)
@@ -1334,7 +1376,7 @@ class DittoCoder:
             older, kept = list(earlier[:cut]), [m.model_copy() for m in earlier[cut:]]
             summary_limit = budget.summary_tokens or max(256, min(2000, budget.room // 4))   # R7: the same limit
             summary = self._summarize(client, older, max_tokens=summary_limit,
-                                      max_chars=self._summary_chars(client, window, summary_limit))
+                                      max_chars=self._summary_chars(client, window, summary_limit), spent=spent)
             summary_block = _text_block(SUMMARY_LEAD + wrap_untrusted(summary, "conversation summary"))
             if kept:
                 first = kept[0]
@@ -1395,8 +1437,10 @@ class DittoCoder:
         elif not text:
             text = "(Ditto gave no answer.)"
         last = results[-1] if results else None
+        cache, cache_turn, cache_lines, cache_cap = self._cache_turn(client, history, [*spent, *results])
         return ChatReply(question=question, text=text, new_messages=[*repairs, user_turn, *new],
                          new_conversation=new_conversation, tools=uses, stop=stop,
                          provider=getattr(last, "provider", ""), model=getattr(last, "model", ""), usage=usage,
                          source_changed=source_changed, new_conversation_reason=reason if new_conversation else "",
-                         kept_messages=kept, compaction=compaction, budget=budget, context_lines=context_lines)
+                         kept_messages=kept, compaction=compaction, budget=budget, context_lines=context_lines,
+                         cache=cache, cache_turn=cache_turn, cache_lines=cache_lines, cache_cap=cache_cap)

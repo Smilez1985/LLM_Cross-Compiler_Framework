@@ -874,6 +874,15 @@ class ChatPanel(QWidget):
         for key, params in getattr(reply, "context_lines", None) or ():
             # What the turn's budget compacted or cut (llm/context_budget.py): a did line of Ditto's in the console.
             self._post("ai_action", self._ditto_sender(), text_key=key, params=dict(params))
+        for key, params in getattr(reply, "cache_lines", None) or ():
+            # The turn's cloud cache numbers and the soft cap (llm/cloud_cache.py): did lines in the Ditto console.
+            self._post("ai_action", self._ditto_sender(), text_key=key, params=dict(params))
+        if getattr(reply, "cache_cap", False) and reply.cache is not None:
+            # The soft cap was crossed: the person decides; caching goes on.
+            from orchestrator.llm.cloud_cache import dollars
+            self.post_notice("chat.notice.cache_cap", {"cost": dollars(reply.cache.cost_usd),
+                                                       "limit": dollars(float(reply.cache.cap_told or 0))},
+                             level="warning")
         if reply.text:
             self._post("ditto_answer", self._ditto_sender(), ai_text=reply.text, ai_text_kind="answer",
                        announce_row=True)

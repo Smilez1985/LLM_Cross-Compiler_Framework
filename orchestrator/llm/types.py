@@ -115,7 +115,8 @@ class ChatRequest(BaseModel):
     effort: Optional[Effort] = None
     task: Task = "chat"
     cache: bool = True
-    cache_ttl: Literal["5m", "1h"] = "5m"
+    # The cache lifetime of Claude's cache points (llm/cloud_cache.py); None: the person's ai_cache_ttl (LLMClient.chat)
+    cache_ttl: Optional[Literal["5m", "1h"]] = None
     model: Optional[str] = None  # overrides the configured model for this one call
     cache_probe: Optional[CacheProbe] = None  # evaluation only (CacheProbe)
 
@@ -125,6 +126,7 @@ class Usage(BaseModel):
     output_tokens: int = 0
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    cache_write_1h_tokens: int = 0   # the part of cache_write_tokens written for 1 hour (Anthropic's cache_creation)
 
     def __add__(self, other: "Usage") -> "Usage":
         return Usage(**{k: getattr(self, k) + getattr(other, k) for k in type(self).model_fields})

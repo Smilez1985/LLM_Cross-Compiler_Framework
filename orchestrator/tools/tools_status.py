@@ -200,10 +200,32 @@ class ContextWindowOut(BaseModel):
     model: str = ""
 
 
+class CloudCacheOut(BaseModel):
+    """The cloud cache of Ditto's chat model (llm/cloud_cache.py), read-only: the lifetime and the soft cap are the
+    person's (ai_cache_ttl, ai_cache_cost_limit); an AI never changes them."""
+    way: str = Field(description="breakpoints (Claude: cache points on the system text and the newest block), "
+                                 "openrouter_breakpoints (an anthropic/ model through OpenRouter), automatic (the "
+                                 "provider caches a stable prefix by itself) or none (no cloud cache)")
+    ttl: str = Field(description="ai_cache_ttl: 5m or 1h; applies only where cache points are sent")
+    ttl_applies: bool = False
+    cost_limit_usd: float = Field(description="ai_cache_cost_limit: soft cap on the estimated cache writes of one "
+                                              "conversation; crossing it brings a notice, caching goes on; 0 = off")
+    min_tokens: Optional[int] = Field(default=None, description="The model's minimum cacheable prompt length")
+    read_tokens: int = 0
+    written_tokens: int = 0
+    uncached_tokens: int = 0
+    write_cost_usd: float = Field(default=0.0, description="Estimated cost of this conversation's priced cache writes")
+    unpriced_written_tokens: int = 0
+    cap_reached: bool = False
+
+
 class AiAccessSection(BaseModel):
     providers: List[ProviderAccess] = Field(default_factory=list)
     context_window: Optional[ContextWindowOut] = Field(default=None, description="Ditto's chat model's window, from "
                                                        "what is known already (no request is sent for it)")
+    cloud_cache: Optional[CloudCacheOut] = Field(default=None, description="How Ditto's chat model's provider caches, "
+                                                 "the person's lifetime and soft cap, and the saved conversation's "
+                                                 "cache numbers (no request is sent for it)")
     hf_token_stored: bool
     how_to_sign_in: str = ("The person signs in in the GUI's sign-in panel or with 'llm-cli ditto login'; a Hugging "
                            "Face token with 'llm-cli secrets set hf_token'. Keys never pass through an AI.")
@@ -574,6 +596,11 @@ def ai_access_section(framework, sign_in_factory: Callable[[], Any]) -> AiAccess
     except Exception:  # noqa: BLE001 - the window is a fact for reading; without it the section stays
         pass
     try:
+        if ditto is not None:
+            section.cloud_cache = cloud_cache_out(framework, ditto)
+    except Exception:  # noqa: BLE001 - a fact for reading; without it the section stays
+        pass
+    try:
         statuses = sign_in_factory().status_all(check=False)
     except Exception:  # noqa: BLE001
         return section
@@ -585,6 +612,21 @@ def ai_access_section(framework, sign_in_factory: Callable[[], Any]) -> AiAccess
         section.providers.append(ProviderAccess(provider=str(st.provider), label=str(st.label), state=str(st.state),
                                                 primary=bool(st.primary), method=st.method, source=kind))
     return section
+
+
+def cloud_cache_out(framework, ditto) -> CloudCacheOut:
+    """The cloud cache facts for get_status: the chat target from the settings, the sums of the saved conversation."""
+    from orchestrator.Core.ditto_context import cloud_cache_view
+    from orchestrator.Core.ditto_manager import ChatHistory
+    from orchestrator.runtime.profile import default_state_dir
+    config = getattr(framework, "config", None)
+    history = ChatHistory.in_state_dir(Path(getattr(config, "user_state_dir", None) or default_state_dir()))
+    view = cloud_cache_view(ditto, history, config if config is not None else getattr(ditto, "config", None))
+    t = view.totals
+    return CloudCacheOut(way=view.way, ttl=view.ttl, ttl_applies=view.ttl_applies, cost_limit_usd=view.cost_limit,
+                         min_tokens=view.min_tokens, read_tokens=t.read, written_tokens=t.written,
+                         uncached_tokens=t.uncached, write_cost_usd=round(t.cost_usd, 6),
+                         unpriced_written_tokens=t.unpriced_written, cap_reached=view.cap_reached)
 
 
 def audit_section(registry, caller: str) -> AuditSection:

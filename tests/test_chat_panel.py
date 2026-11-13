@@ -1231,3 +1231,21 @@ def test_a_conversation_of_the_removed_remote_mode_starts_anew_with_its_own_tool
     shown = panel.feed_view.plain_text()
     assert "Ditto now uses its own tools: a new conversation." in shown
     assert "together" not in shown and "build box" not in shown
+
+
+def test_the_chat_panel_posts_the_did_lines_and_the_cap_notice(qapp, make_panel, feed):
+    from orchestrator.Core.ditto_console import line_of_feed
+    from orchestrator.Core.ditto_manager import ChatReply
+    from orchestrator.llm import cloud_cache as cc
+    panel = make_panel(feed)
+    total = cc.CacheTally(calls=3, written=600_000, written_1h=600_000, cost_usd=4.8, cap_told=3.0)
+    lines = cc.turn_lines("breakpoints", cc.CacheTally(calls=1, read=3000, written=60, uncached=10), total, 3.0, True)
+    panel._on_ai_response(ChatReply(question="q", text="Hello.", new_messages=[], cache=total, cache_lines=lines,
+                                    cache_cap=True))
+    shown = panel.feed_view.plain_text()
+    assert "soft cap of 3.00 USD. Caching goes on." in shown
+    did = [line_of_feed(stored) for stored in feed.page(limit=50).entries]
+    texts = [line.text for line in did if line is not None and line.kind == "did"]
+    assert any("Cache: 3000 tokens read" in text for text in texts)
+    assert any("reached about 4.80 USD" in text for text in texts)
+    assert panel.history.cache["cap_told"] == 3.0, "the sums go with the conversation"

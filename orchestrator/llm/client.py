@@ -528,6 +528,12 @@ class LLMClient:
                 self.logger.info(f"{target.provider}: {type(e).__name__}, retry {attempt}/{MAX_RETRIES} in {wait:.1f}s")
                 self.sleep(wait)
 
+    def cache_ttl(self) -> str:
+        """The person's ai_cache_ttl for Claude's cache points (llm/cloud_cache.py): "5m" (the default) or "1h"."""
+        from orchestrator.llm.cloud_cache import DEFAULT_TTL, TTL_SETTING, TTLS
+        value = str(self._setting(TTL_SETTING, DEFAULT_TTL) or DEFAULT_TTL).strip().lower()
+        return value if value in TTLS else DEFAULT_TTL
+
     def token_calibration(self):
         """The calibration of the token estimate (llm/token_count.Calibration), kept in this user's state folder."""
         if getattr(self, "_calibration", None) is None:
@@ -558,6 +564,8 @@ class LLMClient:
         effort = self._effort(request)
         if effort and effort != request.effort:
             request = request.model_copy(update={"effort": effort})
+        if request.cache_ttl is None:
+            request = request.model_copy(update={"cache_ttl": self.cache_ttl()})
         primary = self.resolve(request.task, model=request.model)
         targets: List[Any] = [primary, *(self.fallback_targets(request.task) if fallback else ())]
         last_error: Optional[LLMError] = None

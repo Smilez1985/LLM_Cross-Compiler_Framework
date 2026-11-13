@@ -4793,6 +4793,13 @@ def ditto_ask(ctx: FrameworkContext, question: str, no_tools: bool, provider: Op
     except DittoError as e:   # may quote the provider's or a tool's text
         err.print(f"[red]{escape(_printable(e))}[/red]")
         sys.exit(1)
+    from orchestrator.Core.chat_feed import feed_text
+    for key, params in getattr(reply, "cache_lines", None) or ():   # the turn's cloud cache numbers (framework's words)
+        err.print(f"[dim]{escape(feed_text(key, 'en', **params))}[/dim]")
+    if getattr(reply, "cache_cap", False):   # the soft cap: the person decides, caching goes on
+        from orchestrator.utils.next_steps import NextStep, render
+        for line in render([NextStep("cloud_cache.set")], "cli", "en", channel="cli").splitlines():
+            err.print(escape(line))
     click.echo(_printable(reply.text))
 
 
@@ -4932,6 +4939,45 @@ def ditto_context_undo(ctx: FrameworkContext, yes: bool):
         console.print("[red]The conversation could not be saved.[/red]")
         sys.exit(1)
     console.print("[green]Undone: the original conversation is back.[/green]")
+
+
+@ditto_context.command('cache')
+@click.option('--ttl', type=click.Choice(['5m', '1h']), default=None,
+              help="Lifetime of Claude's prompt cache (directly and through OpenRouter); 5m is the default")
+@click.option('--cost-limit', type=click.FloatRange(0, 100000), default=None,
+              help='Soft cap in US dollars on the estimated cache writes of one conversation (0: no notice)')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def ditto_context_cache(ctx: FrameworkContext, ttl: Optional[str], cost_limit: Optional[float], as_json: bool):
+    """The cloud cache: how the chat model's provider caches, the lifetime, the soft cap and this conversation's
+    cache numbers; --ttl and --cost-limit set them (the person's settings ai_cache_ttl and ai_cache_cost_limit)"""
+    from orchestrator.Core.ditto_context import cloud_cache_view
+    ditto = _context_ditto(ctx)
+    config, _ = _settings(ctx)
+    if ttl is not None or cost_limit is not None:
+        _set_cloud_cache(config, ttl, cost_limit)
+    view = cloud_cache_view(ditto, _chat_history(ctx), config)
+    if as_json:
+        click.echo(json.dumps(view.model_dump(), indent=2, sort_keys=True))
+        return
+    for line in view.lines():
+        console.print(escape(line))
+
+
+def _set_cloud_cache(config: Any, ttl: Optional[str], limit: Optional[float]) -> None:
+    """ai_cache_ttl and ai_cache_cost_limit through their one writer (llm/cloud_cache.set_cache_settings)."""
+    from orchestrator.llm.cloud_cache import LIMIT_SETTING, TTL_SETTING, set_cache_settings
+    try:
+        saved = set_cache_settings(config, ttl, limit)
+    except ValueError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+    if not saved:
+        console.print("[red]The cloud cache settings could not be saved to config.yml.[/red]")
+        sys.exit(1)
+    for key, given in ((TTL_SETTING, ttl), (LIMIT_SETTING, limit)):
+        if given is not None:
+            console.print(f"[green]{key}: {escape(str(config.get(key)))}[/green]")
 
 
 @ditto.command('eval')
@@ -11253,8 +11299,9 @@ def show_config(ctx: FrameworkContext):
 # also set in File > Settings.... A key is never set here: llm-cli ditto login.
 CONFIG_SET_AI_KEYS = ("ai_provider", "ai_model", "ai_base_url", "ai_anthropic_workspace_id", "ai_effort",
                       "ai_security_level", "ai_fallback_chain", "offline_mode", "enable_rag_knowledge")
+CONFIG_SET_CACHE_KEYS = ("ai_cache_ttl", "ai_cache_cost_limit")   # Claude's cache lifetime and the soft cost cap
 CONFIG_SET_KEYS = ("framework_mode", "default_enable_imatrix", "default_calibration_dataset", "calibration_language",
-                   "language", "form_of_address") + CONFIG_SET_AI_KEYS
+                   "language", "form_of_address") + CONFIG_SET_AI_KEYS + CONFIG_SET_CACHE_KEYS
 
 
 @config.command('set')
@@ -11278,11 +11325,20 @@ def config_set(ctx: FrameworkContext, key: str, value: str):
     Ditto's AI settings (File > Settings..., Ditto), checked by the same rules as the window: ai_provider (a provider
     id; sign in first with llm-cli ditto login PROVIDER), ai_model, ai_base_url, ai_anthropic_workspace_id, ai_effort
     (low, medium, high, max or ''), ai_security_level, ai_fallback_chain ('provider[:model], ...' or ''),
-    offline_mode and enable_rag_knowledge (true or false). A key never goes on the command line."""
+    offline_mode and enable_rag_knowledge (true or false). A key never goes on the command line.
+
+    Ditto's cloud cache (File > Settings..., Language model > Context window; llm-cli ditto context cache):
+    ai_cache_ttl 5m (the default) or 1h, the lifetime of Claude's prompt cache; ai_cache_cost_limit, a soft cap in US
+    dollars on the estimated cache writes of one conversation (a notice; caching goes on; 0 = no notice)."""
     from orchestrator.Core.config_manager import (BUILD_DEFAULT_SETTINGS, PERSON_LANGUAGE_SETTINGS, framework_mode,
                                                   set_framework_mode)
     if key in CONFIG_SET_AI_KEYS:
         _config_set_ai(ctx, key, value)
+        return
+    if key in CONFIG_SET_CACHE_KEYS:
+        config, _ = _settings(ctx)
+        _set_cloud_cache(config, value if key == "ai_cache_ttl" else None,
+                         value if key == "ai_cache_cost_limit" else None)
         return
     config, resolve = _settings(ctx)
     if key in BUILD_DEFAULT_SETTINGS:
