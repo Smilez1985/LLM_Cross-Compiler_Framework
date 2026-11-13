@@ -533,6 +533,9 @@ class ConfigManager:
             ConfigSchema("ai_cache_cost_limit", float, False, 1.0, "Soft cap in US dollars on the estimated cache "
                          "writes of one Ditto conversation: crossing it brings a notice, caching goes on; 0 = no "
                          "notice", ["min:0", "max:100000"]),
+            ConfigSchema("ditto_archive_security", str, False, "mid", "How many independent sources (different "
+                         "domains) Ditto needs to confirm an entry of its archive by itself: low 3, mid 5, high 7. "
+                         "Only the person sets it", ["regex:^(low|mid|high)$"]),
             ConfigSchema("enable_telemetry", bool, False, False, "Allow anonymous error reporting (GitHub Issues)"),
             ConfigSchema("offline_mode", bool, False, False, "Force offline mode (no external APIs)"),
             # Private mode is the default, enterprise mode optional (the person's choice; an AI reads it, never
@@ -826,6 +829,7 @@ class ConfigManager:
                 "trash_retention_days", "output_dir",
                 "ai_provider", "ai_model", "ai_base_url", "ai_effort", "ai_fallback_chain",
                 "ai_anthropic_workspace_id", "ai_context_window", "ai_cache_ttl", "ai_cache_cost_limit",
+                "ditto_archive_security",
                 # v2.0
                 "chat_context_limit", "enable_telemetry", "offline_mode",
                 "offline_local_vpns", "offline_local_hosts", "offline_local_ranges",

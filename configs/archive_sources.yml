@@ -1,0 +1,44 @@
+# What Ditto's archive treats as a source (read by orchestrator/utils/archive_sources.py and
+# orchestrator/Core/archive_extractors.py; docs/DESIGN.md, Ditto, the archive's rows).
+#
+# listen     the tools whose successful results the archive is offered (an extractor per tool decides whether an entry
+#            comes of it; a tool that is not listed here teaches the archive nothing).
+# suffixes   public suffixes of two parts (co.uk, com.cn, ...): a host below one of them is a different site from its
+#            neighbour, so its registrable domain has three labels. A small table, not the whole public suffix list;
+#            a missing one makes two sites of that suffix count as one source, never as two.
+# vendors    one row per manufacturer whose website counts as the ground "vendor": its name, the registrable domains
+#            of its websites and the target ids (targets/<id>) it speaks for. A new vendor is a row, not code.
+
+version: 1
+
+listen:
+  - get_artifact_details
+  - search_knowledge
+  - read_knowledge_source
+
+suffixes:
+  - ac.uk
+  - co.jp
+  - co.kr
+  - co.uk
+  - com.au
+  - com.br
+  - com.cn
+  - com.hk
+  - com.tw
+  - edu.cn
+  - gov.cn
+  - net.cn
+  - org.cn
+  - org.uk
+
+vendors:
+  - vendor: Radxa
+    domains: [radxa.com]
+    targets: [Rockchip]
+  - vendor: Rockchip
+    domains: [rock-chips.com]
+    targets: [Rockchip]
+  - vendor: Orange Pi
+    domains: [orangepi.org]
+    targets: [Rockchip]

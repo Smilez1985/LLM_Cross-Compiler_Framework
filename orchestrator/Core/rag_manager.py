@@ -428,6 +428,7 @@ class RAGManager:
         self.storage_format = ""  # qdrant-edge, old-local or server, once opened
         self.storage_reason = ""  # why the old local storage is still in use (its conversion failed)
         self._store: Optional["KnowledgeStore"] = None
+        self._alias_stores: Dict[str, "KnowledgeStore"] = {}   # other collections of the same storage (Ditto's archive)
         self._embedder = embedder
         self._sparse = sparse_embedder
         self.model_reason = "provided by the caller" if embedder is not None else ""
@@ -722,9 +723,36 @@ class RAGManager:
                              f"model {store.model_id} ({self.model_reason})")
             return store
 
-    def _with_store(self, operation: Callable[["KnowledgeStore"], Any]) -> Any:
+    def _alias_store(self, main: "KnowledgeStore", alias: str) -> "KnowledgeStore":
+        """The collection `alias` of the same storage, for the same embedding model as the knowledge base itself (Ditto's
+        archive, DESIGN round 92): opened like the knowledge base's own, with the same store class on the same client,
+        and kept until the storage is released."""
+        store = self._alias_stores.get(alias)
+        if store is None:
+            store = type(main)(self.client, alias, main.model_id, main.dim, server_mode=main.server_mode)
+            store.ensure()
+            self._alias_stores[alias] = store
+        return store
+
+    def with_collection(self, alias: str, operation: Callable[["KnowledgeStore"], Any]) -> Any:
+        """Runs `operation` on the collection `alias` of the knowledge base's storage (opened on first use, with the
+        embedding model the knowledge base uses). The same lock, errors and idle release as every other operation."""
+        return self._with_store(operation, alias)
+
+    def models(self) -> Tuple[DenseEmbedder, SparseEmbedder]:
+        """The embedding model and the keyword model the storage is opened with (loaded on first use)."""
+        return self._models()
+
+    def _with_store(self, operation: Callable[["KnowledgeStore"], Any], alias: str = COLLECTION_NAME) -> Any:
         with self._lock:
             store = self._ensure_store()
+            if alias != COLLECTION_NAME:
+                try:
+                    store = self._alias_store(store, alias)
+                except KnowledgeBaseError:
+                    raise
+                except Exception as e:
+                    raise KnowledgeBaseError(f"Could not open the collection {alias}: {redact_secrets(str(e))}") from e
             try:
                 return operation(store)
             except KnowledgeBaseError:
@@ -759,6 +787,7 @@ class RAGManager:
             except Exception:
                 pass
         self.client, self._store, self._connected = None, None, False
+        self._alias_stores = {}
         self._release_file_lock()
 
     def _release_file_lock(self) -> None:
