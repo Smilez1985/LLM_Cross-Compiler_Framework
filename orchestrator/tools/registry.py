@@ -601,6 +601,41 @@ def _reported_reads() -> frozenset:
     return REPORTED_READ_TOOLS
 
 
+class ResultObservers:
+    """The registry's second observer interface (DESIGN round 93): after a call of any caller (Ditto's turn, an MCP
+    client, the CLI) ended ok, each subscriber hears the tool's name, its typed input and its typed result. Unlike
+    RegistryEvents, which carries framework facts only (names, ids, reason codes, never results), this one hands over
+    the result model itself, so a subscriber reads typed fields and never text; Ditto's archive is the one subscriber
+    today (Core/archive_recorder.py). A subscriber that raises is logged and skipped; emitting never blocks, changes
+    or fails a call, so a subscriber that has more to do hands the work to its own thread."""
+
+    def __init__(self):
+        self._subscribers: List[Callable[[str, Any, Any], None]] = []
+        self._lock = threading.Lock()
+        self.logger = get_logger("ToolRegistry")
+
+    def subscribe(self, callback: Callable[[str, Any, Any], None]) -> Callable[[], None]:
+        """Calls `callback(tool, inp, result)` after every call that ended ok from now on; returns the function that
+        unsubscribes."""
+        with self._lock:
+            self._subscribers.append(callback)
+
+        def unsubscribe() -> None:
+            with self._lock:
+                if callback in self._subscribers:
+                    self._subscribers.remove(callback)
+        return unsubscribe
+
+    def emit(self, tool: str, inp: Any, result: Any) -> None:
+        with self._lock:
+            subscribers = list(self._subscribers)
+        for callback in subscribers:
+            try:
+                callback(tool, inp, result)
+            except Exception as e:  # noqa: BLE001 - an observer never fails a call
+                self.logger.warning(f"A result subscriber failed for {tool}: {redact_secrets(str(e))}")
+
+
 class RegistryEvents:
     """The registry's observer interface (no-op until something subscribes): the producers of the chat feed subscribe
     here instead of editing the registry. A subscriber that raises is logged and skipped; emitting never changes or
@@ -730,6 +765,7 @@ class ToolRegistry:
         self._failures: "OrderedDict[tuple, Dict[str, Any]]" = OrderedDict()
         self._sessions: "OrderedDict[tuple, Dict[str, int]]" = OrderedDict()
         self.events = RegistryEvents()  # observers (the chat feed's producers); nothing listens by default
+        self.results = ResultObservers()  # the typed results of finished calls (Ditto's archive); nothing listens by default
 
     def register(self, spec: ToolSpec) -> ToolSpec:
         if spec.grant is not None and spec.name in NEVER_GRANT:
@@ -1801,6 +1837,7 @@ class ToolRegistry:
             self.limiter.add(("day", ctx.actor, spec.name), DAY)
         serialized = result.model_dump_json()
         end("ok", result={"sha256": text_sha256(serialized), "bytes": len(serialized.encode("utf-8"))})
+        self.results.emit(spec.name, inp, result)   # never fails or changes the finished call
         if writes or spec.name in _reported_reads():
             # The observers (the chat feed's producer) hear of a call that changed something: who, which tool, the
             # turn's channel and the ids it issued. Emitting never changes or fails the finished call.

@@ -120,6 +120,8 @@ class FrameworkManager:
         self.tool_registry = None
         self.chat_feed = None  # Core.chat_feed.FeedStore: what arrives in the chat panel
         self.activity = None  # Core.activity.ActivityProducer: what Ditto and AI apps do, as rows of the chat feed
+        self.ditto_archive = None  # Core.ditto_archive.DittoArchive: what Ditto learned (made with the recorder below)
+        self.archive_recorder = None  # Core.archive_recorder.ArchiveRecorder: offers tool results to the archive
         self.updater: Optional[UpdateManager] = None
 
         self._initialized = False
@@ -233,6 +235,14 @@ class FrameworkManager:
             except Exception as e:
                 self.activity = None
                 self.logger.error(f"AI activity is not shown in the chat (it stays in the audit log): {e}")
+            # What tool calls of every caller teach Ditto's archive (Core/archive_recorder.py): green-tested artifact
+            # builds and a manufacturer's own pages; queued, never slowing or changing a call.
+            try:
+                from orchestrator.Core.archive_recorder import attach_archive
+                self.archive_recorder = attach_archive(self)
+            except Exception as e:
+                self.archive_recorder = None
+                self.logger.error(f"Ditto's archive does not learn from tool results: {e.__class__.__name__}")
             # Every build end of this process to the person's MQTT broker (Core/doorbell.py); nothing is sent until
             # the person sets one, and a broker that is down never blocks a build.
             try:
@@ -331,6 +341,7 @@ class FrameworkManager:
             "tool_registry": self.tool_registry,
             "chat_feed": self.chat_feed,
             "activity": self.activity,
+            "ditto_archive": self.ditto_archive,
             "docker_client": getattr(getattr(self.docker_manager, "builder", None), "docker_client", None)
         }
         return components.get(name)
@@ -338,6 +349,8 @@ class FrameworkManager:
     def shutdown(self):
         """Graceful Shutdown."""
         self.logger.info("Shutting down Framework...")
+        if self.archive_recorder is not None:  # what is queued is offered to the archive first
+            self.archive_recorder.close()
         if self.rag_manager is not None:
             self.rag_manager.close()  # releases the lock on the embedded knowledge base storage
         approvals = getattr(self.tool_registry, "approvals", None)
