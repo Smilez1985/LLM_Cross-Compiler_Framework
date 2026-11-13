@@ -428,7 +428,8 @@ jobs:
         run: python -m pytest -ra tests/test_qt_free_core.py tests/test_lazy_loading.py
 
       - name: Run the non-GUI suite
-        run: python -m pytest -ra --junitxml=test-results-headless.xml
+        # on every core, like the GUI jobs on Linux: serially it had grown past the job's limit of 30 minutes
+        run: python -m pytest -ra --junitxml=test-results-headless.xml -n auto
 
       - name: Upload test results
         if: always()

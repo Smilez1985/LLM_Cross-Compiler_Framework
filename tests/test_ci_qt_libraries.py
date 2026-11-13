@@ -44,6 +44,7 @@ def test_linux_runs_the_suite_on_every_core_and_a_failed_report_upload_never_fai
     text = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     test_job = _job(text, "test")
     assert "--junitxml=test-results.xml ${{ runner.os == 'Linux' && '-n auto' || '' }}" in test_job
+    assert "--junitxml=test-results-headless.xml -n auto" in _job(text, "test-headless"), "the non-GUI suite too"
     uploads = re.findall(r"- name: Upload test results\n(?:\s+#[^\n]*\n)*?\s+if: always\(\)\n(?:\s+#[^\n]*\n)*"
                          r"\s+continue-on-error: true", text)
     assert len(uploads) == text.count("- name: Upload test results") == 2

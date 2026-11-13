@@ -85,14 +85,18 @@ jobs:
         # version-specific pins are audited too, not only those matching this Linux runner.
         # A package pinned differently per Python version (e.g. numpy) goes to a second file,
         # because pip-audit rejects duplicate names in one requirements file.
+        # One finding is ignored, for a reason: CVE-2026-126190 in Soup Sieve before 4.0 (polynomial time of the
+        # descendant combinator on deeply nested pages). Soup Sieve 4.0 needs Python 3.11.5, so the pin for older 3.11
+        # (Debian 12 brings 3.11.2) stays 2.10; llmcf itself never runs a CSS selector, it looks elements up with
+        # Beautiful Soup's find(), and tests/test_no_css_selectors.py keeps it so (docs/DESIGN.md, Supply chain).
         run: |
           grep -E '^[A-Za-z0-9]' requirements-gui.txt \
             | sed -E 's/[[:space:]]*;.*$//; s/[[:space:]]*\\$//' \
             | awk -F'==' -v main="$RUNNER_TEMP/req-main.txt" -v dups="$RUNNER_TEMP/req-dups.txt" \
                 '{ if (seen[$1]++) print > dups; else print > main }'
-          pip-audit --requirement "$RUNNER_TEMP/req-main.txt" --no-deps --disable-pip --desc on
+          pip-audit --requirement "$RUNNER_TEMP/req-main.txt" --no-deps --disable-pip --desc on --ignore-vuln CVE-2026-126190
           if [ -s "$RUNNER_TEMP/req-dups.txt" ]; then
-            pip-audit --requirement "$RUNNER_TEMP/req-dups.txt" --no-deps --disable-pip --desc on
+            pip-audit --requirement "$RUNNER_TEMP/req-dups.txt" --no-deps --disable-pip --desc on --ignore-vuln CVE-2026-126190
           fi
 
       - name: Audit dev tools

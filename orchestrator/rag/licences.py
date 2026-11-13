@@ -548,18 +548,26 @@ def _licenses_the_page(tag) -> bool:
     return in_footer or bool(_LICENSING.search(context))
 
 
-_FILE_VIEWS = ("textarea#read-only-cursor-text-area", "[data-testid=read-only-cursor-text-area]",
-               "article.markdown-body", "[itemprop=text]", "table.highlight", "pre")
+# The file's own view on a page, tried in this order, each the first match in the document: a textarea with that id,
+# an element with that data-testid, an article of class markdown-body, an element with itemprop "text", a table of
+# class highlight, a pre. Looked up with Beautiful Soup's find(), never a CSS selector: llmcf never calls Soup Sieve,
+# whose descendant combinator takes polynomial time on deeply nested untrusted pages (CVE-2026-126190, fixed in 4.0,
+# which needs Python 3.11.5; Debian 12 brings 3.11.2).
+_FILE_VIEWS = (
+    {"name": "textarea", "attrs": {"id": "read-only-cursor-text-area"}},
+    {"attrs": {"data-testid": "read-only-cursor-text-area"}},
+    {"name": "article", "class_": "markdown-body"},
+    {"attrs": {"itemprop": "text"}},
+    {"name": "table", "class_": "highlight"},
+    {"name": "pre"},
+)
 
 
 def _file_text(soup) -> str:
     """The text of a file shown on a page (a repository's licence file): the file's own view when the page has one,
     otherwise the whole page."""
-    for selector in _FILE_VIEWS:
-        try:
-            view = soup.select_one(selector)
-        except Exception:  # noqa: BLE001 - a selector the parser does not support finds nothing
-            view = None
+    for view_of in _FILE_VIEWS:
+        view = soup.find(**view_of)
         if view is not None and view.get_text(strip=True):
             return view.get_text("\n")
     return soup.get_text("\n")
