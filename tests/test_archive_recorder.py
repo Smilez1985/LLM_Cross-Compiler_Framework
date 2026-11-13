@@ -111,11 +111,39 @@ class TestPageExtractor:
         one = SimpleNamespace(source=SimpleNamespace(source=VENDOR_PAGE, title=""))
         assert len(from_pages(one, context)) == 1
 
+    def test_chips_are_named_beside_the_targets_or_alone(self, context):
+        vendors = [{"vendor": "Chip Maker", "domains": ["chipmaker.com"], "chips": ["Hailo-8", "X 1; drop"]},
+                   {"vendor": "Both Maker", "domains": ["bothmaker.com"], "targets": ["Rockchip"], "chips": ["RK3588"]},
+                   {"vendor": "Nothing", "domains": ["nothing.com"]}]
+        shipped = ExtractContext(dict(context.table, vendors=vendors), capabilities)
+        found = from_pages(self.result(("https://chipmaker.com/x", ""), ("https://bothmaker.com/y", ""),
+                                       ("https://nothing.com/z", "")), shipped)
+        assert [c.text for c in found] == [
+            "Chip Maker's own website has a page at https://chipmaker.com/x, a manufacturer source for chips Hailo-8.",
+            "Both Maker's own website has a page at https://bothmaker.com/y, a manufacturer source for target Rockchip "
+            "and for chips RK3588."]
+
+    def test_the_shipped_table_names_every_vendor_the_maintainer_asked_for(self):
+        from orchestrator.Core.archive_extractors import _WORD
+        table = archive_sources.load_table()
+        rows = {row["vendor"]: row for row in table["vendors"]}
+        for name in ("Hailo", "Axelera AI", "SunFounder", "NVIDIA", "AMD", "Apple", "Banana Pi", "CIX", "Radxa",
+                     "Rockchip", "Orange Pi"):
+            assert name in rows, name
+        domains = [d for row in rows.values() for d in row["domains"]]
+        assert len(domains) == len(set(domains))
+        for name, row in rows.items():
+            assert row.get("targets") or row.get("chips"), name           # a row says what it speaks for
+            for domain in row["domains"]:
+                assert archive_sources.registrable_domain(domain) == domain, (name, domain)
+            assert all(_WORD.match(c) for c in row.get("chips", [])), name
+        assert "RK3588" in rows["Banana Pi"]["chips"] and "SpacemiT-K1" in rows["Banana Pi"]["chips"]
+
     def test_the_shipped_table_knows_radxa(self):
         table = archive_sources.load_table()
         shipped = ExtractContext(table, capabilities)
         (candidate,) = from_pages(self.result(("https://docs.radxa.com/en/rock5/rock5b", "Rock 5B")), shipped)
-        assert candidate.key.startswith("vendor_page:Radxa/") and "target Rockchip" in candidate.text
+        assert candidate.key.startswith("vendor_page:Radxa/") and "target Rockchip and for chips RK3588, CD8180." in candidate.text
 
 
 class TestTable:

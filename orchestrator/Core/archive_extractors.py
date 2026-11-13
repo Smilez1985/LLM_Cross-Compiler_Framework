@@ -95,13 +95,16 @@ def from_pages(result: Any, ctx: ExtractContext) -> List[Candidate]:
         seen.add(address)
         vendor = str(row.get("vendor") or "")
         targets = [t for t in (row.get("targets") or []) if _word(t)]
+        chips = [c for c in (row.get("chips") or []) if _word(c)]
         slug = re.sub(r"[^A-Za-z0-9]+", "-", vendor).strip("-")
-        if not vendor or not slug or not targets or not _TITLE.match(vendor):
+        if not vendor or not slug or not (targets or chips) or not _TITLE.match(vendor):
             continue
         title = str(getattr(page, "title", "") or "").strip()
         named = f' "{title}"' if _TITLE.match(title) and '"' not in title else ""
-        text = (f"{vendor}'s own website has a page{named} at {address}, a manufacturer source for target "
-                f"{', '.join(targets)}.")
+        covers = " and ".join(part for part in (
+            f"target {', '.join(targets)}" if targets else "", f"{'for ' if targets else ''}chips {', '.join(chips)}"
+            if chips else "") if part)
+        text = f"{vendor}'s own website has a page{named} at {address}, a manufacturer source for {covers}."
         key = f"vendor_page:{slug}/{hashlib.sha256(address.encode('utf-8')).hexdigest()[:12]}"
         found.append(Candidate(key, text, "vendor", [address]))
     return found

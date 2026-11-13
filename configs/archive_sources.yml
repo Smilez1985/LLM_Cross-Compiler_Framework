@@ -7,7 +7,11 @@
 #            neighbour, so its registrable domain has three labels. A small table, not the whole public suffix list;
 #            a missing one makes two sites of that suffix count as one source, never as two.
 # vendors    one row per manufacturer whose website counts as the ground "vendor": its name, the registrable domains
-#            of its websites and the target ids (targets/<id>) it speaks for. A new vendor is a row, not code.
+#            of its websites, the target ids (targets/<id>) it speaks for and the chips (SoCs and NPUs, as closed words:
+#            letters, digits, dot, dash, underscore) its boards or accelerators build on, as its own pages say. A row
+#            needs at least one target or one chip. A new vendor is a row, not code.
+#            Researched on 2026-11-13 (the pages named in docs/DESIGN.md, round 94); the domain of SunFounder was not
+#            confirmed by that search and is the one its products and documentation are known by.
 
 version: 1
 
@@ -36,9 +40,36 @@ vendors:
   - vendor: Radxa
     domains: [radxa.com]
     targets: [Rockchip]
+    chips: [RK3588, CD8180]
   - vendor: Rockchip
     domains: [rock-chips.com]
     targets: [Rockchip]
+    chips: [RK3588, RK3576, RK3566]
   - vendor: Orange Pi
     domains: [orangepi.org]
     targets: [Rockchip]
+    chips: [RK3588, CD8180]
+  - vendor: CIX
+    domains: [cixtech.com]
+    chips: [CD8180, CD8160, Zhouyi-Z3]
+  - vendor: Hailo
+    domains: [hailo.ai]
+    chips: [Hailo-8L, Hailo-8, Hailo-8R, Hailo-10H, Hailo-15H, Hailo-15L]
+  - vendor: Axelera AI
+    domains: [axelera.ai]
+    chips: [Metis, RK3588]
+  - vendor: SunFounder
+    domains: [sunfounder.com]
+    chips: [BCM2712, BCM2711]
+  - vendor: NVIDIA
+    domains: [nvidia.com]
+    chips: [GeForce-RTX, Jetson-Orin, Jetson-Thor]
+  - vendor: AMD
+    domains: [amd.com]
+    chips: [Radeon-RX-9000, Radeon-RX-7000, Radeon-AI-PRO, Instinct-MI300, Instinct-MI350, Ryzen-AI-XDNA]
+  - vendor: Apple
+    domains: [apple.com]
+    chips: [Apple-Silicon, Neural-Engine]
+  - vendor: Banana Pi
+    domains: [banana-pi.org]
+    chips: [RK3588, RK3576, SpacemiT-K1, K230D]
