@@ -295,6 +295,32 @@ def test_the_engine_reuses_a_kept_f16_and_keeps_a_new_one_only_with_room(tmp_pat
     assert build_large.record(again)["f16_intermediate"]["state"] == "reused"
 
 
+@pytest.mark.skipif(os.name != "posix", reason="owners of POSIX files")
+def test_on_a_root_host_the_f16_folder_gets_the_work_folders_owner(tmp_path, monkeypatch):
+    """The sandbox hands the work folder to the stage runner first (utils/sandbox.hand_over); the F16 folder, made
+    afterwards, got root as its owner on a root host, so the runner could not open it to the stage account and the
+    convert stage failed with "Permission denied" writing model-F16.gguf (the first real build of a module made by
+    the module wizard). Now it gets the work folder's owner; an ordinary host owns both anyway."""
+    from orchestrator.Core import build_large, f16_cache
+    from orchestrator.Core.build_formats import ModelFormat
+    monkeypatch.setattr(build_large, "_pin", lambda: "b11429")
+    cfg = SimpleNamespace(model_source="owner/model", model_revision=COMMIT, target_format=ModelFormat.GGUF,
+                          quantization="Q4_K_M", use_imatrix=False, tuning=None, local_inputs=None, large_model=None)
+    temp = tmp_path / "cache" / "builds" / "b1"
+    (temp / "work").mkdir(parents=True)
+    work = os.stat(temp / "work")
+    chowned = []
+    monkeypatch.setattr(build_large.os, "chown", lambda path, uid, gid: chowned.append((Path(path), uid, gid)))
+    monkeypatch.setattr(build_large.os, "getuid", lambda: 0)
+    build_large.f16_plan(cfg, tmp_path / "cache", temp)
+    assert chowned == [(temp / "work" / "f16", work.st_uid, work.st_gid)]
+    chowned.clear()
+    monkeypatch.setattr(build_large.os, "getuid", lambda: 1000)
+    build_large.f16_plan(cfg, tmp_path / "cache", temp)
+    assert chowned == [], "an ordinary host owns the folder it makes"
+    assert f16_cache.WORK_FILE.startswith("/build-cache/work/f16/")
+
+
 def test_a_given_matrix_is_copied_while_hashed_and_recorded_without_a_path(tmp_path):
     from orchestrator.Core import build_large
     matrix = _dat(tmp_path / "given.dat", ["blk.0.attn_q.weight"])

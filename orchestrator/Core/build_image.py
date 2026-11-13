@@ -35,6 +35,7 @@ one disk rule (disk_plan.room) and are person-only: an AI caller gets needs_pers
 import json
 import re
 import shutil
+import stat
 import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -585,20 +586,25 @@ def stop_text(target: str, plan: ImagePlan) -> str:
 
 def stage_llama_copy(copy: Path, context: Path) -> Path:
     """Copies the local llama.cpp copy (with its .git, so the Dockerfile checks the commit) into the build context's
-    sources/ folder; the copy is writable (the source store's tree is read-only), so the build folder can be cleaned."""
+    sources/ folder; the copy is writable (the source store's tree is read-only), so the build folder can be cleaned.
+    A file keeps whether it is executable: git records that bit, and the Dockerfile refuses a copy whose `git status`
+    names any change, so a script made 0644 here (llama.cpp tracks 126 files as 100755 at the pin) stopped every
+    offline build of a target image."""
     import os
     target = Path(context) / CONTEXT_SOURCES / LLAMA_COPY
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(copy, target, symlinks=True, copy_function=shutil.copyfile)
+    # shutil.copy keeps the mode bits (the store's are read-only), which are then set to the shared modes below
+    shutil.copytree(copy, target, symlinks=True, copy_function=shutil.copy)
     # B103: folders of the public llama.cpp source in the build context, 0755 so the image build (COPY keeps the
-    # modes, another user inside) can enter them; nothing secret is in them, the files stay 0644.
+    # modes, another user inside) can enter them; nothing secret is in them, the files 0644, an executable one 0755.
     for root, dirs, files in os.walk(target):
         for name in dirs:
             os.chmod(Path(root) / name, SHARED_RUN)  # nosec B103
         for name in files:
             path = Path(root) / name
             if not path.is_symlink():
-                os.chmod(path, SHARED_READ)
+                executable = os.stat(path).st_mode & stat.S_IXUSR
+                os.chmod(path, SHARED_RUN if executable else SHARED_READ)  # nosec B103
     os.chmod(target, SHARED_RUN)  # nosec B103
     return target
 

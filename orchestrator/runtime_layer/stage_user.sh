@@ -19,7 +19,8 @@
 # the exit code of the run, the end record "failed" at stage "preflight"); the runner never falls back to running a
 # module as itself.
 #
-# What the modules may write (stage_folders): the work folder ($BUILD_SCRATCH_DIR with tmp, home and cache), the job's
+# What the modules may write (stage_folders): the work folder ($BUILD_SCRATCH_DIR with tmp, home, cache and f16, the
+# place of the build's own F16 intermediate the host makes when it keeps none of the model), the job's
 # stage folder, the output folder and the importance matrix folder. They are made group-writable for the runner's
 # group, which the stage account gets as its supplementary group, with setgid and the sticky bit on the work and
 # stage folders, so a module can add files there but never change, rename or remove the runner's own (resume markers,
@@ -281,10 +282,10 @@ stage_switch_problem() {
 stage_folders() {
     _work="$1"; _stage_dir="$2"
     shift 2
-    for _folder in "$_work" "$_work/tmp" "$_work/home" "$_work/cache" "$_stage_dir" "$@"; do
+    for _folder in "$_work" "$_work/tmp" "$_work/home" "$_work/cache" "$_work/f16" "$_stage_dir" "$@"; do
         [ -d "$_folder" ] && [ ! -L "$_folder" ] && [ -w "$_folder" ] || continue
         _mode=2775
-        case "$_folder" in "$_work"|"$_work/tmp"|"$_work/home"|"$_work/cache"|"$_stage_dir") _mode=3775 ;; esac
+        case "$_folder" in "$_work"|"$_work/tmp"|"$_work/home"|"$_work/cache"|"$_work/f16"|"$_stage_dir") _mode=3775 ;; esac
         # shellcheck disable=SC3067 # test -O: busybox sh and dash have it
         if [ -O "$_folder" ]; then
             chmod "$_mode" "$_folder" 2>/dev/null || true

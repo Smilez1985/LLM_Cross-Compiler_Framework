@@ -623,6 +623,29 @@ def test_a_folder_the_stage_account_cannot_write_refuses_the_build(box):
     assert "cannot write the folder home" in refused.stderr
 
 
+F16_WRITER = r'''#!/bin/bash
+if (: > "$BUILD_SCRATCH_DIR/f16/model-F16.gguf") 2>/dev/null; then echo "f16 writable"; else echo "f16 closed"; fi \
+    > "$BUILD_SCRATCH_DIR/f16-check"
+'''
+
+
+@needs_rights
+def test_the_stage_account_writes_the_builds_own_f16_folder(box):
+    """The build's own F16 intermediate goes to work/f16 (Core/build_large.f16_plan makes that folder on the host when
+    no F16 of the model is kept). Before, the stage folders were only work, tmp, home and cache: f16 stayed the
+    runner's 0755 folder and the convert stage of the first build of every model failed with "Permission denied"
+    writing model-F16.gguf (found by the first real build of a module made by the module wizard)."""
+    (box.work / "f16").mkdir()
+    os.chown(box.work / "f16", RUNNER, RUNNER)
+    os.chmod(box.work / "f16", MODE_755)
+    box.module("source", F16_WRITER)
+
+    result = box.run("--to", "source")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (box.work / "f16-check").read_text().strip() == "f16 writable"
+
+
 # --- a target's own stage runner (review cs-stage-user-v, then the runtime layer) -----------------------------------
 #
 # Before the runtime layer, the host ran the target's modules/build.sh as the runner, with CAP_SETUID and CAP_SETGID as

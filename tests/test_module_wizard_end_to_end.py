@@ -1,4 +1,4 @@
-"""The module wizard checked from start to end (ROADMAP row "The module wizard checked from start to end"): the wizard
+"""The module wizard checked from start to end (DESIGN, targets; built in the build image 2026-11-12): the wizard
 (standard import and Ditto's analysis), `llm-cli module create` and the tool create_target_module each make a target
 from a hardware probe; the target passes the check, its board is the probe's SoC so the probe finds it, it is marked
 untested, list_targets names its trust, and a build request for it is planned."""

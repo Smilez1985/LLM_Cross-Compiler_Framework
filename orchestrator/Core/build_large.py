@@ -81,8 +81,21 @@ def f16_plan(config: Any, cache_dir: Path, build_temp: Path) -> Tuple[Dict[str, 
         options(config)["f16"] = {"state": "reused", "bytes": entry.size_bytes}
         return ({str(entry.folder): {"bind": f16_cache.MOUNT, "mode": "ro"}},
                 {"F16_FILE": f"{f16_cache.MOUNT}/{f16_cache.FILE_NAME}", "F16_KEPT": "1"})
-    (Path(build_temp) / "work" / "f16").mkdir(parents=True, exist_ok=True)
+    work = Path(build_temp) / "work"
+    (work / "f16").mkdir(parents=True, exist_ok=True)
+    _owner_of_work(work / "f16")
     return {}, {"F16_FILE": f16_cache.WORK_FILE}
+
+
+def _owner_of_work(folder: Path) -> None:
+    """A root host makes the folder after the sandbox handed the work folder to the stage runner (utils/sandbox.
+    hand_over): it gets the work folder's owner, so the runner makes it writable for the stage account like the work
+    folder's others (runtime_layer/stage_user.sh stage_folders). Before, it stayed root's and the convert stage could
+    not write the F16 into it."""
+    if os.name != "posix" or os.getuid() != 0:
+        return
+    owner = os.stat(folder.parent)
+    os.chown(folder, owner.st_uid, owner.st_gid)
 
 
 def stage_env(config: Any) -> Dict[str, str]:

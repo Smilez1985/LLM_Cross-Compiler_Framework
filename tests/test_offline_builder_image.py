@@ -298,6 +298,39 @@ class TestTheOfflineImageBuild:
         assert seen["args"]["LLAMA_CPP_SOURCE"] == "context"
         (staged / "CMakeLists.txt").unlink()   # writable: the build folder can be cleaned
 
+    @pytest.mark.skipif(os.name == "nt", reason="executable bits are POSIX file modes")
+    def test_the_staged_copy_keeps_its_executable_files_so_git_finds_it_clean(self, tmp_path):
+        """The Dockerfile's check of the copy (`git status --porcelain=v1 --untracked-files=normal
+        --ignored=traditional` must print nothing) passes on the staged copy: before, every file was made 0644, git
+        named each script tracked as 100755 as changed, and every offline build of a target image stopped there."""
+        import shutil
+        import subprocess
+        from orchestrator.runtime.build.source import _make_read_only
+        git = shutil.which("git")
+        if not git:
+            pytest.skip("git is not installed")
+        store = tmp_path / "store" / "llama.cpp"
+        store.mkdir(parents=True)
+        (store / "CMakeLists.txt").write_text("project(llama)\n")
+        (store / "convert_hf_to_gguf.py").write_text("#!/usr/bin/env python3\n")
+        (store / "convert_hf_to_gguf.py").chmod(0o755)
+        env = {"PATH": os.environ.get("PATH", ""), "GIT_CONFIG_NOSYSTEM": "1", "HOME": str(tmp_path),
+               "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid", "GIT_COMMITTER_NAME": "t",
+               "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+
+        def run(*args, cwd):
+            return subprocess.run([git, *args], cwd=cwd, env=env, capture_output=True, text=True, check=True).stdout
+        run("init", "-q", cwd=store)
+        run("add", "-A", cwd=store)
+        run("commit", "-q", "-m", "pin", cwd=store)
+        assert "100755 " in run("ls-files", "-s", "convert_hf_to_gguf.py", cwd=store)
+        _make_read_only(store)   # as the source store keeps it
+
+        staged = build_image.stage_llama_copy(store, tmp_path / "ctx")
+        assert run("status", "--porcelain=v1", "--untracked-files=normal", "--ignored=traditional", cwd=staged) == ""
+        assert (staged / "convert_hf_to_gguf.py").stat().st_mode & 0o777 == 0o755
+        assert (staged / "CMakeLists.txt").stat().st_mode & 0o777 == 0o644
+
     def test_the_image_built_earlier_is_still_used_first(self, engine, monkeypatch, tmp_path, names):
         online, _ = build(engine, monkeypatch, tmp_path, Docker(here={"debian:bookworm-slim"}), offline_mode=False)
         earlier = SimpleNamespace(labels=dict(online["labels"]), attrs={"Created": "2026"}, short_id="i1",
