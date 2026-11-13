@@ -1,4 +1,4 @@
-Version 3.4.0 · Last updated 2026-11-10
+Version 3.4.0 · Last updated 2026-11-13
 
 **English** · [Deutsch](CLI_Usage_DE.md)
 
@@ -158,6 +158,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `ditto ask` | Ask Ditto one question |
 | `ditto console` | What Ditto and AI apps type and do, as the Ditto console beside the chat shows it; `--follow` keeps printing |
 | `ditto context` | The context window of Ditto's chat model with its source, the token counting, the compactions (`original`, `undo`) and the cloud cache (`cache`) |
+| `ditto archive` | Ditto's archive of what it learned from tool results: `list`, `search`, `show`, `confirm`, `unconfirm`, `delete`, `undo` and the `level` that decides when Ditto confirms by itself |
 | `ditto eval` | Grade Ditto on fixed test cases, or the knowledge-base search |
 | `ditto runtime install/start/status/stop/import/export/prune` | The managed local model server (llama.cpp, built on this machine) for offline mode |
 | `ditto runtime ensure` | Install Ditto's local model server when it is not there, bare metal or in Docker; `--force` switches the mode |
@@ -1642,6 +1643,61 @@ llm-cli ditto context cache --ttl 1h --cost-limit 2.5
 In the GUI: **Ditto > Advanced > Context Window...** opens Settings > Language model > Context window, with
 **Check Again** (`--refresh`), **Show Original...** and **Undo Compaction...** (it asks first, No by default), and
 below it the **Cloud cache** box with the lifetime, the soft cap and **Apply** (`ditto context cache`).
+
+### ditto archive
+
+```
+llm-cli ditto archive
+llm-cli ditto archive list [--status confirmed|unconfirmed] [--copies] [--json]
+llm-cli ditto archive search QUERY [--confirmed-only] [--json]
+llm-cli ditto archive show ID [--json]
+llm-cli ditto archive confirm ID
+llm-cli ditto archive unconfirm ID
+llm-cli ditto archive delete ID [--yes]
+llm-cli ditto archive undo KEY_OR_ID [--yes]
+llm-cli ditto archive level [low|mid|high] [--json]
+```
+
+Ditto's archive keeps what Ditto learned from tool results, never anything from your private conversations. An entry
+is one plain sentence with a key (`kind:subject/property`), the ground it rests on and its evidence. It enters the
+archive only with one of three grounds: several independent sources that say the same (`sources`), the website of a
+manufacturer listed in `configs/archive_sources.yml` (`vendor`), or a build that passed its functional test
+(`tested`). Today two things teach it, from every caller's tool calls (Ditto's turns, an AI app over MCP): the details
+of a built model whose functional test passed, and a page of a listed manufacturer's website that a knowledge-base
+search or read returned. A sentence is written from typed fields only, never copied from a page, a manifest or a
+conversation; anything that still holds an address, an e-mail address, a path or a secret is dropped. The archive lives
+in its own collection of the knowledge base's storage, so it needs the knowledge base (`enable_rag_knowledge`).
+
+An entry is a claim until it is confirmed. You confirm at will; Ditto confirms an entry by itself only when enough
+independent sources (different domains) say the same, and how many depends on the level: low 3, mid 5 (the default),
+high 7. A manufacturer's page or a passed test lets an entry in but never confirms it alone. A newer entry with the same
+key replaces the older one; when you had confirmed the older one, its text is kept as a copy that `undo` swaps back.
+
+| Command | Meaning |
+|---|---|
+| `ditto archive` / `list` | The entries, newest first, with the level and the numbers. `--status` narrows by status, `--copies` lists the copies kept of replaced, confirmed entries, `--json` prints them as JSON. |
+| `search QUERY` | Searches meaning and words together; a copy is never returned. `--confirmed-only` leaves out entries nobody confirmed. |
+| `show ID` | One entry or copy in full with its evidence. `ID` is the id or its first six characters or more. |
+| `confirm ID` / `unconfirm ID` | You confirm an entry, whatever its ground, or take that back (the entry stays). |
+| `delete ID` | Deletes an entry or a copy after a question (No by default; `--yes` skips it). Nothing else deletes an entry but a newer one replacing it. |
+| `undo KEY_OR_ID` | Brings the text of the newest replacement of that key back, after a question: your confirmed text becomes the entry again and the newer text becomes the copy. |
+| `level [LEVEL]` | Shows the level, or sets it (the setting `ditto_archive_security`; only you change it, an AI app cannot). |
+
+AI apps and Ditto read the archive through `search_knowledge` with `scope` `archive` or `both` (the default is
+`knowledge`): each hit comes with its ground, its evidence and whether it is confirmed. Only you confirm, withdraw,
+delete or undo.
+
+```bash
+llm-cli ditto archive
+llm-cli ditto archive search "npu inference" --confirmed-only
+llm-cli ditto archive confirm 3f2a9c1b
+llm-cli ditto archive level high
+```
+
+In the GUI: **Ditto > Ditto's Archive...** shows the list with the search box, **Confirmed only**, the status filter and
+**Show the copies of replaced entries**; the selected entry appears in full below it; **Confirm**, **Take
+Confirmation Back**, **Delete...** and **Undo Replacement...** (both ask first, No by default) and the **Level** box
+with **Set Level** do the rest.
 
 ### ditto eval
 

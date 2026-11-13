@@ -1,4 +1,4 @@
-Version 3.4.0 · Stand 2026-11-10
+Version 3.4.0 · Stand 2026-11-13
 
 [English](Features.md) · **Deutsch**
 
@@ -1331,6 +1331,32 @@ Cache-Schreibvorgänge eines Gesprächs: Wird sie überschritten, kommt ein Hinw
 Möglichkeiten (die kürzere Lebensdauer, Chat leeren, eine höhere Grenze), und das Caching geht weiter. Der Kasten
 **Cloud-Cache** unter dem Kontextfenster, `llm-cli ditto context cache --ttl ... --cost-limit ...` und
 `llmcf config set` setzen beides; KI-Apps lesen es in `get_status` und ändern es nie.
+
+### Dittos Archiv
+
+Ditto führt ein durchsuchbares Archiv dessen, was es über llmcf und das Bauen gelernt hat, und alle, die den Harness
+nutzen, lesen es: Ditto und KI-Apps über `search_knowledge` mit `scope` `archive` oder `both`, du in **Ditto > Dittos
+Archiv ...** und mit `llm-cli ditto archive`. Es enthält nie etwas aus deinen privaten Gesprächen oder über deine
+eigenen Geräte. Ein Eintrag ist ein schlichter Satz, geschrieben aus typisierten Feldern eines Tool-Ergebnisses (nie
+kopierter Text), mit der Grundlage, auf der er ruht, und seinen Belegen: **ein Build, der seinen Funktionstest bestanden
+hat** (die Tool-Aufrufe jedes Aufrufers lehren es: Dittos Turns und KI-Apps gleichermaßen, und nur Werte, die das Target
+selbst nennt, machen einen Eintrag), **eine Seite der eigenen Website eines Herstellers** (Radxa, Rockchip, Orange Pi, CIX,
+Hailo, Axelera AI, SunFounder, NVIDIA, AMD, Apple und Banana Pi stehen in `configs/archive_sources.yml` mit den Chips,
+die ihre Seiten nennen) oder **mehrere unabhängige Quellen, die dasselbe sagen**. Ein Satz, der nach dem Bereinigen noch
+eine Adresse, eine E-Mail-Adresse, einen Pfad oder ein Secret enthält, wird verworfen, nie bereinigt gespeichert.
+
+Ein Eintrag ist eine Behauptung, bis er bestätigt ist. Du bestätigst nach Belieben. Ditto bestätigt nur von selbst, wenn
+genug unabhängige Quellen, also verschiedene Domains, dasselbe sagen: 3 bei der Stufe niedrig, 5 bei mittel (die
+Vorgabe), 7 bei hoch; die Stufe stellst nur du ein, nie eine KI-App. Die Seite eines Herstellers oder ein bestandener Test
+lässt einen Eintrag herein, bestätigt ihn aber nie allein. Ein neuerer Eintrag mit demselben Schlüssel ersetzt den
+älteren; hattest du den älteren bestätigt, bleibt sein Text als Kopie, und **Ersetzung rückgängig ...** tauscht ihn
+zurück. Gelöscht wird nichts außer von dir oder durch einen neueren Eintrag, der den älteren ersetzt.
+
+Das Archiv liegt in einer eigenen Collection im Speicher der Wissensbasis, braucht sie also eingeschaltet
+(`enable_rag_knowledge`) und nutzt ihr Embedding-Modell; ein neues Embedding-Modell füllt das Archiv aus den gespeicherten
+Texten neu. Ein Tool-Aufruf lädt dieses Modell nie herunter, ein Eintrag wartet also auf einen Aufruf, nachdem das Modell
+auf diesem Computer liegt. Dieselbe Aussage mehrerer Domains vergleichbar zu machen, wodurch Ditto von selbst bestätigen
+kann, ist geplant (siehe Roadmap).
 
 ### Der Chat-Bereich
 

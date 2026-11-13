@@ -1,4 +1,4 @@
-Version 3.4.0 · Last updated 2026-11-10
+Version 3.4.0 · Last updated 2026-11-13
 
 **English** · [Deutsch](Features_DE.md)
 
@@ -1212,6 +1212,31 @@ learns from them. `ai_cache_cost_limit` (1.00 US dollars by default; 0 is off) i
 writes of one conversation: crossing it brings a notice with the numbers and your choices (the shorter lifetime, Clear
 chat, a higher limit), and caching goes on. The **Cloud cache** box below the context window, `llm-cli ditto context
 cache --ttl ... --cost-limit ...` and `llmcf config set` set both; AI apps read them in `get_status`, never change them.
+
+### Ditto's archive
+
+Ditto keeps a searchable archive of what it learned about llmcf and about building, and everyone who uses the harness
+reads it: Ditto and AI apps through `search_knowledge` with `scope` `archive` or `both`, you in **Ditto > Ditto's
+Archive...** and with `llm-cli ditto archive`. It never holds anything from your private conversations or about your own
+devices. An entry is one plain sentence, written from typed fields of a tool result (never copied text), with the
+ground it rests on and its evidence: **a build that passed its functional test** (every caller's tool calls teach it:
+Ditto's turns and AI apps alike, and only values the target itself declares make an entry), **a page of a manufacturer's
+own website** (Radxa, Rockchip, Orange Pi, CIX, Hailo, Axelera AI, SunFounder, NVIDIA, AMD, Apple and Banana Pi are
+listed in `configs/archive_sources.yml` with the chips their pages name), or **several independent sources that say the
+same**. A sentence that still holds an address, an e-mail address, a path or a secret after the cleaning is dropped,
+never stored cleaned.
+
+An entry is a claim until it is confirmed. You confirm at will. Ditto confirms by itself only when enough independent
+sources, that is different domains, say the same: 3 at the level low, 5 at mid (the default), 7 at high; only you set
+the level, never an AI app. A manufacturer's page or a passed test lets an entry in but never confirms it alone. A newer
+entry with the same key replaces the older one; when you had confirmed the older one, its text is kept as a copy, and
+**Undo Replacement...** swaps it back. Nothing is deleted but by you, or by a newer entry replacing the older one.
+
+The archive lives in its own collection of the knowledge base's storage, so it needs the knowledge base to be on
+(`enable_rag_knowledge`) and uses its embedding model; a new embedding model fills the archive again from the stored
+texts. A tool call never downloads that model, so an entry waits for a call after the model is on this computer.
+Making the same statement from several domains comparable, which is what lets Ditto confirm by itself, is planned (see
+the roadmap).
 
 ### The chat panel
 

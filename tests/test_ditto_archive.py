@@ -266,3 +266,30 @@ class TestStorage:
     def test_without_the_knowledge_base_the_archive_is_unavailable(self):
         archive = DittoArchive(lambda: None, None, table=TABLE)
         assert offer(archive).outcome == "unavailable"
+
+
+class TestIdsAndLevel:
+
+    def test_an_id_can_be_given_by_its_first_characters(self, archive):
+        entry = offer(archive).entry
+        assert archive.resolve_id(entry.id) == entry.id
+        assert archive.resolve_id(entry.id[:8].upper()) == entry.id
+        with pytest.raises(ArchiveError, match="at least six"):
+            archive.resolve_id(entry.id[:3])
+        with pytest.raises(ArchiveError, match="no archive entry"):
+            archive.resolve_id("ffffffff")
+
+    def test_two_entries_with_the_same_beginning_are_not_guessed(self, archive, monkeypatch):
+        first, second = offer(archive).entry, offer(archive, key="target:rk3588/two").entry
+        monkeypatch.setattr(archive, "entries", lambda **kw: [first.model_copy(update={"id": "abcdef01-0000"}),
+                                                              second.model_copy(update={"id": "abcdef02-0000"})])
+        with pytest.raises(ArchiveError, match="2 archive entries begin with"):
+            archive.resolve_id("abcdef")
+
+    def test_set_level_checks_first_and_the_archive_follows_the_setting(self, archive):
+        from orchestrator.Core.ditto_archive import set_level
+        config = archive.config
+        assert set_level(config, "HIGH", save=False) is True and archive.level() == "high" and archive.needed() == 7
+        with pytest.raises(ValueError, match="low, mid or high"):
+            set_level(config, "extreme", save=False)
+        assert archive.level() == "high"                                  # nothing changed

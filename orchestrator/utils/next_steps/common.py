@@ -44,6 +44,7 @@ MENU_LAYOUT = (
         ("act_tools_approvals", "main.ditto.approvals"),
         ("act_tools_proposals", "main.ditto.proposals"),
         ("act_acp_agents", "acp.menu.agents"),
+        ("act_ditto_archive_open", "archive.menu"),
         "-",
         ("menu_ditto_advanced", "main.menu.ditto_advanced", (
             ("act_ditto_runtime_open", "ditto_runtime.menu.open"),

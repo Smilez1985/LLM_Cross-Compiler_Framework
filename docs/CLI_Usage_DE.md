@@ -1,4 +1,4 @@
-Version 3.4.0 · Stand 2026-11-10
+Version 3.4.0 · Stand 2026-11-13
 
 [English](CLI_Usage.md) · **Deutsch**
 
@@ -159,6 +159,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `ditto ask` | Ditto eine Frage stellen |
 | `ditto console` | Was Ditto und KI-Apps tippen und tun, wie die Ditto-Konsole neben dem Chat es zeigt; `--follow` druckt weiter |
 | `ditto context` | Das Kontextfenster von Dittos Chat-Modell mit seiner Quelle, das Zählen der Token, die Verdichtungen (`original`, `undo`) und der Cloud-Cache (`cache`) |
+| `ditto archive` | Dittos Archiv dessen, was es aus Tool-Ergebnissen gelernt hat: `list`, `search`, `show`, `confirm`, `unconfirm`, `delete`, `undo` und die `level`-Stufe, die entscheidet, wann Ditto von selbst bestätigt |
 | `ditto eval` | Ditto anhand fester Testfälle bewerten, oder die Suche der Wissensbasis |
 | `ditto runtime install/start/status/stop/import/export/prune` | Der verwaltete lokale Modellserver (llama.cpp, auf diesem Rechner gebaut) für den Offline-Modus |
 | `ditto runtime ensure` | Dittos lokalen Modellserver installieren, wenn er fehlt, direkt oder in Docker; `--force` wechselt die Art |
@@ -1711,6 +1712,63 @@ In der GUI: **Ditto > Erweitert > Kontextfenster...** öffnet Einstellungen > Sp
 **Erneut prüfen** (`--refresh`), **Original zeigen...** und **Verdichtung rückgängig...** (fragt vorher, Nein als
 Vorgabe), und darunter der Kasten **Cloud-Cache** mit Lebensdauer, weicher Obergrenze und **Übernehmen**
 (`ditto context cache`).
+
+### ditto archive
+
+```
+llm-cli ditto archive
+llm-cli ditto archive list [--status confirmed|unconfirmed] [--copies] [--json]
+llm-cli ditto archive search ANFRAGE [--confirmed-only] [--json]
+llm-cli ditto archive show ID [--json]
+llm-cli ditto archive confirm ID
+llm-cli ditto archive unconfirm ID
+llm-cli ditto archive delete ID [--yes]
+llm-cli ditto archive undo SCHLÜSSEL_ODER_ID [--yes]
+llm-cli ditto archive level [low|mid|high] [--json]
+```
+
+Dittos Archiv bewahrt auf, was Ditto aus Tool-Ergebnissen gelernt hat, nie etwas aus deinen privaten Gesprächen. Ein
+Eintrag ist ein schlichter Satz mit einem Schlüssel (`art:gegenstand/eigenschaft`), der Grundlage, auf der er ruht, und
+seinen Belegen. Er kommt nur mit einer von drei Grundlagen ins Archiv: mehrere unabhängige Quellen, die dasselbe sagen
+(`sources`), die Website eines Herstellers, der in `configs/archive_sources.yml` steht (`vendor`), oder ein Build, der
+seinen Funktionstest bestanden hat (`tested`). Heute lehren es zwei Dinge, aus den Tool-Aufrufen jedes Aufrufers (Dittos
+Turns, eine KI-App über MCP): die Details eines gebauten Modells, dessen Funktionstest bestanden wurde, und eine Seite
+der Website eines gelisteten Herstellers, die eine Suche oder ein Lesen der Wissensbasis geliefert hat. Ein Satz wird nur
+aus typisierten Feldern geschrieben, nie aus einer Seite, einem Manifest oder einem Gespräch kopiert; was danach noch
+eine Adresse, eine E-Mail-Adresse, einen Pfad oder ein Secret enthält, wird verworfen. Das Archiv liegt in einer eigenen
+Collection im Speicher der Wissensbasis und braucht sie also (`enable_rag_knowledge`).
+
+Ein Eintrag ist eine Behauptung, bis er bestätigt ist. Du bestätigst nach Belieben; Ditto bestätigt einen Eintrag nur
+von selbst, wenn genug unabhängige Quellen (verschiedene Domains) dasselbe sagen, und wie viele, hängt von der Stufe ab:
+`low` 3, `mid` 5 (die Vorgabe), `high` 7. Die Seite eines Herstellers oder ein bestandener Test lässt einen Eintrag
+herein, bestätigt ihn aber nie allein. Ein neuerer Eintrag mit demselben Schlüssel ersetzt den älteren; hattest du den
+älteren bestätigt, bleibt sein Text als Kopie erhalten, die `undo` zurücktauscht.
+
+| Befehl | Bedeutung |
+|---|---|
+| `ditto archive` / `list` | Die Einträge, neueste zuerst, mit der Stufe und den Zahlen. `--status` grenzt nach Status ein, `--copies` listet die aufbewahrten Kopien ersetzter, bestätigter Einträge, `--json` gibt sie als JSON aus. |
+| `search ANFRAGE` | Sucht Bedeutung und Wörter zusammen; eine Kopie kommt nie zurück. `--confirmed-only` lässt Einträge weg, die niemand bestätigt hat. |
+| `show ID` | Ein Eintrag oder eine Kopie ganz, mit den Belegen. `ID` ist die ID oder ihre ersten sechs Zeichen oder mehr. |
+| `confirm ID` / `unconfirm ID` | Du bestätigst einen Eintrag, welche Grundlage er auch hat, oder nimmst das zurück (der Eintrag bleibt). |
+| `delete ID` | Löscht einen Eintrag oder eine Kopie nach einer Frage (Vorgabe Nein; `--yes` überspringt sie). Nur ein neuerer Eintrag, der ihn ersetzt, löscht sonst einen Eintrag. |
+| `undo SCHLÜSSEL_ODER_ID` | Holt nach einer Frage den Text der neuesten Ersetzung dieses Schlüssels zurück: Dein bestätigter Text wird wieder der Eintrag, und der neuere Text wird die Kopie. |
+| `level [STUFE]` | Zeigt die Stufe oder setzt sie (die Einstellung `ditto_archive_security`; nur du änderst sie, eine KI-App kann es nicht). |
+
+KI-Apps und Ditto lesen das Archiv über `search_knowledge` mit `scope` `archive` oder `both` (Standard ist `knowledge`):
+Jeder Treffer kommt mit seiner Grundlage, seinen Belegen und der Angabe, ob er bestätigt ist. Nur du bestätigst,
+nimmst zurück, löschst oder machst rückgängig.
+
+```bash
+llm-cli ditto archive
+llm-cli ditto archive search "npu inference" --confirmed-only
+llm-cli ditto archive confirm 3f2a9c1b
+llm-cli ditto archive level high
+```
+
+In der GUI: **Ditto > Dittos Archiv...** zeigt die Liste mit dem Suchfeld, **Nur bestätigte**, dem Status-Filter und
+**Die Kopien ersetzter Einträge zeigen**; der gewählte Eintrag erscheint darunter ganz; **Bestätigen**,
+**Bestätigung zurücknehmen**, **Löschen ...** und **Ersetzung rückgängig ...** (beide fragen zuerst, Vorgabe Nein) und das
+Feld **Stufe** mit **Stufe setzen** erledigen den Rest.
 
 ### ditto eval
 

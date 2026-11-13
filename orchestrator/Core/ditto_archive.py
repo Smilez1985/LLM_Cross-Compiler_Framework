@@ -30,7 +30,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from orchestrator.rag.embeddings import check_vectors
 from orchestrator.rag.errors import EmbeddingModelNotCached, KnowledgeBaseError
 from orchestrator.schemas.archive import (
-    ARCHIVE_ALIAS, DEFAULT_LEVEL, EVIDENCE_MAX, GROUNDS, SETTING, TEXT_MAX, ArchiveEntry, confirm_needed,
+    ARCHIVE_ALIAS, DEFAULT_LEVEL, EVIDENCE_MAX, GROUNDS, LEVELS, SETTING, TEXT_MAX, ArchiveEntry, confirm_needed,
     normalize_level, valid_evidence, valid_key)
 from orchestrator.security import personal_data, secret_patterns
 from orchestrator.security.paths import scrub_for_ai
@@ -86,6 +86,19 @@ def is_id(value: object) -> bool:
         return str(uuid.UUID(str(value))) == str(value).lower()
     except ValueError:
         return False
+
+
+def set_level(config: Any, level: Any, *, save: bool = True) -> bool:
+    """The one writer of the setting ditto_archive_security (`llm-cli ditto archive level`, the archive window): checked
+    first (ValueError, nothing changes), then set and config.yml saved with `save`. Returns False when it could not be
+    saved (the value holds for this run). The person's alone: no tool of an AI calls it."""
+    word = str(level or "").strip().lower()
+    if word not in LEVELS:
+        raise ValueError(f"{SETTING} is low, mid or high, not '{level}'.")
+    if config.set(SETTING, word) is False:
+        raise ValueError(f"{SETTING} cannot be '{level}'.")
+    saver = getattr(config, "save_user_config", None)
+    return bool(saver()) if save and callable(saver) else True
 
 
 def normalized(text: str) -> str:
@@ -305,6 +318,21 @@ class DittoArchive:
             return self._entry(found[0]) if found and (found[0].payload or {}).get("key") else None
         return self._run(read)
 
+    def resolve_id(self, text: str) -> str:
+        """The id an `ids` text names: a whole id, or the beginning of one (six characters or more) that only one entry
+        or copy has. ArchiveError for none or for several."""
+        text = str(text or "").strip().lower()
+        if is_id(text):
+            return text
+        if len(text) < 6:
+            raise ArchiveError("An id is at least six characters long (the first ones of the id the list shows).")
+        found = [e.id for e in self.entries(kind="") if e.id.startswith(text)]
+        if not found:
+            raise ArchiveError(f"There is no archive entry or copy whose id begins with {text}.")
+        if len(found) > 1:
+            raise ArchiveError(f"{len(found)} archive entries begin with {text}; give more characters of the id.")
+        return found[0]
+
     def copies(self, key: str) -> List[ArchiveEntry]:
         """The copies kept of `key`, newest first."""
         return [e for e in self.entries(kind="copy") if e.key == key]
@@ -412,4 +440,4 @@ class DittoArchive:
 
 
 __all__ = ["ArchiveError", "Candidate", "DittoArchive", "RecordResult", "SearchHit", "entry_id", "is_id", "normalized",
-           "private_reason"]
+           "private_reason", "set_level"]

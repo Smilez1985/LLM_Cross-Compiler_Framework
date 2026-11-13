@@ -4980,6 +4980,220 @@ def _set_cloud_cache(config: Any, ttl: Optional[str], limit: Optional[float]) ->
             console.print(f"[green]{key}: {escape(str(config.get(key)))}[/green]")
 
 
+# --- Ditto's archive (DESIGN, Ditto, the archive's rows; maintainer's decisions of 2026-11-13) ---------------------------
+
+def _archive(ctx: FrameworkContext):
+    """Ditto's archive of this process (made with the framework); the person's own actions only."""
+    ctx.require_framework()
+    fm = ctx.framework_manager
+    archive = getattr(fm, "ditto_archive", None)
+    if archive is None:
+        console.print("[red]Ditto's archive is not available.[/red]")
+        sys.exit(1)
+    return archive
+
+
+def _archive_run(operation: Any) -> Any:
+    """Runs one archive action; the knowledge base's and the archive's own errors become a plain line and exit 1."""
+    from orchestrator.rag.errors import EmbeddingModelNotCached, KnowledgeBaseError
+    try:
+        return operation()
+    except (KnowledgeBaseError, EmbeddingModelNotCached) as e:
+        console.print(f"[red]{escape(_printable(str(e)))}[/red]")
+        sys.exit(1)
+
+
+def _archive_rows(entries: Any, title: str) -> None:
+    from rich.text import Text
+    table = Table(title=title)
+    for column in ("Id", "Status", "Ground", "Sources", "Key", "Sentence"):
+        table.add_column(column, overflow="fold")
+    for e in entries:
+        status = e.status + (f" ({e.confirmed_by})" if e.confirmed_by else "") if e.kind == "entry" else "copy"
+        table.add_row(*(Text(_printable(v)) for v in (e.id[:8], status, e.ground, str(e.independent_sources), e.key,
+                                                      e.text)))
+    console.print(table)
+
+
+def _archive_show_line(archive: Any) -> str:
+    n = archive.overview()
+    return (f"Ditto's archive: {n['entries']} entr{'y' if n['entries'] == 1 else 'ies'}, {n['confirmed']} confirmed, "
+            f"{n['copies']} cop{'y' if n['copies'] == 1 else 'ies'}. Level {n['level']}: Ditto confirms an entry by "
+            f"itself with {n['needed']} independent sources (different domains); the person confirms at will.")
+
+
+@ditto.group('archive', invoke_without_command=True)
+@click.pass_context
+def ditto_archive(click_ctx):
+    """What Ditto learned from tool results (a build that passed its functional test, a manufacturer's own page): list,
+    search, confirm, withdraw, delete and undo, and the level that decides when Ditto confirms by itself"""
+    if click_ctx.invoked_subcommand is None:
+        click_ctx.invoke(ditto_archive_list, status=None, copies=False, as_json=False)
+
+
+@ditto_archive.command('list')
+@click.option('--status', type=click.Choice(['confirmed', 'unconfirmed']), default=None,
+              help='Only entries with this status')
+@click.option('--copies', is_flag=True, help='Show the copies kept of replaced, person-confirmed entries instead')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def ditto_archive_list(ctx: FrameworkContext, status: Optional[str], copies: bool, as_json: bool):
+    """The entries (or, with --copies, the kept copies), newest first"""
+    archive = _archive(ctx)
+    found = _archive_run(lambda: archive.entries(status=status or "", kind="copy" if copies else "entry"))
+    if as_json:
+        click.echo(json.dumps([e.model_dump() for e in found], indent=2, sort_keys=True))
+        return
+    console.print(escape(_archive_show_line(archive)))
+    if not found:
+        console.print("Nothing is kept here yet." if copies else
+                      "No entry yet: a build that passed its functional test, or a manufacturer's own page found in "
+                      "the knowledge base, teaches Ditto's archive.")
+        return
+    _archive_rows(found, "Copies of replaced entries" if copies else "Archive entries")
+
+
+@ditto_archive.command('search')
+@click.argument('query')
+@click.option('--confirmed-only', is_flag=True, help='Leave out entries nobody confirmed')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def ditto_archive_search(ctx: FrameworkContext, query: str, confirmed_only: bool, as_json: bool):
+    """Search the archive (meaning and words together); a copy is never returned"""
+    archive = _archive(ctx)
+    hits = _archive_run(lambda: archive.search(query, limit=20, confirmed_only=confirmed_only))
+    if as_json:
+        click.echo(json.dumps([dict(h.entry.model_dump(), score=h.score) for h in hits], indent=2, sort_keys=True))
+        return
+    if not hits:
+        console.print("No entry matches.")
+        return
+    _archive_rows([h.entry for h in hits], "Archive entries that match")
+
+
+@ditto_archive.command('show')
+@click.argument('entry_id')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def ditto_archive_show(ctx: FrameworkContext, entry_id: str, as_json: bool):
+    """One entry or copy in full: its sentence, ground, evidence and who confirmed it (the id or its first characters)"""
+    archive = _archive(ctx)
+    entry = _archive_run(lambda: archive.get(archive.resolve_id(entry_id)))
+    if entry is None:
+        console.print("[red]There is no such entry.[/red]")
+        sys.exit(1)
+    if as_json:
+        click.echo(json.dumps(entry.model_dump(), indent=2, sort_keys=True))
+        return
+    lines = [f"{entry.key} ({'copy' if entry.kind == 'copy' else entry.status})", entry.text,
+             f"Ground: {entry.ground}; {entry.independent_sources} independent source(s)",
+             f"Confirmed by: {entry.confirmed_by or '-'}; created {entry.created}; updated {entry.updated}"]
+    if entry.kind == "copy":
+        lines.append(f"Kept when a newer entry replaced it ({entry.copied_at}); undoing the replacement brings it back.")
+    lines += [f"Evidence: {item}" for item in entry.evidence]
+    for line in lines:
+        console.print(escape(_printable(line)))
+
+
+def _archive_change(ctx: FrameworkContext, entry_id: str, action: str, done: str) -> None:
+    archive = _archive(ctx)
+
+    def work():
+        return getattr(archive, action)(archive.resolve_id(entry_id))
+    entry = _archive_run(work)
+    console.print(f"[green]{escape(done)}: {escape(_printable(entry.key))}[/green]")
+
+
+@ditto_archive.command('confirm')
+@click.argument('entry_id')
+@pass_context
+def ditto_archive_confirm(ctx: FrameworkContext, entry_id: str):
+    """Confirm an entry, whatever its ground and its sources (only you confirm at will)"""
+    _archive_change(ctx, entry_id, "confirm", "Confirmed")
+
+
+@ditto_archive.command('unconfirm')
+@click.argument('entry_id')
+@pass_context
+def ditto_archive_unconfirm(ctx: FrameworkContext, entry_id: str):
+    """Take a confirmation back: the entry stays, unconfirmed"""
+    _archive_change(ctx, entry_id, "unconfirm", "Confirmation taken back")
+
+
+@ditto_archive.command('delete')
+@click.argument('entry_id')
+@click.option('--yes', is_flag=True, help='Delete without asking')
+@pass_context
+def ditto_archive_delete(ctx: FrameworkContext, entry_id: str, yes: bool):
+    """Delete an entry or a copy (nothing else deletes an entry but a newer one replacing it)"""
+    archive = _archive(ctx)
+    found = _archive_run(lambda: archive.get(archive.resolve_id(entry_id)))
+    if found is None:
+        console.print("[red]There is no such entry.[/red]")
+        sys.exit(1)
+    console.print(escape(_printable(f"{found.key}: {found.text}")))
+    if not yes and not click.confirm("Delete it?", default=False):
+        console.print("Nothing was changed.")
+        return
+    _archive_run(lambda: archive.delete(found.id))
+    console.print("[green]Deleted.[/green]")
+
+
+@ditto_archive.command('undo')
+@click.argument('key_or_id')
+@click.option('--yes', is_flag=True, help='Undo without asking')
+@pass_context
+def ditto_archive_undo(ctx: FrameworkContext, key_or_id: str, yes: bool):
+    """Undo the newest replacement of a key (or of the entry with this id): your confirmed text becomes the entry again
+    and the newer text becomes the copy"""
+    from orchestrator.schemas.archive import valid_key
+    archive = _archive(ctx)
+    key = key_or_id if valid_key(key_or_id) else None
+    if key is None:
+        found = _archive_run(lambda: archive.get(archive.resolve_id(key_or_id)))
+        key = found.key if found is not None else ""
+    copies = _archive_run(lambda: archive.copies(key)) if key else []
+    if not copies:
+        console.print("There is nothing to undo for this key.")
+        sys.exit(1)
+    console.print(escape(_printable(f"{key}: your text comes back: {copies[0].text}")))
+    if not yes and not click.confirm("Undo the replacement?", default=False):
+        console.print("Nothing was changed.")
+        return
+    _archive_run(lambda: archive.undo(key))
+    console.print("[green]Undone: your text is the entry again.[/green]")
+
+
+@ditto_archive.command('level')
+@click.argument('level', required=False, type=click.Choice(['low', 'mid', 'high']))
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def ditto_archive_level(ctx: FrameworkContext, level: Optional[str], as_json: bool):
+    """The archive's security level: how many independent sources (different domains) Ditto needs to confirm an entry by
+    itself, low 3, mid 5, high 7; LEVEL sets it (the setting ditto_archive_security, yours alone)"""
+    from orchestrator.Core.ditto_archive import set_level
+    from orchestrator.schemas.archive import LEVEL_SOURCES
+    config, _ = _settings(ctx)
+    if level is not None:
+        try:
+            saved = set_level(config, level)
+        except ValueError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(2)
+        if not saved:
+            console.print("[red]The level could not be saved to config.yml.[/red]")
+            sys.exit(1)
+    from orchestrator.schemas.archive import SETTING, normalize_level
+    now = normalize_level(config.get(SETTING))
+    if as_json:
+        click.echo(json.dumps({"level": now, "sources_needed": LEVEL_SOURCES[now], "levels": LEVEL_SOURCES},
+                              indent=2, sort_keys=True))
+        return
+    console.print(f"[green]ditto_archive_security: {now}[/green] (Ditto confirms an entry by itself with "
+                  f"{LEVEL_SOURCES[now]} independent sources; low {LEVEL_SOURCES['low']}, mid {LEVEL_SOURCES['mid']}, "
+                  f"high {LEVEL_SOURCES['high']})")
+
+
 @ditto.command('eval')
 @click.option('--cases', 'cases_file', type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
               help='Cases file (default: evals/ditto/cases.yml of the installation, for --kind retrieval '
