@@ -61,7 +61,7 @@ dependencies = [
     # Agent Client Protocol (Zed/JetBrains, protocol version 1, Apache-2.0): Ditto as an ACP agent for editors and
     # llmcf as an ACP client that runs agents the person picks (DESIGN round 54). 0.x: its minor releases change
     # the protocol's types, so the range ends before the next minor.
-    "agent-client-protocol>=0.12.1,<0.13",
+    "agent-client-protocol>=0.12.1,<1.1",
 
     # --- 6. Crawler & Ingestion ---
     "beautifulsoup4>=4.15.0,<5",
