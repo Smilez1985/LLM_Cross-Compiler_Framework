@@ -114,7 +114,7 @@ class TestGrounds:
     def test_a_bad_key_or_evidence_is_dropped(self, archive):
         assert offer(archive, key="rk3588").outcome == "dropped"
         assert offer(archive, evidence=["/home/jane/log", "https://a.example.org/x"]).outcome == "dropped"
-        assert offer(archive, text="x " * 300).outcome == "dropped"
+        assert offer(archive, text="x " * 400).outcome == "dropped"
 
 
 class TestConfirmation:

@@ -1221,8 +1221,9 @@ Archive...** and with `llm-cli ditto archive`. It never holds anything from your
 devices. An entry is one plain sentence, written from typed fields of a tool result (never copied text), with the
 ground it rests on and its evidence: **a build that passed its functional test** (every caller's tool calls teach it:
 Ditto's turns and AI apps alike, and only values the target itself declares make an entry), **a page of a manufacturer's
-own website** (Radxa, Rockchip, Orange Pi, CIX, Hailo, Axelera AI, SunFounder, NVIDIA, AMD, Apple and Banana Pi are
-listed in `configs/archive_sources.yml` with the chips their pages name), or **several independent sources that say the
+own website** (Radxa, Rockchip, Orange Pi with every model of its hardware page, CIX, Hailo, Axelera AI, SunFounder, NVIDIA, AMD,
+Apple, Banana Pi, Qualcomm, Intel, NXP, Google Coral, Kneron, DeepX, MemryX, Amlogic and SpacemiT are listed in
+`configs/archive_sources.yml` with the chips their pages name), or **several independent sources that say the
 same**. A sentence that still holds an address, an e-mail address, a path or a secret after the cleaning is dropped,
 never stored cleaned.
 

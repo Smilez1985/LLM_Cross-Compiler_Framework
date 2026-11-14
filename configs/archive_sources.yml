@@ -10,8 +10,10 @@
 #            of its websites, the target ids (targets/<id>) it speaks for and the chips (SoCs and NPUs, as closed words:
 #            letters, digits, dot, dash, underscore) its boards or accelerators build on, as its own pages say. A row
 #            needs at least one target or one chip. A new vendor is a row, not code.
-#            Researched on 2026-11-13 (the pages named in docs/DESIGN.md, round 94); the domain of SunFounder was not
-#            confirmed by that search and is the one its products and documentation are known by.
+#            Researched on 2026-11-13 and 2026-11-14 (the vendors the maintainer named, rounds 94 and 95; the chips of
+#            Orange Pi are the ones its own hardware page names). The domains of SunFounder (given by the maintainer) and
+#            of Kneron are the ones their products are known by; a search found no page of Kneron's own. The NPU of
+#            Amlogic's A311D2 is not confirmed by its own pages: the row names the chips of its pages, not their NPUs.
 
 version: 1
 
@@ -48,7 +50,8 @@ vendors:
   - vendor: Orange Pi
     domains: [orangepi.org]
     targets: [Rockchip]
-    chips: [RK3588, CD8180]
+    chips: [RK3588, RK3588S, RK3566, RK3399, RK3328, CD8180, CD8160, CIX-P1, A733, T527, H618, H616, H6, H5, H3, H2,
+            Ky-X1, BM1688, Ascend-310]
   - vendor: CIX
     domains: [cixtech.com]
     chips: [CD8180, CD8160, Zhouyi-Z3]
@@ -73,3 +76,30 @@ vendors:
   - vendor: Banana Pi
     domains: [banana-pi.org]
     chips: [RK3588, RK3576, SpacemiT-K1, K230D]
+  - vendor: Qualcomm
+    domains: [qualcomm.com]
+    chips: [Hexagon, Dragonwing, IQ-9075, IQ-8275, IQ-X]
+  - vendor: Intel
+    domains: [intel.com, openvino.ai]
+    chips: [Core-Ultra-NPU, Meteor-Lake]
+  - vendor: NXP
+    domains: [nxp.com, nxp.com.cn, nxp.jp]
+    chips: [eIQ-Neutron, i.MX95, i.MX93]
+  - vendor: Google Coral
+    domains: [coral.ai]
+    chips: [Edge-TPU]
+  - vendor: Kneron
+    domains: [kneron.com]
+    chips: [KL520, KL720, KL730]
+  - vendor: DeepX
+    domains: [deepx.ai]
+    chips: [DX-M1, DX-H1]
+  - vendor: MemryX
+    domains: [memryx.com]
+    chips: [MX3]
+  - vendor: Amlogic
+    domains: [amlogic.com]
+    chips: [S905X5, A311D, A311D2]
+  - vendor: SpacemiT
+    domains: [spacemit.com]
+    chips: [K1, M1]

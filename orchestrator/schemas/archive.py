@@ -32,7 +32,7 @@ LEVEL_SOURCES = {"low": 3, "mid": 5, "high": 7}
 
 ARCHIVE_ALIAS = "ditto_archive"    # the collection's alias in the knowledge base's storage
 
-TEXT_MAX = 400
+TEXT_MAX = 600                     # a manufacturer's page names up to about twenty chips of one vendor
 EVIDENCE_MAX = 20                  # evidence items kept per entry
 EVIDENCE_LENGTH = 500
 

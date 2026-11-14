@@ -128,16 +128,46 @@ class TestPageExtractor:
         table = archive_sources.load_table()
         rows = {row["vendor"]: row for row in table["vendors"]}
         for name in ("Hailo", "Axelera AI", "SunFounder", "NVIDIA", "AMD", "Apple", "Banana Pi", "CIX", "Radxa",
-                     "Rockchip", "Orange Pi"):
+                     "Rockchip", "Orange Pi", "Qualcomm", "Intel", "NXP", "Google Coral", "Kneron", "DeepX", "MemryX",
+                     "Amlogic", "SpacemiT"):
             assert name in rows, name
         domains = [d for row in rows.values() for d in row["domains"]]
         assert len(domains) == len(set(domains))
         for name, row in rows.items():
             assert row.get("targets") or row.get("chips"), name           # a row says what it speaks for
             for domain in row["domains"]:
-                assert archive_sources.registrable_domain(domain) == domain, (name, domain)
+                assert archive_sources.registrable_domain(domain, archive_sources.suffixes_of(table)) == domain, \
+                    (name, domain)
             assert all(_WORD.match(c) for c in row.get("chips", [])), name
         assert "RK3588" in rows["Banana Pi"]["chips"] and "SpacemiT-K1" in rows["Banana Pi"]["chips"]
+        # every Orange Pi chip the vendor's hardware page names (2026-11-14), the NPUs among them
+        for chip in ("RK3588", "RK3566", "CD8180", "A733", "T527", "Ky-X1", "BM1688", "Ascend-310", "H618", "H3"):
+            assert chip in rows["Orange Pi"]["chips"], chip
+
+    def test_a_vendor_with_many_chips_still_makes_a_sentence_the_archive_takes(self, tmp_path):
+        """Orange Pi names about twenty chips: the sentence with a long address and a title must still fit."""
+        from orchestrator.Core.ditto_archive import DittoArchive
+        from orchestrator.schemas.archive import TEXT_MAX
+        shipped = ExtractContext(archive_sources.load_table(), capabilities)
+        address = "https://www.orangepi.org/html/hardWare/computerAndMicrocontrollers/service-and-support/" + "a" * 60
+        (candidate,) = from_pages(self.result((address, "Orange Pi 5 Max user manual and downloads")), shipped)
+        assert len(candidate.text) <= TEXT_MAX and "Ascend-310" in candidate.text
+        archive = DittoArchive(lambda: None, None, table=archive_sources.load_table())
+        ready, reason = archive.check(candidate)
+        assert ready is not None, reason
+
+    @pytest.mark.parametrize("address, vendor", [
+        ("https://www.qualcomm.com/products/internet-of-things/robotics-processors/iq9-series/iq-9075", "Qualcomm"),
+        ("https://docs.openvino.ai/2026/openvino-workflow/running-inference/inference-devices-and-modes/npu-device.html",
+         "Intel"),
+        ("https://www.nxp.com.cn/docs/zh/unique/TIP-i.MX95-0806-CN.pdf", "NXP"),
+        ("https://www.coral.ai/products/dev-board", "Google Coral"),
+        ("https://deepx.ai/products-ai-modules/", "DeepX"), ("https://www.spacemit.com/en/news/x", "SpacemiT"),
+        ("https://docs.banana-pi.org/en/BPI-F3/SpacemiT_K1", "Banana Pi"),
+        ("https://www.sunfounder.com/collections/raspberry-pi-5-4-robotics", "SunFounder"),
+        ("https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest", "AMD")])
+    def test_the_pages_the_maintainer_named_belong_to_their_vendor(self, address, vendor):
+        assert archive_sources.vendor_of(address, archive_sources.load_table())["vendor"] == vendor
 
     def test_the_shipped_table_knows_radxa(self):
         table = archive_sources.load_table()

@@ -1340,9 +1340,9 @@ Archiv ...** und mit `llm-cli ditto archive`. Es enthält nie etwas aus deinen p
 eigenen Geräte. Ein Eintrag ist ein schlichter Satz, geschrieben aus typisierten Feldern eines Tool-Ergebnisses (nie
 kopierter Text), mit der Grundlage, auf der er ruht, und seinen Belegen: **ein Build, der seinen Funktionstest bestanden
 hat** (die Tool-Aufrufe jedes Aufrufers lehren es: Dittos Turns und KI-Apps gleichermaßen, und nur Werte, die das Target
-selbst nennt, machen einen Eintrag), **eine Seite der eigenen Website eines Herstellers** (Radxa, Rockchip, Orange Pi, CIX,
-Hailo, Axelera AI, SunFounder, NVIDIA, AMD, Apple und Banana Pi stehen in `configs/archive_sources.yml` mit den Chips,
-die ihre Seiten nennen) oder **mehrere unabhängige Quellen, die dasselbe sagen**. Ein Satz, der nach dem Bereinigen noch
+selbst nennt, machen einen Eintrag), **eine Seite der eigenen Website eines Herstellers** (Radxa, Rockchip, Orange Pi mit jedem Modell seiner Hardware-Seite,
+CIX, Hailo, Axelera AI, SunFounder, NVIDIA, AMD, Apple, Banana Pi, Qualcomm, Intel, NXP, Google Coral, Kneron, DeepX, MemryX,
+Amlogic und SpacemiT stehen in `configs/archive_sources.yml` mit den Chips, die ihre Seiten nennen) oder **mehrere unabhängige Quellen, die dasselbe sagen**. Ein Satz, der nach dem Bereinigen noch
 eine Adresse, eine E-Mail-Adresse, einen Pfad oder ein Secret enthält, wird verworfen, nie bereinigt gespeichert.
 
 Ein Eintrag ist eine Behauptung, bis er bestätigt ist. Du bestätigst nach Belieben. Ditto bestätigt nur von selbst, wenn

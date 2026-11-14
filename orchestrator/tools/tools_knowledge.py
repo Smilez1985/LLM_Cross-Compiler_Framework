@@ -148,7 +148,7 @@ class ArchiveHit(BaseModel):
     build or test, never a local path)."""
     entry_id: str
     key: str
-    text: untrusted_text(500)
+    text: untrusted_text(600)
     ground: Literal["sources", "vendor", "tested"]
     status: Literal["unconfirmed", "confirmed"]
     confirmed_by: Optional[Literal["person", "ditto"]] = None
