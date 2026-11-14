@@ -312,7 +312,11 @@ def test_installer_says_what_the_docker_group_means(tmp_path):
     """No question about the docker group, but the installer says what membership means; the group comes only with
     --rootful (the default is a rootless engine without the group)."""
     stubs = tmp_path / "bin"
-    for name in ("curl", "usermod", "sh", "groups", "docker"):
+    # setup_system also makes sure 7-Zip and Python are there: a computer without 7-Zip would have the real apt-get
+    # install it as root (this test once did exactly that on a host without 7z). 7z is stubbed, and every package
+    # manager the installer could call is a stub, so nothing here can reach the host's packages.
+    for name in ("curl", "usermod", "sh", "groups", "docker", "7z", "apt-get", "dpkg", "dnf", "zypper", "pacman",
+                 "apk"):
         _stub(stubs, name)
     (stubs / "python3").symlink_to(shutil.which("python3") or sys.executable)
     script = 'source "$1"; wait_for_internet() { :; }; ROOTFUL=1; setup_system'

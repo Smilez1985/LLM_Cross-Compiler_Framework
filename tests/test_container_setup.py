@@ -793,9 +793,12 @@ def _stub(folder: Path, name: str, exit_code: int = 0) -> None:
 @needs_bash
 class TestInstallShInAContainer:
 
-    def _setup_system(self, tmp_path, container: bool, rootful: bool = False):
+    def _setup_system(self, tmp_path, container: bool, rootful: bool = False, seven_zip: bool = True):
         stubs = tmp_path / "bin"
-        for name in ("curl", "usermod", "sh", "groups", "apt-get", "dpkg"):
+        # 7-Zip is one of the installer's own dependencies (a harness is taken over with it): with a 7z on the PATH it
+        # installs nothing for it, without one it installs the package through apt-get. The stub keeps this test
+        # independent of what the computer it runs on has installed.
+        for name in ("curl", "usermod", "sh", "groups", "apt-get", "dpkg", *(("7z",) if seven_zip else ())):
             _stub(stubs, name)
         python = shutil.which("python3")
         (stubs / "python3").symlink_to(python)
@@ -818,6 +821,16 @@ class TestInstallShInAContainer:
         run, calls = self._setup_system(tmp_path, container=True)
         assert run.returncode == 0, run.stdout + run.stderr
         assert "download.docker.com" not in calls and "apt-get" not in calls and "usermod" not in calls
+
+    @pytest.mark.skipif(any(shutil.which(n, path="/usr/bin:/bin") for n in ("7zz", "7z", "7za")),
+                        reason="this computer has 7-Zip on the system PATH, so the installer installs none")
+    def test_a_container_build_still_installs_7_zip_but_never_docker(self, tmp_path):
+        """Without 7-Zip the installer installs the family's package (7zip on Debian) in a container build too; that is
+        the only apt-get call: no Docker engine, no Docker repository, no docker group."""
+        run, calls = self._setup_system(tmp_path, container=True, seven_zip=False)
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert "apt-get install -y 7zip" in calls
+        assert "download.docker.com" not in calls and "docker" not in calls.replace("apt-get", "") and "usermod" not in calls
 
     def test_outside_a_container_build_the_engine_is_still_installed(self, tmp_path):
         """Round 23, item 3: from Docker's apt repository with the checked key, no longer with get.docker.com. The

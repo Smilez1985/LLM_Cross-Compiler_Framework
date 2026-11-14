@@ -484,24 +484,66 @@ def test_the_switch_needs_sudo_and_a_known_package_manager():
     assert dietpi.as_dict()["dropbear_packages"][-1] == "dropbear-initramfs"
 
 
-@POSIX
-def test_the_install_step_writes_the_port_first_checks_sshd_and_starts_it(tmp_path):
-    """Nothing really runs as root: the sudo stub writes down what it was asked and runs only harmless commands."""
+def _sshd_on_this_computer() -> bool:
+    """Whether the install step's own look-up (`command -v sshd`, else /usr/sbin/sshd) finds a real sshd here."""
+    return shutil.which("sshd") is not None or os.access("/usr/sbin/sshd", os.X_OK)
+
+
+def _run_install_step(tmp_path, bin_dir):
+    """The switch's install step as the pairing runs it, with the sudo stub of `bin_dir`: (what it printed, the calls
+    the stub wrote down, the plan)."""
     log = tmp_path / "sudo.log"
-    bin_dir = _bin(tmp_path, {"sudo": f'echo "$*" >> "{log}"; cat >/dev/null; exit 0'})
     the_plan = openssh_switch.plan(key_tiers.TierFacts(sudo="password", family="debian", managers=("apt-get",)))
     script = gate.script("openssh-install", the_plan.manager, str(the_plan.port))
     done = subprocess.run(["sh", "-c", str(script)], input=b"pw\n", capture_output=True, timeout=60,
                           env={"PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}", "HOME": str(tmp_path)})
-    out = done.stdout.decode()
-    calls = log.read_text().splitlines()
+    return done.stdout.decode(), log.read_text().splitlines(), the_plan
+
+
+@POSIX
+def test_the_install_step_writes_the_port_first_checks_sshd_and_starts_it(tmp_path):
+    """Nothing really runs as root: the sudo stub writes down what it was asked and runs only harmless commands. The
+    sshd is a stub too (found first on the PATH), so this holds on a computer without an sshd as well as on one with
+    it: the step's look-up of sshd must not depend on what the host has installed."""
+    log = tmp_path / "sudo.log"
+    bin_dir = _bin(tmp_path, {"sudo": f'echo "$*" >> "{log}"; cat >/dev/null; exit 0', "sshd": "exit 0"})
+    out, calls, the_plan = _run_install_step(tmp_path, bin_dir)
     tee = next(i for i, c in enumerate(calls) if c.startswith(f"-S -p  tee {openssh_switch.DROPIN}"))
-    assert any(" -t" in c for c in calls[tee:]), calls   # sshd -t after the port is written
-    if "openssh=installed" in out:
-        assert any("apt-get install -y --no-install-recommends openssh-server openssh-client" in c for c in calls)
-    assert f"port={the_plan.port}" in out, out
+    assert any(c.endswith(" -t") for c in calls[tee:]), calls   # sshd -t after the port is written
+    assert not any("apt-get install" in c for c in calls), calls   # an sshd is there: nothing is installed
+    assert f"openssh=present port={the_plan.port}" in out, out
     with pytest.raises(gate.GateRefused):
         gate.script("openssh-install", "curl", "22")
+
+
+@POSIX
+@pytest.mark.skipif(_sshd_on_this_computer(), reason="this computer has an sshd, so the step never installs one")
+def test_the_install_step_installs_openssh_when_there_is_no_sshd_then_checks_it(tmp_path):
+    """The stub of sudo plays the package manager: the install command it is asked to run puts an sshd on the PATH.
+    Without this step a computer that has no sshd found none after the (stubbed) install and the step answered
+    openssh=unavailable reason=no-sshd, which is right and which `sshd -t` never followed."""
+    log = tmp_path / "sudo.log"
+    bin_dir = tmp_path / "bin"
+    body = (f'echo "$*" >> "{log}"; cat >/dev/null; case "$*" in *"apt-get install"*) '
+            f"printf '#!/bin/sh\\nexit 0\\n' > \"{bin_dir}/sshd\"; chmod 755 \"{bin_dir}/sshd\";; esac; exit 0")
+    _bin(tmp_path, {"sudo": body})
+    out, calls, the_plan = _run_install_step(tmp_path, bin_dir)
+    tee = next(i for i, c in enumerate(calls) if c.startswith(f"-S -p  tee {openssh_switch.DROPIN}"))
+    install = next(i for i, c in enumerate(calls) if "apt-get install -y --no-install-recommends openssh-server "
+                   "openssh-client" in c)
+    assert tee < install and any(c.endswith(" -t") for c in calls[install:]), calls
+    assert f"openssh=installed port={the_plan.port}" in out, out
+
+
+@POSIX
+@pytest.mark.skipif(_sshd_on_this_computer(), reason="this computer has an sshd, so the step never installs one")
+def test_an_install_that_leaves_no_sshd_is_reported_not_hidden(tmp_path):
+    """The package manager (the stub) installs nothing: the step says so and never claims a port."""
+    log = tmp_path / "sudo.log"
+    bin_dir = _bin(tmp_path, {"sudo": f'echo "$*" >> "{log}"; cat >/dev/null; exit 0'})
+    out, calls, the_plan = _run_install_step(tmp_path, bin_dir)
+    assert "openssh=unavailable reason=no-sshd" in out and "port=" not in out, out
+    assert not any(c.endswith(" -t") for c in calls), calls   # nothing to check
 
 
 def test_the_switch_keeps_dropbear_until_the_separate_yes_and_logs_every_step(framework_key, monkeypatch):
