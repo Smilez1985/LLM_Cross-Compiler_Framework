@@ -143,6 +143,8 @@ class TestPageExtractor:
         # every Orange Pi chip the vendor's hardware page names (2026-11-14), the NPUs among them
         for chip in ("RK3588", "RK3566", "CD8180", "A733", "T527", "Ky-X1", "BM1688", "Ascend-310", "H618", "H3"):
             assert chip in rows["Orange Pi"]["chips"], chip
+        # the chips on Kneron's own SoC page
+        assert rows["Kneron"]["chips"] == ["KL520", "KL530", "KL630", "KL720", "KL730"]
 
     def test_a_vendor_with_many_chips_still_makes_a_sentence_the_archive_takes(self, tmp_path):
         """Orange Pi names about twenty chips: the sentence with a long address and a title must still fit."""
@@ -165,6 +167,8 @@ class TestPageExtractor:
         ("https://deepx.ai/products-ai-modules/", "DeepX"), ("https://www.spacemit.com/en/news/x", "SpacemiT"),
         ("https://docs.banana-pi.org/en/BPI-F3/SpacemiT_K1", "Banana Pi"),
         ("https://www.sunfounder.com/collections/raspberry-pi-5-4-robotics", "SunFounder"),
+        ("https://www.kneron.com/page/soc/", "Kneron"), ("https://doc.kneron.com/docs/", "Kneron"),
+        ("https://www.kneron.com/support/developers/", "Kneron"),
         ("https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest", "AMD")])
     def test_the_pages_the_maintainer_named_belong_to_their_vendor(self, address, vendor):
         assert archive_sources.vendor_of(address, archive_sources.load_table())["vendor"] == vendor

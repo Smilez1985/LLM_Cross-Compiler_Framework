@@ -11,9 +11,9 @@
 #            letters, digits, dot, dash, underscore) its boards or accelerators build on, as its own pages say. A row
 #            needs at least one target or one chip. A new vendor is a row, not code.
 #            Researched on 2026-11-13 and 2026-11-14 (the vendors the maintainer named, rounds 94 and 95; the chips of
-#            Orange Pi are the ones its own hardware page names). The domains of SunFounder (given by the maintainer) and
-#            of Kneron are the ones their products are known by; a search found no page of Kneron's own. The NPU of
-#            Amlogic's A311D2 is not confirmed by its own pages: the row names the chips of its pages, not their NPUs.
+#            Orange Pi are the ones its own hardware page names). The pages of SunFounder, Kneron (www.kneron.com and
+#            doc.kneron.com) were given by the maintainer. The NPU of Amlogic's A311D2 is not confirmed by its own pages:
+#            the row names the chips of its pages, not their NPUs.
 
 version: 1
 
@@ -90,7 +90,7 @@ vendors:
     chips: [Edge-TPU]
   - vendor: Kneron
     domains: [kneron.com]
-    chips: [KL520, KL720, KL730]
+    chips: [KL520, KL530, KL630, KL720, KL730]
   - vendor: DeepX
     domains: [deepx.ai]
     chips: [DX-M1, DX-H1]
