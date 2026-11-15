@@ -1,0 +1,31 @@
+# The settings of llmcf's own SearXNG (the search engine behind Ditto's web search).
+#
+# The installer copies this file, as it is, to <state folder>/searxng/config/settings.yml after it has installed the
+# software (llm-cli ditto web setup does the same later). Nobody has to edit it.
+#
+# What it does (from SearXNG's own documentation, docs.searxng.org/admin/settings):
+# - use_default_settings: true     only what differs from SearXNG's defaults is written here.
+# - search.formats: html and json  the web search asks SearXNG for the format json, which SearXNG does not give unless
+#                                  it is listed here (its default is html only).
+# - server.limiter: false          this instance serves this computer only; the limiter would need a database.
+# - server.public_instance: false  no features for the public.
+#
+# The secret key is not in this file, on purpose: a key in a public repository would be the same on every computer.
+# llmcf makes one per computer and gives it to SearXNG at the start in the environment variable SEARXNG_SECRET, which
+# SearXNG reads for server.secret_key.
+use_default_settings: true
+
+general:
+  instance_name: "llmcf search"
+
+server:
+  limiter: false
+  public_instance: false
+  image_proxy: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  formats:
+    - html
+    - json
