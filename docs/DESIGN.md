@@ -4826,6 +4826,13 @@ goes before the feature that needs it.
 
 Now in: [Knowledge base and Deep Ingest](#knowledge-base-and-deep-ingest) and [Tests, CI and the Windows hazards](#tests-ci-and-the-windows-hazards)
 
+### Round 100
+
+<a id="decision-round-100"></a>
+Decided 2026-11-15. On the order of the open roadmap items and their open points: "Reihenfolge: genehmigt" (the host guard of the tests, the web search, archive phase 2, then the Kneron target and more archive extractors, whenever they fit). Web search: "alle such apis die wir kostenlos bekommen können, alle paid apis die der user haben könnte supporten" and "Standartwerte, anpassbar in den einstellungen" for the SearXNG address; so every search API that can be had free of charge is a way of its own, and every paid API a person may hold is supported with their own key, and the SearXNG address has a default that the settings change. Kneron: the formats and quantizations follow the SDK compatibility state, which a web research finds; there is no board to test on, so the target stays untested. Archive phase 2: "nicht case sensitive ausser für codeblöcke" (comparing two values ignores case, except inside code blocks, where case matters) and "hersteller ist eigentlich die ssot, alles andere sind bestätigungen oder abweichungen die aber gerne mal die lösung für ein spezielles problem beinhalten, zB Foren Posts oder GitHub Repos / Issues / PR": the manufacturer is the single source of truth, everything else (forum posts, repositories, issues, pull requests) is a confirmation or a deviation, and a deviation is kept with its origin because it often holds the solution to one special problem. Host guard of the tests: "Nicht hart abbrechen, warnen und pakete installieren, Dienst starten": a test that reaches a real package manager or starts a service of the host does not fail; the suite warns, naming the test and the command, and what the test would have installed or started is the part to watch. More archive extractors: "alles wo es wirklich was brauchbares lernen kann. hardware_probe > ergebniss auf jeden fall, dafür ist sie da. die flags können mit den infos der website verglichen werden etc.": every tool whose typed result holds something useful may teach the archive, the hardware probe's result first, and its flags can be compared with what a manufacturer's page says.
+
+Now in: [Knowledge base and Deep Ingest](#knowledge-base-and-deep-ingest) and [Tests, CI and the Windows hazards](#tests-ci-and-the-windows-hazards)
+
 ## Versioning and documentation policy
 
 - **Semantic Versioning 2.0.0.** MAJOR for incompatible changes, MINOR for new features, PATCH for fixes.
