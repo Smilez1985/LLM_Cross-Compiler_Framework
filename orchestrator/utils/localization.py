@@ -572,6 +572,7 @@ TEXT_MODULES += ("orchestrator.utils.l10n_launch",)   # the crash dialog and the
 TEXT_MODULES += ("orchestrator.utils.l10n_console",)   # the Ditto console beside the chat (llm-cli ditto console)
 TEXT_MODULES += ("orchestrator.utils.l10n_context",)   # Ditto's context window (llm-cli ditto context)
 TEXT_MODULES += ("orchestrator.utils.l10n_archive",)   # Ditto's archive window (llm-cli ditto archive)
+TEXT_MODULES += ("orchestrator.utils.l10n_websearch",)   # Ditto's web search window (llm-cli ditto web)
 
 
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,

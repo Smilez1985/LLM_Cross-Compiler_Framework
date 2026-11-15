@@ -2320,6 +2320,44 @@ herunterladen...**; die Frage zeigt Repository, Datei, Lizenz, Größe und Ordne
 Vorgabe), der Download läuft im Hintergrund mit Fortschritt und **Abbrechen** (was schon heruntergeladen ist, bleibt
 für die Fortsetzung).
 
+### ditto web
+
+```
+llm-cli ditto web [status|use|search|setup]
+```
+
+Dittos Websuche findet im Web mehr als eine Quelle für das, was es lernt. Ein **Treffer** ist eine öffentliche
+https-Adresse, ein Titel und ein kurzer Text von Fremden, nie eine Seite: Um eine Seite zu lesen, kommt sie in die
+Wissensbasis (Deep Ingest). Die Frage geht zuerst durch den Datenschutzfilter, und eine Anfrage, die einen Pfad dieses
+Rechners oder ein Geheimnis enthält, wird abgelehnt und nirgendwohin geschickt. Das Nein einer Website (robots.txt) wird
+beachtet. Die Wege schaltest du ein, beliebig viele zusammen (sie laufen parallel, und dieselbe Seite, zweimal gefunden,
+ist ein Treffer):
+
+- **searxng**: die Suchmaschine auf diesem Rechner (kein Schlüssel). `ditto web setup` richtet sie für dich ein.
+- **api**: Such-APIs mit deinen eigenen Schlüsseln: Tavily, Exa, Bright Data (SERP API), Serper, SearchApi und Brave
+  Search. Ein Schlüssel kommt in den Secrets-Speicher (`llm-cli secrets set web_search_tavily_key` und so weiter), nie in
+  eine Einstellung. Jeder Anbieter nennt sein Gratis-Kontingent und seinen Preis selbst; schau auf seiner Seite nach.
+- **html**: die HTML-Ergebnisse einer Suchseite, aus, bis du sie einschaltest.
+
+Jeder Treffer sagt, woher er kommt: **vendor** (die Website eines gelisteten Herstellers), **repository**, **forum** oder
+**other**. Im Offline-Modus wird nur eine Suchmaschine auf diesem Rechner oder im eigenen Netz erreicht.
+
+| Befehl | Bedeutung |
+|---|---|
+| `ditto web` / `status` | Was eingestellt ist: die Wege, jeder Anbieter mit der Angabe, ob sein Schlüssel gespeichert ist (nie der Schlüssel), die Adresse. `--json` für Skripte. |
+| `use` | Wählt, was die Suche nutzt (nur du; eine KI-App kann es lesen, nie ändern): `--ways searxng,api,html` (oder `off`), `--apis tavily,exa,brightdata,serper,searchapi,brave`, `--address URL`, `--zone ZONE` (Bright Data). Ohne Option zeigt er, was eingestellt ist. |
+| `search ANFRAGE` | Sucht mit jedem eingeschalteten Weg: `--count N` (1 bis 20, Standard 10), `--json` für Skripte. Ein Weg, der scheitert, wird mit seinem Grund genannt; die anderen antworten trotzdem. |
+| `setup` | Richtet die Suchmaschine auf diesem Rechner ein: kopiert die fertige Einstellungsdatei (nichts zu bearbeiten), erzeugt einmal ein Geheimnis und startet SearXNG mit Docker oder Podman, nur auf diesem Rechner veröffentlicht (`http://127.0.0.1:8888`). Eine vorhandene Einstellungsdatei wird nie überschrieben. `--no-start` bereitet nur die Dateien vor; `--stop` entfernt den Container (Einstellungen, Geheimnis und Cache bleiben). |
+
+In der GUI: **Ditto > Websuche...** (die Wege und Anbieter als Kästchen, die Schlüssel, die Adresse, **Suchmaschine
+einrichten**, **Suchmaschine stoppen** und eine Probesuche mit ihrer Tabelle).
+
+```bash
+llm-cli ditto web setup
+llm-cli ditto web use --ways searxng
+llm-cli ditto web search "RK3588 NPU Quantisierung"
+```
+
 ### ditto cache
 
 #### ditto cache show

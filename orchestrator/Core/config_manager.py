@@ -536,6 +536,16 @@ class ConfigManager:
             ConfigSchema("ditto_archive_security", str, False, "mid", "How many independent sources (different "
                          "domains) Ditto needs to confirm an entry of its archive by itself: low 3, mid 5, high 7. "
                          "Only the person sets it", ["regex:^(low|mid|high)$"]),
+            ConfigSchema("web_search_ways", list, False, [], "The ways Ditto's web search uses, in parallel: "
+                         "searxng, api, html. Empty = the web search is off. Only the person sets it"),
+            ConfigSchema("web_search_apis", list, False, [], "The search APIs Ditto's web search asks when the way "
+                         "api is on (tavily, exa, brightdata, serper, searchapi, brave); each needs the person's own "
+                         "key in the secrets store. Only the person sets it"),
+            ConfigSchema("web_search_url", str, False, "http://127.0.0.1:8888", "The address of the SearXNG the web "
+                         "search asks (the one the installer sets up on this computer by default). Only the person "
+                         "sets it", ["regex:^https?://[^\\s/]+\\S*$"]),
+            ConfigSchema("web_search_brightdata_zone", str, False, "", "The zone of the person's Bright Data account "
+                         "that the web search's provider brightdata needs. Only the person sets it"),
             ConfigSchema("enable_telemetry", bool, False, False, "Allow anonymous error reporting (GitHub Issues)"),
             ConfigSchema("offline_mode", bool, False, False, "Force offline mode (no external APIs)"),
             # Private mode is the default, enterprise mode optional (the person's choice; an AI reads it, never
@@ -830,6 +840,7 @@ class ConfigManager:
                 "ai_provider", "ai_model", "ai_base_url", "ai_effort", "ai_fallback_chain",
                 "ai_anthropic_workspace_id", "ai_context_window", "ai_cache_ttl", "ai_cache_cost_limit",
                 "ditto_archive_security",
+                "web_search_ways", "web_search_apis", "web_search_url", "web_search_brightdata_zone",
                 # v2.0
                 "chat_context_limit", "enable_telemetry", "offline_mode",
                 "offline_local_vpns", "offline_local_hosts", "offline_local_ranges",

@@ -536,6 +536,67 @@ class WebSearch:
         return parser.can_fetch("llmcf-web-search", url)
 
 
+def for_framework(framework: Any, fetch: Optional[Callable] = None) -> WebSearch:
+    """The search of `framework`: its settings, and the person's keys from its secrets store (a store that is not there
+    or cannot be read has no keys)."""
+    manager = getattr(framework, "secrets_manager", None)
+
+    def secret_of(name: str) -> Optional[str]:
+        try:
+            return manager.get_secret(name) if manager is not None else None
+        except Exception:  # noqa: BLE001 - an unreadable store has no key
+            return None
+    return WebSearch(getattr(framework, "config", None), secret_of, fetch=fetch)
+
+
+def _names(value: Any, allowed: Sequence[str], what: str) -> List[str]:
+    """A list of names (a list or one comma-separated text) in the order of `allowed`; ValueError for an unknown one."""
+    words = [w.strip().lower() for w in (value.split(",") if isinstance(value, str) else list(value or [])) if str(w).strip()]
+    if "none" in words or "off" in words:
+        return []
+    unknown = [w for w in words if w not in allowed]
+    if unknown:
+        raise ValueError(f"{what} {', '.join(unknown)} is not known; one of {', '.join(allowed)}, or off.")
+    return [a for a in allowed if a in words]
+
+
+def configure(config: Any, *, ways: Any = None, apis: Any = None, address: Optional[str] = None,
+              zone: Optional[str] = None, save: bool = True) -> bool:
+    """The one writer of the web search's settings (`llm-cli ditto web use`, the settings window): every value is checked
+    first (ValueError, nothing changes), then set, and config.yml is saved with `save`. None leaves a setting as it is;
+    "off" or an empty list turns ways or providers off. Returns False when config.yml could not be saved (the values hold
+    for this run). The person's alone: no tool of an AI calls it."""
+    changes: Dict[str, Any] = {}
+    if ways is not None:
+        changes["web_search_ways"] = _names(ways, WAYS, "The way")
+    if apis is not None:
+        changes["web_search_apis"] = _names(apis, tuple(PROVIDERS), "The provider")
+    if address is not None:
+        text = str(address).strip().rstrip("/")
+        if not re.match(r"^https?://[^\s/]+\S*$", text):
+            raise ValueError("The SearXNG address starts with http:// or https://, e.g. http://127.0.0.1:8888.")
+        changes["web_search_url"] = text
+    if zone is not None:
+        text = str(zone).strip()
+        if len(text) > 100 or re.search(r"\s", text):
+            raise ValueError("The Bright Data zone is one word (the name of the zone in your account).")
+        changes["web_search_brightdata_zone"] = text
+    for key, value in changes.items():
+        if config.set(key, value) is False:
+            raise ValueError(f"{key} cannot be '{value}'.")
+    saver = getattr(config, "save_user_config", None)
+    return bool(saver()) if save and changes and callable(saver) else True
+
+
+def status(search: WebSearch) -> Dict[str, Any]:
+    """What is set up, for the command and the window: the ways that are on, every provider with whether its key is
+    saved (never the key), the SearXNG address and whether offline mode is on."""
+    return {"ways": search.ways(), "address": search.address(), "offline": search.offline(),
+            "apis": [{"name": p.name, "label": p.label, "listed": p.name in search.providers(),
+                      "key_saved": bool((search.secret_of(p.secret) or "").strip()), "secret": p.secret,
+                      "needs": list(p.needs)} for p in PROVIDERS.values()]}
+
+
 __all__ = ["DEFAULT_URL", "JSON_OFF", "OFF", "ORIGINS", "PROVIDERS", "Provider", "Request", "Response", "SearchHit",
            "SearchRefused", "SearchResult", "WAYS", "WayError", "WayReport", "WebSearch", "clean_text", "default_fetch",
-           "merge", "normalize", "origin_of", "parse_duckduckgo", "parse_searxng", "prepare_query", "public_https"]
+           "configure", "for_framework", "merge", "normalize", "origin_of", "parse_duckduckgo", "parse_searxng", "prepare_query", "public_https", "status"]

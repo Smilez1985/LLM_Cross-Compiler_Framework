@@ -2623,6 +2623,25 @@ als PDF oder als HTML speichern und die Datei über ihren Pfad (`llm-cli knowled
 - **Du behältst die Kontrolle:** Die gespeicherte Datei wird gelesen, nie kopiert oder verändert; **Private Seite
   entfernen...** und `llm-cli knowledge remove-private` fragen vorher (Nein ist vorgewählt) und lassen die Datei in Ruhe.
 
+### Dittos Websuche
+
+Ditto sucht im Web mehr als eine Quelle für das, was es lernt (die Seite eines Herstellers, ein Repository, ein
+Forenbeitrag, der ein besonderes Problem löst). **Du schaltest die Wege ein** (Ditto > Websuche... oder `llm-cli ditto web
+use`): die Suchmaschine auf diesem Rechner, Such-APIs mit deinen eigenen Schlüsseln (Tavily, Exa, Bright Data, Serper,
+SearchApi, Brave Search) und die HTML-Ergebnisse einer Suchseite. Sie laufen zusammen, und dieselbe Seite, zweimal
+gefunden, ist ein Treffer.
+
+- **Nichts einzustellen:** `llm-cli ditto web setup` oder die Schaltfläche **Suchmaschine einrichten** richtet auf diesem
+  Rechner eine Suchmaschine (SearXNG) ein, mit einer fertigen Einstellungsdatei aus dem Repository, einem eigenen
+  Geheimnis und dem Port nur auf diesem Rechner offen; niemand bearbeitet eine Einstellungsdatei. Es braucht Docker oder
+  Podman und sagt es in einfachen Worten, wenn keines da ist.
+- **Ein Treffer ist nie eine Seite:** eine Adresse, ein Titel und ein kurzer Text von Fremden, als Daten gelesen. Eine Seite
+  zu lesen ist die Aufgabe von Deep Ingest, mit seinem Hinweis.
+- **Die Frage bleibt privat:** Sie geht zuerst durch den Datenschutzfilter; eine Anfrage mit einem Pfad dieses Rechners oder
+  einem Geheimnis wird abgelehnt. Der Offline-Modus erreicht nur eine Suchmaschine auf diesem Rechner oder im eigenen Netz,
+  und die robots.txt einer Website wird beachtet.
+- **Deine Schlüssel bleiben deine:** Sie liegen im Secrets-Speicher, nie in einer Einstellung, und werden nirgends gezeigt.
+
 ### Lizenzen und Urheberrecht
 
 Text- und Data-Mining erlaubt der Wissensbasis, den Text zu behalten, den der Crawl lesen durfte. Diesen Text

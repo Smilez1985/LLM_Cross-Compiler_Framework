@@ -4752,6 +4752,143 @@ def ditto_cache_set(ctx: FrameworkContext, name: str, value: str, yes_over_cap: 
     console.print("A running server takes it at its next start (llm-cli ditto runtime start restarts it once).")
 
 
+@ditto.group('web', invoke_without_command=True)
+@click.pass_context
+def ditto_web(click_ctx):
+    """Ditto's web search: what is set up, a search from the command line, and the search engine (SearXNG) that the
+    installer sets up on this computer"""
+    if click_ctx.invoked_subcommand is None:
+        click_ctx.invoke(ditto_web_status, as_json=False)
+
+
+def _web(ctx: FrameworkContext):
+    from orchestrator.Core import web_search
+    ctx.require_framework()
+    return web_search.for_framework(ctx.framework_manager)
+
+
+@ditto_web.command('status')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def ditto_web_status(ctx: FrameworkContext, as_json: bool):
+    """The ways that are turned on, the search APIs with whether their key is saved, and the SearXNG address"""
+    _web_show(ctx, as_json)
+
+
+def _web_show(ctx: FrameworkContext, as_json: bool) -> None:
+    from orchestrator.Core import web_search
+    info = web_search.status(_web(ctx))
+    if as_json:
+        click.echo(json.dumps(info, indent=2, sort_keys=True))
+        return
+    console.print("Web search: " + (", ".join(info["ways"]) if info["ways"] else "off (no way is turned on)"))
+    if info["offline"]:
+        console.print("[yellow]Offline mode is on: only a SearXNG on this computer or the own network is reached.[/yellow]")
+    console.print(f"SearXNG address: {escape(info['address'])}")
+    for api in info["apis"]:
+        state = ("listed, " if api["listed"] else "not listed, ") + ("key saved" if api["key_saved"] else "no key")
+        console.print(f"  {escape(api['label'])}: {state}" + ("" if api["key_saved"] else f" (llm-cli secrets set {api['secret']})"))
+    if not info["ways"]:
+        console.print("Turn it on with: llm-cli ditto web use --ways searxng   (or api, html; "
+                      "llm-cli ditto web setup sets up the search engine)")
+
+
+@ditto_web.command('use')
+@click.option('--ways', default=None, help='The ways to use, comma-separated: searxng, api, html; off turns the web search off')
+@click.option('--apis', default=None, help='The search APIs to ask, comma-separated: tavily, exa, brightdata, serper, '
+                                           'searchapi, brave; off lists none')
+@click.option('--address', default=None, help='The SearXNG address (the installer sets up http://127.0.0.1:8888)')
+@click.option('--zone', default=None, help='Your Bright Data zone (only for the provider brightdata)')
+@pass_context
+def ditto_web_use(ctx: FrameworkContext, ways: Optional[str], apis: Optional[str], address: Optional[str],
+                  zone: Optional[str]):
+    """Choose what the web search uses (yours alone; an AI can read it, never change it). Without an option it shows
+    what is set. A key goes into the secrets store: llm-cli secrets set web_search_<provider>_key"""
+    from orchestrator.Core import web_search
+    ctx.require_framework()
+    if ways is None and apis is None and address is None and zone is None:
+        _web_show(ctx, False)
+        return
+    try:
+        saved = web_search.configure(ctx.framework_manager.config, ways=ways, apis=apis, address=address, zone=zone)
+    except ValueError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    if not saved:
+        console.print("[yellow]config.yml could not be saved; the choice holds until this program ends.[/yellow]")
+    _web_show(ctx, False)
+
+
+@ditto_web.command('search')
+@click.argument('query')
+@click.option('--count', type=click.IntRange(1, 20), default=10, show_default=True, help='Most hits')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def ditto_web_search(ctx: FrameworkContext, query: str, count: int, as_json: bool):
+    """Search the web with every way that is turned on: addresses, titles and short snippets, never a page. To read a
+    page, add it to the knowledge base (Deep Ingest)"""
+    from dataclasses import asdict
+    from orchestrator.Core.web_search import SearchRefused
+    search = _web(ctx)
+    try:
+        result = search.search(query, count)
+    except SearchRefused as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    if as_json:
+        click.echo(json.dumps({"query": result.query, "hits": [asdict(h) for h in result.hits],
+                               "ways": [asdict(w) for w in result.ways]}, indent=2, sort_keys=True))
+        return
+    for number, hit in enumerate(result.hits, 1):
+        console.print(f"{number}. [bold]{escape(_printable(hit.title))}[/bold] ({escape(hit.origin)}; "
+                      f"{escape(', '.join(hit.ways))})")
+        console.print(f"   {escape(_printable(hit.address))}")
+        if hit.snippet:
+            console.print(f"   {escape(_printable(hit.snippet))}")
+    if not result.hits:
+        console.print("No hit.")
+    for way in result.ways:
+        if way.status != "ok":
+            console.print(f"[yellow]{escape(way.way)}: {escape(way.status)}: {escape(_printable(way.reason))}[/yellow]")
+    console.print("A hit is an address and a short text from a stranger. To read the page, add it to the knowledge base "
+                  "(Deep Ingest).")
+
+
+@ditto_web.command('setup')
+@click.option('--no-start', is_flag=True, help='Only copy the settings file and make the secret; do not start the engine')
+@click.option('--stop', is_flag=True, help='Stop and remove the search engine container (settings and secret stay)')
+@pass_context
+def ditto_web_setup(ctx: FrameworkContext, no_start: bool, stop: bool):
+    """Set up the SearXNG that Ditto's web search asks, on this computer: copies the finished settings file (nothing to
+    edit), makes a secret and starts the container (needs Docker or Podman). The installer does this after installing"""
+    from orchestrator.Core import searxng_setup
+    from orchestrator.Core.disk_plan import state_dir
+    ctx.require_framework()
+    try:
+        if stop:
+            outcome = searxng_setup.stop()
+            console.print("The search engine was stopped and removed; the settings, the secret and the cache stay."
+                          if outcome == "removed" else "There was no search engine container.")
+            return
+        folder = state_dir(ctx.framework_manager)
+        if folder is None:
+            console.print("[red]The state folder is not known; the search engine could not be set up.[/red]")
+            sys.exit(1)
+        result = searxng_setup.setup(folder, run=not no_start)
+    except searxng_setup.SetupError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    for note in result.notes:
+        console.print(escape(note))
+    if result.secret_made:
+        console.print("A secret for this computer's search engine was made (only you can read it).")
+    if result.running:
+        console.print(f"[green]The search engine runs at {escape(result.url)} (this computer only).[/green] Turn the web "
+                      "search on with: llm-cli ditto web use --ways searxng")
+    else:
+        console.print("Not started (--no-start). Start it later with: llm-cli ditto web setup")
+
+
 @ditto.command('setup')
 @pass_context
 def ditto_setup(ctx: FrameworkContext):

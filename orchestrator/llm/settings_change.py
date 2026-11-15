@@ -62,8 +62,11 @@ _KV_ORDER = {"q4_0": 0, "q8_0": 1, "f16": 2}   # memory of the KV-cache type, sm
 # Settings an AI may read but never change, in either direction (not even downwards): lowering the idle timeout can
 # stop the person's own long builds, and pinning "auto" of the prompt cache or the KV-cache type to a value freezes
 # a value that may no longer fit this computer later.
+WEB_SEARCH_SETTINGS = ("web_search_ways", "web_search_apis", "web_search_url", "web_search_brightdata_zone")
+WEB_SEARCH_PERSON_ONLY_TEXT = ("{key} decides whether and how Ditto's web search reaches out. Only the person sets it, in "
+                               "the framework's settings; no AI and no settings change of an AI can.")
 PERSON_DECIDES = ("build_idle_timeout", "local_cache_ram_mib", "local_kv_cache", "framework_mode",
-                  "runtime_layer_toolbox", "ditto_archive_security")
+                  "runtime_layer_toolbox", "ditto_archive_security") + WEB_SEARCH_SETTINGS
 # The MQTT doorbell's broker, user name, topic prefix and CA file (Core/doorbell.py): an AI may not redirect or
 # silence the person's notifications.
 MQTT_SETTINGS = ("mqtt_broker_url", "mqtt_username", "mqtt_topic_prefix", "mqtt_ca_file")
@@ -106,6 +109,8 @@ def person_only_text(key: str) -> str:
         return MODE_PERSON_ONLY_TEXT.format(key=key)
     if key == "ditto_archive_security":
         return ARCHIVE_PERSON_ONLY_TEXT.format(key=key)
+    if key in WEB_SEARCH_SETTINGS:
+        return WEB_SEARCH_PERSON_ONLY_TEXT.format(key=key)
     if key == "runtime_layer_toolbox":
         return TOOLBOX_PERSON_ONLY_TEXT.format(key=key)
     if key in PERSON_DECIDES:
@@ -120,6 +125,8 @@ def _person_only_title(key: str) -> str:
         return "Build"
     if key == "ditto_archive_security":
         return "Ditto's archive"
+    if key in WEB_SEARCH_SETTINGS:
+        return "Web search"
     if key == CACHE_OVER_CAP_OK or key in LOCAL_CACHE_SETTINGS:
         return "Prompt cache"
     return "Offline Mode"

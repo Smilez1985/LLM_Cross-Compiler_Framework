@@ -2380,6 +2380,24 @@ the file over by its path (`llm-cli knowledge add-private`) or by dragging it in
 - **You stay in control:** the file you saved is read, never copied or changed; **Remove private page...** and
   `llm-cli knowledge remove-private` ask first (No by default) and leave the file alone.
 
+### Ditto's web search
+
+Ditto looks for more than one source on the web for what it learns (a manufacturer's page, a repository, a forum post that
+fixes one special problem). **You turn on the ways** (Ditto > Web Search..., or `llm-cli ditto web use`): the search
+engine on this computer, search APIs with your own keys (Tavily, Exa, Bright Data, Serper, SearchApi, Brave Search) and a
+search page's HTML results. They run together, and the same page found twice is one hit.
+
+- **Nothing to configure:** `llm-cli ditto web setup` or the button **Set Up the Search Engine** sets up a search engine
+  (SearXNG) on this computer with a finished settings file from the repository, a secret of its own and the port open on
+  this computer only; nobody edits a settings file. It needs Docker or Podman and says so in plain words when neither is
+  there.
+- **A hit is never a page:** an address, a title and a short text from a stranger, read as data. Reading a page is Deep
+  Ingest's job, with its notice.
+- **The question stays private:** it goes through the privacy filter first; a query with a path of this computer or a
+  secret is refused. Offline mode reaches only a search engine on this computer or in your own network, and a site's
+  robots.txt is respected.
+- **Your keys stay yours:** they are in the secrets store, never in a setting, and shown nowhere.
+
 ### Licences and copyright
 
 Text and data mining lets the knowledge base keep the text the crawl was allowed to read. Passing that text on is
