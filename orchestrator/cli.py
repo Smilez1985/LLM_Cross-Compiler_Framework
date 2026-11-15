@@ -6814,6 +6814,8 @@ def knowledge_snapshots_export(ctx: FrameworkContext, names: Tuple[str, ...], de
             note = f" ({r.problem})" if r.problem else ""
             console.print(f"[green]Copied and checked: {escape(r.name)} -> {escape(r.copy)} "
                           f"({size_text(r.size_bytes)}, sha256 {r.sha256[:16]}...){escape(note)}[/green]")
+            if r.private:
+                console.print(f"[yellow]{escape(r.private_note)}[/yellow]")
         else:
             console.print(f"[yellow]Not exported: {escape(r.name)}: {escape(r.problem)}[/yellow]")
     done = sum(1 for r in results if r.ok)
@@ -6972,8 +6974,67 @@ def knowledge_index_docs(ctx: FrameworkContext, with_code: bool):
                   "clients).")
 
 
+def _private_rag(ctx: FrameworkContext):
+    """The knowledge base for a private page's commands (they need it on, like every command that stores)."""
+    ctx.require_framework()
+    ensure = getattr(ctx.framework_manager, "ensure_rag_manager", None)
+    rag = ensure() if callable(ensure) else None
+    if rag is None:
+        console.print("[red]The knowledge base is off (setting enable_rag_knowledge). Switch it on in File > "
+                      "Settings... first.[/red]")
+        sys.exit(1)
+    return rag
+
+
+@knowledge.command('add-private')
+@click.argument('file', type=click.Path(path_type=Path))
+@click.option('--source', 'address', default='',
+              help='The page\'s own address (https://...), where the saved file came from; without it the file\'s name '
+                   'is its label')
+@pass_context
+def knowledge_add_private(ctx: FrameworkContext, file: Path, address: str):
+    """Add a page you saved (a PDF or an HTML file) that could not be crawled, as a private page: marked private, kept
+    on this computer, never put into a pack, an export or the knowledge wiki, never learned by Ditto's archive. Your
+    own AI model, local or cloud, may read it"""
+    from orchestrator.Core.private_pages import PrivatePageError, add_private_page
+    rag = _private_rag(ctx)
+    try:
+        result = add_private_page(rag, file, address)
+    except PrivatePageError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]Added as a private page: {escape(_printable(result.source))}[/green]")
+    console.print("It is marked private, stays on this computer and is never shared; Ditto finds it with kind private.")
+
+
+@knowledge.command('remove-private')
+@click.argument('source')
+@click.option('--yes', is_flag=True, help='Remove without asking')
+@pass_context
+def knowledge_remove_private(ctx: FrameworkContext, source: str, yes: bool):
+    """Remove a private page from the knowledge base (its label as 'knowledge sources' shows it, with or without the
+    leading 'private:'); the file you saved is not touched"""
+    from orchestrator.Core.rag_manager import OWN_HOLDER
+    from orchestrator.rag.private import private_label
+    rag = _private_rag(ctx)
+    label = private_label(source)
+    known = [e for e in rag.list_sources() if e["source"] == label and e["kind"] == "private"]
+    if not known:
+        console.print("[red]There is no private page with that label.[/red]")
+        sys.exit(1)
+    console.print(f"{escape(_printable(label))}: {known[0]['chunks']} excerpt(s)")
+    if not yes and not click.confirm("Remove it from the knowledge base?", default=False):
+        console.print("Nothing was changed.")
+        return
+    if not rag.release_holder(OWN_HOLDER, sources=lambda name: name == label):
+        console.print(f"[red]{escape(str(rag.last_error or 'It could not be removed.'))}[/red]")
+        sys.exit(1)
+    console.print("[green]Removed. The file you saved was not touched.[/green]")
+
+
 @knowledge.command('sources')
-@click.option('--kind', type=click.Choice(["web", "pack", "docs", "other", "any"]), default="any", show_default=True,
+@click.option('--kind', type=click.Choice(["web", "pack", "docs", "private", "other", "any"]), default="any",
+              show_default=True,
               help='Only sources of this kind')
 @click.option('--topic', help='Only sources that belong to this topic or target (e.g. llama.cpp or Rockchip)')
 @pass_context

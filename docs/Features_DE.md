@@ -2599,6 +2599,26 @@ eine KI zu verstecken (Prompt Injection). Deshalb speichert Deep Ingest nur, was
   evals/retrieval/carriers.yml`): Eine Nutzlast, die in die gespeicherten Auszüge gelangt, oder ein sichtbarer Text,
   der dort fehlt, lässt den Lauf scheitern.
 
+### Nicht crawlbare Seiten bleiben privat
+
+Eine Seite, die robots.txt oder ein anderes Opt-out verweigert, eine hinter einem Login oder einer Paywall, eine, die
+mit einem Fehler antwortet, wird nie abgerufen oder umgangen. Du bekommst ihre Adresse als Link; du kannst sie öffnen,
+als PDF oder als HTML speichern und die Datei über ihren Pfad (`llm-cli knowledge add-private`) oder per Drag & Drop in
+**Tools > Wissensquellen...** übergeben.
+
+- **Sie ist privat:** Die Seite ist überall, wo sie aufgelistet wird, als privat markiert, ihre Bezeichnung beginnt mit
+  `private:`, und ein späterer Crawl derselben Adresse überschreibt sie nie. Die Markierung setzt allein das Framework;
+  ein Wissenspaket kann sie weder beanspruchen noch fälschen.
+- **Sie bleibt auf diesem Rechner:** Sie kommt nie in ein Wissenspaket, einen Export, das Community- oder das globale
+  Wissens-Wiki, wird nie von Dittos Archiv gelernt und nirgendwohin hochgeladen. Ein Snapshot ist deine eigene Sicherung
+  und behält deine privaten Seiten; sein Kopf nennt ihre Zahl, und sein Export weist darauf hin, ihn nicht
+  weiterzugeben.
+- **Dein eigenes KI-Modell darf sie lesen:** Ein lokales oder ein Cloud-Modell liest ihre Auszüge wie die jeder Quelle,
+  denn das ist Lesen auf deinem eigenen Rechner. Das Nein des Herausgebers (was robots.txt sagt) wird beachtet: Es wird
+  nichts abgerufen und nichts von der Seite weitergegeben.
+- **Du behältst die Kontrolle:** Die gespeicherte Datei wird gelesen, nie kopiert oder verändert; **Private Seite
+  entfernen...** und `llm-cli knowledge remove-private` fragen vorher (Nein ist vorgewählt) und lassen die Datei in Ruhe.
+
 ### Lizenzen und Urheberrecht
 
 Text- und Data-Mining erlaubt der Wissensbasis, den Text zu behalten, den der Crawl lesen durfte. Diesen Text

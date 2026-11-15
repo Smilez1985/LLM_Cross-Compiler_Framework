@@ -456,7 +456,7 @@ llm-cli knowledge index-docs --with-code
 ### knowledge sources
 
 ```
-llm-cli knowledge sources [--kind web|pack|docs|other|any] [--topic NAME]
+llm-cli knowledge sources [--kind web|pack|docs|private|other|any] [--topic NAME]
 ```
 
 Listet, was die Wissensbasis enthält: jede Quelle mit ihrer Art, der Lizenz, die sie nennt (eine
@@ -477,6 +477,43 @@ Target** ist `--topic`).
 llm-cli knowledge sources
 llm-cli knowledge sources --kind web
 llm-cli knowledge sources --topic Rockchip
+```
+
+### knowledge add-private und knowledge remove-private
+
+```
+llm-cli knowledge add-private DATEI [--source ADRESSE]
+llm-cli knowledge remove-private QUELLE [--yes]
+```
+
+Eine Seite, die sich nicht crawlen lässt (robots.txt oder ein anderes Opt-out der Website, ein Login, eine Paywall, ein
+Fehler), wird nie abgerufen oder umgangen; du bekommst ihre Adresse als Link. Öffne sie im Browser, speichere sie als
+**PDF** oder als **HTML** und gib die Datei hier an: `add-private` liest sie so, wie der Crawler eine Seite liest (den
+Text eines PDFs, den sichtbaren Text einer HTML-Seite), und speichert sie als **private Seite**. `--source` ist die eigene
+Adresse der Seite (`https://...`, woher die Datei stammt); ohne sie ist der Dateiname die Bezeichnung, nie der Ordner, in
+dem sie liegt. Dieselbe Datei oder Adresse noch einmal ersetzt die frühere Fassung. Die Datei selbst wird weder kopiert
+noch verändert. Angenommen wird nur ein PDF (bis 64 MiB, mit Text; ein Scan hat keinen) oder eine HTML-Seite (bis 8 MiB);
+ein Link auf eine Datei wird nicht verfolgt.
+
+Eine private Seite ist überall, wo sie aufgelistet wird, als **privat** markiert (`knowledge sources --kind private`, die
+Art von `list_knowledge_sources`, die Bezeichnung beginnt mit `private:`), bleibt auf diesem Rechner und wird **nie
+geteilt**: nicht in einem Wissenspaket, nicht in einem Export, nicht im Community- oder im globalen Wissens-Wiki, nicht
+von Dittos Archiv gelernt, nirgendwohin hochgeladen. Ein Snapshot ist deine eigene Sicherung und behält sie; sein Export
+weist darauf hin, dass die Datei private Seiten enthält und nicht weitergegeben werden soll. Dein eigenes KI-Modell, lokal
+oder in der Cloud, darf ihre Auszüge lesen wie die jeder Quelle: das ist Lesen auf deinem Rechner; das Nein des
+Herausgebers wird beachtet, indem nichts abgerufen und nichts weitergegeben wird.
+
+`remove-private` entfernt eine private Seite anhand ihrer Bezeichnung (mit oder ohne `private:`), fragt vorher (Nein ist
+vorgewählt; `--yes` überspringt die Frage) und berührt die gespeicherte Datei nicht.
+
+In der GUI: **Tools > Wissensquellen...**: die Schaltfläche **Gespeicherte Seite hinzufügen...** (oder die Datei auf das
+Fenster ziehen; das Feld **Adresse der Seite** ist `--source`) und **Private Seite entfernen...**; der Filter **Art** hat
+**Private Seiten**.
+
+```bash
+llm-cli knowledge add-private ~/Downloads/npu-guide.pdf --source https://docs.example.com/npu-guide
+llm-cli knowledge sources --kind private
+llm-cli knowledge remove-private https://docs.example.com/npu-guide
 ```
 
 ### knowledge loose und knowledge sort

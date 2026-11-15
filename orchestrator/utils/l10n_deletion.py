@@ -79,6 +79,9 @@ TEXTS = {
         "snapshots.exported": "Copied and checked (sha256): {name} -> {path}",
         "snapshots.not_exported": "Not exported: {name}: {reason}",
         "snapshots.export_note": "The snapshots themselves were not changed.",
+        "snapshots.private_note": "{name} holds {n} excerpt(s) of private pages (your own saved copies of pages that "
+                                  "could not be crawled). It is your backup: do not pass the file on, share it or put "
+                                  "it online.",
         "snapshots.no_delete": "Deleting needs the framework (its trash and audit log); open this window from the "
                                "main window.",
         "snapshots.note": "There is no limit: the framework keeps as many snapshots as the disk holds and deletes "
@@ -168,6 +171,9 @@ TEXTS = {
         "snapshots.exported": "Kopiert und geprüft (sha256): {name} -> {path}",
         "snapshots.not_exported": "Nicht exportiert: {name}: {reason}",
         "snapshots.export_note": "Die Snapshots selbst wurden nicht verändert.",
+        "snapshots.private_note": "{name} enthält {n} Auszug/Auszüge privater Seiten (eigene gespeicherte Kopien von "
+                                  "Seiten, die sich nicht crawlen ließen). Die Datei ist eine Sicherung: nicht "
+                                  "weitergeben, nicht teilen, nicht ins Netz stellen.",
         "snapshots.no_delete": "Zum Löschen braucht es das Framework (seinen Papierkorb und sein Audit-Protokoll); "
                                "öffne dieses Fenster aus dem Hauptfenster.",
         "snapshots.note": "Es gibt keine Obergrenze: das Framework behält so viele Snapshots, wie die Platte fasst, "

@@ -48,6 +48,10 @@ CLI_PATHS: Dict[str, str] = {
     "knowledge sources": ACT_SOURCES,
     "knowledge sources --kind": "cmb_knowledge_sources_kind",
     "knowledge sources --topic": "edt_knowledge_sources_topic",
+    # a page that could not be crawled, saved by the person as a PDF or HTML: a private page (never shared)
+    "knowledge add-private": "btn_knowledge_private_add",       # the button, or the file dragged into the window
+    "knowledge add-private --source": "edt_knowledge_private_source",
+    "knowledge remove-private": "btn_knowledge_private_remove",
     # loose knowledge files: listed and sorted into a topic or target folder in the Community Hub (round 23 item 1)
     "knowledge loose": "btn_zoo_sort",               # the list of the window it opens
     "knowledge sort": "btn_zoo_sort",                # the chosen file, then the summary ("No" default)
@@ -111,6 +115,9 @@ WINDOW_OBJECTS: Dict[str, str] = {
     "lbl_knowledge_storage": ACT_SNAPSHOTS,
     "cmb_knowledge_sources_kind": ACT_SOURCES,
     "edt_knowledge_sources_topic": ACT_SOURCES,
+    "btn_knowledge_private_add": ACT_SOURCES,
+    "edt_knowledge_private_source": ACT_SOURCES,
+    "btn_knowledge_private_remove": ACT_SOURCES,
     "btn_zoo_sort": ACT_HUB,
     "btn_knowledge_sources_refresh": ACT_SOURCES,
     "tbl_knowledge_sources": ACT_SOURCES,
@@ -138,6 +145,7 @@ WINDOW_OBJECTS: Dict[str, str] = {
     "edt_zoo_maint_title": ACT_HUB,
 }
 MACHINE_ONLY: Dict[str, str] = {
+    "knowledge remove-private --yes": "skips the question; the window always asks (No by default)",
     "zoo list --json": "machine-readable output; the Community Hub shows the same rows",
     "zoo install --yes": "script switch: the Community Hub shows the summary and asks every time (\"No\" default)",
     "zoo export --yes": "script switch: in the export window the person clicks Open pull request after the summary",

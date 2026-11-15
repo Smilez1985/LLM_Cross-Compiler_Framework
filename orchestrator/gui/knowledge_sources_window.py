@@ -8,23 +8,31 @@ and copyright notice it shows, what a knowledge pack would carry of it (its full
 and short facts, or nothing) and why. The kind filter lists only web pages, pack pages, documents or other sources.
 The list comes from knowledge_sources.sources (RAGManager.list_sources, the same list as `llm-cli knowledge sources
 --kind ...`); it opens the knowledge base, so it is read in a worker thread that reports through the one WorkerRelay.
-Nothing is changed here. Addresses, titles and notices are site text: shown as plain text only.
+Addresses, titles and notices are site text: shown as plain text only.
+
+Pages that could not be crawled (DESIGN, Knowledge base and Deep Ingest): the person saves such a page as a PDF or as
+HTML and adds the file here, with "Add a Saved Page..." or by dragging it onto the window (`llm-cli knowledge
+add-private`, with the page's address in its field as `--source`). It becomes a private page, kind private, marked
+private wherever it is listed, kept on this computer and never shared (rag/private.py). "Remove Private Page..." takes
+the selected one out again after a question (No by default); the file the person saved is never touched. Adding and
+removing run in a worker thread and report through the same WorkerRelay.
 """
 
 import threading
 from typing import Any, List, Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
-                               QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout,
+                               QHeaderView, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
+                               QWidget)
 
-from orchestrator.gui.plain import button_text, one_line, plain_label, plain_tooltip
+from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_label, plain_tooltip
 from orchestrator.utils.localization import current_language, ui_text
 
 # the order of knowledge_sources.COLUMNS (the CLI's list): the topic or target is the third column on both
 COLUMNS = ("sources.col.source", "sources.col.kind", "sources.col.topic", "sources.col.removed", "sources.col.licence",
            "sources.col.copyright", "sources.col.carried", "sources.col.why")
-KIND_FILTER = ("any", "web", "pack", "docs", "other")   # knowledge_sources.KIND_CHOICES, "any" first
+KIND_FILTER = ("any", "web", "pack", "docs", "private", "other")   # knowledge_sources.KIND_CHOICES, "any" first
 
 
 class KnowledgeSourcesDialog(QDialog):
@@ -76,10 +84,34 @@ class KnowledgeSourcesDialog(QDialog):
         layout.addWidget(self.summary)
         self.status = plain_label("")
         layout.addWidget(self.status)
+        # private pages: a page that could not be crawled, saved by the person (drag the file here, or choose it)
+        self.setAcceptDrops(True)
+        layout.addWidget(plain_label(self._t("sources.private.drop")))
+        private = QHBoxLayout()
+        self.address = QLineEdit(self)
+        self.address.setObjectName("edt_knowledge_private_source")
+        self.address.setAccessibleName(self._t("sources.private.address"))
+        self.address.setPlaceholderText(self._t("sources.private.address.hint"))
+        self.address.setClearButtonEnabled(True)
+        private.addWidget(plain_label(self._t("sources.private.address"), wrap=False, selectable=False))
+        private.addWidget(self.address, stretch=1)
+        self.btn_add = QPushButton(button_text(self._t("sources.private.add")), self)
+        self.btn_add.setObjectName("btn_knowledge_private_add")
+        self.btn_add.setAutoDefault(False)
+        self.btn_add.clicked.connect(self.choose_file)
+        private.addWidget(self.btn_add)
+        self.btn_remove = QPushButton(button_text(self._t("sources.private.remove")), self)
+        self.btn_remove.setObjectName("btn_knowledge_private_remove")
+        self.btn_remove.setAutoDefault(False)
+        self.btn_remove.clicked.connect(self.remove_selected)
+        private.addWidget(self.btn_remove)
+        layout.addLayout(private)
         buttons = QDialogButtonBox(QDialogButtonBox.Close, self)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.entries: List[dict] = []
+        self._note = ""                        # the sentence shown once the list is read again
+        self._jobs: dict = {}                  # token -> what to do with the result of adding or removing a page
         self.shown_kind = ""
         self._token: Optional[object] = None   # the newest read; an older one that arrives late is dropped
         from orchestrator.gui.worker_relay import worker_relay
@@ -117,6 +149,11 @@ class KnowledgeSourcesDialog(QDialog):
         threading.Thread(target=work, name="knowledge-sources", daemon=True).start()
 
     def _loaded(self, token: object, payload: Any) -> None:
+        job = self._jobs.pop(token, None)
+        if job is not None:   # the result of adding or removing a private page, not of a read
+            ok, value = payload[1]
+            job(ok, value)
+            return
         if token is not self._token:
             return
         self._token = None
@@ -129,7 +166,8 @@ class KnowledgeSourcesDialog(QDialog):
         elif outcome == "unreadable":
             self.status.setText(self._t("sources.unreadable", reason=one_line(value)))
         else:
-            self.status.setText("")
+            self.status.setText(self._note)   # what adding or removing a page told, kept after the list is read again
+        self._note = ""
         self._fill(kind, outcome == "ok")
 
     def _fill(self, kind: str, read: bool) -> None:
@@ -168,6 +206,95 @@ class KnowledgeSourcesDialog(QDialog):
 
     def _kind_text(self, kind: str) -> str:
         return self._t(f"sources.filter.{kind}") if kind in KIND_FILTER else kind
+
+
+    # --- private pages (`llm-cli knowledge add-private`, `knowledge remove-private`) -----------------------------------
+
+    def dragEnterEvent(self, event: Any) -> None:  # noqa: N802 - Qt's name
+        if event.mimeData().hasUrls() and any(url.isLocalFile() for url in event.mimeData().urls()):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: Any) -> None:  # noqa: N802 - Qt's name
+        files = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
+        event.acceptProposedAction()
+        for path in files:
+            self.add_file(path)
+
+    def choose_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, self._t("sources.private.pick"), "",
+                                              self._t("sources.private.filter"))
+        if path:
+            self.add_file(path)
+
+    def _tell(self, kind: str, text: str) -> None:
+        plain_box(self, kind, self._t("sources.title"), text)
+
+    def _in_worker(self, work: Any, then: Any) -> None:
+        """Runs `work` in a worker thread; `then(ok, value)` runs in the GUI thread with its result or error."""
+        from orchestrator.gui.worker_relay import worker_relay
+        token, relay = object(), worker_relay()
+        self._jobs[token] = then
+
+        def run() -> None:
+            try:
+                result: Any = (True, work())
+            except BaseException as e:  # noqa: BLE001 - shown to the person as text
+                result = (False, e)
+            relay.done.emit(token, ("job", result))
+
+        threading.Thread(target=run, name="knowledge-private", daemon=True).start()
+
+    def add_file(self, path: str) -> None:
+        """Adds the saved file as a private page (the page's address from its field, when the person gave one)."""
+        address = self.address.text().strip()
+        framework = self.framework
+
+        def work() -> Any:
+            from orchestrator.Core import knowledge_sources
+            from orchestrator.Core.private_pages import add_private_page
+            return add_private_page(knowledge_sources.knowledge_base(framework), path, address)
+
+        def then(ok: bool, value: Any) -> None:
+            if ok:
+                note = self._t("sources.private.added", source=one_line(value.source))
+                self.reload()
+                self._note = note
+            else:
+                self._tell("warning", self._t("sources.private.failed", reason=one_line(value)))
+        self._in_worker(work, then)
+
+    def selected_private(self) -> Optional[dict]:
+        row = self.table.currentRow()
+        entry = self.entries[row] if 0 <= row < len(self.entries) else None
+        return entry if entry is not None and entry.get("kind") == "private" else None
+
+    def remove_selected(self) -> None:
+        """Removes the selected private page after a question (No by default); the saved file is not touched."""
+        entry = self.selected_private()
+        if entry is None:
+            self._tell("information", self._t("sources.private.select"))
+            return
+        label = str(entry["source"])
+        if not ask(self, self._t("sources.title"), self._t("sources.private.remove.ask", source=one_line(label))):
+            return
+        framework = self.framework
+
+        def work() -> Any:
+            from orchestrator.Core import knowledge_sources
+            from orchestrator.Core.rag_manager import OWN_HOLDER
+            rag = knowledge_sources.knowledge_base(framework)
+            if not rag.release_holder(OWN_HOLDER, sources=lambda name: name == label):
+                raise RuntimeError(str(rag.last_error or "It could not be removed."))
+            return label
+
+        def then(ok: bool, value: Any) -> None:
+            if ok:
+                note = self._t("sources.private.removed", source=one_line(label))
+                self.reload()
+                self._note = note
+            else:
+                self._tell("warning", self._t("sources.private.failed", reason=one_line(value)))
+        self._in_worker(work, then)
 
 
 def open_knowledge_sources(window: Any) -> KnowledgeSourcesDialog:

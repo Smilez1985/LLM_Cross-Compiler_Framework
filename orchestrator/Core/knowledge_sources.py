@@ -14,7 +14,7 @@ RAGManager.list_sources reads payload fields only, never the chunk text.
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # The kinds of a source (rag_manager.source_kind), and the filter's choices.
-KINDS = ("web", "pack", "docs", "other")
+KINDS = ("web", "pack", "docs", "private", "other")
 KIND_CHOICES = KINDS + ("any",)
 # What a knowledge pack carries of a source (licence_view's pack_share), in the words the person reads.
 CARRIED = {"full_text": "full text", "link_and_facts": "link and short facts", "not_exported": "not exported"}

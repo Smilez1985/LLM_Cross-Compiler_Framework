@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 from orchestrator.Core.ditto_archive import Candidate
+from orchestrator.rag.private import is_private
 from orchestrator.utils import archive_sources
 
 _WORD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,40}$")
@@ -89,6 +90,8 @@ def from_pages(result: Any, ctx: ExtractContext) -> List[Candidate]:
     seen = set()
     for page in _pages(result):
         address = str(getattr(page, "source", "") or "")
+        if getattr(page, "kind", "") == "private" or is_private({"source": address}):
+            continue   # a private page (the person's saved copy) is never learned: it stays on this computer
         row = archive_sources.vendor_of(address, ctx.table)
         if row is None or address in seen:
             continue

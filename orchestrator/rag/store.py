@@ -164,10 +164,16 @@ class KnowledgeStore:
 
     # --- snapshots (portable files, the same for every backend) ---
 
-    def _snapshot_header(self) -> str:
+    def private_count(self) -> int:
+        """How many stored excerpts belong to private pages (rag/private.py): a snapshot says so in its header, so that
+        the export of one can warn that the file is not to be passed on."""
+        from orchestrator.rag.private import PRIVATE_FIELD, is_private
+        return sum(1 for payload in self.payloads(["source", PRIVATE_FIELD]) if is_private(payload))
+
+    def _snapshot_header(self, private: int = 0) -> str:
         return json.dumps({"format": SNAPSHOT_FORMAT, "version": SNAPSHOT_VERSION, "store": self.store_format,
                            "collection": self.collection, "embedding_model": self.model_id, "dim": self.dim,
-                           "created": datetime.now().isoformat()}) + "\n"
+                           "created": datetime.now().isoformat(), "private": int(private)}) + "\n"
 
     @staticmethod
     def _snapshot_line(record) -> str:
@@ -185,7 +191,7 @@ class KnowledgeStore:
         tmp = path.with_name(path.name + ".tmp")
         count = 0
         with gzip.open(tmp, "wt", encoding="utf-8") as f:
-            f.write(self._snapshot_header())
+            f.write(self._snapshot_header(self.private_count()))
             for record in self.records(with_vectors=True):
                 f.write(self._snapshot_line(record))
                 count += 1

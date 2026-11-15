@@ -447,7 +447,7 @@ llm-cli knowledge index-docs --with-code
 ### knowledge sources
 
 ```
-llm-cli knowledge sources [--kind web|pack|docs|other|any] [--topic NAME]
+llm-cli knowledge sources [--kind web|pack|docs|private|other|any] [--topic NAME]
 ```
 
 Lists what the knowledge base holds: every source with its kind, the licence it names (an SPDX-like id
@@ -466,6 +466,40 @@ target** is `--topic`).
 llm-cli knowledge sources
 llm-cli knowledge sources --kind web
 llm-cli knowledge sources --topic Rockchip
+```
+
+### knowledge add-private and knowledge remove-private
+
+```
+llm-cli knowledge add-private FILE [--source ADDRESS]
+llm-cli knowledge remove-private SOURCE [--yes]
+```
+
+A page that cannot be crawled (robots.txt or another opt-out of the site, a login, a paywall, an error) is never fetched
+or worked around; you get its address as a link. Open it in your browser, save it as a **PDF** or as **HTML**, and give
+the file here: `add-private` reads it the way the crawler reads a page (the text of a PDF, the visible text of an HTML
+page) and stores it as a **private page**. `--source` is the page's own address (`https://...`, where the file came from);
+without it the file's name is the label, never the folder it lies in. The same file or address again replaces the earlier
+version. The file itself is not copied and not changed. Only a PDF (up to 64 MiB, with text; a scan has none) or an HTML
+page (up to 8 MiB) is accepted, and a link to a file is not followed.
+
+A private page is marked **private** wherever it is listed (`knowledge sources --kind private`, the kind of
+`list_knowledge_sources`, the label starts with `private:`), stays on this computer and is **never shared**: not in a
+knowledge pack, not in an export, not in the community's or the global knowledge wiki, not learned by Ditto's archive,
+not uploaded anywhere. A snapshot is your own backup and keeps it; its export warns that the file holds private pages and
+is not to be passed on. Your own AI model, local or cloud, may read its excerpts like those of any source: that is
+reading on your computer; the publisher's no is respected by nothing being fetched and nothing being passed on.
+
+`remove-private` removes one private page by its label (with or without `private:`), asks first (No by default; `--yes`
+skips the question) and does not touch the file you saved.
+
+In the GUI: **Tools > Knowledge Sources...**: the button **Add saved page...** (or drag the file onto the window; the
+field **Page address** is `--source`) and **Remove private page...**; the **Kind** filter has **Private pages**.
+
+```bash
+llm-cli knowledge add-private ~/Downloads/npu-guide.pdf --source https://docs.example.com/npu-guide
+llm-cli knowledge sources --kind private
+llm-cli knowledge remove-private https://docs.example.com/npu-guide
 ```
 
 ### knowledge loose and knowledge sort

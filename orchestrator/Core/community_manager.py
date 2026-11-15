@@ -2184,8 +2184,12 @@ class CommunityManager:
             roots = {str(u) for u in root_urls}
             records = [r for r in records if (r.get("metadata") or {}).get("root_url") in roots]
         from orchestrator.Core.rag_manager import REMOVED_FIELD, source_kind
+        from orchestrator.rag.private import shareable
         records = [r for r in records
                    if source_kind({**(r.get("metadata") or {}), "source": r.get("source", "")}) != "docs"]
+        # A private page (the person's saved copy of a page that could not be crawled) never leaves this computer:
+        # this is the one place every knowledge export and every pack of kind knowledge passes.
+        records = [r for r in records if shareable({**(r.get("metadata") or {}), "source": r.get("source", "")})]
         # What this installation left out of a page (REMOVED_FIELD) is its own provenance, not part of the page.
         own = [{**r, "metadata": {k: v for k, v in (r.get("metadata") or {}).items() if k != REMOVED_FIELD}}
                for r in records if not (r.get("metadata") or {}).get("origin_pack")]

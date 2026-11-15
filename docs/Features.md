@@ -2358,6 +2358,24 @@ injection). So Deep Ingest stores only what a reader sees (`orchestrator/rag/htm
   group of their own (`llm-cli ditto eval --kind retrieval --cases evals/retrieval/carriers.yml`): a payload that
   reaches the stored excerpts, or a visible text that does not, fails the run.
 
+### Pages that cannot be crawled stay private
+
+A page that robots.txt or another opt-out refuses, one behind a login or a paywall, one that answers with an error, is
+never fetched or worked around. You get its address as a link; you can open it, save it as a PDF or as HTML and hand
+the file over by its path (`llm-cli knowledge add-private`) or by dragging it into **Tools > Knowledge Sources...**.
+
+- **It is private:** the page is marked private wherever it is listed, its label starts with `private:` and a later
+  crawl of the same address never overwrites it. The framework alone sets the mark; a knowledge pack cannot claim or
+  forge it.
+- **It stays on this computer:** it is never put into a knowledge pack, an export, the community's or the global
+  knowledge wiki, never learned by Ditto's archive and never uploaded anywhere. A snapshot is your own backup and keeps
+  your private pages; its header says how many it holds and its export tells you not to pass it on.
+- **Your own AI may read it:** a local or a cloud model reads its excerpts like those of any source, because that is
+  reading on your own computer. The publisher's no (what robots.txt says) is respected: nothing is fetched and nothing
+  of the page is passed on.
+- **You stay in control:** the file you saved is read, never copied or changed; **Remove private page...** and
+  `llm-cli knowledge remove-private` ask first (No by default) and leave the file alone.
+
 ### Licences and copyright
 
 Text and data mining lets the knowledge base keep the text the crawl was allowed to read. Passing that text on is

@@ -348,13 +348,37 @@ def delete_snapshots(folder: Path, accepted: Any, trash: Any = None, audit: Any 
 @dataclass
 class ExportedSnapshot:
     """One snapshot of an export: the copy's full path, whether it is done (its sha256 matches the original) and,
-    when not, why."""
+    when not, why; and how many excerpts of private pages the file holds (a snapshot is the person's own backup and
+    keeps them, so the export warns that the file is not to be passed on)."""
     name: str
     copy: str
     size_bytes: int
     sha256: str = ""
     ok: bool = False
     problem: str = ""
+    private: int = 0
+
+    @property
+    def private_note(self) -> str:
+        return PRIVATE_EXPORT_NOTE.format(n=self.private) if self.private else ""
+
+
+PRIVATE_EXPORT_NOTE = ("This snapshot holds {n} excerpt(s) of private pages (your own saved copies of pages that could "
+                       "not be crawled). It is your backup: do not pass the file on, share it or put it online.")
+
+
+def private_in_snapshot(path: Path) -> int:
+    """How many private excerpts a snapshot file says it holds (the `private` count of its header; 0 for a snapshot
+    made before the count existed or one that cannot be read)."""
+    import gzip
+    import json
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            header = json.loads(f.readline() or "{}")
+    except (OSError, ValueError, EOFError):
+        return 0
+    count = header.get("private") if isinstance(header, dict) else 0
+    return count if isinstance(count, int) and not isinstance(count, bool) and count > 0 else 0
 
 
 def _copy_checked(source: Path, target: Path, original: str) -> str:
@@ -426,7 +450,8 @@ def export_snapshots(folder: Path, names: Iterable[str], destination: Path) -> L
     for name in wanted:
         snap = snapshots[name]
         target = destination / snap.file_name
-        result = ExportedSnapshot(name=name, copy=str(target), size_bytes=snap.size_bytes)
+        result = ExportedSnapshot(name=name, copy=str(target), size_bytes=snap.size_bytes,
+                                  private=private_in_snapshot(snap.path))
         results.append(result)
         try:
             original = _sha256(snap.path)

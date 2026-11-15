@@ -354,6 +354,8 @@ class KnowledgeSnapshotsDialog(QDialog):
         lines = [self._t("snapshots.exported", name=one_line(r.name), path=one_line(r.copy)) if r.ok else
                  self._t("snapshots.not_exported", name=one_line(r.name), reason=one_line(r.problem))
                  for r in results]
+        lines += [self._t("snapshots.private_note", name=one_line(r.name), n=r.private) for r in results
+                  if r.ok and r.private]
         self._box("information", "\n".join(lines + [self._t("snapshots.export_note")]))
 
     def _open_folder(self) -> None:

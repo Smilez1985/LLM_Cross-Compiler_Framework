@@ -60,6 +60,8 @@ def _crawler_class() -> Any:
     """CrawlerManager (a value set on this module wins, e.g. a test's stand-in), or None without the crawler."""
     return globals()["CrawlerManager"] if "CrawlerManager" in globals() else __getattr__("CrawlerManager")
 
+from orchestrator.rag.private import PRIVATE_FIELD, is_private, private_label  # noqa: E402 - the private pages' one marker
+
 COLLECTION_NAME = "framework_knowledge"  # alias of the active collection (one collection per embedding model)
 MIN_SPARSE_QUERY_TOKENS = 3  # shorter queries use the dense ranking only, unless they hold an identifier
 _IDENTIFIER = re.compile(r"\d|_|[A-Z]{2,}|\w[.-]\w")  # E2041, GGML_CUDA, RKNN, librkllmrt.so
@@ -96,7 +98,7 @@ SOURCE_ID_PREFIX = "ks_"
 REMOVED_FIELD = "hidden_removed"
 # Payload fields a source listing reads (never the chunk text): provenance, and what the page says about its licence.
 _SOURCE_FIELDS = ["source", "title", "content_type", "type", "origin_pack", "root_url", "ingested_at",
-                  *licences.META_KEYS, REMOVED_FIELD, "chunk_index", "topic", "target"]
+                  *licences.META_KEYS, REMOVED_FIELD, "chunk_index", "topic", "target", PRIVATE_FIELD]
 NOT_EXPORTED = "not_exported"   # a source no knowledge pack carries (an installed pack's page, the framework's docs)
 # Who holds an excerpt (one stored point): two installed packs, or a pack and your own crawl, that carry the same page
 # share its points (a point's id is its source and chunk hash, never the pack). HOLDERS lists every holder (a pack's
@@ -109,7 +111,7 @@ OWN_HOLDER = "own"
 CRAWL_HOLDER = "crawl:"
 OWNER_FIELDS = ("origin_pack", "origin_sha256", "topic", "target", "root_url")
 _RESERVED_PAYLOAD = {"content", "source", "section", "chunk_index", "chunk_hash", "embedding_model", "ingested_at",
-                     "fused_score", "reranker", REMOVED_FIELD, HOLDERS, HOLDER_INFO}
+                     "fused_score", "reranker", REMOVED_FIELD, HOLDERS, HOLDER_INFO, PRIVATE_FIELD}
 
 
 def site_topic(url: str) -> str:
@@ -186,6 +188,8 @@ def source_id(source: str) -> str:
 def source_kind(payload: Dict[str, Any]) -> str:
     """Where a chunk came from: an installed knowledge pack, the framework's own code and documentation, a crawled
     web page or PDF, or something else (an evaluation corpus)."""
+    if is_private(payload):   # first: nothing a label or a pack's metadata says hides a private page
+        return "private"
     if payload.get("origin_pack"):
         return "pack"
     source = str(payload.get("source") or "")
@@ -205,6 +209,10 @@ def licence_view(kind: str, meta: Dict[str, Any], repos: Dict[Tuple[str, str], s
     if licence not in licences.LICENCES:
         licence = licences.OTHER if licence else ""
     view = {"licence": licence, "copyright": licences.clean(meta.get("copyright") or "")}
+    if kind == "private":
+        return {**view, "licence_state": "", "pack_share": NOT_EXPORTED,
+                "share_reason": "your own saved copy of a page that could not be crawled: private, it stays on this "
+                                "computer and is never shared"}
     if kind == "pack":
         return {**view, "licence_state": "", "pack_share": NOT_EXPORTED,
                 "share_reason": "a page of an installed knowledge pack: its author shares it, it is not exported again"}
@@ -914,7 +922,7 @@ class RAGManager:
     # --- ingestion ---
 
     def ingest_document(self, source_name: str, content: str, metadata: Optional[Dict[str, Any]] = None,
-                        replace: bool = False, *, outside: bool = False) -> bool:
+                        replace: bool = False, *, outside: bool = False, private: bool = False) -> bool:
         """
         Indexes a document; re-ingesting the same content updates it in place. replace=True also removes
         chunks only its previous version had - only for complete documents (a page, a file), never for
@@ -922,9 +930,11 @@ class RAGManager:
         outside=True: outside text is stored cleaned (clean_outside_text: hidden HTML elements, invisible characters
         and HTML comments left out), with how much was left out (REMOVED_FIELD). A knowledge pack's page (metadata
         with origin_pack) always counts as outside text, whoever stores it.
+        private=True: the person's own saved copy of a page that could not be crawled (Core/private_pages.py): the source
+        label gets the private prefix and every excerpt the private marker, which only this argument can set.
         """
         try:
-            return self._ingest(source_name, content, metadata, replace, outside=outside) > 0
+            return self._ingest(source_name, content, metadata, replace, outside=outside, private=private) > 0
         except KnowledgeBaseError as e:
             self._fail(e)
             return False
@@ -1035,7 +1045,8 @@ class RAGManager:
 
     @_uses_models
     def _ingest(self, source_name: str, content: str, metadata: Optional[Dict[str, Any]], replace: bool,
-                outside: bool = False, markup: bool = True, removed: Optional[Dict[str, int]] = None) -> int:
+                outside: bool = False, markup: bool = True, removed: Optional[Dict[str, int]] = None,
+                private: bool = False) -> int:
         """outside: clean the text first (clean_outside_text; markup: it may carry HTML) and record what was left out
         (`removed`, e.g. by the crawler, plus what the cleaning found) in REMOVED_FIELD of every excerpt."""
         if not isinstance(content, str) or not content.strip():
@@ -1043,6 +1054,8 @@ class RAGManager:
         if not isinstance(metadata, dict):
             metadata = {}  # community packs are untrusted JSON
         source = str(source_name or "").strip()[:500] or "unknown"
+        if private:
+            source = private_label(source)[:500]
         base_section = str(metadata.get("section") or "")
         meta = _clean_metadata(metadata)
         if outside or meta.get("origin_pack"):   # a pack's page is outside text, whoever stores it
@@ -1081,6 +1094,8 @@ class RAGManager:
             payload = dict(meta)
             payload.update(content=chunk.text, source=source, section=chunk.section, chunk_index=chunk.index,
                            chunk_hash=chunk.hash, embedding_model=embedder.model_id, ingested_at=now)
+            if private:
+                payload[PRIVATE_FIELD] = True
             payloads.append(payload)
 
         me = holder_of(meta)

@@ -34,7 +34,7 @@ from orchestrator.tools.spec import Fact, FieldMeta
 SOURCE_ID_PATTERN = r"^ks_[0-9a-f]{16}$"
 # = Core/community_pack.TOPIC_PATTERN (a topic or target name; tests/test_knowledge_order.py keeps them equal)
 TOPIC_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9_-])?$"
-KINDS = ("web", "pack", "docs", "any")
+KINDS = ("web", "pack", "docs", "private", "any")
 SCOPES = ("knowledge", "archive", "both")
 PAGE_SIZE = 50                 # sources per page (the limits table: lists)
 MAX_CHUNKS = 20                # chunks per read, hits per search (the limits table)
@@ -75,11 +75,12 @@ TRUST_NOTE = {
     "verified": "a knowledge pack from the signed index, trust verified",
     "community": "a knowledge pack from the signed index, trust community (not reviewed)",
     "local": "a knowledge pack installed from a file",
+    "private": "your own saved copy of a page that could not be crawled (third-party text, private: never shared)",
     "unknown": "origin not known to the framework",
 }
 
-Kind = Literal["web", "pack", "docs", "other"]
-Trust = Literal["framework", "crawled", "verified", "community", "local", "unknown"]
+Kind = Literal["web", "pack", "docs", "private", "other"]
+Trust = Literal["framework", "crawled", "verified", "community", "local", "private", "unknown"]
 
 _PATH = re.compile(r"(?:[A-Za-z]:)?[\\/](?:[^\s'\"\\/]+[\\/])+[^\s'\"\\/,;:)]*")
 
@@ -109,9 +110,10 @@ class SearchKnowledgeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     query: str = Field(min_length=2, max_length=500, description="What to look for, e.g. 'rk3588 npu driver'")
     limit: int = Field(default=5, ge=1, le=MAX_CHUNKS, description="Most excerpts to return (1-20)")
-    kind: Literal["web", "pack", "docs", "any"] = Field(
+    kind: Literal["web", "pack", "docs", "private", "any"] = Field(
         default="any", description="Only excerpts of this kind of source: web (pages the person added by Deep "
-                                   "Ingest), pack (knowledge packs), docs (the framework's own code and documents)")
+                                   "Ingest), pack (knowledge packs), docs (the framework's own code and documents), "
+                                   "private (the person's own saved copies of pages that could not be crawled)")
     rerank: Optional[bool] = Field(default=None, description="Let a relevance model reorder the excerpts and drop "
                                                              "irrelevant ones; null: the person's setting")
     topic: Optional[str] = Field(default=None, pattern=TOPIC_PATTERN,
@@ -168,7 +170,7 @@ class SearchOut(ToolOutput):
 
 class ListSourcesIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["web", "pack", "docs", "any"] = Field(default="any", description="Only sources of this kind")
+    kind: Literal["web", "pack", "docs", "private", "any"] = Field(default="any", description="Only sources of this kind")
     query: Optional[str] = Field(default=None, max_length=100,
                                  description="Only sources whose address or title contains this text")
     topic: Optional[str] = Field(default=None, pattern=TOPIC_PATTERN,
@@ -252,6 +254,8 @@ def trust_of(kind: str, origin_pack: str, packs: Dict[str, str]) -> str:
         return "framework"
     if kind == "web":
         return "crawled"
+    if kind == "private":
+        return "private"
     if kind == "pack":
         trust = packs.get(origin_pack, "")
         return trust if trust in ("verified", "community", "local") else "unknown"
