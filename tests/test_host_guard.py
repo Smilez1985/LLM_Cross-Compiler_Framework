@@ -11,16 +11,18 @@ import pytest
 import host_guard
 from host_guard import HostChangeWarning, changes_host, guarded_init
 
-ROOTS = ["/tmp/run"]
+# The folders are resolved the way the guard resolves them (`stub_roots`): on Windows "/tmp/run" is "D:\\tmp\\run".
+RUN = os.path.realpath(os.path.join(os.sep, "tmp", "run"))
+ROOTS = [RUN]
 
 
 def real(program):
     """`which` that finds every program outside the run's folder (a real one)."""
-    return "/usr/bin/" + os.path.basename(program)
+    return os.path.join(os.sep, "usr", "bin", os.path.basename(program))
 
 
 def stub(program):
-    return "/tmp/run/bin/" + os.path.basename(program)
+    return os.path.join(RUN, "bin", os.path.basename(program))
 
 
 def nowhere(program):
