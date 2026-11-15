@@ -138,8 +138,8 @@ def cannot_crawl_note(address: str, reason: str) -> str:
 
 
 REFUSED_HOW = ("Pages that were left out are never fetched or worked around: open their addresses yourself. To keep one "
-               "in the knowledge base, save it as a PDF or as HTML and add the file (llm-cli knowledge add-private FILE, "
-               "or Tools > Knowledge Sources...): it stays private on this computer and is never shared.")
+               "in the knowledge base, save it as a PDF or as HTML and add the file with knowledge add-private or in the "
+               "Knowledge Sources window: it stays private on this computer and is never shared.")
 
 
 def refused_hint(skipped: Any) -> str:
