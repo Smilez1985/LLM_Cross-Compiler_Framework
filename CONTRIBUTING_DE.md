@@ -186,6 +186,13 @@ python -m pytest
   angelegt hat; ein Test, der wirklich mehr braucht, bekommt `@pytest.mark.temp_budget(megabytes, reason="...")`.
   Hebe die Budgets nie an, damit ein Test besteht. `LCF_TEST_DISK_LOG=<Datei>` schreibt für einen Messlauf die Summe
   jedes Tests.
+- `tests/conftest.py` beobachtet auch den Rechner, auf dem die Tests laufen (`tests/host_guard.py`): Startet ein Test
+  einen echten Paketmanager, der etwas installiert, entfernt oder aktualisiert (`apt-get install`, `dnf`, `pacman -S`,
+  `winget`, ...), oder einen echten Dienstbefehl (`systemctl start`, `service ... restart`, `sshd`), gibt der Lauf eine
+  `HostChangeWarning` aus, die den Test und den Befehl nennt. Sie lässt den Test nie scheitern und hält den Befehl nie
+  an: Sie zeigt, welcher Test zu reparieren ist. Die Reparatur ist ein Stub dieses Programms auf dem eigenen `PATH` des
+  Tests (ein Skript in `tmp_path`); ein Programm in einem temporären Ordner des Laufs gilt nie als echtes. `os.system` und
+  `os.exec*` werden nicht gesehen.
 - `tests/test_versioning.py` prüft, dass `orchestrator/__init__.py`, `pyproject.toml` und der neueste
   veröffentlichte Changelog-Eintrag dieselbe Version tragen.
 - `tests/test_foundation.py` und `tests/test_review_capabilities_paths.py` prüfen, dass die Rockchip-Capabilities

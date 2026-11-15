@@ -334,6 +334,16 @@ def pytest_addoption(parser):
     parser.addini("temp_run_budget_mb", "lowers the budget of what the run keeps (tests of the guard)", default="")
 
 
+@pytest.fixture(autouse=True, scope="session")
+def host_change_guard(tmp_path_factory):
+    """Warns when a test starts a real package manager or service command of the host (tests/host_guard.py; it never
+    fails a test and never stops the command). A stub in a temporary folder of the run is not a real program."""
+    import host_guard
+    remove = host_guard.install([tmp_path_factory.getbasetemp()])
+    yield
+    remove()
+
+
 def _children(folder):
     try:
         return set(os.listdir(folder))

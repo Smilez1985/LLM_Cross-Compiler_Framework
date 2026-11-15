@@ -174,6 +174,12 @@ python -m pytest
   temporary folder) fails at its end. Close stores, use `tmp_path` instead of `tempfile.mkdtemp()` and remove what a
   test made; a test that truly needs more gets `@pytest.mark.temp_budget(megabytes, reason="...")`. Never raise the
   budgets to make a test pass. `LCF_TEST_DISK_LOG=<file>` writes each test's total for a measuring run.
+- `tests/conftest.py` also watches the computer the tests run on (`tests/host_guard.py`): when a test starts a real
+  package manager that installs, removes or upgrades something (`apt-get install`, `dnf`, `pacman -S`, `winget`, ...) or
+  a real service command (`systemctl start`, `service ... restart`, `sshd`), the run prints a `HostChangeWarning` that
+  names the test and the command. It never fails the test and never stops the command: it shows which test to fix.
+  The way to fix it is a stub of that program on the test's own `PATH` (a script in `tmp_path`); a program inside a
+  temporary folder of the run is never counted as a real one. `os.system` and `os.exec*` are not seen.
 - `tests/test_versioning.py` checks that `orchestrator/__init__.py`, `pyproject.toml` and the newest released
   changelog entry carry the same version.
 - `tests/test_foundation.py` and `tests/test_review_capabilities_paths.py` check that the Rockchip capabilities in
