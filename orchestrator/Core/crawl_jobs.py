@@ -354,10 +354,12 @@ class CrawlJobService:
             outcome = "partial"
         else:
             outcome = "success"
+        from orchestrator.Core.private_pages import refused_hint
         return {"outcome": outcome, "pages": pages, "chunks": chunks,
                 "skipped": skipped[:LIST_CAP], "skipped_total": len(skipped),
                 "failed": failed[:LIST_CAP], "failed_total": len(failed),
                 "opt_outs": sum(1 for s in skipped if s["opt_out"]), "snapshot": snapshot,
                 **({"stopped_for": no_room} if no_room else {}),
                 "note": "Page text is not returned: read it with search_knowledge or read_knowledge_source. Pages "
-                        "a site reserved (robots.txt, robots directives, TDMRep) were left out."}
+                        "a site reserved (robots.txt, robots directives, TDMRep) were left out."
+                        + (" " + refused_hint(skipped) if skipped else "")}

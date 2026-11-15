@@ -198,6 +198,21 @@ def test_no_page_text_in_the_result_and_skipped_addresses_are_external_text(env)
     assert schema["properties"]["result"]["anyOf"][0].get("untrusted") is True
 
 
+def test_a_refused_page_comes_back_as_a_link_with_what_the_person_can_do(env):
+    out = call(env, {"start_urls": [SITE]}, confirm=lambda s, i: True)
+    wait_job(env, out.job_id)
+    status = env.registry.call("get_job_status", {"job_id": out.job_id}, ToolContext("mcp"))
+    note = status.result["note"]
+    assert status.result["skipped"][0]["address"] == SITE + "private"      # the address is the link
+    assert "never fetched or worked around" in note and "knowledge add-private" in note
+    assert "private on this computer and is never shared" in note
+
+
+def test_nothing_is_said_about_private_pages_when_nothing_was_left_out():
+    from orchestrator.Core.private_pages import refused_hint
+    assert refused_hint([]) == "" and "add-private" in refused_hint([{"address": "https://a.example.org/x"}])
+
+
 def test_cancel_stops_the_crawl_and_keeps_what_is_stored(env):
     release = threading.Event()
     env.rag.slow, env.rag.pages = release, 10

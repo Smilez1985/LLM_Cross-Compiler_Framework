@@ -137,5 +137,17 @@ def cannot_crawl_note(address: str, reason: str) -> str:
             "a PDF or as HTML and add the file: it stays private on this computer and is never shared.")
 
 
-__all__ = ["PrivatePageError", "PrivateResult", "SavedPage", "add_private_page", "cannot_crawl_note", "label_for",
-           "pdf_text", "read_saved_page"]
+REFUSED_HOW = ("Pages that were left out are never fetched or worked around: open their addresses yourself. To keep one "
+               "in the knowledge base, save it as a PDF or as HTML and add the file (llm-cli knowledge add-private FILE, "
+               "or Tools > Knowledge Sources...): it stays private on this computer and is never shared.")
+
+
+def refused_hint(skipped: Any) -> str:
+    """The sentence a crawl's result adds when pages were left out (skipped for a reason such as robots.txt, an
+    opt-out, a login or an error): the addresses are in the list next to it, this says what the person can do. Empty
+    when nothing was left out."""
+    return REFUSED_HOW if skipped else ""
+
+
+__all__ = ["PrivatePageError", "PrivateResult", "REFUSED_HOW", "SavedPage", "add_private_page", "cannot_crawl_note",
+           "label_for", "pdf_text", "read_saved_page", "refused_hint"]

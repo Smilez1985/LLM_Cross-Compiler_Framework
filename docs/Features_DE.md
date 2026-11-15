@@ -2616,6 +2616,10 @@ als PDF oder als HTML speichern und die Datei über ihren Pfad (`llm-cli knowled
 - **Dein eigenes KI-Modell darf sie lesen:** Ein lokales oder ein Cloud-Modell liest ihre Auszüge wie die jeder Quelle,
   denn das ist Lesen auf deinem eigenen Rechner. Das Nein des Herausgebers (was robots.txt sagt) wird beachtet: Es wird
   nichts abgerufen und nichts von der Seite weitergegeben.
+- **Eine abgelehnte Seite kommt als Link zurück:** Das Ergebnis eines Crawls (das Tool `get_job_status`, das Deep-Ingest-
+  Fenster) listet jede ausgelassene Seite mit ihrer Adresse und ihrem Grund (`robots.txt`, ein Opt-out, ein Login, ein
+  Fehler) und sagt in einem Satz, was du tun kannst: selbst öffnen, als PDF oder HTML speichern und die Datei
+  hinzufügen. Es wird nichts abgerufen oder umgangen.
 - **Du behältst die Kontrolle:** Die gespeicherte Datei wird gelesen, nie kopiert oder verändert; **Private Seite
   entfernen...** und `llm-cli knowledge remove-private` fragen vorher (Nein ist vorgewählt) und lassen die Datei in Ruhe.
 

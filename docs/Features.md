@@ -2373,6 +2373,10 @@ the file over by its path (`llm-cli knowledge add-private`) or by dragging it in
 - **Your own AI may read it:** a local or a cloud model reads its excerpts like those of any source, because that is
   reading on your own computer. The publisher's no (what robots.txt says) is respected: nothing is fetched and nothing
   of the page is passed on.
+- **A refused page comes back as a link:** a crawl's result (the tool `get_job_status`, the Deep Ingest window) lists
+  every page that was left out with its address and its reason (`robots.txt`, an opt-out, a login, an error) and says in
+  one sentence what you can do: open it yourself, save it as a PDF or HTML and add the file. Nothing is fetched or
+  worked around.
 - **You stay in control:** the file you saved is read, never copied or changed; **Remove private page...** and
   `llm-cli knowledge remove-private` ask first (No by default) and leave the file alone.
 

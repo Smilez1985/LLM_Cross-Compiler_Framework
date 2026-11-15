@@ -185,6 +185,9 @@ class CrawlWorker(QThread):
                                                          free=size_text(max(0, room.check.after))))
                 for item in result.get("skipped", []):
                     self.progress.emit(f"  -> Skipped {item['url']}: {item['reason']}")
+                if result.get("skipped"):
+                    from orchestrator.Core.private_pages import refused_hint
+                    self.progress.emit("  -> " + refused_hint(result["skipped"]))
                 for item in result.get("failed", []):
                     self.progress.emit(f"  -> Failed {item['url']}: {item['reason']}")
                 outcome = result.get("outcome") or ("success" if result.get("success") else "failure")
