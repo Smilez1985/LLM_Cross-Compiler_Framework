@@ -7,11 +7,13 @@ without a container engine or a person who prefers it: SearXNG's source at one p
 environment inside the person's own state folder, as the person (never root, no system user, no service, no uWSGI), and
 started only when a search needs it. Nothing here is installed or started unless the person chose this way.
 
-- `install` fetches the pinned commit with git (git checks every object it fetches against the commit's hash, so the files
-  are exactly those of that commit), makes the virtual environment and installs SearXNG's own pinned requirements the way
-  its documentation does (`pip install --use-pep517 --no-build-isolation -e .`). On Windows it also puts the stand-in
-  `pwd.py` (configs/searxng/shim) where SearXNG's process finds it, because SearXNG's `import pwd` exists only on Linux and
-  macOS.
+- `install` downloads the archive of the pinned commit from GitHub, checks that it is that commit (GitHub writes the commit
+  into the archive's comment) and unpacks it without the folder of web-server templates: four files there have a ":" in
+  their name, which Windows cannot store (a `git checkout` fails on it there, found by the CI check), and a local SearXNG
+  does not need them. It makes the virtual environment and installs SearXNG's own pinned requirements the way its
+  documentation does (`pip install --use-pep517 --no-build-isolation -e .`). It needs no git. On Windows it also puts the
+  stand-in `pwd.py` (configs/searxng/shim) where SearXNG's process finds it, because SearXNG's `import pwd` exists only
+  on Linux and macOS.
 - `start` runs `python -m searx.webapp` on this computer's address only (127.0.0.1), with the finished settings file and the
   secret in the environment (SEARXNG_SECRET), waits until it answers (`/healthz`) and returns the process; `stop` ends it.
 - `Running` does both around a search: it starts SearXNG when it is not running, and stops what it started when the last
@@ -29,6 +31,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 
@@ -36,6 +39,9 @@ REPOSITORY = "https://github.com/searxng/searxng"
 COMMIT = "b99cf7496eeb837e4c60a17eacaa60fe946fc4e4"      # the pinned stand of SearXNG (2026-11-17)
 MIN_PYTHON = (3, 10)                                       # setup.py of SearXNG: python_requires >= 3.10
 HELPERS = ("pip", "setuptools", "wheel", "pyyaml", "msgspec", "typing-extensions", "pybind11")   # its documentation's list
+ARCHIVE = f"{REPOSITORY}/archive/{COMMIT}.zip"
+SKIP_PREFIXES = ("utils/templates/etc/",)   # web-server templates; four names there hold ":" (not storable on Windows)
+MAX_ARCHIVE = 80 * 1024 * 1024
 SHIM = Path(__file__).resolve().parents[2] / "configs" / "searxng" / "shim" / "pwd.py"
 HOST = "127.0.0.1"
 START_TIMEOUT = 45.0
@@ -82,32 +88,75 @@ def _step(run: Callable, command: List[str], what: str, cwd: Optional[Path] = No
         raise NativeError(f"{what} did not work" + (f": {tail[0][:200]}" if tail else "."))
 
 
+def fetch_source(src: Path, folder: Path, urlopen: Callable = urllib.request.urlopen) -> None:
+    """Downloads the pinned commit's archive and unpacks it into `src` without SKIP_PREFIXES. NativeError when the download
+    fails, the archive is not that commit, or a name in it would land outside `src`."""
+    archive = Path(folder) / "searxng.zip"
+    try:
+        with urlopen(ARCHIVE, timeout=120) as answer, open(archive, "wb") as out:
+            size = 0
+            while True:
+                chunk = answer.read(1024 * 256)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_ARCHIVE:
+                    raise NativeError("The download of SearXNG is larger than expected and was stopped.")
+                out.write(chunk)
+    except urllib.error.HTTPError as e:
+        raise NativeError(f"Fetching SearXNG did not work (HTTP {e.code}).") from None
+    except (urllib.error.URLError, OSError) as e:
+        raise NativeError(f"Fetching SearXNG did not work ({type(e).__name__}).") from None
+    try:
+        with zipfile.ZipFile(archive) as bundle:
+            if bundle.comment.decode("ascii", "replace").strip() != COMMIT:
+                raise NativeError("The files fetched are not the pinned stand of SearXNG; nothing was installed.")
+            members = bundle.infolist()
+            root = members[0].filename.split("/")[0] + "/" if members else ""
+            base = Path(src).resolve()
+            for info in members:
+                name = info.filename[len(root):] if info.filename.startswith(root) else info.filename
+                if not name or name.startswith(SKIP_PREFIXES):
+                    continue
+                target = (base / name).resolve()
+                if base != target and base not in target.parents:
+                    raise NativeError("The archive holds a name outside its folder; nothing was installed.")
+                if info.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(bundle.read(info))
+    except zipfile.BadZipFile:
+        raise NativeError("The download of SearXNG is damaged; nothing was installed.") from None
+    except OSError as e:
+        raise NativeError(f"SearXNG could not be unpacked ({type(e).__name__}).") from None
+    finally:
+        try:
+            archive.unlink()
+        except OSError:
+            pass
+
+
 def install(folder: Path, python: Optional[str] = None, run: Callable = subprocess.run,
-            progress: Callable[[str], None] = lambda text: None, which: Callable = shutil.which) -> None:
+            progress: Callable[[str], None] = lambda text: None, urlopen: Callable = urllib.request.urlopen) -> None:
     """Installs SearXNG at the pinned commit into `folder` (a no-op when it is installed). NativeError with the reason."""
     folder = Path(folder)
     if installed(folder):
         return
     if sys.version_info < MIN_PYTHON and python is None:
         raise NativeError(f"SearXNG needs Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} or newer.")
-    if which("git") is None:
-        raise NativeError("git is not installed, and fetching SearXNG needs it.")
     src = source_dir(folder)
     try:
         folder.mkdir(parents=True, exist_ok=True)
-        if src.exists():
-            shutil.rmtree(src)          # an older or broken stand: fetched again, never mixed
-        if venv_dir(folder).exists():
-            shutil.rmtree(venv_dir(folder))
+        for old in (src, venv_dir(folder)):
+            if old.exists():
+                shutil.rmtree(old)          # an older or broken stand: fetched again, never mixed
+        marker(folder).unlink(missing_ok=True)
+        src.mkdir(parents=True)
     except OSError as e:
         raise NativeError(f"The folder for the search engine could not be prepared ({type(e).__name__}).") from None
     progress("Fetching SearXNG ...")
-    _step(run, ["git", "init", "-q", str(src)], "preparing the source folder")
-    _step(run, ["git", "-C", str(src), "fetch", "-q", "--depth", "1", REPOSITORY, COMMIT], "fetching SearXNG")
-    _step(run, ["git", "-C", str(src), "checkout", "-q", "FETCH_HEAD"], "checking out SearXNG")
-    head = run(["git", "-C", str(src), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=60)
-    if head.returncode != 0 or head.stdout.strip() != COMMIT:
-        raise NativeError("The files fetched are not the pinned stand of SearXNG; nothing was installed.")
+    fetch_source(src, folder, urlopen)
     progress("Making its Python environment ...")
     _step(run, [python or sys.executable, "-m", "venv", str(venv_dir(folder))], "making the Python environment")
     py = str(venv_python(folder))
@@ -223,5 +272,5 @@ class Running:
                 self._stop(process)
 
 
-__all__ = ["COMMIT", "HELPERS", "HOST", "NativeError", "REPOSITORY", "Running", "SHIM", "environment", "healthy",
-           "install", "installed", "marker", "source_dir", "start", "stop", "venv_dir", "venv_python"]
+__all__ = ["ARCHIVE", "COMMIT", "HELPERS", "HOST", "NativeError", "REPOSITORY", "Running", "SHIM", "SKIP_PREFIXES",
+           "environment", "fetch_source", "healthy", "install", "installed", "marker", "source_dir", "start", "stop", "venv_dir", "venv_python"]
