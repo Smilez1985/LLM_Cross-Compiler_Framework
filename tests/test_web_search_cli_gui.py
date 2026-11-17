@@ -115,23 +115,56 @@ class TestCommands:
         result = invoke("search", "why does " + "gh" + "p_" + "abcdefghijklmnopqrstuvwxyz0123456789" + " fail")
         assert result.exit_code == 1 and "not sent anywhere" in result.output
 
-    def test_setup_without_start_copies_the_file_and_makes_the_secret(self, framework, tmp_path, monkeypatch):
+    def test_setup_says_what_it_installs_and_asks_first_and_no_is_the_answer_without_a_yes(self, framework, tmp_path,
+                                                                                         monkeypatch):
         framework.config.user_state_dir = str(tmp_path)
-        result = invoke("setup", "--no-start")
-        assert result.exit_code == 0 and "settings file was copied" in result.output.replace("\n", " ")
-        assert (tmp_path / "searxng" / "config" / "settings.yml").is_file()
+        from orchestrator.Core import searxng_engine
+        monkeypatch.setattr(searxng_engine, "setup", lambda *a, **k: pytest.fail("nothing is set up without a yes"))
+        from click.testing import CliRunner
+        from orchestrator import cli
+        monkeypatch.setattr(cli, "_interactive", lambda: True)
+        result = CliRunner(env={"PYTHONUTF8": "1", "COLUMNS": "250"}).invoke(
+            cli.cli, ["ditto", "web", "setup"], input="\n")                # an empty answer: No
+        text = result.output.replace("\n", " ")
+        assert result.exit_code == 0 and "about 200 MB" in text and "no Docker" in text and "--remove" in text
+        assert "Nothing was changed" in text and "search APIs" in text
 
-    def test_setup_without_an_engine_says_so_and_the_file_is_ready(self, framework, tmp_path, monkeypatch):
+    def test_setup_without_a_terminal_and_without_yes_does_nothing_and_says_so(self, framework, tmp_path, monkeypatch):
         framework.config.user_state_dir = str(tmp_path)
-        from orchestrator.Core import searxng_setup
-
-        def no_engine():
-            raise RuntimeError("no daemon")
-        monkeypatch.setattr(searxng_setup, "_client", lambda factory: (_ for _ in ()).throw(
-            searxng_setup.SetupError(searxng_setup.NO_ENGINE)))
+        from orchestrator.Core import searxng_engine
+        monkeypatch.setattr(searxng_engine, "setup", lambda *a, **k: pytest.fail("no yes, no setup"))
         result = invoke("setup")
-        assert result.exit_code == 1 and "No container engine" in result.output.replace("\n", " ")
-        assert (tmp_path / "searxng" / "config" / "settings.yml").is_file()
+        assert result.exit_code == 1 and "needs your yes" in result.output.replace("\n", " ")
+
+    def test_setup_with_yes_uses_the_own_python_folder_by_default(self, framework, tmp_path, monkeypatch):
+        framework.config.user_state_dir = str(tmp_path)
+        from orchestrator.Core import searxng_engine
+        seen = {}
+
+        def fake(way, folder, config, **kwargs):
+            seen.update(way=way, run=kwargs.get("run"))
+            return searxng_engine.EngineResult(way, tmp_path, ["SearXNG is installed in your own folder."])
+        monkeypatch.setattr(searxng_engine, "setup", fake)
+        result = invoke("setup", "--yes")
+        assert result.exit_code == 0 and seen == {"way": "own", "run": True} and "Done" in result.output
+        invoke("setup", "--yes", "--way", "container", "--no-start")
+        assert seen == {"way": "container", "run": False}
+
+    def test_setup_that_fails_says_why_in_one_line(self, framework, tmp_path, monkeypatch):
+        framework.config.user_state_dir = str(tmp_path)
+        from orchestrator.Core import searxng_engine, searxng_native
+        monkeypatch.setattr(searxng_engine, "setup", lambda *a, **k: (_ for _ in ()).throw(
+            searxng_native.NativeError("Fetching SearXNG did not work (HTTP 403).")))
+        result = invoke("setup", "--yes")
+        assert result.exit_code == 1 and "HTTP 403" in result.output and "Traceback" not in result.output
+
+    def test_remove_asks_first_and_removes_with_yes(self, framework, tmp_path, monkeypatch):
+        framework.config.user_state_dir = str(tmp_path)
+        from orchestrator.Core import searxng_engine
+        monkeypatch.setattr(searxng_engine, "remove", lambda *a, **k: ["The Python folder of SearXNG was removed."])
+        assert invoke("setup", "--remove").exit_code == 1                   # no terminal, no yes
+        done = invoke("setup", "--remove", "--yes")
+        assert done.exit_code == 0 and "Python folder" in done.output
 
 
 class TestWindow:
@@ -141,11 +174,13 @@ class TestWindow:
         from orchestrator.gui.ditto_web_window import DittoWebWindow
         ran = []
 
-        def setup_runner(folder):
-            ran.append(folder)
-            return SimpleNamespace(url="http://127.0.0.1:8888")
-        win = DittoWebWindow(framework, None, setup_runner=setup_runner, stop_runner=lambda: "removed", lang="en")
-        win.ran = ran
+        def setup_runner(way, folder, config, **kwargs):
+            ran.append((way, folder))
+            return SimpleNamespace(notes=[])
+        removed = []
+        win = DittoWebWindow(framework, None, setup_runner=setup_runner,
+                             remove_runner=lambda folder, config: removed.append(folder) or ["removed"], lang="en")
+        win.ran, win.removed = ran, removed
         yield win
         win.close()
         win.deleteLater()
@@ -212,20 +247,69 @@ class TestWindow:
         self.wait(qapp, window)
         assert told and "off" in told[0]
 
-    def test_the_search_engine_is_set_up_and_stopping_asks_first(self, qapp, window, framework, tmp_path, monkeypatch):
+    def test_the_own_python_folder_is_the_default_way_and_docker_is_the_persons_choice(self, qapp, window):
+        assert window.cb_engine_way.currentData() == "own" and window.cb_engine_way.count() == 2
+        assert "no Docker" in window.cb_engine_way.itemText(0) and "Docker or Podman" in window.cb_engine_way.itemText(1)
+
+    def test_setting_up_says_what_it_installs_and_nothing_happens_without_a_yes(self, qapp, window, framework, tmp_path,
+                                                                                monkeypatch):
         from orchestrator.gui import ditto_web_window as module
         framework.config.user_state_dir = str(tmp_path)
+        asked = []
+        monkeypatch.setattr(module, "ask", lambda parent, title, text: asked.append(text) or False)
         window.btn_setup.click()
         self.wait(qapp, window)
-        assert window.ran == [tmp_path] and "http://127.0.0.1:8888" in window.lbl_result.text()
-        monkeypatch.setattr(module, "ask", lambda parent, title, text: False)
-        window.btn_stop.click()
-        self.wait(qapp, window)
-        assert "stopped" not in window.lbl_result.text()                      # "No" changed nothing
+        assert len(asked) == 1 and "about 200 MB" in asked[0] and "no Docker" in asked[0] and "Set it up?" in asked[0]
+        assert str(tmp_path / "searxng") in asked[0] and window.ran == []          # "No" changed nothing
+
+    def test_a_yes_sets_it_up_the_chosen_way(self, qapp, window, framework, tmp_path, monkeypatch):
+        from orchestrator.gui import ditto_web_window as module
+        framework.config.user_state_dir = str(tmp_path)
         monkeypatch.setattr(module, "ask", lambda parent, title, text: True)
-        window.btn_stop.click()
+        window.btn_setup.click()
         self.wait(qapp, window)
-        assert "stopped and removed" in window.lbl_result.text()
+        assert window.ran == [("own", tmp_path)] and "starts only for a search" in window.lbl_result.text()
+        window.cb_engine_way.setCurrentIndex(window.cb_engine_way.findData("container"))
+        window.btn_setup.click()
+        self.wait(qapp, window)
+        assert window.ran[-1] == ("container", tmp_path)
+
+    def test_the_container_way_explains_the_image_and_the_engine(self, qapp, window, framework, tmp_path, monkeypatch):
+        from orchestrator.gui import ditto_web_window as module
+        framework.config.user_state_dir = str(tmp_path)
+        asked = []
+        monkeypatch.setattr(module, "ask", lambda parent, title, text: asked.append(text) or False)
+        window.cb_engine_way.setCurrentIndex(window.cb_engine_way.findData("container"))
+        window.btn_setup.click()
+        assert "Docker or Podman" in asked[0] and "docker.io/searxng/searxng" in asked[0] and "127.0.0.1:8888" in asked[0]
+
+    def test_a_failed_setup_is_told_in_plain_words(self, qapp, framework, tmp_path, monkeypatch):
+        from orchestrator.Core import searxng_native
+        from orchestrator.gui import ditto_web_window as module
+        framework.config.user_state_dir = str(tmp_path)
+        told = []
+        monkeypatch.setattr(module, "ask", lambda parent, title, text: True)
+        monkeypatch.setattr(module, "plain_box", lambda parent, kind, title, text, **k: told.append(text))
+
+        def failing(way, folder, config, **kwargs):
+            raise searxng_native.NativeError("Fetching SearXNG did not work (HTTP 403).")
+        win = module.DittoWebWindow(framework, None, setup_runner=failing, lang="en")
+        win.btn_setup.click()
+        self.wait(qapp, win)
+        assert told == ["Fetching SearXNG did not work (HTTP 403)."]
+        win.close()
+
+    def test_removing_asks_first_and_no_is_the_default(self, qapp, window, framework, tmp_path, monkeypatch):
+        from orchestrator.gui import ditto_web_window as module
+        framework.config.user_state_dir = str(tmp_path)
+        monkeypatch.setattr(module, "ask", lambda parent, title, text: False)
+        window.btn_remove.click()
+        self.wait(qapp, window)
+        assert window.removed == []                                              # "No" changed nothing
+        monkeypatch.setattr(module, "ask", lambda parent, title, text: True)
+        window.btn_remove.click()
+        self.wait(qapp, window)
+        assert window.removed == [tmp_path] and "removed" in window.lbl_result.text()
 
     def test_every_text_exists_in_both_languages_with_the_same_placeholders(self):
         import re

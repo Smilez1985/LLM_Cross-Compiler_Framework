@@ -4784,13 +4784,14 @@ def _web_show(ctx: FrameworkContext, as_json: bool) -> None:
     console.print("Web search: " + (", ".join(info["ways"]) if info["ways"] else "off (no way is turned on)"))
     if info["offline"]:
         console.print("[yellow]Offline mode is on: only a SearXNG on this computer or the own network is reached.[/yellow]")
-    console.print(f"SearXNG address: {escape(info['address'])}")
+    console.print(f"SearXNG address: {escape(info['address'])}"
+                  + (f" (set up by the framework: {escape(info['engine'])}; it starts for a search)" if info.get("engine") else ""))
     for api in info["apis"]:
         state = ("listed, " if api["listed"] else "not listed, ") + ("key saved" if api["key_saved"] else "no key")
         console.print(f"  {escape(api['label'])}: {state}" + ("" if api["key_saved"] else f" (llm-cli secrets set {api['secret']})"))
     if not info["ways"]:
         console.print("Turn it on with: llm-cli ditto web use --ways searxng   (or api, html; "
-                      "llm-cli ditto web setup sets up the search engine)")
+                      "llm-cli ditto web setup sets up a search engine for you, if you want one)")
 
 
 @ditto_web.command('use')
@@ -4854,39 +4855,65 @@ def ditto_web_search(ctx: FrameworkContext, query: str, count: int, as_json: boo
                   "(Deep Ingest).")
 
 
+def _interactive() -> bool:
+    """Whether a person can answer a question here (a terminal on standard input)."""
+    try:
+        return bool(sys.stdin.isatty())
+    except (AttributeError, ValueError):
+        return False
+
+
 @ditto_web.command('setup')
-@click.option('--no-start', is_flag=True, help='Only copy the settings file and make the secret; do not start the engine')
-@click.option('--stop', is_flag=True, help='Stop and remove the search engine container (settings and secret stay)')
+@click.option('--way', type=click.Choice(['own', 'container']), default=None,
+              help='own (default): SearXNG in a folder of your own, no Docker; container: with Docker or Podman')
+@click.option('--yes', is_flag=True, help='Say yes to the question (for scripts and the installer)')
+@click.option('--no-start', is_flag=True, help='Only install; do not start it once to check that it answers')
+@click.option('--remove', is_flag=True, help='Remove the search engine again (the Python folder and the container)')
 @pass_context
-def ditto_web_setup(ctx: FrameworkContext, no_start: bool, stop: bool):
-    """Set up the SearXNG that Ditto's web search asks, on this computer: copies the finished settings file (nothing to
-    edit), makes a secret and starts the container (needs Docker or Podman). The installer does this after installing"""
-    from orchestrator.Core import searxng_setup
+def ditto_web_setup(ctx: FrameworkContext, way: Optional[str], yes: bool, no_start: bool, remove: bool):
+    """Set up a search engine (SearXNG) for Ditto's web search, only after you said yes: it says what it installs and how
+    it runs first. It starts only for a search and stops right after. Nothing to edit: the settings file is the finished
+    one of the framework. Without --way it uses your own Python folder, with no Docker"""
+    from orchestrator.Core import searxng_engine, searxng_native, searxng_setup
     from orchestrator.Core.disk_plan import state_dir
     ctx.require_framework()
+    config = ctx.framework_manager.config
+    folder = state_dir(ctx.framework_manager)
+    if folder is None:
+        console.print("[red]The state folder is not known; the search engine could not be set up.[/red]")
+        sys.exit(1)
     try:
-        if stop:
-            outcome = searxng_setup.stop()
-            console.print("The search engine was stopped and removed; the settings, the secret and the cache stay."
-                          if outcome == "removed" else "There was no search engine container.")
+        if remove:
+            if not yes and _interactive() and not click.confirm("Remove the search engine?", default=False):
+                console.print("Nothing was changed.")
+                return
+            if not yes and not _interactive():
+                console.print("[red]Removing needs your yes: run it in a terminal, or add --yes.[/red]")
+                sys.exit(1)
+            for line in searxng_engine.remove(folder, config):
+                console.print(escape(line))
             return
-        folder = state_dir(ctx.framework_manager)
-        if folder is None:
-            console.print("[red]The state folder is not known; the search engine could not be set up.[/red]")
-            sys.exit(1)
-        result = searxng_setup.setup(folder, run=not no_start)
-    except searxng_setup.SetupError as e:
+        chosen = way or searxng_engine.current(config) or searxng_engine.DEFAULT_WAY
+        for line in searxng_engine.explain(chosen, folder):
+            console.print(escape(line))
+        console.print("To remove it again: llm-cli ditto web setup --remove, or the button in Ditto > Web Search...")
+        if not yes:
+            if not _interactive():
+                console.print("[red]This needs your yes: run it in a terminal and answer the question, or add --yes.[/red]")
+                sys.exit(1)
+            if not click.confirm("Set it up?", default=False):
+                console.print("Nothing was changed. The web search also works without it: with search APIs and keys of "
+                              "your own (llm-cli ditto web use --ways api).")
+                return
+        result = searxng_engine.setup(chosen, folder, config, run=not no_start,
+                                      progress=lambda text: console.print(escape(text)))
+    except (searxng_engine.EngineError, searxng_native.NativeError, searxng_setup.SetupError) as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     for note in result.notes:
         console.print(escape(note))
-    if result.secret_made:
-        console.print("A secret for this computer's search engine was made (only you can read it).")
-    if result.running:
-        console.print(f"[green]The search engine runs at {escape(result.url)} (this computer only).[/green] Turn the web "
-                      "search on with: llm-cli ditto web use --ways searxng")
-    else:
-        console.print("Not started (--no-start). Start it later with: llm-cli ditto web setup")
+    console.print("[green]Done.[/green] It starts only for a search and stops right after; try it: "
+                  "llm-cli ditto web search \"RK3588 NPU\"")
 
 
 @ditto.command('setup')

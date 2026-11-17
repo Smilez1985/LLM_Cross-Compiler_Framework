@@ -31,8 +31,9 @@ CLI_PATHS: Dict[str, str] = {
     "ditto web use --zone": "edt_web_zone",
     "ditto web search": "btn_web_search",                   # the query box and its button
     "ditto web search --count": "spn_web_count",
-    "ditto web setup": "btn_web_setup",
-    "ditto web setup --stop": "btn_web_stop",
+    "ditto web setup": "btn_web_setup",                     # asks first, No by default
+    "ditto web setup --way": "cb_web_engine_way",           # the own Python folder (default) or the container
+    "ditto web setup --remove": "btn_web_remove",
 }
 WINDOW_OBJECTS: Dict[str, str] = {
     **{name: WEB_ACTION for name in CLI_PATHS.values() if name != WEB_ACTION},
@@ -48,7 +49,8 @@ WINDOW_OBJECTS: Dict[str, str] = {
 MACHINE_ONLY: Dict[str, str] = {
     "ditto web status --json": "machine output for scripts; the window shows the same choice",
     "ditto web search --json": "machine output for scripts; the table shows the same hits",
-    "ditto web setup --no-start": "for the installer and scripts: the window's button always sets up and starts",
+    "ditto web setup --no-start": "for the installer and scripts: the window's button always checks that it answers",
+    "ditto web setup --yes": "skips the question for scripts and the installer; the window always asks (No by default)",
 }
 
 

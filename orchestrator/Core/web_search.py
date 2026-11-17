@@ -22,6 +22,7 @@ The network is behind one function, `fetch`, so the tests need none: the default
 framework's PublicOnlyAdapter) for the APIs and the search page, and a local or home address only for SearXNG.
 """
 
+import contextlib
 import html as htmllib
 import re
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -34,6 +35,8 @@ DEFAULT_URL = "http://127.0.0.1:8888"
 DEFAULT_COUNT = 10
 MAX_COUNT = 20
 TIME_LIMIT = 15.0
+ENGINE_START_EXTRA = 45.0     # more time for the search engine's way when its first start is part of the search
+ENGINES = ("own", "container")
 MAX_BODY = 2 * 1024 * 1024
 SNIPPET_MAX = 300
 TITLE_MAX = 200
@@ -355,8 +358,11 @@ class WebSearch:
 
     def __init__(self, config: Any, secret_of: Callable[[str], Optional[str]], fetch: Optional[Callable] = None,
                  reach: Optional[Callable] = None, table: Optional[Dict[str, Any]] = None,
-                 time_limit: float = TIME_LIMIT):
+                 time_limit: float = TIME_LIMIT, engine: Optional[Callable[[], Any]] = None):
+        """`engine()`: a context manager that has the search engine running inside it (Running of Core/searxng_native.py or
+        ContainerRunning of Core/searxng_setup.py): used around the SearXNG way when the address is of this computer."""
         self.config, self.secret_of, self.table, self.time_limit = config, secret_of, table, time_limit
+        self.engine = engine
         self.fetch = fetch or (lambda request: default_fetch(request, config, time_limit))
         self._reach = reach
 
@@ -432,8 +438,10 @@ class WebSearch:
             return found, reports
         pool = ThreadPoolExecutor(max_workers=len(jobs), thread_name_prefix="web-search")
         futures = {pool.submit(job): (way, group) for way, group, job in jobs}
+        limit = self.time_limit + (ENGINE_START_EXTRA if self.engine is not None and any(w == "searxng" for w, _, _ in jobs)
+                                   else 0.0)
         try:
-            done, pending = wait(list(futures), timeout=self.time_limit)
+            done, pending = wait(list(futures), timeout=limit)
             for future in done:
                 way, _ = futures[future]
                 try:
@@ -447,8 +455,7 @@ class WebSearch:
                     found.append((way, rows))
                     reports.append(WayReport(way, "ok"))
             for future in pending:
-                reports.append(WayReport(futures[future][0], "failed",
-                                         reason=f"no answer within {self.time_limit:g} seconds"))
+                reports.append(WayReport(futures[future][0], "failed", reason=f"no answer within {limit:g} seconds"))
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
         return found, reports
@@ -475,8 +482,15 @@ class WebSearch:
             if not locality.local:
                 raise SearchRefused(locality.refusal("the web search"))
         local = self._is_local(base)
-        response = self.fetch(Request("GET", base + "/search", params={"q": query, "format": "json"},
-                                      headers={"Accept": "application/json"}, local=local))
+        try:
+            with (self.engine() if self.engine is not None and local else contextlib.nullcontext()):
+                response = self.fetch(Request("GET", base + "/search", params={"q": query, "format": "json"},
+                                              headers={"Accept": "application/json"}, local=local))
+        except Exception as e:  # noqa: BLE001 - a search engine that cannot be started is this way's failure only
+            if isinstance(e, (WayError, SearchRefused)):
+                raise
+            raise WayError(str(e) if type(e).__name__ in ("NativeError", "SetupError") else
+                           f"the search engine could not be started ({type(e).__name__})") from None
         if response.status != 200:
             raise WayError(_http_problem(response.status, searxng=True))
         data = response.json()
@@ -536,6 +550,36 @@ class WebSearch:
         return parser.can_fetch("llmcf-web-search", url)
 
 
+_ENGINES: Dict[Any, Any] = {}      # one Running object per folder and way, shared by every search of the process
+
+
+def engine_for(framework: Any) -> Optional[Callable[[], Any]]:
+    """The context manager that has the person's search engine running for a search, as the setting web_search_engine says
+    ("own": the Python folder, "container": the container; empty: the person runs their own, nothing is started). None when
+    none is set up or the folder is not known."""
+    from orchestrator.Core import searxng_native, searxng_setup
+    from orchestrator.Core.disk_plan import state_dir
+    config = getattr(framework, "config", None)
+    try:
+        way = str(config.get("web_search_engine", "") or "") if config is not None else ""
+        address = str(config.get("web_search_url", DEFAULT_URL) or DEFAULT_URL) if config is not None else DEFAULT_URL
+    except Exception:  # noqa: BLE001 - an unreadable setting is "none"
+        return None
+    folder = state_dir(framework)
+    if way not in ENGINES or folder is None:
+        return None
+    base = searxng_setup.folder_of(folder)
+    key = (way, str(base), searxng_native.port_of(address))
+    if key not in _ENGINES:
+        if way == "own":
+            secret, _ = searxng_setup.ensure_secret(base)
+            _ENGINES[key] = searxng_native.Running(base / "native", base / "config" / "settings.yml", secret,
+                                                   searxng_native.port_of(address))
+        else:
+            _ENGINES[key] = searxng_setup.ContainerRunning(base)
+    return lambda: _ENGINES[key]
+
+
 def for_framework(framework: Any, fetch: Optional[Callable] = None) -> WebSearch:
     """The search of `framework`: its settings, and the person's keys from its secrets store (a store that is not there
     or cannot be read has no keys)."""
@@ -546,7 +590,7 @@ def for_framework(framework: Any, fetch: Optional[Callable] = None) -> WebSearch
             return manager.get_secret(name) if manager is not None else None
         except Exception:  # noqa: BLE001 - an unreadable store has no key
             return None
-    return WebSearch(getattr(framework, "config", None), secret_of, fetch=fetch)
+    return WebSearch(getattr(framework, "config", None), secret_of, fetch=fetch, engine=engine_for(framework))
 
 
 def _names(value: Any, allowed: Sequence[str], what: str) -> List[str]:
@@ -561,7 +605,7 @@ def _names(value: Any, allowed: Sequence[str], what: str) -> List[str]:
 
 
 def configure(config: Any, *, ways: Any = None, apis: Any = None, address: Optional[str] = None,
-              zone: Optional[str] = None, save: bool = True) -> bool:
+              zone: Optional[str] = None, engine: Optional[str] = None, save: bool = True) -> bool:
     """The one writer of the web search's settings (`llm-cli ditto web use`, the settings window): every value is checked
     first (ValueError, nothing changes), then set, and config.yml is saved with `save`. None leaves a setting as it is;
     "off" or an empty list turns ways or providers off. Returns False when config.yml could not be saved (the values hold
@@ -581,6 +625,11 @@ def configure(config: Any, *, ways: Any = None, apis: Any = None, address: Optio
         if len(text) > 100 or re.search(r"\s", text):
             raise ValueError("The Bright Data zone is one word (the name of the zone in your account).")
         changes["web_search_brightdata_zone"] = text
+    if engine is not None:
+        word = str(engine).strip().lower()
+        if word not in ENGINES + ("", "none"):
+            raise ValueError(f"The search engine way is own or container, not '{engine}'.")
+        changes["web_search_engine"] = "" if word == "none" else word
     for key, value in changes.items():
         if config.set(key, value) is False:
             raise ValueError(f"{key} cannot be '{value}'.")
@@ -592,11 +641,12 @@ def status(search: WebSearch) -> Dict[str, Any]:
     """What is set up, for the command and the window: the ways that are on, every provider with whether its key is
     saved (never the key), the SearXNG address and whether offline mode is on."""
     return {"ways": search.ways(), "address": search.address(), "offline": search.offline(),
+            "engine": str(search._setting("web_search_engine", "") or ""),
             "apis": [{"name": p.name, "label": p.label, "listed": p.name in search.providers(),
                       "key_saved": bool((search.secret_of(p.secret) or "").strip()), "secret": p.secret,
                       "needs": list(p.needs)} for p in PROVIDERS.values()]}
 
 
-__all__ = ["DEFAULT_URL", "JSON_OFF", "OFF", "ORIGINS", "PROVIDERS", "Provider", "Request", "Response", "SearchHit",
+__all__ = ["DEFAULT_URL", "ENGINES", "ENGINE_START_EXTRA", "engine_for", "JSON_OFF", "OFF", "ORIGINS", "PROVIDERS", "Provider", "Request", "Response", "SearchHit",
            "SearchRefused", "SearchResult", "WAYS", "WayError", "WayReport", "WebSearch", "clean_text", "default_fetch",
            "configure", "for_framework", "merge", "normalize", "origin_of", "parse_duckduckgo", "parse_searxng", "prepare_query", "public_https", "status"]

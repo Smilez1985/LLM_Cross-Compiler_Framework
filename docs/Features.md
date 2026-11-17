@@ -2387,10 +2387,14 @@ fixes one special problem). **You turn on the ways** (Ditto > Web Search..., or 
 engine on this computer, search APIs with your own keys (Tavily, Exa, Bright Data, Serper, SearchApi, Brave Search) and a
 search page's HTML results. They run together, and the same page found twice is one hit.
 
-- **Nothing to configure:** `llm-cli ditto web setup` or the button **Set Up the Search Engine** sets up a search engine
-  (SearXNG) on this computer with a finished settings file from the repository, a secret of its own and the port open on
-  this computer only; nobody edits a settings file. It needs Docker or Podman and says so in plain words when neither is
-  there.
+- **A search engine, only if you want one:** the web search also works without any installation (search APIs with your
+  own keys). If you want a search engine of your own, `llm-cli ditto web setup` or the window's **Set Up...** installs
+  SearXNG after it told you what it installs, how big it is and what it runs with, and after you said yes (No is the
+  default). The default way is a **folder of your own**: no Docker, no administrator rights, no WSL, also on Windows;
+  Docker or Podman is the opt-in of whoever wants it. It comes with a finished settings file and a secret of its own;
+  nobody edits a settings file.
+- **Nothing runs in between:** SearXNG starts only while a search needs it and stops right after, on this computer only.
+  **Remove...** takes it away again.
 - **A hit is never a page:** an address, a title and a short text from a stranger, read as data. Reading a page is Deep
   Ingest's job, with its notice.
 - **The question stays private:** it goes through the privacy filter first; a query with a path of this computer or a

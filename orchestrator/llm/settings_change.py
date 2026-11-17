@@ -62,7 +62,8 @@ _KV_ORDER = {"q4_0": 0, "q8_0": 1, "f16": 2}   # memory of the KV-cache type, sm
 # Settings an AI may read but never change, in either direction (not even downwards): lowering the idle timeout can
 # stop the person's own long builds, and pinning "auto" of the prompt cache or the KV-cache type to a value freezes
 # a value that may no longer fit this computer later.
-WEB_SEARCH_SETTINGS = ("web_search_ways", "web_search_apis", "web_search_url", "web_search_brightdata_zone")
+WEB_SEARCH_SETTINGS = ("web_search_ways", "web_search_apis", "web_search_url", "web_search_brightdata_zone",
+                       "web_search_engine")
 WEB_SEARCH_PERSON_ONLY_TEXT = ("{key} decides whether and how Ditto's web search reaches out. Only the person sets it, in "
                                "the framework's settings; no AI and no settings change of an AI can.")
 PERSON_DECIDES = ("build_idle_timeout", "local_cache_ram_mib", "local_kv_cache", "framework_mode",

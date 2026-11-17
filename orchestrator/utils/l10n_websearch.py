@@ -31,16 +31,36 @@ TEXTS = {
         "websearch.apply": "Save Choice",
         "websearch.saved": "Saved.",
         "websearch.notsaved": "The choice holds until the program ends; the settings file could not be saved.",
-        "websearch.setup": "Set Up the Search Engine",
-        "websearch.setup.running": "Setting up the search engine ...",
-        "websearch.setup.done": "The search engine runs at {url}, on this computer only. Turn on the way \"Search engine "
-                                "on this computer\" and save the choice.",
+
+
+
         "websearch.setup.nofolder": "The folder for the search engine is not known.",
-        "websearch.stop": "Stop the Search Engine",
-        "websearch.stop.ask": "Stop the search engine and remove its container? Its settings, its secret and its cache "
-                              "stay.",
-        "websearch.stop.done": "The search engine was stopped and removed.",
-        "websearch.stop.none": "There was no search engine to stop.",
+
+
+
+
+        "websearch.engine": "Search engine:",
+        "websearch.engine.own": "In my own Python folder (no Docker)",
+        "websearch.engine.container": "As a container (needs Docker or Podman)",
+        "websearch.setup": "Set Up...",
+        "websearch.setup.running": "Setting up the search engine; this takes a minute ...",
+        "websearch.setup.done": "The search engine is set up. It starts only for a search and stops right after.",
+        "websearch.setup.ask": "Set it up?",
+        "websearch.explain.own": "This sets up SearXNG, a search engine that Ditto's web search can use, in a folder of your "
+                                 "own.\n\nWhat it installs: a pinned copy of SearXNG from github.com with its own Python "
+                                 "packages, {size}, in {folder}.\n\nHow it runs: with your own rights, only while a "
+                                 "search needs it and on this computer only (127.0.0.1); nothing runs in between. It needs "
+                                 "no Docker, no administrator rights and no WSL.\n\nYou can remove it again here.",
+        "websearch.explain.container": "This sets up SearXNG, a search engine that Ditto's web search can use, as a "
+                                       "container.\n\nWhat it installs: the image {image} through your container engine "
+                                       "(Docker or Podman, which must be installed), and its settings and secret in "
+                                       "{folder}.\n\nHow it runs: started only while a search needs it and stopped right "
+                                       "after, published on this computer only (127.0.0.1:{port}); the engine does not "
+                                       "restart it by itself.\n\nYou can remove it again here.",
+        "websearch.remove": "Remove...",
+        "websearch.remove.ask": "Remove the search engine (the Python folder and the container)? Its settings file and "
+                                "its secret stay.",
+        "websearch.remove.done": "The search engine was removed.",
         "websearch.query.placeholder": "What to search for",
         "websearch.count": "Most hits",
         "websearch.search": "Search",
@@ -88,16 +108,38 @@ TEXTS = {
         "websearch.apply": "Auswahl speichern",
         "websearch.saved": "Gespeichert.",
         "websearch.notsaved": "Die Auswahl gilt, bis das Programm endet; die Einstellungsdatei ließ sich nicht speichern.",
-        "websearch.setup": "Suchmaschine einrichten",
-        "websearch.setup.running": "Die Suchmaschine wird eingerichtet ...",
-        "websearch.setup.done": "Die Suchmaschine läuft unter {url}, nur auf diesem Rechner. Den Weg „Suchmaschine auf "
-                                "diesem Rechner“ einschalten und die Auswahl speichern.",
+
+
+
         "websearch.setup.nofolder": "Der Ordner für die Suchmaschine ist nicht bekannt.",
-        "websearch.stop": "Suchmaschine stoppen",
-        "websearch.stop.ask": "Die Suchmaschine stoppen und ihren Container entfernen? Ihre Einstellungen, ihr Geheimnis "
-                              "und ihr Cache bleiben.",
-        "websearch.stop.done": "Die Suchmaschine wurde gestoppt und entfernt.",
-        "websearch.stop.none": "Es gab keine Suchmaschine zum Stoppen.",
+
+
+
+
+        "websearch.engine": "Suchmaschine:",
+        "websearch.engine.own": "In meinem eigenen Python-Ordner (ohne Docker)",
+        "websearch.engine.container": "Als Container (braucht Docker oder Podman)",
+        "websearch.setup": "Einrichten...",
+        "websearch.setup.running": "Die Suchmaschine wird eingerichtet; das dauert eine Minute ...",
+        "websearch.setup.done": "Die Suchmaschine ist eingerichtet. Sie startet nur für eine Suche und endet gleich danach.",
+        "websearch.setup.ask": "Soll sie eingerichtet werden?",
+        "websearch.explain.own": "Hier wird SearXNG eingerichtet, eine Suchmaschine, die Dittos Websuche nutzen kann, in "
+                                 "einem eigenen Ordner.\n\nWas installiert wird: eine feste Kopie von SearXNG von github.com "
+                                 "mit eigenen Python-Paketen, {size}, in {folder}.\n\nWie sie läuft: mit den eigenen "
+                                 "Rechten, nur solange eine Suche sie braucht und nur auf diesem Rechner (127.0.0.1); "
+                                 "dazwischen läuft nichts. Sie braucht kein Docker, keine Administratorrechte und kein "
+                                 "WSL.\n\nHier lässt sie sich wieder entfernen.",
+        "websearch.explain.container": "Hier wird SearXNG eingerichtet, eine Suchmaschine, die Dittos Websuche nutzen "
+                                       "kann, als Container.\n\nWas installiert wird: das Image {image} über die "
+                                       "Container-Engine (Docker oder Podman, das installiert sein muss), und ihre Einstellungen "
+                                       "und ihr Geheimnis in {folder}.\n\nWie sie läuft: nur gestartet, solange eine Suche "
+                                       "sie braucht, und gleich danach gestoppt, nur auf diesem Rechner veröffentlicht "
+                                       "(127.0.0.1:{port}); die Engine startet sie nicht von allein neu.\n\nHier lässt sie "
+                                       "sich wieder entfernen.",
+        "websearch.remove": "Entfernen...",
+        "websearch.remove.ask": "Die Suchmaschine entfernen (den Python-Ordner und den Container)? Ihre Einstellungsdatei und "
+                                "ihr Geheimnis bleiben.",
+        "websearch.remove.done": "Die Suchmaschine wurde entfernt.",
         "websearch.query.placeholder": "Wonach gesucht werden soll",
         "websearch.count": "Höchstens so viele Treffer",
         "websearch.search": "Suchen",

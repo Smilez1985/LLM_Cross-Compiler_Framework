@@ -14,7 +14,8 @@ settings window):
    its `server.secret_key` from the environment variable `SEARXNG_SECRET`;
 3. starts the container `docker.io/searxng/searxng` through the framework's container engine, named `llmcf-searxng`,
    with the settings folder as `/etc/searxng`, a volume of the engine for `/var/cache/searxng` and the port published on
-   this computer only (127.0.0.1:8888 -> 8080, the mapping of SearXNG's own Docker example), restarted with the engine.
+   this computer only (127.0.0.1:8888 -> 8080, the mapping of SearXNG's own Docker example). It is not restarted by
+   the engine: it runs only while a search needs it (`ContainerRunning`) and is stopped right after.
 
 The engine is a parameter (`client_factory`, docker-py's client), so the tests need none. Nothing here reaches the web
 except the engine pulling the image.
@@ -154,8 +155,7 @@ def start(client: Any, settings: Path, secret: str) -> str:
             environment={"SEARXNG_SECRET": secret},
             ports={f"{CONTAINER_PORT}/tcp": (HOST_ADDRESS, HOST_PORT)},
             volumes={str(Path(settings).parent): {"bind": "/etc/searxng", "mode": "rw"},
-                     VOLUME: {"bind": "/var/cache/searxng", "mode": "rw"}},
-            restart_policy={"Name": "unless-stopped"})
+                     VOLUME: {"bind": "/var/cache/searxng", "mode": "rw"}})
         container.start()
         return "started"
     except NotFound:
@@ -170,7 +170,7 @@ def start(client: Any, settings: Path, secret: str) -> str:
         raise _engine_error(e) from None
 
 
-def stop(client_factory: Optional[Callable[[], Any]] = None) -> str:
+def remove(client_factory: Optional[Callable[[], Any]] = None) -> str:
     """Stops and removes the container (the settings, the secret and the cache stay); "removed" or "missing"."""
     client = _client(client_factory)
     if container_state(client) == "missing":
@@ -180,6 +180,48 @@ def stop(client_factory: Optional[Callable[[], Any]] = None) -> str:
     except Exception as e:  # noqa: BLE001
         raise _engine_error(e) from None
     return "removed"
+
+
+def pause(client: Any) -> None:
+    """Stops the container (it stays, stopped, for the next search); never raises."""
+    try:
+        client.containers.get(CONTAINER).stop(timeout=10)
+    except Exception:  # noqa: BLE001 - one that is gone or stopped already is the goal
+        pass
+
+
+class ContainerRunning:
+    """The container for the time of a search, as `searxng_native.Running` is for the Python folder: started when it is
+    not running, stopped when the last search that needed it is done, never one that was running before (the person
+    started it)."""
+
+    def __init__(self, folder: Path, client_factory: Optional[Callable[[], Any]] = None):
+        import threading
+        self.folder, self._factory = Path(folder), client_factory
+        self._lock = threading.Lock()
+        self._users = 0
+        self._client: Any = None
+        self._started = False
+
+    def __enter__(self) -> "ContainerRunning":
+        with self._lock:
+            if self._users == 0:
+                client = _client(self._factory)
+                secret, _ = ensure_secret(self.folder)
+                settings, _ = prepare(self.folder)
+                if container_state(client) != "running":
+                    start(client, settings, secret)
+                    self._started = True
+                self._client = client
+            self._users += 1
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        with self._lock:
+            self._users -= 1
+            if self._users == 0 and self._started and self._client is not None:
+                pause(self._client)
+                self._started = False
 
 
 def setup(state_dir: Any, client_factory: Optional[Callable[[], Any]] = None, *, run: bool = True,
@@ -196,9 +238,12 @@ def setup(state_dir: Any, client_factory: Optional[Callable[[], Any]] = None, *,
     client = _client(client_factory)
     outcome = start(client, settings, secret)
     result.started, result.running = outcome == "started", True
-    result.notes.append("The search engine was started." if result.started else "The search engine was running.")
+    if outcome == "started":
+        pause(client)       # it starts again for a search; nothing runs in between
+        result.running = False
+    result.notes.append("The search engine is ready: it starts for a search and stops right after.")
     return result
 
 
 __all__ = ["CONTAINER", "IMAGE", "NO_ENGINE", "SetupError", "SetupResult", "TEMPLATE", "URL", "VOLUME",
-           "container_state", "ensure_secret", "folder_of", "prepare", "setup", "start", "stop"]
+           "ContainerRunning", "container_state", "ensure_secret", "folder_of", "pause", "prepare", "remove", "setup", "start"]

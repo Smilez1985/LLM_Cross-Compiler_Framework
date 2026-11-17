@@ -15,7 +15,10 @@ TABLE = {"listen": ["search_knowledge"], "suffixes": [], "vendors": [
 
 
 class Config(dict):
-    """A stand-in for the settings: get(key, default)."""
+    """A stand-in for the settings: get(key, default), and set(key, value) for the writer."""
+
+    def set(self, key, value):
+        self[key] = value
 
 
 def make(ways=("searxng",), apis=(), keys=None, fetch=None, offline=False, **extra):
@@ -293,3 +296,86 @@ class TestTheNetwork:
     def test_a_bad_searxng_address_is_told(self):
         result = make(web_search_url="ftp://nope", fetch=lambda r: json_response({})).search("x")
         assert result.ways[0].status == "failed" and "http://" in result.ways[0].reason
+
+
+class TestTheSearchEngineForASearch:
+    """The engine the person had set up runs only inside a search (Core/searxng_native.Running, searxng_setup.ContainerRunning)."""
+
+    class Engine:
+        def __init__(self, events, error=None):
+            self.events, self.error = events, error
+
+        def __enter__(self):
+            if self.error:
+                raise self.error
+            self.events.append("up")
+            return self
+
+        def __exit__(self, *exc):
+            self.events.append("down")
+
+    def search(self, events, engine, **extra):
+        config = Config({"web_search_ways": ["searxng"], "offline_mode": False, "ai_security_level": "STRICT", **extra})
+        return WebSearch(config, lambda n: None, fetch=lambda r: events.append("fetch") or json_response(SEARXNG),
+                         table=TABLE, time_limit=3.0, engine=engine)
+
+    def test_it_is_up_for_the_request_and_down_right_after(self):
+        events = []
+        result = self.search(events, lambda: self.Engine(events)).search("x")
+        assert events == ["up", "fetch", "down"] and result.ways[0].status == "ok"
+
+    def test_it_goes_down_even_when_the_request_fails(self):
+        events = []
+
+        def fetch(request):
+            events.append("fetch")
+            raise WayError("the request failed (ConnectionError)")
+        search = WebSearch(Config(web_search_ways=["searxng"]), lambda n: None, fetch=fetch, table=TABLE, time_limit=3.0,
+                           engine=lambda: self.Engine(events))
+        assert search.search("x").ways[0].status == "failed" and events == ["up", "fetch", "down"]
+
+    def test_an_address_that_is_not_of_this_computer_is_never_started_for(self):
+        events = []
+        self.search(events, lambda: self.Engine(events), web_search_url="https://s.example.org").search("x")
+        assert events == ["fetch"]
+
+    def test_an_engine_that_cannot_start_fails_only_this_way_and_says_why(self):
+        from orchestrator.Core.searxng_native import NativeError
+        events = []
+        result = self.search(events, lambda: self.Engine(events, NativeError("The search engine did not answer within "
+                                                                              "45 seconds; see server.log."))).search("x")
+        assert events == [] and result.ways[0].status == "failed" and "did not answer within 45 seconds" in result.ways[0].reason
+
+    def test_the_first_start_gets_more_time_than_a_plain_request(self):
+        import time
+        from orchestrator.Core.web_search import ENGINE_START_EXTRA
+
+        class Slow(self.Engine):
+            def __enter__(inner):
+                time.sleep(3.5)                       # longer than time_limit=3, within the extra time
+                return super().__enter__()
+        events = []
+        result = self.search(events, lambda: Slow(events)).search("x")
+        assert ENGINE_START_EXTRA > 3 and result.ways[0].status == "ok" and events == ["up", "fetch", "down"]
+
+    def test_engine_for_follows_the_setting_and_nothing_is_started_by_it(self, tmp_path):
+        from types import SimpleNamespace
+        from orchestrator.Core import searxng_native, searxng_setup
+        framework = lambda way: SimpleNamespace(config=SimpleNamespace(  # noqa: E731
+            get=lambda key, default=None: {"web_search_engine": way}.get(key, default), user_state_dir=str(tmp_path)))
+        assert ws.engine_for(framework("")) is None
+        assert ws.engine_for(SimpleNamespace(config=None)) is None
+        own = ws.engine_for(framework("own"))
+        assert isinstance(own(), searxng_native.Running) and own() is own()          # one shared object per folder and way
+        assert isinstance(ws.engine_for(framework("container"))(), searxng_setup.ContainerRunning)
+        assert ws.engine_for(framework("bogus")) is None
+        assert (tmp_path / "searxng" / "secret").is_file() and not (tmp_path / "searxng" / "native").exists()
+
+    def test_configure_writes_the_way_and_checks_it(self):
+        config = Config()
+        ws.configure(config, engine="own")
+        assert config["web_search_engine"] == "own"
+        ws.configure(config, engine="none")
+        assert config["web_search_engine"] == ""
+        with pytest.raises(ValueError):
+            ws.configure(Config(), engine="docker")

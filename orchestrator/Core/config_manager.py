@@ -544,6 +544,9 @@ class ConfigManager:
             ConfigSchema("web_search_url", str, False, "http://127.0.0.1:8888", "The address of the SearXNG the web "
                          "search asks (the one the installer sets up on this computer by default). Only the person "
                          "sets it", ["regex:^https?://[^\\s/]+\\S*$"]),
+            ConfigSchema("web_search_engine", str, False, "", "The search engine that was set up for the web search, "
+                         "started only while a search needs it: own (a Python folder of the person) or container; empty "
+                         "= none. Only the person sets it", ["regex:^(own|container)?$"]),
             ConfigSchema("web_search_brightdata_zone", str, False, "", "The zone of the person's Bright Data account "
                          "that the web search's provider brightdata needs. Only the person sets it"),
             ConfigSchema("enable_telemetry", bool, False, False, "Allow anonymous error reporting (GitHub Issues)"),
@@ -841,6 +844,7 @@ class ConfigManager:
                 "ai_anthropic_workspace_id", "ai_context_window", "ai_cache_ttl", "ai_cache_cost_limit",
                 "ditto_archive_security",
                 "web_search_ways", "web_search_apis", "web_search_url", "web_search_brightdata_zone",
+                "web_search_engine",
                 # v2.0
                 "chat_context_limit", "enable_telemetry", "offline_mode",
                 "offline_local_vpns", "offline_local_hosts", "offline_local_ranges",

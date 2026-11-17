@@ -17,9 +17,14 @@ class FakeContainer:
     def __init__(self, status="created"):
         self.status = status
         self.started = self.removed = False
+        self.stopped = 0
 
     def start(self):
         self.started, self.status = True, "running"
+
+    def stop(self, timeout=10):
+        self.stopped += 1
+        self.status = "exited"
 
     def remove(self, force=False):
         self.removed = True
@@ -140,8 +145,9 @@ class TestStarting:
         assert made["environment"]["SEARXNG_SECRET"] == (tmp_path / "searxng" / "secret").read_text().strip()
         binds = {v["bind"]: k for k, v in made["volumes"].items()}
         assert binds["/etc/searxng"] == str(tmp_path / "searxng" / "config") and binds["/var/cache/searxng"] == ss.VOLUME
-        assert made["restart_policy"] == {"Name": "unless-stopped"}
-        assert result.started and result.running and result.copied and result.secret_made and client.container.started
+        assert "restart_policy" not in made                                        # the engine never restarts it by itself
+        assert result.started and not result.running and result.copied and result.secret_made
+        assert client.container.started is True and client.container.status == "exited"      # started once, then stopped
 
     def test_the_image_is_pulled_only_when_the_engine_has_none(self, tmp_path):
         client = FakeClient(images=())
@@ -154,7 +160,7 @@ class TestStarting:
     def test_a_running_container_is_left_alone(self, tmp_path):
         client = FakeClient(existing=FakeContainer("running"))
         result = setup(tmp_path, lambda: client)
-        assert not result.started and result.running and client.created == []
+        assert not result.started and client.created == []
 
     def test_a_stopped_container_is_started_again(self, tmp_path):
         stopped = FakeContainer("exited")
@@ -165,7 +171,8 @@ class TestStarting:
         client = FakeClient()
         setup(tmp_path, lambda: client)
         again = setup(tmp_path, lambda: client)
-        assert not again.copied and not again.secret_made and not again.started and len(client.created) == 1
+        assert not again.copied and not again.secret_made and len(client.created) == 1      # nothing new is made
+        assert client.container.status == "exited"                                           # and nothing is left running
 
     def test_without_run_only_the_file_and_the_secret_are_made(self, tmp_path):
         result = setup(tmp_path, lambda: pytest.fail("no engine without run"), run=False)
@@ -197,8 +204,47 @@ class TestStopping:
     def test_it_removes_the_container_and_keeps_the_rest(self, tmp_path):
         client = FakeClient()
         setup(tmp_path, lambda: client)
-        assert ss.stop(lambda: client) == "removed" and client.container.removed
+        assert ss.remove(lambda: client) == "removed" and client.container.removed
         assert (tmp_path / "searxng" / "secret").is_file()
 
     def test_nothing_to_remove_is_said(self):
-        assert ss.stop(lambda: FakeClient()) == "missing"
+        assert ss.remove(lambda: FakeClient()) == "missing"
+
+
+class TestOnlyForASearch:
+
+    def test_the_container_starts_for_a_search_and_stops_right_after(self, tmp_path):
+        client = FakeClient()
+        setup(tmp_path, lambda: client)                       # made, started once, stopped
+        assert client.container.status == "exited"
+        running = ss.ContainerRunning(folder_of(tmp_path), lambda: client)
+        with running:
+            assert client.container.status == "running"
+        assert client.container.status == "exited"
+
+    def test_searches_at_the_same_time_share_one_start(self, tmp_path):
+        client = FakeClient()
+        setup(tmp_path, lambda: client)
+        stops = client.container.stopped
+        running = ss.ContainerRunning(folder_of(tmp_path), lambda: client)
+        with running:
+            with running:
+                assert client.container.status == "running"
+            assert client.container.status == "running"           # one search is still going
+        assert client.container.status == "exited" and client.container.stopped == stops + 1
+
+    def test_a_container_the_person_started_is_never_stopped(self, tmp_path):
+        client = FakeClient(existing=FakeContainer("running"))
+        running = ss.ContainerRunning(folder_of(tmp_path), lambda: client)
+        with running:
+            pass
+        assert client.container.status == "running" and client.container.stopped == 0
+
+    def test_it_stops_even_when_the_search_fails(self, tmp_path):
+        client = FakeClient()
+        setup(tmp_path, lambda: client)
+        running = ss.ContainerRunning(folder_of(tmp_path), lambda: client)
+        with pytest.raises(RuntimeError):
+            with running:
+                raise RuntimeError("search failed")
+        assert client.container.status == "exited"

@@ -34,13 +34,13 @@ class DittoWebWindow(QDialog):
 
     def __init__(self, framework: Any, parent: Optional[QWidget] = None,
                  search_factory: Optional[Callable[[], Any]] = None, setup_runner: Optional[Callable[..., Any]] = None,
-                 stop_runner: Optional[Callable[[], Any]] = None, lang: Optional[str] = None):
+                 remove_runner: Optional[Callable[..., Any]] = None, lang: Optional[str] = None):
         super().__init__(parent)
         self.setObjectName("dlg_ditto_web")
         self.framework = framework
         self.lang = lang or current_language()
         self._factory = search_factory or (lambda: web_search.for_framework(framework))
-        self._setup, self._stop = setup_runner, stop_runner
+        self._setup, self._remove = setup_runner, remove_runner
         self._jobs: Dict[object, Callable[[bool, Any], None]] = {}
         self.hits: List[Any] = []
         self.setWindowTitle(self._t("websearch.title"))
@@ -108,10 +108,17 @@ class DittoWebWindow(QDialog):
         layout.addLayout(where)
 
         engine = QHBoxLayout()
+        engine.addWidget(plain_label(self._t("websearch.engine"), self, wrap=False))
+        self.cb_engine_way = QComboBox(self)
+        self.cb_engine_way.setObjectName("cb_web_engine_way")
+        self.cb_engine_way.setAccessibleName(self._t("websearch.engine"))
+        for way in ("own", "container"):       # the own Python folder first: no Docker unless the person wants it
+            self.cb_engine_way.addItem(self._t(f"websearch.engine.{way}"), way)
+        engine.addWidget(self.cb_engine_way)
         self.btn_setup = self._button("websearch.setup", "btn_web_setup", self.set_up_engine)
         engine.addWidget(self.btn_setup)
-        self.btn_stop = self._button("websearch.stop", "btn_web_stop", self.stop_engine)
-        engine.addWidget(self.btn_stop)
+        self.btn_remove = self._button("websearch.remove", "btn_web_remove", self.remove_engine)
+        engine.addWidget(self.btn_remove)
         engine.addStretch(1)
         layout.addLayout(engine)
 
@@ -245,42 +252,67 @@ class DittoWebWindow(QDialog):
 
     # --- the search engine ------------------------------------------------------------------------------------------
 
+    def _plain_errors(self) -> tuple:
+        from orchestrator.Core import searxng_engine, searxng_native, searxng_setup
+        return (searxng_engine.EngineError, searxng_native.NativeError, searxng_setup.SetupError)
+
+    def _fail(self, value: Any) -> None:
+        self.lbl_result.setText("")
+        self._tell("warning", one_line(value) if isinstance(value, self._plain_errors())
+                   else self._t("websearch.failed", reason=one_line(type(value).__name__)))
+
     def set_up_engine(self) -> None:
-        """Copies the finished settings file, makes the secret and starts SearXNG (`ditto web setup`)."""
-        from orchestrator.Core import searxng_setup
+        """Sets up the search engine the chosen way, after it said what it installs and the person said yes (No is the
+        default): `ditto web setup`."""
+        from orchestrator.Core import searxng_engine, searxng_setup
         from orchestrator.Core.disk_plan import state_dir
+        way = str(self.cb_engine_way.currentData() or "own")
         folder = state_dir(self.framework)
-        runner = self._setup or searxng_setup.setup
+        shown = (searxng_setup.folder_of(folder) if folder is not None else "")
+        text = self._t(f"websearch.explain.{way}", folder=str(shown), size=searxng_engine.SIZE_OWN,
+                       image=searxng_setup.IMAGE, port=searxng_setup.HOST_PORT)
+        if not ask(self, self._t("websearch.title"), text + "\n\n" + self._t("websearch.setup.ask")):
+            return
+        runner = self._setup or searxng_engine.setup
+        config = getattr(self.framework, "config", None)
         self.lbl_result.setText(self._t("websearch.setup.running"))
 
         def work() -> Any:
             if folder is None:
-                raise searxng_setup.SetupError(self._t("websearch.setup.nofolder"))
-            return runner(folder)
+                raise searxng_engine.EngineError(self._t("websearch.setup.nofolder"))
+            return runner(way, folder, config)
 
         def then(ok: bool, value: Any) -> None:
             if not ok:
-                self.lbl_result.setText("")
-                self._tell("warning", one_line(value) if isinstance(value, searxng_setup.SetupError)
-                           else self._t("websearch.failed", reason=one_line(f"{type(value).__name__}")))
+                self._fail(value)
                 return
-            self.lbl_result.setText(self._t("websearch.setup.done", url=value.url))
+            self.refresh()
+            self.lbl_result.setText(self._t("websearch.setup.done"))
         self._in_worker(work, then)
 
-    def stop_engine(self) -> None:
-        """Stops and removes the search engine container after a question (No by default)."""
-        from orchestrator.Core import searxng_setup
-        if not ask(self, self._t("websearch.title"), self._t("websearch.stop.ask")):
+    def remove_engine(self) -> None:
+        """Removes the search engine (the Python folder and the container) after a question (No by default):
+        `ditto web setup --remove`."""
+        from orchestrator.Core import searxng_engine
+        from orchestrator.Core.disk_plan import state_dir
+        if not ask(self, self._t("websearch.title"), self._t("websearch.remove.ask")):
             return
-        runner = self._stop or searxng_setup.stop
+        folder = state_dir(self.framework)
+        runner = self._remove or searxng_engine.remove
+        config = getattr(self.framework, "config", None)
+
+        def work() -> Any:
+            if folder is None:
+                raise searxng_engine.EngineError(self._t("websearch.setup.nofolder"))
+            return runner(folder, config)
 
         def then(ok: bool, value: Any) -> None:
             if not ok:
-                self._tell("warning", one_line(value) if isinstance(value, searxng_setup.SetupError)
-                           else self._t("websearch.failed", reason=one_line(type(value).__name__)))
+                self._fail(value)
                 return
-            self.lbl_result.setText(self._t("websearch.stop.done" if value == "removed" else "websearch.stop.none"))
-        self._in_worker(runner, then)
+            self.refresh()
+            self.lbl_result.setText(self._t("websearch.remove.done"))
+        self._in_worker(work, then)
 
     # --- a test search ---------------------------------------------------------------------------------------------
 

@@ -2631,10 +2631,14 @@ use`): die Suchmaschine auf diesem Rechner, Such-APIs mit deinen eigenen Schlüs
 SearchApi, Brave Search) und die HTML-Ergebnisse einer Suchseite. Sie laufen zusammen, und dieselbe Seite, zweimal
 gefunden, ist ein Treffer.
 
-- **Nichts einzustellen:** `llm-cli ditto web setup` oder die Schaltfläche **Suchmaschine einrichten** richtet auf diesem
-  Rechner eine Suchmaschine (SearXNG) ein, mit einer fertigen Einstellungsdatei aus dem Repository, einem eigenen
-  Geheimnis und dem Port nur auf diesem Rechner offen; niemand bearbeitet eine Einstellungsdatei. Es braucht Docker oder
-  Podman und sagt es in einfachen Worten, wenn keines da ist.
+- **Eine Suchmaschine, nur wenn du eine willst:** Die Websuche funktioniert auch ganz ohne Installation (Such-APIs mit
+  deinen eigenen Schlüsseln). Willst du eine eigene Suchmaschine, installiert `llm-cli ditto web setup` oder **Einrichten...**
+  im Fenster SearXNG, nachdem es gesagt hat, was installiert wird, wie groß es ist und mit welchen Rechten es läuft, und
+  nachdem du ja gesagt hast (Nein ist die Vorgabe). Der Standardweg ist ein **eigener Ordner**: kein Docker, keine
+  Administratorrechte, kein WSL, auch unter Windows; Docker oder Podman ist das Opt-in dessen, der es will. Sie kommt mit
+  einer fertigen Einstellungsdatei und einem eigenen Geheimnis; niemand bearbeitet eine Einstellungsdatei.
+- **Dazwischen läuft nichts:** SearXNG startet nur, solange eine Suche es braucht, und endet gleich danach, nur auf diesem
+  Rechner. **Entfernen...** nimmt es wieder weg.
 - **Ein Treffer ist nie eine Seite:** eine Adresse, ein Titel und ein kurzer Text von Fremden, als Daten gelesen. Eine Seite
   zu lesen ist die Aufgabe von Deep Ingest, mit seinem Hinweis.
 - **Die Frage bleibt privat:** Sie geht zuerst durch den Datenschutzfilter; eine Anfrage mit einem Pfad dieses Rechners oder

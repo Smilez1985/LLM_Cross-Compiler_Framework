@@ -176,6 +176,30 @@ def install(folder: Path, python: Optional[str] = None, run: Callable = subproce
         raise NativeError(f"The install could not be recorded ({type(e).__name__}).") from None
 
 
+def remove(folder: Path) -> bool:
+    """Removes what `install` made in `folder` (the source, the Python environment, the log and the record); True when
+    something was there. The settings file and the secret are not in this folder and stay."""
+    folder, found = Path(folder), False
+    for name in ("src", "venv", "shim"):
+        if (folder / name).exists():
+            shutil.rmtree(folder / name, ignore_errors=True)
+            found = True
+    for name in ("installed.json", "server.log", "searxng.zip"):
+        if (folder / name).exists():
+            (folder / name).unlink(missing_ok=True)
+            found = True
+    return found
+
+
+def port_of(address: str, default: int = 8888) -> int:
+    """The port of the SearXNG address in the setting web_search_url."""
+    from urllib.parse import urlsplit
+    try:
+        return urlsplit(address).port or default
+    except ValueError:
+        return default
+
+
 def environment(folder: Path, settings: Path, secret: str, port: int, base: Optional[dict] = None) -> dict:
     """The environment of SearXNG's process: its settings file, its secret, this computer's address only, and on Windows
     the stand-in for pwd on PYTHONPATH."""
@@ -273,4 +297,4 @@ class Running:
 
 
 __all__ = ["ARCHIVE", "COMMIT", "HELPERS", "HOST", "NativeError", "REPOSITORY", "Running", "SHIM", "SKIP_PREFIXES",
-           "environment", "fetch_source", "healthy", "install", "installed", "marker", "source_dir", "start", "stop", "venv_dir", "venv_python"]
+           "environment", "fetch_source", "healthy", "install", "port_of", "remove", "installed", "marker", "source_dir", "start", "stop", "venv_dir", "venv_python"]

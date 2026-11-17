@@ -2333,7 +2333,7 @@ Rechners oder ein Geheimnis enthält, wird abgelehnt und nirgendwohin geschickt.
 beachtet. Die Wege schaltest du ein, beliebig viele zusammen (sie laufen parallel, und dieselbe Seite, zweimal gefunden,
 ist ein Treffer):
 
-- **searxng**: die Suchmaschine auf diesem Rechner (kein Schlüssel). `ditto web setup` richtet sie für dich ein.
+- **searxng**: die Suchmaschine auf diesem Rechner (kein Schlüssel). `ditto web setup` richtet sie für dich ein, wenn du sie willst, in einem eigenen Ordner ohne Docker; mit `--address` kannst du auch auf eine zeigen, die du selbst betreibst.
 - **api**: Such-APIs mit deinen eigenen Schlüsseln: Tavily, Exa, Bright Data (SERP API), Serper, SearchApi und Brave
   Search. Ein Schlüssel kommt in den Secrets-Speicher (`llm-cli secrets set web_search_tavily_key` und so weiter), nie in
   eine Einstellung. Jeder Anbieter nennt sein Gratis-Kontingent und seinen Preis selbst; schau auf seiner Seite nach.
@@ -2347,10 +2347,10 @@ Jeder Treffer sagt, woher er kommt: **vendor** (die Website eines gelisteten Her
 | `ditto web` / `status` | Was eingestellt ist: die Wege, jeder Anbieter mit der Angabe, ob sein Schlüssel gespeichert ist (nie der Schlüssel), die Adresse. `--json` für Skripte. |
 | `use` | Wählt, was die Suche nutzt (nur du; eine KI-App kann es lesen, nie ändern): `--ways searxng,api,html` (oder `off`), `--apis tavily,exa,brightdata,serper,searchapi,brave`, `--address URL`, `--zone ZONE` (Bright Data). Ohne Option zeigt er, was eingestellt ist. |
 | `search ANFRAGE` | Sucht mit jedem eingeschalteten Weg: `--count N` (1 bis 20, Standard 10), `--json` für Skripte. Ein Weg, der scheitert, wird mit seinem Grund genannt; die anderen antworten trotzdem. |
-| `setup` | Richtet die Suchmaschine auf diesem Rechner ein: kopiert die fertige Einstellungsdatei (nichts zu bearbeiten), erzeugt einmal ein Geheimnis und startet SearXNG mit Docker oder Podman, nur auf diesem Rechner veröffentlicht (`http://127.0.0.1:8888`). Eine vorhandene Einstellungsdatei wird nie überschrieben. `--no-start` bereitet nur die Dateien vor; `--stop` entfernt den Container (Einstellungen, Geheimnis und Cache bleiben). |
+| `setup` | Richtet eine Suchmaschine (SearXNG) für die Websuche ein, nur nachdem du ja gesagt hast: Er sagt zuerst, was installiert wird, mit welchen Rechten es läuft und wie man es entfernt, und fragt (Nein ist die Vorgabe; `--yes` ist für Skripte und den Installer). `--way own` (die Vorgabe) installiert sie in einem eigenen Ordner: rund 200 MB, mit deinen eigenen Rechten, **ohne Docker, ohne Administratorrechte, ohne WSL**, auch unter Windows. `--way container` ist das Opt-in dessen, der Docker oder Podman will. Beide Wege lassen dazwischen nichts laufen: SearXNG **startet nur, solange eine Suche es braucht**, und endet gleich danach, nur auf diesem Rechner (`127.0.0.1`). Die Einstellungsdatei ist die fertige des Frameworks (nichts zu bearbeiten; eine vorhandene wird nie überschrieben), und das Geheimnis wird einmal für diesen Rechner erzeugt. `--no-start` installiert, ohne zu prüfen, ob sie antwortet; `--remove` entfernt sie wieder (den Python-Ordner und den Container; die Einstellungsdatei und das Geheimnis bleiben). |
 
 In der GUI: **Ditto > Websuche...** (die Wege und Anbieter als Kästchen, die Schlüssel, die Adresse, **Suchmaschine
-einrichten**, **Suchmaschine stoppen** und eine Probesuche mit ihrer Tabelle).
+einrichten**, **Entfernen...**, die Wahl zwischen deinem eigenen Python-Ordner und einem Container und eine Probesuche mit ihrer Tabelle; das Einrichten fragt vorher).
 
 ```bash
 llm-cli ditto web setup
