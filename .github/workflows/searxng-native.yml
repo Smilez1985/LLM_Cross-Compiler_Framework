@@ -1,0 +1,43 @@
+name: SearXNG without a container
+
+# Does SearXNG run in a Python folder of its own, on every system llmcf supports? (Core/searxng_native.py, the way for a
+# computer without a container engine.) The check installs SearXNG at the pinned commit, starts it on 127.0.0.1, asks it for
+# JSON, checks that a format the settings file does not allow is refused, and stops it. On Windows SearXNG needs the stand-in
+# for the Linux-only module pwd (configs/searxng/shim/pwd.py); this is where that is proven, not assumed.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [gate, development]
+    paths:
+      - "configs/searxng/**"
+      - "orchestrator/Core/searxng_native.py"
+      - "orchestrator/Core/searxng_setup.py"
+      - "scripts/searxng_native_check.py"
+      - ".github/workflows/searxng-native.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: SearXNG in its own Python folder (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Install, start, ask for JSON, stop
+        run: python scripts/searxng_native_check.py
+        env:
+          PYTHONUTF8: "1"
