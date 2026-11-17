@@ -10,7 +10,6 @@ searches once, and stops it. Exit code 0 when all of that worked, 1 otherwise, w
 """
 
 import json
-import os
 import shutil
 import sys
 import tempfile
