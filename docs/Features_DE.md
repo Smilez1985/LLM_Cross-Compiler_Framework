@@ -1586,6 +1586,7 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `propose_bundle_block` | lesen, optional | Ein Baustein für das Bündel, aus einem Hugging-Face-Modell oder einer Aufgabe vorgeschlagen: die Fakten des Modells, der Entwurf (Art, Dateien, `reach`) und der Grund jedes Felds; eine Notiz von ihm siehst du im Prüfdialog, nie übernommen; es schreibt nie einen Baustein; verborgen, bis du es freigibst |
 | `start_tuning` | lokal schreiben, optional | Auto-Tuning eines Modells für ein Board (ein Build, der seine Quantisierungstypen misst; kein Modell bleibt); verborgen, bis du es freigibst, und jeden Lauf beantwortest du: keine stehende Freigabe deckt ihn |
 | `get_tuning_report` | lesen, optional | Die fertigen Tuning-Läufe und der Bericht eines Laufs: je Typ die Größe, das Urteil der Speicherschätzung, die KL-Divergenz, die Top-1-Übereinstimmung und die auf dem Board gemessene Geschwindigkeit, und die Empfehlung; verborgen, bis du es freigibst |
+| `web_search` | extern, optional | Dittos Websuche für eine KI: Adressen, Titel und kurze Texte von Fremden mit ihrer Herkunft (Hersteller, Repository, Forum, sonstige), nie eine Seite; verborgen, bis du es aktivierst, und du beantwortest jede Suche mit den genauen Wörtern, die diesen Rechner verlassen (nach dem Datenschutzfilter), und wohin sie gehen; eine Frage mit einem Pfad dieses Rechners oder einem Geheimnis wird abgelehnt, bevor sie gezeigt wird; keine Dauerfreigabe deckt sie ab; höchstens 60 am Tag |
 | `remove_pack` | extern, optional | Bitten, ein installiertes Community-Paket zu deinstallieren: Du siehst seinen Ordner, seine Import-Notizen und die Auszüge, die nur es hält, im eigenen Fenster des Frameworks und entscheidest; es geht in den Papierkorb; verborgen, bis du es freigibst, immer mit Frage |
 | `list_trash` / `restore_from_trash` | lesen / lokal schreiben, optional | Den Papierkorb mit Name, Art und Größe sehen; wiederherstellen, was diese KI selbst löschen wollte (immer mit Frage); verborgen, bis du sie freigibst. Kein Tool leert den Papierkorb |
 | `restore_knowledge_snapshot` | extern, optional | Die Wissensbasis durch einen früheren Snapshot ersetzen, nach einer Sicherung des aktuellen Inhalts (ein Job); verborgen, bis du es freigibst, immer mit Frage |
@@ -2645,6 +2646,9 @@ gefunden, ist ein Treffer.
   einem Geheimnis wird abgelehnt. Der Offline-Modus erreicht nur eine Suchmaschine auf diesem Rechner oder im eigenen Netz,
   und die robots.txt einer Website wird beachtet.
 - **Deine Schlüssel bleiben deine:** Sie liegen im Secrets-Speicher, nie in einer Einstellung, und werden nirgends gezeigt.
+- **Eine KI kann fragen, du entscheidest:** Das optionale Werkzeug `web_search` ist verborgen, bis du es aktivierst. Dann
+  fragt jede Suche dich und zeigt die genauen Wörter, die diesen Rechner verlassen, und wohin sie gehen. Die Wege, die
+  Anbieter und die Adresse sind deine Einstellungen: Kein Werkzeug kann einen Weg einschalten oder einen ändern.
 
 ### Lizenzen und Urheberrecht
 

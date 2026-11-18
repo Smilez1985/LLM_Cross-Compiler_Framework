@@ -57,8 +57,14 @@ class TestPreparingTheQuery:
             prepare_query(query)
         assert "not sent anywhere" in str(e.value)
 
-    def test_the_privacy_filter_cleans_what_it_knows(self):
-        assert "anna@example.org" not in prepare_query("bug report from anna@example.org about the NPU")
+    def test_the_privacy_filter_cleans_what_it_knows_and_no_placeholder_is_sent(self):
+        sent = prepare_query("bug report from anna@example.org about the NPU")
+        assert sent == "bug report from about the NPU"            # no address, and no <EMAIL_...> to search for
+
+    def test_a_query_of_nothing_but_private_values_is_refused(self):
+        with pytest.raises(SearchRefused) as e:
+            prepare_query("anna@example.org")
+        assert "Nothing is left" in str(e.value)
 
 
 class TestAddresses:

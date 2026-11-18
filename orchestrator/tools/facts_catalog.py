@@ -308,6 +308,8 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
         "downloads", "remove the pack (deletion dialog)"),
     "export_pack": ToolFacts(_FS({"no_signing_key"}), _FS(), _FS({"signs_as_you"}), "never",
                              "delete the exported file (deletion dialog)"),
+    # the web search asks each time and is no delegation's business: the question leaves the computer; nothing to undo
+    "web_search": ToolFacts(delegable="never", undo="nothing to undo"),
     "crawl_docs_site": ToolFacts(
         _FS({"ingest_notice_unread", "offline_mode", "knowledge_off", "url_not_public", "crawl_caps", "crawl_quota",
              "crawl_running", "snapshot_no_room"}),

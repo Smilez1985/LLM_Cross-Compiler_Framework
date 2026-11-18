@@ -2248,6 +2248,8 @@ Each hit says where it comes from: **vendor** (a listed manufacturer's website),
 | `search QUERY` | Searches with every way that is on: `--count N` (1 to 20, default 10), `--json` for scripts. A way that fails is named with its reason; the others still answer. |
 | `setup` | Sets up a search engine (SearXNG) for the web search, only after you said yes: it first says what it installs, what it runs with and how to remove it, and asks (No is the default; `--yes` is for scripts and the installer). `--way own` (the default) installs it in a folder of your own: about 200 MB, your own rights, **no Docker, no administrator rights, no WSL**, also on Windows. `--way container` is the opt-in of whoever wants Docker or Podman. Either way nothing runs in between: SearXNG **starts only while a search needs it** and stops right after, on this computer only (`127.0.0.1`). The settings file is the finished one of the framework (nothing to edit; an existing one is never overwritten), and the secret is made once for this computer. `--no-start` installs without checking that it answers; `--remove` removes it again (the Python folder and the container; the settings file and the secret stay). |
 
+AI apps and Ditto reach the same search through the optional tool `web_search` (enable it in [`tools permissions`](#tools-permissions); you answer every search, and it can use only the ways you turned on). The question and the result are the same as `search` shows.
+
 In the GUI: **Ditto > Web Search...** (the ways and providers as boxes, the keys, the address, **Set Up the Search Engine**,
 **Remove...**, the choice between your own Python folder and a container, and a test search with its table; setting up asks first).
 

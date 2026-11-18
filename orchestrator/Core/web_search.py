@@ -49,6 +49,7 @@ FORUM_PREFIXES = ("forum", "forums", "discuss", "discussion", "community", "bbs"
 TRACKING = re.compile(r"^(utm_.*|fbclid|gclid|msclkid|mc_[a-z]+|ref|ref_src|igshid|yclid|_hsenc|_hsmi)$", re.I)
 # What stays in a query after the privacy filter and must not leave the computer: a path of this computer or a secret.
 PATH_IN_QUERY = re.compile(r"(?:\b[A-Za-z]:\\|\\\\[\w.-]+\\|(?<![\w.:])/(?:home|Users|root|etc|var|tmp|opt|mnt|usr)/)")
+PLACEHOLDER = re.compile(r"<[A-Z][A-Z0-9_]*_[0-9a-f]{6,}>")   # what the privacy filter puts in the place of a value
 SECRET_IN_QUERY = re.compile(r"(?:\bsk-[A-Za-z0-9_-]{16,}|\bgh[pousr]_[A-Za-z0-9]{20,}|\bAKIA[0-9A-Z]{16}|"
                              r"\bxox[abpr]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY|\beyJ[A-Za-z0-9_-]{15,}\.)")
 
@@ -306,6 +307,10 @@ def prepare_query(query: str, level: str = "STRICT") -> str:
     if any(p.search(t) for p in (PATH_IN_QUERY, SECRET_IN_QUERY) for t in (text, clean)):
         raise SearchRefused("The query holds a path of this computer or a secret and is not sent anywhere; ask the "
                             "question without it.")
+    clean = re.sub(r"\s+", " ", PLACEHOLDER.sub("", clean)).strip()   # a search for a placeholder finds nothing
+    if not clean:
+        raise SearchRefused("Nothing is left of the query once what must not leave this computer is taken out; ask the "
+                            "question in other words.")
     return clean
 
 

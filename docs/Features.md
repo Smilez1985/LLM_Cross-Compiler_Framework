@@ -1446,6 +1446,7 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `propose_bundle_block` | read, optional | A bundle building block proposed from a Hugging Face model or a task: the model's facts, the draft block (kind, files, `reach`) and the reason of every field; a note it gives is shown to you in the review dialog, never applied; it never writes a block; hidden until you enable it |
 | `start_tuning` | local write, optional | Auto-Tuning of a model for a board (a build that measures its quantization types; no model is kept); hidden until you enable it, and you answer every run: no standing approval covers it |
 | `get_tuning_report` | read, optional | The finished tuning runs and one run's report: per type the size, the memory verdict, the KL divergence, the top-1 agreement and the speed measured on the board, and the recommendation; hidden until you enable it |
+| `web_search` | external, optional | Ditto's web search for an AI: addresses, titles and short texts of strangers with their origin (manufacturer, repository, forum, other), never a page; hidden until you enable it, and you answer every search with the exact words that leave this computer (after the privacy filter) and where they go; a question with a path of this computer or a secret is refused before it is shown; no standing approval covers it; at most 60 a day |
 | `remove_pack` | external, optional | Ask to uninstall one installed community pack: you see its folder, its import notes and the excerpts only it holds in the framework's own window and decide; it goes to the trash; hidden until you enable it, always asked |
 | `list_trash` / `restore_from_trash` | read / local write, optional | See the trash by name, kind and size; restore what this AI asked to delete itself (always asked); hidden until you enable them. No tool empties the trash |
 | `restore_knowledge_snapshot` | external, optional | Replace the knowledge base with an earlier snapshot, after a backup of the current content (a job); hidden until you enable it, always asked |
@@ -2401,6 +2402,9 @@ search page's HTML results. They run together, and the same page found twice is 
   secret is refused. Offline mode reaches only a search engine on this computer or in your own network, and a site's
   robots.txt is respected.
 - **Your keys stay yours:** they are in the secrets store, never in a setting, and shown nowhere.
+- **An AI can ask, you decide:** the optional tool `web_search` is hidden until you enable it. Then every search asks you,
+  showing the exact words that leave this computer and where they go. The ways, the providers and the address are your
+  settings: no tool can turn a way on or change one.
 
 ### Licences and copyright
 

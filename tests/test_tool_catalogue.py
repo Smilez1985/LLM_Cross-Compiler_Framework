@@ -35,7 +35,8 @@ OPTIONAL = {"delete_artifact", "restore_knowledge_snapshot", "build_local_runtim
             "bundle_plan", "bundle_deploy",   # the board bundle (deploy way 3): plan as labels, deploy asked each time
             "harness_report",   # the person's harness runs, read only and scrubbed
             "propose_bundle_block",   # a block proposed from a model: read only, the person writes it
-            "start_tuning", "get_tuning_report"}   # Auto-Tuning: a tuning run asked every time, its reports read
+            "start_tuning", "get_tuning_report",   # Auto-Tuning: a tuning run asked every time, its reports read
+            "web_search"}   # Ditto's web search: the person enables it and is asked each time
 LATER = {"probe_remote_device", "run_device_benchmark"}
 # The AI's hands in the open window (DESIGN round 8, W4): one tool, the same for Ditto and every MCP caller.
 GUI = {"gui"}
@@ -46,7 +47,7 @@ BUILT = set(CORE)
 
 
 def test_the_catalogue_has_the_designed_size():
-    assert (len(CORE), len(OPTIONAL), len(LATER), len(HIDDEN)) == (40, 16, 2, 1)
+    assert (len(CORE), len(OPTIONAL), len(LATER), len(HIDDEN)) == (40, 17, 2, 1)
     assert GUI <= CORE
 
 

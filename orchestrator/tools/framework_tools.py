@@ -183,7 +183,7 @@ KNOWN_TOOLS = frozenset({
     "delete_artifact", "restore_knowledge_snapshot", "build_local_runtime", "start_local_runtime",
     "stop_local_runtime", "run_benchmark", "deploy_device_runtime", "list_trash", "restore_from_trash",
     "remove_pack", "bundle_plan", "bundle_deploy", "harness_report", "propose_bundle_block",
-    "start_tuning", "get_tuning_report",
+    "start_tuning", "get_tuning_report", "web_search",
     # later
     "probe_remote_device", "run_device_benchmark",
 })
@@ -539,6 +539,8 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
     register_hf_tools(registry, framework, jobs)
     from orchestrator.tools.tools_crawl import register_crawl_tools  # Deep Ingest (T7)
     register_crawl_tools(registry, framework, jobs)
+    from orchestrator.tools.tools_web import register_web_tools  # Ditto's web search (optional, asked each time)
+    register_web_tools(registry, framework)
     from orchestrator.tools.tools_community import register_community_tools  # community zoo (T9)
     register_community_tools(registry, framework, jobs)
     # Building an installed recipe through start_build's two-phase path, and the cached index as a resource (T9).
