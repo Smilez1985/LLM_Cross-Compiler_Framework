@@ -9,6 +9,7 @@ from test_searxng_setup import FakeClient, FakeContainer
 
 from orchestrator.Core import searxng_engine as eng
 from orchestrator.Core import searxng_setup
+from orchestrator.Core import searxng_native as native
 from orchestrator.Core.searxng_native import NativeError
 
 
@@ -130,6 +131,122 @@ class TestSettingUpTheContainer:
         with pytest.raises(searxng_setup.SetupError) as e:
             eng.setup("container", tmp_path, config, client_factory=none)
         assert "No container engine" in str(e.value) and "web_search_engine" not in config
+
+
+def info(current="1" * 40, needs=True, present=True):
+    link = f"{native.REPOSITORY}/compare/{current}...{native.COMMIT}" if current and current != native.COMMIT else native.REPOSITORY
+    return native.UpdateInfo(present, current, native.COMMIT, needs, native.REPOSITORY, link)
+
+
+class TestUpdating:
+
+    def test_the_plan_of_the_own_way_says_both_stands_what_changes_and_where_to_read_more(self, tmp_path):
+        plan = eng.update_plan(tmp_path, Config(web_search_engine="own"), info_fn=lambda folder: info())
+        text = " ".join(plan.lines)
+        assert plan.needs_update and plan.current == "1" * 12 and plan.pinned == native.COMMIT[:12]
+        assert "1" * 12 in text and native.COMMIT[:12] in text and plan.link in text and "github.com" in text
+        assert "old copy is removed only after" in text and "settings file and secret stay" in text
+
+    def test_the_plan_asks_the_folder_of_the_own_way(self, tmp_path):
+        seen = []
+        eng.update_plan(tmp_path, Config(web_search_engine="own"), info_fn=lambda folder: seen.append(folder) or info())
+        assert seen == [tmp_path / "searxng" / "native"]
+
+    def test_at_the_pin_the_plan_says_there_is_nothing_to_update(self, tmp_path):
+        plan = eng.update_plan(tmp_path, Config(web_search_engine="own"),
+                               info_fn=lambda folder: info(current=native.COMMIT, needs=False))
+        assert not plan.needs_update and "nothing to update" in " ".join(plan.lines)
+
+    def test_the_plan_of_the_container_says_the_image_is_pulled_again(self, tmp_path):
+        plan = eng.update_plan(tmp_path, Config(web_search_engine="container"),
+                               info_fn=lambda folder: pytest.fail("the container way reads no folder"))
+        text = " ".join(plan.lines)
+        assert plan.needs_update and searxng_setup.IMAGE in text and "made new" in text
+
+    def test_no_search_engine_set_up_is_told(self, tmp_path):
+        with pytest.raises(eng.EngineError) as e:
+            eng.update_plan(tmp_path, Config())
+        assert "nothing to update" in str(e.value)
+
+    def test_a_setting_that_names_a_folder_with_nothing_in_it_is_told(self, tmp_path):
+        with pytest.raises(eng.EngineError) as e:
+            eng.update_plan(tmp_path, Config(web_search_engine="own"), info_fn=lambda folder: info(present=False, current=""))
+        assert "not installed there" in str(e.value)
+
+    def test_no_state_folder_is_told(self):
+        with pytest.raises(eng.EngineError):
+            eng.update_plan(None, Config(web_search_engine="own"))
+
+    def test_the_own_way_is_updated_with_the_settings_file_and_the_secret_that_belong_to_it(self, tmp_path):
+        seen = {}
+
+        def update_fn(folder, settings, secret, progress=None):
+            seen.update(folder=folder, settings=settings, secret=secret, progress=progress)
+            return "updated"
+        config = Config(web_search_engine="own", web_search_ways=["searxng"])
+        result = eng.update(tmp_path, config, update_fn=update_fn, info_fn=lambda folder: info(),
+                            offline=lambda c: False)
+        assert seen["folder"] == tmp_path / "searxng" / "native"
+        assert seen["settings"] == tmp_path / "searxng" / "config" / "settings.yml" and seen["settings"].is_file()
+        assert len(seen["secret"]) >= 32 and any("was updated" in n for n in result.notes)
+        assert config == {"web_search_engine": "own", "web_search_ways": ["searxng"]}          # no setting is changed
+
+    def test_at_the_pin_nothing_is_run(self, tmp_path):
+        result = eng.update(tmp_path, Config(web_search_engine="own"),
+                            update_fn=lambda *a, **k: pytest.fail("nothing to update, nothing to run"),
+                            info_fn=lambda folder: info(current=native.COMMIT, needs=False), offline=lambda c: False)
+        assert any("nothing to update" in n for n in result.notes)
+
+    def test_offline_mode_refuses_it_before_anything_is_fetched(self, tmp_path):
+        with pytest.raises(eng.EngineError) as e:
+            eng.update(tmp_path, Config(web_search_engine="own"), info_fn=lambda folder: info(),
+                       update_fn=lambda *a, **k: pytest.fail("offline mode reaches no network"), offline=lambda c: True)
+        assert "Offline mode" in str(e.value)
+
+    def test_the_real_offline_setting_is_what_decides_by_default(self, tmp_path):
+        with pytest.raises(eng.EngineError):
+            eng.update(tmp_path, Config(web_search_engine="container", offline_mode=True),
+                       container_update=lambda factory: pytest.fail("offline"))
+
+    def test_the_container_way_pulls_the_image_anew(self, tmp_path):
+        calls = []
+        result = eng.update(tmp_path, Config(web_search_engine="container"), client_factory="factory",
+                            container_update=lambda factory: calls.append(factory) or "updated", offline=lambda c: False)
+        assert calls == ["factory"] and any("pulled again" in n for n in result.notes)
+
+    def test_a_failed_update_is_told_as_it_is(self, tmp_path):
+        def failing(folder, settings, secret, progress=None):
+            raise NativeError("Fetching SearXNG did not work (HTTP 403). The earlier stand is kept and still works.")
+        with pytest.raises(NativeError) as e:
+            eng.update(tmp_path, Config(web_search_engine="own"), update_fn=failing, info_fn=lambda folder: info(),
+                       offline=lambda c: False)
+        assert "earlier stand is kept" in str(e.value)
+
+
+class TestTheContainerUpdate:
+
+    def test_it_pulls_the_image_and_removes_the_container_so_the_next_search_makes_it_new(self):
+        client = FakeClient(existing=FakeContainer("exited"))
+        pulled = []
+        client.images.pull = lambda image: pulled.append(image)
+        assert searxng_setup.update(lambda: client) == "updated"
+        assert pulled == [searxng_setup.IMAGE] and client.container.removed
+
+    def test_a_pull_that_fails_leaves_the_container_as_it_was(self):
+        client = FakeClient(existing=FakeContainer("exited"))
+
+        def pull(image):
+            raise RuntimeError("no route to the registry")
+        client.images.pull = pull
+        with pytest.raises(searxng_setup.SetupError) as e:
+            searxng_setup.update(lambda: client)
+        assert "refused" in str(e.value) and not client.container.removed
+
+    def test_without_a_container_only_the_image_is_pulled(self):
+        client = FakeClient()
+        pulled = []
+        client.images.pull = lambda image: pulled.append(image)
+        assert searxng_setup.update(lambda: client) == "updated" and pulled == [searxng_setup.IMAGE]
 
 
 class TestRemoving:

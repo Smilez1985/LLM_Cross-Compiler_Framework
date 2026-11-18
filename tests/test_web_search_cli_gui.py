@@ -166,6 +166,81 @@ class TestCommands:
         done = invoke("setup", "--remove", "--yes")
         assert done.exit_code == 0 and "Python folder" in done.output
 
+    def plan(self, needs=True, way="own"):
+        from orchestrator.Core import searxng_engine
+        lines = ["SearXNG in your own folder is at 111111111111; this version of the framework pins bbbbbbbbbbbb.",
+                 "What changes: a new copy is fetched."] if needs else ["There is nothing to update."]
+        return searxng_engine.UpdatePlan(way, needs, "111111111111", "bbbbbbbbbbbb",
+                                         "https://github.com/searxng/searxng/compare/1...2", lines)
+
+    def test_update_says_what_changes_asks_first_and_no_is_the_answer_without_a_yes(self, framework, tmp_path,
+                                                                                   monkeypatch):
+        framework.config.user_state_dir = str(tmp_path)
+        from click.testing import CliRunner
+
+        from orchestrator import cli
+        from orchestrator.Core import searxng_engine
+        monkeypatch.setattr(searxng_engine, "update_plan", lambda *a, **k: self.plan())
+        monkeypatch.setattr(searxng_engine, "update", lambda *a, **k: pytest.fail("nothing is updated without a yes"))
+        monkeypatch.setattr(cli, "_interactive", lambda: True)
+        result = CliRunner(env={"PYTHONUTF8": "1", "COLUMNS": "250"}).invoke(
+            cli.cli, ["ditto", "web", "setup", "--update"], input="\n")          # an empty answer: No
+        text = result.output.replace("\n", " ")
+        assert result.exit_code == 0 and "111111111111" in text and "bbbbbbbbbbbb" in text and "Nothing was changed" in text
+
+    def test_update_with_yes_updates_and_says_it_is_done(self, framework, tmp_path, monkeypatch):
+        framework.config.user_state_dir = str(tmp_path)
+        from orchestrator.Core import searxng_engine
+        seen = {}
+
+        def fake(folder, config, **kwargs):
+            seen.update(folder=folder, progress=kwargs.get("progress"))
+            return searxng_engine.EngineResult("own", tmp_path, ["SearXNG was updated to the stand that this version of the "
+                                                                 "framework pins."])
+        monkeypatch.setattr(searxng_engine, "update_plan", lambda *a, **k: self.plan())
+        monkeypatch.setattr(searxng_engine, "update", fake)
+        result = invoke("setup", "--update", "--yes")
+        assert result.exit_code == 0 and "was updated" in result.output and "Done" in result.output
+        assert seen["folder"] == tmp_path and callable(seen["progress"])
+
+    def test_update_without_a_terminal_and_without_yes_does_nothing_and_says_so(self, framework, tmp_path, monkeypatch):
+        framework.config.user_state_dir = str(tmp_path)
+        from orchestrator.Core import searxng_engine
+        monkeypatch.setattr(searxng_engine, "update_plan", lambda *a, **k: self.plan())
+        monkeypatch.setattr(searxng_engine, "update", lambda *a, **k: pytest.fail("no yes, no update"))
+        result = invoke("setup", "--update")
+        assert result.exit_code == 1 and "needs your yes" in result.output.replace("\n", " ")
+
+    def test_update_at_the_pin_says_so_and_asks_nothing(self, framework, tmp_path, monkeypatch):
+        framework.config.user_state_dir = str(tmp_path)
+        from orchestrator.Core import searxng_engine
+        monkeypatch.setattr(searxng_engine, "update_plan", lambda *a, **k: self.plan(needs=False))
+        monkeypatch.setattr(searxng_engine, "update", lambda *a, **k: pytest.fail("nothing to update"))
+        result = invoke("setup", "--update")
+        assert result.exit_code == 0 and "nothing to update" in result.output
+
+    def test_update_that_cannot_start_says_why_in_one_line(self, framework, tmp_path, monkeypatch):
+        framework.config.user_state_dir = str(tmp_path)
+        from orchestrator.Core import searxng_engine
+        monkeypatch.setattr(searxng_engine, "update_plan", lambda *a, **k: (_ for _ in ()).throw(
+            searxng_engine.EngineError("No search engine is set up, so there is nothing to update.")))
+        result = invoke("setup", "--update", "--yes")
+        assert result.exit_code == 1 and "nothing to update" in result.output and "Traceback" not in result.output
+
+    def test_a_failed_update_says_why_in_one_line(self, framework, tmp_path, monkeypatch):
+        framework.config.user_state_dir = str(tmp_path)
+        from orchestrator.Core import searxng_engine, searxng_native
+        monkeypatch.setattr(searxng_engine, "update_plan", lambda *a, **k: self.plan())
+        monkeypatch.setattr(searxng_engine, "update", lambda *a, **k: (_ for _ in ()).throw(
+            searxng_native.NativeError("Fetching SearXNG did not work (HTTP 403). The earlier stand is kept and still "
+                                       "works.")))
+        result = invoke("setup", "--update", "--yes")
+        assert result.exit_code == 1 and "earlier stand is kept" in result.output and "Traceback" not in result.output
+
+    def test_update_and_remove_together_are_refused(self, framework, tmp_path):
+        framework.config.user_state_dir = str(tmp_path)
+        assert invoke("setup", "--update", "--remove", "--yes").exit_code == 2
+
 
 class TestWindow:
 
@@ -310,6 +385,82 @@ class TestWindow:
         window.btn_remove.click()
         self.wait(qapp, window)
         assert window.removed == [tmp_path] and "removed" in window.lbl_result.text()
+
+    def plan(self, needs=True, way="own"):
+        from orchestrator.Core import searxng_engine
+        return searxng_engine.UpdatePlan(way, needs, "111111111111", "bbbbbbbbbbbb",
+                                         "https://github.com/searxng/searxng/compare/1...2", [])
+
+    def test_updating_says_what_changes_and_nothing_happens_without_a_yes(self, qapp, framework, tmp_path, monkeypatch):
+        from orchestrator.gui import ditto_web_window as module
+        framework.config.user_state_dir = str(tmp_path)
+        asked, ran = [], []
+        monkeypatch.setattr(module, "ask", lambda parent, title, text: asked.append(text) or False)
+        win = module.DittoWebWindow(framework, None, plan_runner=lambda folder, config: self.plan(),
+                                    update_runner=lambda folder, config: ran.append(folder), lang="en")
+        win.btn_update.click()
+        self.wait(qapp, win)
+        assert len(asked) == 1 and "111111111111" in asked[0] and "bbbbbbbbbbbb" in asked[0]
+        assert "compare/1...2" in asked[0] and "Update it?" in asked[0] and ran == []        # "No" changed nothing
+        win.close()
+
+    def test_a_yes_updates_and_the_result_is_told(self, qapp, framework, tmp_path, monkeypatch):
+        from orchestrator.gui import ditto_web_window as module
+        framework.config.user_state_dir = str(tmp_path)
+        ran = []
+        monkeypatch.setattr(module, "ask", lambda parent, title, text: True)
+        win = module.DittoWebWindow(framework, None, plan_runner=lambda folder, config: self.plan(),
+                                    update_runner=lambda folder, config: ran.append(folder) or [], lang="en")
+        win.btn_update.click()
+        self.wait(qapp, win)
+        assert ran == [tmp_path] and "was updated" in win.lbl_result.text()
+        win.close()
+
+    def test_at_the_pin_it_says_so_and_asks_nothing(self, qapp, framework, tmp_path, monkeypatch):
+        from orchestrator.gui import ditto_web_window as module
+        framework.config.user_state_dir = str(tmp_path)
+        monkeypatch.setattr(module, "ask", lambda parent, title, text: pytest.fail("nothing to update"))
+        win = module.DittoWebWindow(framework, None, plan_runner=lambda folder, config: self.plan(needs=False),
+                                    update_runner=lambda folder, config: pytest.fail("nothing to update"), lang="en")
+        win.btn_update.click()
+        assert "nothing to update" in win.lbl_result.text() and "bbbbbbbbbbbb" in win.lbl_result.text()
+        win.close()
+
+    def test_the_container_way_says_the_image_is_pulled_again(self, qapp, framework, tmp_path, monkeypatch):
+        from orchestrator.gui import ditto_web_window as module
+        framework.config.user_state_dir = str(tmp_path)
+        asked = []
+        monkeypatch.setattr(module, "ask", lambda parent, title, text: asked.append(text) or False)
+        win = module.DittoWebWindow(framework, None, plan_runner=lambda folder, config: self.plan(way="container"),
+                                    update_runner=lambda folder, config: pytest.fail("no yes"), lang="en")
+        win.btn_update.click()
+        assert "docker.io/searxng/searxng" in asked[0] and "pulled again" in asked[0]
+        win.close()
+
+    def test_a_plan_that_cannot_be_made_and_a_failed_update_are_told_in_plain_words(self, qapp, framework, tmp_path,
+                                                                                   monkeypatch):
+        from orchestrator.Core import searxng_engine, searxng_native
+        from orchestrator.gui import ditto_web_window as module
+        framework.config.user_state_dir = str(tmp_path)
+        told = []
+        monkeypatch.setattr(module, "ask", lambda parent, title, text: True)
+        monkeypatch.setattr(module, "plain_box", lambda parent, kind, title, text, **k: told.append(text))
+
+        def no_plan(folder, config):
+            raise searxng_engine.EngineError("No search engine is set up, so there is nothing to update.")
+        win = module.DittoWebWindow(framework, None, plan_runner=no_plan, lang="en")
+        win.btn_update.click()
+        assert told == ["No search engine is set up, so there is nothing to update."]
+
+        def failing(folder, config):
+            raise searxng_native.NativeError("Fetching SearXNG did not work (HTTP 403).")
+        win2 = module.DittoWebWindow(framework, None, plan_runner=lambda folder, config: self.plan(),
+                                     update_runner=failing, lang="en")
+        win2.btn_update.click()
+        self.wait(qapp, win2)
+        assert told[-1] == "Fetching SearXNG did not work (HTTP 403)."
+        win.close()
+        win2.close()
 
     def test_every_text_exists_in_both_languages_with_the_same_placeholders(self):
         import re

@@ -182,6 +182,23 @@ def remove(client_factory: Optional[Callable[[], Any]] = None) -> str:
     return "removed"
 
 
+def update(client_factory: Optional[Callable[[], Any]] = None) -> str:
+    """Pulls the image anew and removes the container, so that the next search makes it new from the new image (a container
+    keeps the image it was made from). The settings file, the secret and the cache volume stay. "updated"; SetupError with
+    the reason when the engine refuses or the pull does not work (the container is then left as it was)."""
+    client = _client(client_factory)
+    try:
+        client.images.pull(IMAGE)
+    except Exception as e:  # noqa: BLE001 - no network, a refusal of the engine, an image that is gone
+        raise _engine_error(e) from None
+    if container_state(client) != "missing":
+        try:
+            client.containers.get(CONTAINER).remove(force=True)
+        except Exception as e:  # noqa: BLE001
+            raise _engine_error(e) from None
+    return "updated"
+
+
 def pause(client: Any) -> None:
     """Stops the container (it stays, stopped, for the next search); never raises."""
     try:
@@ -246,4 +263,5 @@ def setup(state_dir: Any, client_factory: Optional[Callable[[], Any]] = None, *,
 
 
 __all__ = ["CONTAINER", "IMAGE", "NO_ENGINE", "SetupError", "SetupResult", "TEMPLATE", "URL", "VOLUME",
-           "ContainerRunning", "container_state", "ensure_secret", "folder_of", "pause", "prepare", "remove", "setup", "start"]
+           "ContainerRunning", "container_state", "ensure_secret", "folder_of", "pause", "prepare", "remove", "setup", "start",
+           "update"]

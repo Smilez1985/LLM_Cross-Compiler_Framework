@@ -61,6 +61,21 @@ TEXTS = {
         "websearch.remove.ask": "Remove the search engine (the Python folder and the container)? Its settings file and "
                                 "its secret stay.",
         "websearch.remove.done": "The search engine was removed.",
+        "websearch.update": "Update...",
+        "websearch.update.ask": "Update it?",
+        "websearch.update.running": "Updating the search engine; this takes a minute ...",
+        "websearch.update.done": "The search engine was updated. It starts only for a search and stops right after.",
+        "websearch.update.current": "SearXNG in your own folder is at the stand that this version of the framework pins "
+                                    "({pinned}); there is nothing to update.",
+        "websearch.update.explain.own": "SearXNG in your own folder is at {current}; this version of the framework pins "
+                                        "{pinned}.\n\nWhat changes: a new copy of SearXNG is fetched from github.com into a "
+                                        "new folder beside the old one, with its own Python packages, {size}, and started "
+                                        "once to check that it answers. The old copy is removed only after that; when a step "
+                                        "fails, the old copy stays and keeps working. Your settings file and secret "
+                                        "stay.\n\nWhat changed between the two: {link}",
+        "websearch.update.explain.container": "The image {image} is pulled again through your container engine, and the "
+                                              "container is made new from it at the next search. Your settings file and "
+                                              "secret stay.",
         "websearch.query.placeholder": "What to search for",
         "websearch.count": "Most hits",
         "websearch.search": "Search",
@@ -140,6 +155,22 @@ TEXTS = {
         "websearch.remove.ask": "Die Suchmaschine entfernen (den Python-Ordner und den Container)? Ihre Einstellungsdatei und "
                                 "ihr Geheimnis bleiben.",
         "websearch.remove.done": "Die Suchmaschine wurde entfernt.",
+        "websearch.update": "Aktualisieren...",
+        "websearch.update.ask": "Soll sie aktualisiert werden?",
+        "websearch.update.running": "Die Suchmaschine wird aktualisiert; das dauert eine Minute ...",
+        "websearch.update.done": "Die Suchmaschine wurde aktualisiert. Sie startet nur für eine Suche und endet gleich danach.",
+        "websearch.update.current": "SearXNG im eigenen Ordner steht auf dem Stand, den diese Version des Frameworks "
+                                    "festlegt ({pinned}); es gibt nichts zu aktualisieren.",
+        "websearch.update.explain.own": "SearXNG im eigenen Ordner steht auf {current}; diese Version des Frameworks "
+                                        "legt {pinned} fest.\n\nWas sich ändert: Eine neue Kopie von SearXNG wird von "
+                                        "github.com in einen neuen Ordner neben dem alten geholt, mit eigenen "
+                                        "Python-Paketen, {size}, und einmal gestartet, um zu prüfen, dass sie antwortet. Die "
+                                        "alte Kopie wird erst danach entfernt; scheitert ein Schritt, bleibt die alte Kopie "
+                                        "und funktioniert weiter. Die Einstellungsdatei und das Geheimnis "
+                                        "bleiben.\n\nWas sich zwischen beiden geändert hat: {link}",
+        "websearch.update.explain.container": "Das Image {image} wird über die Container-Engine neu gezogen, und der "
+                                              "Container wird bei der nächsten Suche daraus neu angelegt. Die "
+                                              "Einstellungsdatei und das Geheimnis bleiben.",
         "websearch.query.placeholder": "Wonach gesucht werden soll",
         "websearch.count": "Höchstens so viele Treffer",
         "websearch.search": "Suchen",

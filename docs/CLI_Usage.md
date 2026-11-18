@@ -2250,11 +2250,22 @@ Each hit says where it comes from: **vendor** (a listed manufacturer's website),
 
 AI apps and Ditto reach the same search through the optional tool `web_search` (enable it in [`tools permissions`](#tools-permissions); you answer every search, and it can use only the ways you turned on). The question and the result are the same as `search` shows.
 
+`ditto web setup --update` moves a search engine that is set up to the stand this version of the framework pins: for the
+own Python folder it compares the commit recorded there with the pinned one and says what changes (both commits and a link
+to what changed between them), then asks (No is the default; `--yes` answers it for scripts). It fetches the new copy into a
+new folder beside the old one, starts it once to check that it answers, and only then switches to it and removes the old
+one; when a step fails, the old copy stays as it was and keeps working. For the container it pulls the image again and the
+container is made new from it at the next search. The settings file and the secret stay. It never takes a newer SearXNG
+than this version of the framework pins (the pin moves with a framework release), and offline mode refuses it.
+`--update` and `--remove` cannot be combined.
+
 In the GUI: **Ditto > Web Search...** (the ways and providers as boxes, the keys, the address, **Set Up the Search Engine**,
-**Remove...**, the choice between your own Python folder and a container, and a test search with its table; setting up asks first).
+**Update...**, **Remove...**, the choice between your own Python folder and a container, and a test search with its table;
+setting up and updating ask first).
 
 ```bash
 llm-cli ditto web setup
+llm-cli ditto web setup --update
 llm-cli ditto web use --ways searxng
 llm-cli ditto web search "RK3588 NPU quantization"
 ```

@@ -2351,11 +2351,23 @@ Jeder Treffer sagt, woher er kommt: **vendor** (die Website eines gelisteten Her
 
 KI-Apps und Ditto erreichen dieselbe Suche über das optionale Werkzeug `web_search` (aktiviere es in [`tools permissions`](#tools-permissions); du beantwortest jede Suche, und es kann nur die Wege nutzen, die du eingeschaltet hast). Die Frage und das Ergebnis sind dieselben, die `search` zeigt.
 
+`ditto web setup --update` bringt eine eingerichtete Suchmaschine auf den Stand, den diese Version des Frameworks festlegt:
+Beim eigenen Python-Ordner vergleicht es den dort vermerkten Commit mit dem festgelegten und sagt, was sich ändert (beide
+Commits und einen Link auf das, was dazwischen geändert wurde), und fragt dann (Nein ist die Vorgabe; `--yes` beantwortet es
+für Skripte). Es holt die neue Kopie in einen neuen Ordner neben dem alten, startet sie einmal, um zu prüfen, dass sie
+antwortet, und wechselt erst dann zu ihr und entfernt die alte; scheitert ein Schritt, bleibt die alte Kopie, wie sie war,
+und funktioniert weiter. Beim Container zieht es das Image neu, und der Container wird bei der nächsten Suche daraus neu
+angelegt. Die Einstellungsdatei und das Geheimnis bleiben. Es nimmt nie ein neueres SearXNG, als diese Version des
+Frameworks festlegt (der feste Stand wandert mit einem Framework-Release), und der Offline-Modus lehnt es ab. `--update` und
+`--remove` lassen sich nicht verbinden.
+
 In der GUI: **Ditto > Websuche...** (die Wege und Anbieter als Kästchen, die Schlüssel, die Adresse, **Suchmaschine
-einrichten**, **Entfernen...**, die Wahl zwischen deinem eigenen Python-Ordner und einem Container und eine Probesuche mit ihrer Tabelle; das Einrichten fragt vorher).
+einrichten**, **Aktualisieren...**, **Entfernen...**, die Wahl zwischen deinem eigenen Python-Ordner und einem Container und
+eine Probesuche mit ihrer Tabelle; das Einrichten und das Aktualisieren fragen vorher).
 
 ```bash
 llm-cli ditto web setup
+llm-cli ditto web setup --update
 llm-cli ditto web use --ways searxng
 llm-cli ditto web search "RK3588 NPU Quantisierung"
 ```

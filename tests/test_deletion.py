@@ -68,7 +68,7 @@ DELETION_SITES = {
     # staging, and the manifest's own bookkeeping
     ("orchestrator/Core/searxng_native.py", "remove"): OWN_SOFTWARE,
     ("orchestrator/Core/searxng_setup.py", "remove"): OWN_SOFTWARE,
-    ("orchestrator/Core/searxng_native.py", "install"): STAGING,
+    ("orchestrator/Core/searxng_setup.py", "update"): OWN_SOFTWARE,
     ("orchestrator/Core/searxng_native.py", "fetch_source"): STAGING,
     ("orchestrator/utils/install_manifest.py", "forget"): MANIFEST_NOTE,
     ("orchestrator/Core/knowledge_snapshots.py", "delete_snapshots"): PERSON,

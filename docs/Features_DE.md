@@ -2641,6 +2641,11 @@ gefunden, ist ein Treffer.
   `--ditto=skip`), sagt, was installiert wird, und fragt, mit Nein als Vorgabe (`--searxng=ask|own|container|skip`).
 - **Dazwischen läuft nichts:** SearXNG startet nur, solange eine Suche es braucht, und endet gleich danach, nur auf diesem
   Rechner. **Entfernen...** nimmt es wieder weg.
+- **Auf den neuen Stand bringen:** `llm-cli ditto web setup --update` oder **Aktualisieren...** im Fenster bringt es auf den
+  Stand, den diese Version des Frameworks festlegt, nachdem es gesagt hat, was sich ändert, und du ja gesagt hast (Nein ist
+  die Vorgabe). Die neue Kopie entsteht neben der alten und wird einmal gestartet; erst wenn sie antwortet, ersetzt sie die
+  alte, ein scheiternder Schritt lässt die alte Kopie also funktionieren. Es nimmt nie ein neueres SearXNG, als das
+  Framework festlegt, und der Offline-Modus lehnt es ab.
 - **Ein Treffer ist nie eine Seite:** eine Adresse, ein Titel und ein kurzer Text von Fremden, als Daten gelesen. Eine Seite
   zu lesen ist die Aufgabe von Deep Ingest, mit seinem Hinweis.
 - **Die Frage bleibt privat:** Sie geht zuerst durch den Datenschutzfilter; eine Anfrage mit einem Pfad dieses Rechners oder

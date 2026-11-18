@@ -6,7 +6,8 @@ and Deep Ingest, the web search's rows).
 The person chooses which ways Ditto's web search uses (the search engine on this computer, search APIs with their own keys,
 a search page's HTML results), which providers to ask and where the search engine is; keys go into the secrets store, never
 into a setting. "Set Up the Search Engine" copies the finished settings file, makes a secret and starts SearXNG on this
-computer (it needs Docker or Podman and says so in plain words); "Stop the Search Engine" removes the container. A
+computer (it needs Docker or Podman and says so in plain words); "Stop the Search Engine" removes the container; "Update..."
+moves the search engine to the stand this version of the framework pins, after saying what changes. A
 test search shows addresses, titles and short texts of strangers as plain text, never a page.
 
 Every action that reaches out or starts something runs in a plain worker thread whose result comes back on the
@@ -34,13 +35,15 @@ class DittoWebWindow(QDialog):
 
     def __init__(self, framework: Any, parent: Optional[QWidget] = None,
                  search_factory: Optional[Callable[[], Any]] = None, setup_runner: Optional[Callable[..., Any]] = None,
-                 remove_runner: Optional[Callable[..., Any]] = None, lang: Optional[str] = None):
+                 remove_runner: Optional[Callable[..., Any]] = None, lang: Optional[str] = None,
+                 update_runner: Optional[Callable[..., Any]] = None, plan_runner: Optional[Callable[..., Any]] = None):
         super().__init__(parent)
         self.setObjectName("dlg_ditto_web")
         self.framework = framework
         self.lang = lang or current_language()
         self._factory = search_factory or (lambda: web_search.for_framework(framework))
         self._setup, self._remove = setup_runner, remove_runner
+        self._update, self._plan = update_runner, plan_runner
         self._jobs: Dict[object, Callable[[bool, Any], None]] = {}
         self.hits: List[Any] = []
         self.setWindowTitle(self._t("websearch.title"))
@@ -117,6 +120,8 @@ class DittoWebWindow(QDialog):
         engine.addWidget(self.cb_engine_way)
         self.btn_setup = self._button("websearch.setup", "btn_web_setup", self.set_up_engine)
         engine.addWidget(self.btn_setup)
+        self.btn_update = self._button("websearch.update", "btn_web_update", self.update_engine)
+        engine.addWidget(self.btn_update)
         self.btn_remove = self._button("websearch.remove", "btn_web_remove", self.remove_engine)
         engine.addWidget(self.btn_remove)
         engine.addStretch(1)
@@ -288,6 +293,42 @@ class DittoWebWindow(QDialog):
                 return
             self.refresh()
             self.lbl_result.setText(self._t("websearch.setup.done"))
+        self._in_worker(work, then)
+
+    def update_engine(self) -> None:
+        """Moves the search engine that is set up to the stand this version of the framework pins, after it said what
+        changes and the person said yes (No is the default): `ditto web setup --update`."""
+        from orchestrator.Core import searxng_engine, searxng_setup
+        from orchestrator.Core.disk_plan import state_dir
+        folder = state_dir(self.framework)
+        config = getattr(self.framework, "config", None)
+        try:
+            plan = (self._plan or searxng_engine.update_plan)(folder, config)
+        except self._plain_errors() as e:
+            self._fail(e)
+            return
+        if not plan.needs_update:
+            self.lbl_result.setText(self._t("websearch.update.current", pinned=plan.pinned))
+            return
+        if plan.way == "container":
+            text = self._t("websearch.update.explain.container", image=searxng_setup.IMAGE)
+        else:
+            text = self._t("websearch.update.explain.own", current=plan.current, pinned=plan.pinned, link=plan.link,
+                           size=searxng_engine.SIZE_OWN)
+        if not ask(self, self._t("websearch.title"), text + "\n\n" + self._t("websearch.update.ask")):
+            return
+        runner = self._update or searxng_engine.update
+        self.lbl_result.setText(self._t("websearch.update.running"))
+
+        def work() -> Any:
+            return runner(folder, config)
+
+        def then(ok: bool, value: Any) -> None:
+            if not ok:
+                self._fail(value)
+                return
+            self.refresh()
+            self.lbl_result.setText(self._t("websearch.update.done"))
         self._in_worker(work, then)
 
     def remove_engine(self) -> None:

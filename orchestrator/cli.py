@@ -4869,11 +4869,14 @@ def _interactive() -> bool:
 @click.option('--yes', is_flag=True, help='Say yes to the question (for scripts and the installer)')
 @click.option('--no-start', is_flag=True, help='Only install; do not start it once to check that it answers')
 @click.option('--remove', is_flag=True, help='Remove the search engine again (the Python folder and the container)')
+@click.option('--update', 'update', is_flag=True,
+              help='Move the search engine to the stand this version of the framework pins; it says what changes first')
 @pass_context
-def ditto_web_setup(ctx: FrameworkContext, way: Optional[str], yes: bool, no_start: bool, remove: bool):
+def ditto_web_setup(ctx: FrameworkContext, way: Optional[str], yes: bool, no_start: bool, remove: bool, update: bool):
     """Set up a search engine (SearXNG) for Ditto's web search, only after you said yes: it says what it installs and how
     it runs first. It starts only for a search and stops right after. Nothing to edit: the settings file is the finished
-    one of the framework. Without --way it uses your own Python folder, with no Docker"""
+    one of the framework. Without --way it uses your own Python folder, with no Docker. With --update it moves a search
+    engine that is set up to the stand this version of the framework pins (never a newer one from the network)"""
     from orchestrator.Core import searxng_engine, searxng_native, searxng_setup
     from orchestrator.Core.disk_plan import state_dir
     ctx.require_framework()
@@ -4882,7 +4885,29 @@ def ditto_web_setup(ctx: FrameworkContext, way: Optional[str], yes: bool, no_sta
     if folder is None:
         console.print("[red]The state folder is not known; the search engine could not be set up.[/red]")
         sys.exit(1)
+    if remove and update:
+        console.print("[red]Remove or update, not both.[/red]")
+        sys.exit(2)
     try:
+        if update:
+            plan = searxng_engine.update_plan(folder, config)
+            for line in plan.lines:
+                console.print(escape(line))
+            if not plan.needs_update:
+                return
+            if not yes:
+                if not _interactive():
+                    console.print("[red]This needs your yes: run it in a terminal and answer the question, or add "
+                                  "--yes.[/red]")
+                    sys.exit(1)
+                if not click.confirm("Update it?", default=False):
+                    console.print("Nothing was changed.")
+                    return
+            result = searxng_engine.update(folder, config, progress=lambda text: console.print(escape(text)))
+            for note in result.notes:
+                console.print(escape(note))
+            console.print("[green]Done.[/green] It starts only for a search and stops right after.")
+            return
         if remove:
             if not yes and _interactive() and not click.confirm("Remove the search engine?", default=False):
                 console.print("Nothing was changed.")

@@ -2397,6 +2397,10 @@ search page's HTML results. They run together, and the same page found twice is 
   `--ditto=skip`), says what it installs and asks, with No as the default (`--searxng=ask|own|container|skip`).
 - **Nothing runs in between:** SearXNG starts only while a search needs it and stops right after, on this computer only.
   **Remove...** takes it away again.
+- **Moving it on:** `llm-cli ditto web setup --update` or the window's **Update...** moves it to the stand this version of
+  the framework pins, after it said what changes and you said yes (No is the default). The new copy is made beside the old
+  one and started once; only when it answers does it replace the old one, so a step that fails leaves the old copy working.
+  It never takes a newer SearXNG than the framework pins, and offline mode refuses it.
 - **A hit is never a page:** an address, a title and a short text from a stranger, read as data. Reading a page is Deep
   Ingest's job, with its notice.
 - **The question stays private:** it goes through the privacy filter first; a query with a path of this computer or a
