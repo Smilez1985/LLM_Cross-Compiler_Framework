@@ -16,7 +16,7 @@ path (`crawl_docs_site`) with its notice and its opt-out checks.
   repository, a forum or something else. Nothing a search returns is stored.
 """
 
-from typing import Any, List, Literal, Optional
+from typing import Any, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
