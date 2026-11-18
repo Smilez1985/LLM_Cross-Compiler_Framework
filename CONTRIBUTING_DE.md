@@ -531,6 +531,11 @@ API-Schlüssel, Tokens, private Schlüssel und persönlicher Zustand dürfen nie
 make hooks          # dasselbe wie: git config core.hooksPath .githooks
 ```
 
+Eine Claude-Code-Sitzung braucht kein `make hooks`: Ihr SessionStart-Hook (`.claude/hooks/session-start.sh`) setzt
+`core.hooksPath` bei jedem Start, leise, und installiert nichts. Ein frischer Klon, und eine Cloud-Sitzung startet in einem,
+hat die Hooks sonst aus, und dann hält nichts einen Commit mit einem Zugangsdatum auf, bevor es die CI tut (die Testwerte
+in der Form eines Schlüssels, die am 2026-11-18 auf den öffentlichen Zweig `gate` kamen, rutschten deshalb durch).
+
 - Der Hook **pre-commit** durchsucht, was der nächste Commit enthalten würde (`--staged`), und lehnt den Commit ab,
   wenn er etwas findet.
 - Der Hook **pre-push** durchsucht die Commits, die ein Push veröffentlichen würde (`--push`); er fängt also auch

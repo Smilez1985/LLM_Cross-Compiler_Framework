@@ -500,6 +500,11 @@ library only) finds them; git hooks and the CI run it for you.
 make hooks          # same as: git config core.hooksPath .githooks
 ```
 
+A Claude Code session needs no `make hooks`: its SessionStart hook (`.claude/hooks/session-start.sh`) sets
+`core.hooksPath` at every start, quietly, and installs nothing. A fresh clone, and a cloud session starts in one, has the hooks
+off otherwise, and then nothing stops a commit with a credential before CI does (the test values with the shape of a key
+that reached the public branch `gate` on 2026-11-18 got past for that reason).
+
 - The **pre-commit** hook scans what the next commit would contain (`--staged`) and refuses the commit if it finds
   something.
 - The **pre-push** hook scans the commits a push would publish (`--push`), so it also catches commits made with
