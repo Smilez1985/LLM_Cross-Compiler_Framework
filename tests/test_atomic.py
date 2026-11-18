@@ -32,12 +32,25 @@ def _symlink(target: Path, link: Path) -> None:
         pytest.skip("this system does not let the test make a symbolic link")
 
 
+def _record_replaces(monkeypatch, folder, replaced, real_replace):
+    """Records the os.replace calls that land inside `folder` and runs them. Only that folder: os.replace is patched for
+    the whole process, so a background thread of another test that writes a file at the same moment (seen on a Windows
+    runner) must not be counted as this test's write."""
+    mine = Path(os.path.realpath(folder))
+
+    def replace(src, dst):
+        if Path(os.path.realpath(dst)).is_relative_to(mine):
+            replaced.append((Path(src), Path(dst)))
+        return real_replace(src, dst)
+    monkeypatch.setattr(os, "replace", replace)
+
+
 class TestVaultKeyWritePrivate:
 
     def test_writes_the_text_through_a_temporary_file_with_fsync(self, tmp_path, monkeypatch):
         replaced, synced = [], []
         real_replace, real_fsync = os.replace, os.fsync
-        monkeypatch.setattr(os, "replace", lambda s, d: replaced.append((Path(s), Path(d))) or real_replace(s, d))
+        _record_replaces(monkeypatch, tmp_path, replaced, real_replace)
         monkeypatch.setattr(os, "fsync", lambda fd: synced.append(fd) or real_fsync(fd))
         target = tmp_path / "state" / "notice.json"
         vault_key.write_private(target, "a\nb\n")
@@ -82,7 +95,7 @@ class TestRuntimeWritePrivate:
     def test_writes_lf_through_an_exclusive_temporary_file_without_fsync(self, tmp_path, monkeypatch):
         replaced, synced, opened = [], [], []
         real_replace, real_open = os.replace, os.open
-        monkeypatch.setattr(os, "replace", lambda s, d: replaced.append((Path(s), Path(d))) or real_replace(s, d))
+        _record_replaces(monkeypatch, tmp_path, replaced, real_replace)
         monkeypatch.setattr(os, "fsync", lambda fd: synced.append(fd))
         monkeypatch.setattr(os, "open", lambda p, flags, mode=MODE_777, **k: opened.append((Path(p), flags, mode))
                             or real_open(p, flags, mode, **k))
@@ -220,7 +233,7 @@ class TestWriteFile:
         from orchestrator.utils import atomic
         replaced, synced = [], []
         real_replace, real_fsync = os.replace, os.fsync
-        monkeypatch.setattr(os, "replace", lambda s, d: replaced.append((Path(s), Path(d))) or real_replace(s, d))
+        _record_replaces(monkeypatch, tmp_path, replaced, real_replace)
         monkeypatch.setattr(os, "fsync", lambda fd: synced.append(fd) or real_fsync(fd))
         (tmp_path / "k").mkdir()
         target = tmp_path / "k" / "pack-a.released"
