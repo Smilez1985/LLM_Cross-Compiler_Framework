@@ -395,6 +395,10 @@ never change or delete it, they say that it is there and how to remove it.
   **LLM-Cross-Compiler-Framework**; the old shortcut **LLM-Conversion-Framework** still starts the old installation.
   `scripts\Uninstall-LLM-Cross-Compiler-Framework.bat` finds both installations, lists for each one what it
   removes (the folder with everything in it and its shortcut) and asks first; without an answer nothing is removed.
+  The installer writes down in `install-manifest.json` what it installed **itself**: a Python, a 7-Zip or a container
+  engine that was there before is never written down and never removed, because other programs may need it. What it did
+  install is shown by the uninstaller, and each system program is asked about on its own, with a warning and No as the
+  answer. The search engine of the web search, in your own folder, is removed with the same question.
 - **Your personal folder** `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`) belongs to neither
   installation and stays as it is. Your API keys and tokens stay readable: the key of the credential vault is now
   kept under the keyring service `llm-cross-compiler-framework`. A key still under the old service

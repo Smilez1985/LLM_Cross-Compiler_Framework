@@ -444,6 +444,11 @@ es Platzhalter enthält, die der Modulgenerator ausfüllt.
 git ls-files -z '*.sh' ':!:targets/_template/*' | xargs -0 shellcheck --severity=error
 ```
 
+**PowerShell** (`ci.yml`): `install.bat` ist eine Batch-Datei und ein PowerShell-Skript in einem. `scripts/Check-PowerShell.ps1`
+liest den PowerShell-Teil mit dem eigenen Parser von PowerShell und lässt PSScriptAnalyzer mit der Schwere Error laufen (ein
+`Write-Host` in einem Installer, der mit einer Person spricht, ist kein Fehler). Aufruf: `pwsh scripts/Check-PowerShell.ps1`;
+`-SkipAnalyzer` ist nur die Syntaxprüfung.
+
 **actionlint** (`ci.yml`): prüft die Workflow-Dateien.
 
 ```bash

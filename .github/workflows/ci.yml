@@ -31,6 +31,10 @@ jobs:
       - name: Install lint tools
         run: python -m pip install --no-deps -r requirements-dev.txt
 
+      - name: PowerShell (install.bat: syntax and PSScriptAnalyzer errors)
+        shell: pwsh
+        run: ./scripts/Check-PowerShell.ps1
+
       - name: Ruff (syntax errors and undefined names)
         run: ruff check --no-cache --select E9,F63,F7,F82 --output-format github orchestrator scripts tests targets
 

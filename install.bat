@@ -267,6 +267,36 @@ if (-not $Offline) {
 }
 
 # 2. PYTHON PRÜFUNG & INSTALLATION
+# MANIFEST-BEGIN
+# What this installer installs itself is written down in install-manifest.json (the shape rag4ll uses: a map from a name to
+# its details), so that scripts\Uninstall-LLM-Cross-Compiler-Framework.bat removes exactly that and never what was there
+# before. The installer installs "if not exist": only a program it installed because it was missing is recorded. Python or
+# 7-Zip that was there stays out, because other programs may need it. What is recorded is "shared" all the same (other
+# programs may use it later), so the uninstaller asks about each on its own, with No as the answer. A manifest that cannot be
+# read is never overwritten.
+$InstalledByUs = @()
+function Add-InstalledByUs ($Id, $Ref, $Title) {
+    $script:InstalledByUs += [pscustomobject]@{ Id = $Id; Ref = $Ref; Title = $Title }
+}
+function Save-InstallManifest ($Path, $Entries) {
+    if (-not $Entries -or @($Entries).Count -eq 0) { return }
+    $Map = [ordered]@{}
+    if (Test-Path -LiteralPath $Path) {
+        try {
+            $Old = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($Property in $Old.PSObject.Properties) { $Map[$Property.Name] = $Property.Value }
+        } catch {
+            Write-Warning "Das Manifest in $Path ist nicht lesbar und wird nicht ueberschrieben; was jetzt installiert wurde, steht nicht darin."
+            return
+        }
+    }
+    foreach ($Entry in $Entries) {
+        $Map[$Entry.Id] = [ordered]@{ scope = "shared"; kind = "winget"; ref = $Entry.Ref; title = $Entry.Title; registered_at = (Get-Date -Format s) }
+    }
+    [System.IO.File]::WriteAllText($Path, ($Map | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
+}
+# MANIFEST-END
+
 Write-Host "[1/5] Pruefe Python Umgebung..." -ForegroundColor Yellow
 if ($Offline -and -not (Get-Command "python" -ErrorAction SilentlyContinue)) {
     Write-Error "Offline: Python fehlt, und ohne Netz installiert der Installer keins (winget braucht das Netz). Installiere Python 3.11 bis 3.14 von einem lokalen Installer (python.org, fuer alle Benutzer) und starte install.bat erneut."
@@ -276,6 +306,7 @@ if (-not (Get-Command "python" -ErrorAction SilentlyContinue)) {
     try {
         # Python 3.13: supported by every pinned dependency (3.11 reaches end of life in 2027-10)
         winget install -e --id Python.Python.3.13 --scope machine --accept-source-agreements --accept-package-agreements
+        if ($LASTEXITCODE -eq 0) { Add-InstalledByUs "python" "Python.Python.3.13" "Python 3.13" }
         # Refresh Env Vars
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
     } catch {
@@ -631,6 +662,12 @@ try {
 } catch {
     Write-Warning "Marker fuer den Uninstaller nicht geschrieben ($_); er findet die Installation dann nicht."
 }
+# What this installer installed itself (see MANIFEST-BEGIN above): the uninstaller is fed from this file.
+try {
+    Save-InstallManifest (Join-Path $InstallDir "install-manifest.json") $InstalledByUs
+} catch {
+    Write-Warning "Manifest dessen, was der Installer installiert hat, nicht geschrieben ($_); der Uninstaller laesst es dann in Ruhe."
+}
 
 # 7-ZIP: the harness take-in reads rar, 7z, iso, cpio, zstd and disk images with it (orchestrator/utils/archives.py:
 # 7zz or 7z on PATH, or the usual install folder). Installed with winget only when none is there, like Python and
@@ -644,7 +681,7 @@ try {
     } elseif (-not $SevenZipThere) {
         Write-Host "7-Zip fehlt. Installiere es ueber winget (7zip.7zip)..."
         winget install -e --id 7zip.7zip --accept-source-agreements --accept-package-agreements
-        if ($LASTEXITCODE -ne 0) { Write-Warning "7-Zip liess sich nicht mit winget installieren; selbst: 7-Zip fuer Windows installieren (winget install -e --id 7zip.7zip). Ohne 7-Zip nimmt das Framework einen Harness als zip, tar oder Ordner an; rar, 7z, iso und Disk-Images brauchen 7-Zip." }
+        if ($LASTEXITCODE -ne 0) { Write-Warning "7-Zip liess sich nicht mit winget installieren; selbst: 7-Zip fuer Windows installieren (winget install -e --id 7zip.7zip). Ohne 7-Zip nimmt das Framework einen Harness als zip, tar oder Ordner an; rar, 7z, iso und Disk-Images brauchen 7-Zip." } else { Add-InstalledByUs "7zip" "7zip.7zip" "7-Zip" }
     }
 } catch {
     Write-Warning "7-Zip: $_ - die Installation geht weiter."
@@ -669,7 +706,7 @@ try {
         Write-Warning "--rootful: Docker Desktop laeuft mit einem Dienst mit Administratorrechten, und wer in der Gruppe docker-users ist, steuert ihn. Damit hat das Konto dauerhaft Rechte wie ein Administrator auf diesem Rechner, auch wenn das Framework nicht laeuft. Ohne --rootful richtet der Installer Podman ohne Administratorrechte ein, mit dem das Framework genauso baut."
         if (-not (Get-Command "docker" -ErrorAction SilentlyContinue)) {
             winget install -e --id Docker.DockerDesktop --accept-source-agreements --accept-package-agreements
-            if ($LASTEXITCODE -ne 0) { Write-Warning "Docker Desktop liess sich nicht mit winget installieren; selbst: https://docs.docker.com/desktop/setup/install/windows-install/" }
+            if ($LASTEXITCODE -ne 0) { Write-Warning "Docker Desktop liess sich nicht mit winget installieren; selbst: https://docs.docker.com/desktop/setup/install/windows-install/" } else { Add-InstalledByUs "docker-desktop" "Docker.DockerDesktop" "Docker Desktop" }
         }
     } elseif ($Offline -and -not (Get-Command "podman" -ErrorAction SilentlyContinue)) {
         Write-Warning "Offline: Es gibt noch keine Container-Engine, und ohne Netz installiert der Installer keine (Podman: winget install -e --id RedHat.Podman, oder sein Installer von einem Rechner mit Netz). Die Installation geht weiter; Builds brauchen sie."
@@ -677,6 +714,7 @@ try {
         if (-not (Get-Command "podman" -ErrorAction SilentlyContinue)) {
             Write-Host "Podman fehlt. Installiere es ueber winget (RedHat.Podman)..."
             winget install -e --id RedHat.Podman --accept-source-agreements --accept-package-agreements
+            if ($LASTEXITCODE -eq 0) { Add-InstalledByUs "podman" "RedHat.Podman" "Podman" }
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
         }
         if (-not (Get-Command "podman" -ErrorAction SilentlyContinue)) {

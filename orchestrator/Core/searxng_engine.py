@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable, List, Optional
 
 from orchestrator.Core import searxng_native, searxng_setup, web_search
+from orchestrator.utils import install_manifest
 
 WAYS = web_search.ENGINES
 DEFAULT_WAY = "own"
@@ -102,15 +103,21 @@ def setup(way: str, state_dir: Any, config: Any, *, run: bool = True, progress: 
     else:
         sub = searxng_setup.setup(state_dir, client_factory, run=run)
         result.notes += sub.notes
+    # Written down so that the uninstaller knows it: only the framework uses it, and it was not there before (the folder is
+    # the framework's own). A manifest that cannot be written only means the uninstaller leaves it alone.
+    install_manifest.record(install_manifest.person_path(state_dir), install_manifest.Entry(
+        "searxng", "own", "searxng", str(folder), "SearXNG, die Suchmaschine fuer Dittos Websuche"))
     saved = web_search.configure(config, engine=way, ways=_ways_with_searxng(config))
     result.notes.append("The web search uses it now (the way \"search engine on this computer\" is on)."
                         + ("" if saved else " The settings file could not be saved; this holds until the program ends."))
     return result
 
 
-def remove(state_dir: Any, config: Any, *, client_factory: Optional[Callable[[], Any]] = None) -> List[str]:
+def remove_files(state_dir: Any, *, client_factory: Optional[Callable[[], Any]] = None,
+                 container_expected: bool = False) -> List[str]:
     """Removes the software of both ways: the Python folder and the container. The settings file and the secret stay (they
-    are a few bytes and the next setup uses them). Clears web_search_engine. The lines say what happened."""
+    are a few bytes and the next setup uses them). Takes the component out of the install manifest. The lines say what
+    happened. The uninstaller calls this with only the state folder: it needs no settings."""
     if state_dir is None:
         raise EngineError("The state folder is not known; nothing was removed.")
     folder = searxng_setup.folder_of(state_dir)
@@ -121,13 +128,21 @@ def remove(state_dir: Any, config: Any, *, client_factory: Optional[Callable[[],
         if searxng_setup.remove(client_factory) == "removed":
             notes.append("The container was stopped and removed.")
     except searxng_setup.SetupError:
-        if current(config) == "container":
+        if container_expected:
             notes.append("The container could not be reached (is the container engine running?); remove it with "
                          "your engine if it is still there.")
+    install_manifest.forget(install_manifest.person_path(state_dir), "searxng")
+    return notes
+
+
+def remove(state_dir: Any, config: Any, *, client_factory: Optional[Callable[[], Any]] = None) -> List[str]:
+    """Removes the search engine (remove_files) and clears web_search_engine. The lines say what happened."""
+    notes = remove_files(state_dir, client_factory=client_factory, container_expected=current(config) == "container")
     web_search.configure(config, engine="none")
     notes.append("The settings file and the secret stay; the web search no longer starts a search engine."
                  if notes else "There was nothing to remove.")
     return notes
 
 
-__all__ = ["DEFAULT_WAY", "EngineError", "EngineResult", "SIZE_OWN", "WAYS", "current", "explain", "remove", "setup"]
+__all__ = ["DEFAULT_WAY", "EngineError", "EngineResult", "SIZE_OWN", "WAYS", "current", "explain", "remove",
+           "remove_files", "setup"]

@@ -417,6 +417,10 @@ placeholders that the module generator fills in.
 git ls-files -z '*.sh' ':!:targets/_template/*' | xargs -0 shellcheck --severity=error
 ```
 
+**PowerShell** (`ci.yml`): `install.bat` is a batch file and a PowerShell script in one. `scripts/Check-PowerShell.ps1` parses its
+PowerShell part with PowerShell's own parser and runs PSScriptAnalyzer at the severity Error (a `Write-Host` in an installer that
+talks to a person is no error). Run it with `pwsh scripts/Check-PowerShell.ps1`; `-SkipAnalyzer` is the syntax check alone.
+
 **actionlint** (`ci.yml`): checks the workflow files.
 
 ```bash

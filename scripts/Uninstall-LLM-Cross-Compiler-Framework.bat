@@ -163,6 +163,7 @@ IF ERRORLEVEL 2 SET "BACKUP_OK=0"
 GOTO :EOF
 
 :DO_PARTIAL_UNINSTALL
+CALL :COMPONENTS
 echo.
 echo [UNINSTALL] Entferne System-Komponenten (behalte Daten)...
 :: Lösche VENV (Dependencies)
@@ -176,6 +177,7 @@ rmdir /s /q "!INSTALL_PATH!\scripts" 2>nul
 GOTO :CLEANUP_SHORTCUTS
 
 :DO_FULL_UNINSTALL
+CALL :COMPONENTS
 echo.
 echo [UNINSTALL] Entferne vollstaendigen Installationsordner...
 echo   - Loesche "!INSTALL_PATH!"...
@@ -183,6 +185,26 @@ rmdir /s /q "!INSTALL_PATH!"
 IF EXIST "!INSTALL_PATH!" echo [WARNUNG] Konnte Ordner nicht vollstaendig loeschen, Dateien in Benutzung? Bitte manuell pruefen: "!INSTALL_PATH!"
 IF NOT EXIST "!INSTALL_PATH!" echo   - Ordner entfernt.
 GOTO :CLEANUP_SHORTCUTS
+
+:: ------------------------------------------------------------------------------------------------------------------
+:: Was der Installer selbst installiert hat: install-manifest.json der Installation (Programme, die er mit winget
+:: installiert hat) und das der Person (die Suchmaschine in ihrem Ordner). Das Python-Modul zeigt es und fragt: was nur das
+:: Framework nutzt, einmal fuer alles; jedes System-Programm einzeln, mit Warnung und mit Nein als Vorgabe. Was der
+:: Installer nicht aufgeschrieben hat, war schon vorher da (oder gehoert der Person) und wird NIE entfernt: ein Python
+:: oder 7-Zip, das schon da war, braucht vielleicht ein anderes Programm. Laeuft vor dem Entfernen, solange .venv da ist.
+:COMPONENTS
+SET "VENV_PY=!INSTALL_PATH!\.venv\Scripts\python.exe"
+IF NOT EXIST "!VENV_PY!" echo [INFO] Keine Python-Umgebung mehr in der Installation: was der Installer sonst installiert hat, wird nicht angeboten.
+IF NOT EXIST "!VENV_PY!" GOTO :EOF
+SET "STATE_DIR=%USERPROFILE%\.llm-framework"
+IF DEFINED LLM_FRAMEWORK_HOME SET "STATE_DIR=%LLM_FRAMEWORK_HOME%"
+echo.
+echo [KOMPONENTEN] Was der Installer selbst installiert hat:
+SET "PYTHONUTF8=1"
+pushd "!INSTALL_PATH!"
+"!VENV_PY!" -m orchestrator.Core.uninstall_components uninstall --machine "!INSTALL_PATH!\install-manifest.json" --person "!STATE_DIR!\install-manifest.json"
+popd
+GOTO :EOF
 
 :CLEANUP_SHORTCUTS
 IF NOT DEFINED LNK_NAME GOTO :EOF

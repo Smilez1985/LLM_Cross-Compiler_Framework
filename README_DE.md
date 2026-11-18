@@ -414,7 +414,11 @@ verändern oder löschen sie nie, sie sagen, dass es sie gibt und wie du sie ent
   und entferne den alten Ordner selbst: `sudo rm -rf /opt/llm-conversion-framework`.
 - **Windows:** Die neue Installation kommt nach `C:\Program Files\LLM-Cross-Compiler-Framework` mit der Verknüpfung
   **LLM-Cross-Compiler-Framework**; die alte Verknüpfung **LLM-Conversion-Framework** startet weiter die alte
-  Installation. `scripts\Uninstall-LLM-Cross-Compiler-Framework.bat` findet beide Installationen, zeigt für jede,
+  Installation. Der Installer schreibt in `install-manifest.json` auf, was er **selbst** installiert hat: Ein Python, ein
+  7-Zip oder eine Container-Engine, die schon vorher da war, wird nie aufgeschrieben und nie entfernt, weil andere
+  Programme sie brauchen können. Was er installiert hat, zeigt der Uninstaller, und jedes System-Programm fragt er einzeln,
+  mit Warnung und mit Nein als Antwort. Die Suchmaschine der Websuche in deinem eigenen Ordner entfernt er mit derselben
+  Frage. `scripts\Uninstall-LLM-Cross-Compiler-Framework.bat` findet beide Installationen, zeigt für jede,
   was es entfernt (den Ordner mit allem darin und seine Verknüpfung), und fragt vorher; ohne Antwort wird nichts
   entfernt.
 - **Dein persönlicher Ordner** `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`) gehört keiner der beiden
