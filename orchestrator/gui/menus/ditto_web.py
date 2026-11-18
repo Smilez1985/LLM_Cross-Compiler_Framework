@@ -34,6 +34,7 @@ CLI_PATHS: Dict[str, str] = {
     "ditto web setup": "btn_web_setup",                     # asks first, No by default
     "ditto web setup --way": "cb_web_engine_way",           # the own Python folder (default) or the container
     "ditto web setup --remove": "btn_web_remove",
+    "ditto web setup --update": "btn_web_update",           # says what changes first, asks, No by default
 }
 WINDOW_OBJECTS: Dict[str, str] = {
     **{name: WEB_ACTION for name in CLI_PATHS.values() if name != WEB_ACTION},

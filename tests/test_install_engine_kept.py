@@ -47,9 +47,24 @@ def fake_timeout(folder: Path) -> Path:
     return log
 
 
-def bash(script: str, folder: Path, extra_path: bool = True):
+def isolated_bin(folder: Path) -> Path:
+    """A PATH folder with the few real tools install.sh needs and no docker: the system's own PATH may hold a real docker
+    (the CI runners have one), so 'no docker at all' needs a PATH of its own."""
+    box = folder / "isolated"
+    box.mkdir(exist_ok=True)
+    for tool in ("bash", "head", "id", "dirname", "realpath", "tr", "sed", "cut", "grep", "cat", "date", "awk", "uname",
+                 "basename"):
+        found = shutil.which(tool)
+        if found and not (box / tool).exists():
+            (box / tool).symlink_to(found)
+    return box
+
+
+def bash(script: str, folder: Path, extra_path: bool = True, path_only: "Path | None" = None):
     """install.sh sourced, the user switch replaced by a plain call (the fakes need no sudo), then `script`."""
     path = f"{folder}:{SYSTEM_PATH}" if extra_path else SYSTEM_PATH
+    if path_only is not None:
+        path = str(path_only)
     prelude = 'SUDO_USER=alice; id() { echo 1000; }; as_engine_user() { "$@"; }; '
     return subprocess.run(["/bin/bash", "-c", f'source "$1"; {prelude}{script}', "test", str(INSTALL_SH)],
                           env={"PATH": path, "HOME": str(folder)}, stdin=subprocess.DEVNULL, capture_output=True,
@@ -81,7 +96,9 @@ class TestTheEngineThatAnswersStays:
         assert "rc=1 kept=[]" in result.stdout
 
     def test_no_docker_at_all_is_no_engine(self, tmp_path):
-        result = bash('engine_kept_answers; echo "rc=$?"', tmp_path, extra_path=False)
+        result = bash('command -v docker > /dev/null && echo DOCKER-FOUND; engine_kept_answers; echo "rc=$?"', tmp_path,
+                      path_only=isolated_bin(tmp_path))
+        assert "DOCKER-FOUND" not in result.stdout, "the test's own PATH must have no docker"
         assert "rc=1" in result.stdout
 
     def test_an_engine_the_person_turned_away_with_engine_is_not_kept_and_not_even_asked(self, tmp_path):
@@ -200,7 +217,12 @@ def ask_pwsh(tmp_path: Path, with_docker: "str | None" = None, exit_code: int = 
     return result, log
 
 
-@needs_pwsh
+# The fake docker is a shell script on a ':' PATH, so these run where there is a POSIX pwsh (the Linux jobs; the real Windows
+# behaviour is what install.bat does with the real docker.exe, which no runner has).
+needs_posix_pwsh = pytest.mark.skipif(PWSH is None or os.name == "nt", reason="needs a POSIX pwsh")
+
+
+@needs_posix_pwsh
 class TestGetContainerEngine:
 
     def test_an_engine_that_answers_is_named(self, tmp_path):
