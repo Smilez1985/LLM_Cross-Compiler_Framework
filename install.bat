@@ -297,6 +297,26 @@ function Save-InstallManifest ($Path, $Entries) {
 }
 # MANIFEST-END
 
+# ENGINE-BEGIN
+# Does a container engine answer already? The question is the one the framework itself asks (docker-py: the default
+# endpoint, so `--context default`): a Docker Desktop, a Docker engine in a WSL distribution, Podman's Docker pipe.
+# Podman is installed only when none answers (docs/DESIGN.md, the installer's rows). State: "answers" (Name: what the
+# server calls itself), "not-running" (a docker program is there and does not answer), "none" (no docker program).
+function Get-ContainerEngine {
+    $Result = [pscustomobject]@{ State = "none"; Name = "" }
+    if (-not (Get-Command "docker" -ErrorAction SilentlyContinue)) { return $Result }
+    $Result.State = "not-running"
+    try {
+        # The whole output, then its first line: `Select-Object -First 1` would end docker early and leave its exit code unsure.
+        $Lines = @(& docker --context default version --format "{{.Server.Platform.Name}}" 2>$null)
+        if (($LASTEXITCODE -eq 0) -and ($Lines.Count -gt 0) -and "$($Lines[0])".Trim()) { $Result.State = "answers"; $Result.Name = "$($Lines[0])".Trim() }
+    } catch {
+        $Result.State = "not-running"
+    }
+    return $Result
+}
+# ENGINE-END
+
 Write-Host "[1/5] Pruefe Python Umgebung..." -ForegroundColor Yellow
 if ($Offline -and -not (Get-Command "python" -ErrorAction SilentlyContinue)) {
     Write-Error "Offline: Python fehlt, und ohne Netz installiert der Installer keins (winget braucht das Netz). Installiere Python 3.11 bis 3.14 von einem lokalen Installer (python.org, fuer alle Benutzer) und starte install.bat erneut."
@@ -389,7 +409,7 @@ if ((-not $PersonOnly) -and $Offline -and (-not $PreloadFile) -and (-not $env:PI
         "# Offline installiert er keine: Bring die Installer von einem Rechner mit Netz mit.",
         "python: winget install -e --id Python.Python.3.13",
         "7zip: winget install -e --id 7zip.7zip",
-        "container-engine: winget install -e --id RedHat.Podman (mit --rootful: Docker.DockerDesktop)") -join "`n"
+        "container-engine: winget install -e --id RedHat.Podman (entfaellt, wenn schon eine Container-Engine antwortet; mit --rootful: Docker.DockerDesktop)") -join "`n"
     [IO.File]::WriteAllText($PackagesFile, $PackagesText + "`n", (New-Object System.Text.UTF8Encoding $false))
     $Version = if ($CheckoutState) { $CheckoutState.Split(' ')[0] } else { "" }
     & python -I $PreloadTool spec --requirements (Join-Path $ScriptPath "requirements-gui.txt") --resolve (Join-Path $ScriptPath "requirements-resolve.txt") --target $ThisTarget --python $PythonVersionFull --version $Version --system-packages $PackagesFile --out $SpecDir | Out-Null
@@ -702,12 +722,19 @@ try {
     $SignedIn = $null
 }
 try {
+    $Engine = Get-ContainerEngine
     if ($Rootful) {
         Write-Warning "--rootful: Docker Desktop laeuft mit einem Dienst mit Administratorrechten, und wer in der Gruppe docker-users ist, steuert ihn. Damit hat das Konto dauerhaft Rechte wie ein Administrator auf diesem Rechner, auch wenn das Framework nicht laeuft. Ohne --rootful richtet der Installer Podman ohne Administratorrechte ein, mit dem das Framework genauso baut."
         if (-not (Get-Command "docker" -ErrorAction SilentlyContinue)) {
             winget install -e --id Docker.DockerDesktop --accept-source-agreements --accept-package-agreements
             if ($LASTEXITCODE -ne 0) { Write-Warning "Docker Desktop liess sich nicht mit winget installieren; selbst: https://docs.docker.com/desktop/setup/install/windows-install/" } else { Add-InstalledByUs "docker-desktop" "Docker.DockerDesktop" "Docker Desktop" }
         }
+    } elseif ($Engine.State -eq "answers") {
+        # Where Docker Desktop (or another engine) already works, a second engine beside it has no use: it is kept and
+        # nothing is installed, so nothing of it lands in the manifest and the uninstaller never touches it.
+        Write-Host "Eine Container-Engine antwortet schon ($($Engine.Name)): Der Installer installiert keine zweite daneben, und das Framework nimmt sie."
+    } elseif (($Engine.State -eq "not-running") -and -not (Get-Command "podman" -ErrorAction SilentlyContinue)) {
+        Write-Warning "docker ist installiert, antwortet aber nicht (Docker Desktop laeuft nicht oder startet noch). Der Installer installiert kein Podman daneben: Starte Docker Desktop; 'llm-cli mojo' sagt danach, ob die Engine antwortet."
     } elseif ($Offline -and -not (Get-Command "podman" -ErrorAction SilentlyContinue)) {
         Write-Warning "Offline: Es gibt noch keine Container-Engine, und ohne Netz installiert der Installer keine (Podman: winget install -e --id RedHat.Podman, oder sein Installer von einem Rechner mit Netz). Die Installation geht weiter; Builds brauchen sie."
     } else {

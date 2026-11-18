@@ -198,8 +198,11 @@ Der Installer:
    (`SUSEConnect -p sle-module-python3/<Version>/<Architektur>`, etwa `sle-module-python3/15.6/x86_64`), und
    versucht es noch einmal; ein nicht registriertes System hält mit dem Schritt der Registrierung an
    (`sudo SUSEConnect -r <Code>`),
-2. richtet eine Container-Engine ein, die mit deinen eigenen Rechten läuft (der Standard: keine dauerhaften Rechte,
-   die mehr können als nötig): **rootless Podman** aus den Paketquellen der Distribution (`podman`, dazu
+2. behält eine Container-Engine, die schon antwortet (ein Docker-Dienst, Docker Desktop oder dein eigenes rootless
+   Docker: daneben wird nichts installiert, und ist dein Konto in der Gruppe `docker`, sagt der Installer, was das
+   heißt, und ändert nichts; `--engine=podman` oder `--engine=docker` sagt, dass du eine andere willst, und schaltet das
+   ab), und richtet nur dort eine ein, wo keine antwortet. Diese läuft mit deinen eigenen Rechten (der Standard: keine
+   dauerhaften Rechte, die mehr können als nötig): **rootless Podman** aus den Paketquellen der Distribution (`podman`, dazu
    `podman-docker` für den Befehl `docker`, wo es das gibt und kein Docker installiert ist; unter Debian und Ubuntu
    auch `uidmap`, `slirp4netns` und `dbus-user-session`, unter Alpine `shadow-uidmap`), einen Sub-ID-Bereich für dein
    Konto (je 65536 IDs in `/etc/subuid` und `/etc/subgid`, nur wo du noch keinen hast; ein vorhandener Bereich
@@ -322,7 +325,9 @@ Nach `--rootful` meldest du dich einmal ab und wieder an, damit die Gruppe `dock
 
 ### Windows
 
-1. Vorher nichts installieren: Der Installer richtet Podman ein (`winget install RedHat.Podman`) mit einer
+1. Vorher nichts installieren: Antwortet Docker Desktop oder eine andere Container-Engine schon, behält der Installer
+   sie und installiert nichts daneben (ein Docker, das installiert ist, aber nicht läuft, bekommt den Hinweis, es zu
+   starten, und kein Podman daneben). Sonst richtet er Podman ein (`winget install RedHat.Podman`) mit einer
    Podman-Maschine, standardmäßig ohne Root-Rechte (`podman machine init`, `podman machine start`, für die
    angemeldete Person). Docker Desktop nur mit `install.bat --rootful`, nach einer Warnung: Seine Gruppe
    `docker-users` gibt dem Konto dauerhaft Rechte wie ein Administrator. Ist dein Konto in `docker-users`, sagt der

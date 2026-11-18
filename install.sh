@@ -61,6 +61,8 @@ OFFLINE="${LCF_OFFLINE:-0}"
 PRELOAD_FILE="${LCF_PRELOAD:-}"
 PRELOAD_SHA256="${LCF_PRELOAD_SHA256:-}"
 
+# Antwortet schon eine Container-Engine (ein Docker-Dienst, Docker Desktop, rootless Docker), bleibt sie, und der Installer
+# installiert keine zweite daneben (engine_kept_answers); --engine= wählt sie bewusst ab.
 # Die Container-Engine läuft standardmäßig ohne Root-Rechte (rootless Podman; --engine=docker: rootless Docker);
 # --rootful: Docker als root mit der Gruppe docker, nur auf den ausdrücklichen Wunsch der Person und nach einer Warnung
 # (setup_engine, weiter unten).
@@ -1299,6 +1301,8 @@ podman_for_user() {
 # Root-Rechte, sobald es eine gibt (orchestrator/utils/docker_engine.py).
 ROOTFUL=0
 ENGINE_CHOICE="podman"
+ENGINE_EXPLICIT=0   # 1: die Person hat --engine= selbst gesagt; dann wird keine vorhandene Engine übernommen
+ENGINE_KEPT=""      # Name der Engine, die schon antwortet und bleibt (engine_kept_answers)
 # Die Sub-ID-Bereiche für Benutzer und Gruppen. Ein Bereich von 65536 IDs je Konto ist der übliche (useradd, Podman,
 # Docker); er reicht bis zum Stufen-Konto des Build-Containers (uid und gid 64010).
 SUBUID_FILE="/etc/subuid"
@@ -1420,6 +1424,38 @@ rootless_docker_there() {
     [ -S "$sock" ] && [ ! -L "$sock" ]
 }
 
+# Antwortet schon eine Container-Engine, die das Framework erreicht? Gefragt wird, wie das Framework selbst fragt (docker-py:
+# der Standard-Endpunkt, also `--context default`), als die Person und mit einer Frist. Dann bleibt sie, und der Installer
+# installiert keine zweite daneben (ein Docker-Dienst, Docker Desktop, rootless Docker ohne eigene Datei). Podman zählt hier
+# nicht: Sein Weg unten richtet die Sub-IDs und den Dienst der Person ein. Eine Engine, die die Person mit --engine= selbst
+# abgewählt hat, bleibt nicht. ENGINE_KEPT nennt, wie sie sich selbst nennt.
+engine_kept_answers() {
+    local name
+    ENGINE_KEPT=""
+    if [ "$ENGINE_EXPLICIT" = "1" ]; then return 1; fi
+    command -v docker &> /dev/null || return 1
+    # Ohne Frist ginge es nicht weiter, wenn ein Dienst nur halb antwortet; `timeout` gibt es nicht überall.
+    if command -v timeout &> /dev/null; then
+        name="$(as_engine_user timeout 20 docker --context default version --format '{{.Server.Platform.Name}}' 2> /dev/null | head -n 1)"
+    else
+        name="$(as_engine_user docker --context default version --format '{{.Server.Platform.Name}}' 2> /dev/null | head -n 1)"
+    fi
+    name="${name//$'\r'/}"
+    [ -n "$name" ] || return 1
+    case "${name,,}" in
+        *podman*) return 1 ;;
+    esac
+    ENGINE_KEPT="$name"
+}
+
+# Die Engine, die schon antwortet, bleibt, wie sie ist. Sitzt die Person in der Gruppe docker (der Docker-Dienst läuft als
+# root), sagt der Installer, was das heißt, und ändert nichts: Genau diese Gruppe braucht die Engine, die schon da ist.
+kept_engine_note() {
+    if in_docker_group "$REAL_USER"; then
+        log_warn "'$REAL_USER' ist in der Gruppe docker: Wer darin ist, steuert den Docker-Dienst, der als root läuft, und hat damit dauerhaft Rechte wie root auf diesem Rechner, auch wenn das Framework nicht läuft. Die Engine, die schon da ist, braucht diese Gruppe, deshalb ändert der Installer nichts daran. Eine Engine ohne Root-Rechte statt dessen: 'sudo ./install.sh --engine=podman' richtet rootless Podman ein; danach nimmt das Framework Podman und die Gruppe lässt sich herausnehmen (sudo gpasswd -d $REAL_USER docker)."
+    fi
+}
+
 # Sagt klar, wenn die Person in einer Gruppe mit Root-Wirkung ist (docker); nimmt sie nie selbst heraus.
 root_group_note() {
     if in_docker_group "$REAL_USER"; then
@@ -1503,6 +1539,9 @@ setup_rootless() {
         ensure_subids || true
         ROOTLESS_ENGINE=docker
         log_success "Rootless Docker von '$REAL_USER' ist schon da; das Framework nimmt es."
+    elif engine_kept_answers; then
+        ROOTLESS_ENGINE=kept
+        log_success "Eine Container-Engine antwortet schon ($ENGINE_KEPT): Der Installer installiert keine zweite daneben, und das Framework nimmt sie."
     elif [ "$ENGINE_CHOICE" = "docker" ]; then
         if ! setup_rootless_docker; then
             log_warn "Rootless Docker geht hier nicht: $ROOTLESS_DOCKER_WHY Stattdessen: rootless Podman."
@@ -1512,7 +1551,7 @@ setup_rootless() {
         log_warn "Podman ließ sich nicht einrichten: $ROOTLESS_PODMAN_WHY Stattdessen: rootless Docker."
         setup_rootless_docker || engine_stop "Weder rootless Podman noch rootless Docker ließen sich einrichten: $ROOTLESS_PODMAN_WHY $ROOTLESS_DOCKER_WHY"
     fi
-    root_group_note
+    if [ "$ROOTLESS_ENGINE" = "kept" ]; then kept_engine_note; else root_group_note; fi
 }
 
 # Docker als root mit der Gruppe docker, nur auf den ausdrücklichen Wunsch der Person (--rootful): die Warnung vorab.
@@ -1591,6 +1630,8 @@ plan_engine() {
     if rootless_docker_there; then
         echo "   Container-Engine: rootless Docker von '$REAL_USER', vorhanden"
         plan_subids
+    elif engine_kept_answers; then
+        echo "   Container-Engine: $ENGINE_KEPT antwortet schon; sie bleibt, der Installer installiert keine zweite daneben"
     elif [ "$ENGINE_CHOICE" = "docker" ]; then
         if ! plan_rootless_docker; then
             echo "   Container-Engine: rootless Docker geht hier nicht: $ROOTLESS_DOCKER_WHY Stattdessen rootless Podman:"
@@ -1639,7 +1680,7 @@ setup_system() {
 offline_engine_there() {
     if [ "$ROOTFUL" = "1" ]; then command -v docker &> /dev/null; return; fi
     engine_user
-    command -v podman &> /dev/null || rootless_docker_there
+    command -v podman &> /dev/null || rootless_docker_there || engine_kept_answers
 }
 
 setup_engine_or_name() {
@@ -2460,7 +2501,7 @@ ditto_option() {
             --headless) HEADLESS=1 ;;
             --dry-run) DRY_RUN=1 ;;
             --rootful) ROOTFUL=1 ;;
-            --engine=*) ENGINE_CHOICE="${arg#--engine=}" ;;
+            --engine=*) ENGINE_CHOICE="${arg#--engine=}"; ENGINE_EXPLICIT=1 ;;
             --mode=*) MODE_CHOICE="${arg#--mode=}" ;;
             --offline) OFFLINE=1 ;;
         esac
@@ -2677,6 +2718,7 @@ finish() {
     case "$ROOTLESS_ENGINE" in
         podman) echo "🐳 Engine: rootless Podman (mit deinen Rechten, ohne Gruppe docker)" ;;
         docker) echo "🐳 Engine: rootless Docker (mit deinen Rechten, ohne Gruppe docker)" ;;
+        kept) echo "🐳 Engine: ${ENGINE_KEPT} (war schon da und antwortet; der Installer hat nichts an ihr geändert)" ;;
     esac
     echo "-----------------------------------------------------"
     old_installation_note

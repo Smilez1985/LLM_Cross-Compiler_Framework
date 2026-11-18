@@ -471,7 +471,9 @@ the toolkits (in the image build).
 
 ### Podman instead of Docker
 
-Rootless Podman is the container engine `install.sh` sets up by default (`podman`, `podman-docker` where it fits,
+A container engine that already answers (a Docker service, Docker Desktop, your own rootless Docker) stays: the
+installers install no second one beside it, and `--engine=` turns that off. Where none answers, rootless Podman is the
+container engine `install.sh` sets up by default (`podman`, `podman-docker` where it fits,
 a sub-id range for your account and your `podman.socket`); rootless Docker comes with `--engine=docker` or where
 Podman cannot be installed, and Docker as root with the group `docker` only with `--rootful` (see
 [Installation](../README.md#installation)). No standing rights that can do more than needed: a rootless engine

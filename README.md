@@ -188,7 +188,10 @@ The installer:
    is there, the installer asks whether to switch it on (`SUSEConnect -p sle-module-python3/<version>/<arch>`, e.g.
    `sle-module-python3/15.6/x86_64`) and tries again; a system that is not registered stops with the registration
    step (`sudo SUSEConnect -r <code>`),
-2. sets up a container engine that runs with your own rights (the default: no standing rights that can do more than
+2. keeps a container engine that already answers (a Docker service, Docker Desktop or your own rootless Docker: nothing
+   is installed beside it, and if your account is in the group `docker` the installer says what that means and changes
+   nothing; `--engine=podman` or `--engine=docker` says you want another and turns this off), and sets one up only where
+   none answers. That one runs with your own rights (the default: no standing rights that can do more than
    needed): **rootless Podman** from the distribution's own sources (`podman`, plus `podman-docker` for the `docker`
    command where it exists and no Docker is installed; on Debian and Ubuntu also `uidmap`, `slirp4netns` and
    `dbus-user-session`, on Alpine `shadow-uidmap`), a sub-id range for your account (65536 ids each in `/etc/subuid`
@@ -304,7 +307,9 @@ After `--rootful`, log out and back in once so the `docker` group takes effect. 
 
 ### Windows
 
-1. Nothing to install beforehand: the installer sets up Podman (`winget install RedHat.Podman`) with a Podman
+1. Nothing to install beforehand: when Docker Desktop or another container engine already answers, the installer keeps
+   it and installs nothing beside it (a Docker that is installed but not running gets a note to start it, and no Podman
+   next to it). Otherwise it sets up Podman (`winget install RedHat.Podman`) with a Podman
    machine, rootless by default (`podman machine init`, `podman machine start`, for the person who is signed in).
    Docker Desktop only with `install.bat --rootful`, after a warning: its group `docker-users` gives the account
    administrator-equivalent rights, permanently. If your account is in `docker-users`, the installer says so.
