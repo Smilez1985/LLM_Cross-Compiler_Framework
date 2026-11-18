@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
+from orchestrator.utils import atomic
 from orchestrator.utils import install_manifest as manifest
 from orchestrator.utils.install_manifest import Entry
 
@@ -53,8 +54,8 @@ def remove_entry(entry: Entry, manifest_file: Path, run: Callable = subprocess.r
         folder = Path(entry.ref)
         if not folder.is_absolute() or not _inside(folder, manifest_file.parent) or folder.resolve() == manifest_file.parent.resolve():
             return "uebersprungen: der Ordner liegt nicht unter dem Ordner dieses Manifests."
-        shutil.rmtree(folder, ignore_errors=True)
-        return "entfernt."
+        left = atomic.remove_tree(folder)
+        return "entfernt." if not left else "nicht ganz entfernt: einiges liegt noch in " + str(folder)
     return f"nicht von hier entfernt: {entry.kind} {entry.ref} (mit der Paketverwaltung)."
 
 
@@ -121,8 +122,5 @@ def main(argv: Sequence[str]) -> int:
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
-__all__ = ["Entry", "FILE_NAME", "forget", "machine_path", "parse", "person_path", "read", "record", "remove_entry",
-           "uninstall"]
-
 
 __all__ = ["SHARED_WARNING", "main", "remove_entry", "uninstall"]

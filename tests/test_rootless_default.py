@@ -298,7 +298,7 @@ def test_the_windows_installer_sets_up_podman_and_docker_desktop_only_with_rootf
     assert "RedHat.Podman" in step and "podman machine init" in step and "podman machine start" in step
     rootful = step[step.index("if ($Rootful) {"):step.index("} else {", step.index("if ($Rootful) {"))]
     assert "Docker.DockerDesktop" in rootful and "dauerhaft Rechte wie ein Administrator" in rootful
-    assert step.count("Docker.DockerDesktop") == 1, "Docker Desktop only on the --rootful path"
+    assert step.count("winget install -e --id Docker.DockerDesktop") == 1, "Docker Desktop only on the --rootful path"
     assert "docker-users" in step and "net localgroup docker-users <dein Konto> /delete" in step
     code = "\n".join(line for line in step.splitlines() if not line.lstrip().startswith("#"))
     assert "Add-LocalGroupMember" not in code and "localgroup docker-users /add" not in code

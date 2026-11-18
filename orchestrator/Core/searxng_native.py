@@ -35,6 +35,8 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 
+from orchestrator.utils import atomic
+
 REPOSITORY = "https://github.com/searxng/searxng"
 COMMIT = "b99cf7496eeb837e4c60a17eacaa60fe946fc4e4"      # the pinned stand of SearXNG (2026-11-17)
 MIN_PYTHON = (3, 10)                                       # setup.py of SearXNG: python_requires >= 3.10
@@ -150,7 +152,7 @@ def install(folder: Path, python: Optional[str] = None, run: Callable = subproce
         folder.mkdir(parents=True, exist_ok=True)
         for old in (src, venv_dir(folder)):
             if old.exists():
-                shutil.rmtree(old)          # an older or broken stand: fetched again, never mixed
+                atomic.remove_tree(old)     # an older or broken stand: fetched again, never mixed
         marker(folder).unlink(missing_ok=True)
         src.mkdir(parents=True)
     except OSError as e:
@@ -182,7 +184,7 @@ def remove(folder: Path) -> bool:
     folder, found = Path(folder), False
     for name in ("src", "venv", "shim"):
         if (folder / name).exists():
-            shutil.rmtree(folder / name, ignore_errors=True)
+            atomic.remove_tree(folder / name)
             found = True
     for name in ("installed.json", "server.log", "searxng.zip"):
         if (folder / name).exists():

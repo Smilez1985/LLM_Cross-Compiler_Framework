@@ -209,15 +209,16 @@ def parse_duckduckgo(text: str) -> List[Tuple[str, str, str]]:
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(text, "html.parser")
     found = []
-    for block in soup.select("div.result, div.web-result"):
-        link = block.select_one("a.result__a")
+    for block in soup.find_all("div", class_=lambda value: value in ("result", "web-result") or (
+            isinstance(value, str) and ("result" in value.split() or "web-result" in value.split()))):
+        link = block.find("a", class_="result__a")
         if link is None or not link.get("href"):
             continue
         href = str(link["href"])
         if "uddg=" in href:   # the page's own redirect: the address is in its query
             query = dict(parse_qsl(urlsplit(href if "//" in href else "https:" + href).query))
             href = unquote(query.get("uddg", ""))
-        snippet = block.select_one(".result__snippet")
+        snippet = block.find(class_="result__snippet")
         found.append((href, link.get_text(" ", strip=True), snippet.get_text(" ", strip=True) if snippet else ""))
     return found
 

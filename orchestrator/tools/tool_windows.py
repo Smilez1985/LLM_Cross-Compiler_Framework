@@ -28,7 +28,7 @@ from orchestrator.Core.job_service import JOB_KINDS
 WINDOW_IDS: Tuple[str, ...] = (
     "builder", "deployment", "build_history", "targets", "boards", "settings", "trash", "knowledge_sources",
     "knowledge_snapshots", "community_hub", "hf_browser", "ditto_runtime", "ditto_models", "mojo", "approvals",
-    "proposals", "ai_settings", "tool_permissions", "module_wizard", "chat", "board_bundle")
+    "proposals", "ai_settings", "tool_permissions", "module_wizard", "chat", "board_bundle", "web_search")
 WINDOW_ID_RE = "^(?:" + "|".join(WINDOW_IDS) + ")$"
 
 # A step of the next-step catalogue (orchestrator/utils/next_steps, chain a0) by its id only: "<area>.<name>", e.g.
@@ -51,6 +51,7 @@ TOOL_WINDOWS: Dict[str, str] = {
     # models and knowledge
     "download_hf_file": "hf_browser",
     "crawl_docs_site": "knowledge_sources",
+    "web_search": "web_search",             # Ditto > Web Search...: its ways, keys and a test search
     "index_framework_docs": "knowledge_sources",
     "add_pack_from_index": "community_hub",
     "export_pack": "community_hub",
@@ -120,6 +121,7 @@ WINDOW_OPENERS: Dict[str, str] = {
     "settings": "act_file_settings",
     "trash": "act_file_trash",
     "knowledge_sources": "act_knowledge_sources",
+    "web_search": "act_ditto_web_open",
     "knowledge_snapshots": "act_knowledge_snapshots",
     "community_hub": "act_knowledge_hub",
     "hf_browser": "act_tools_hf_browser",

@@ -10,7 +10,6 @@ searches once, and stops it. Exit code 0 when all of that worked, 1 otherwise, w
 """
 
 import json
-import shutil
 import sys
 import tempfile
 import urllib.error
@@ -20,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from orchestrator.Core import searxng_native, searxng_setup  # noqa: E402
+from orchestrator.utils import atomic  # noqa: E402
 
 PORT = 8891
 QUERY = "python programming language"
@@ -68,7 +68,7 @@ def main(argv: list) -> int:
         if process is not None:
             searxng_native.stop(process)
         if own:
-            shutil.rmtree(folder, ignore_errors=True)
+            atomic.remove_tree(folder)
 
 
 if __name__ == "__main__":

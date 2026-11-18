@@ -47,6 +47,12 @@ START_ENTRY = ("the framework's own start entry: only the person's own desktop e
                "carries the framework's mark, removed on the person's own command (llm-cli launcher remove, Remove "
                "under File > Settings..., Update); a file of that name without the mark stays")
 UNUSED = "OPEN (reported): no caller; must get a plan before it is wired"
+OWN_SOFTWARE = ("the framework's own optional software (Ditto's search engine SearXNG in its own folder, or its "
+                "container): made by the installer or `ditto web setup`, removed only on the person's own command "
+                "(`ditto web remove`, the uninstaller's question) and never what was there before (the settings file and "
+                "the secret stay)")
+MANIFEST_NOTE = ("bookkeeping: the install manifest's own entry, taken out when the thing it names was removed on the "
+                 "person's command (the manifest itself goes when it is empty)")
 IMPORT_MARKS = ("bookkeeping: the framework's own import note of an installed pack (and its snapshot note), removed so "
                 "the pack is imported again after the person's yes in Mojo Miracle (knowledge.reimport)")
 RELEASED_NOTE = ("bookkeeping: the framework's own note that an uninstalled pack's excerpts left the knowledge base, "
@@ -58,6 +64,13 @@ KNOWLEDGE_REPLACED = ("the knowledge base's own storage: a collection replaced b
 DELETION_SITES = {
     # the person's objects
     ("orchestrator/Core/artifact_store.py", "ArtifactStore.delete"): PERSON,
+    # Ditto's web search: the engine's own folder and container (only on the person's command), its fetch and install
+    # staging, and the manifest's own bookkeeping
+    ("orchestrator/Core/searxng_native.py", "remove"): OWN_SOFTWARE,
+    ("orchestrator/Core/searxng_setup.py", "remove"): OWN_SOFTWARE,
+    ("orchestrator/Core/searxng_native.py", "install"): STAGING,
+    ("orchestrator/Core/searxng_native.py", "fetch_source"): STAGING,
+    ("orchestrator/utils/install_manifest.py", "forget"): MANIFEST_NOTE,
     ("orchestrator/Core/knowledge_snapshots.py", "delete_snapshots"): PERSON,
     ("orchestrator/Core/trash.py", "Trash.empty"): PERSON,
     ("orchestrator/Core/mojo/docker_objects.py", "delete_framework_images"): PERSON,

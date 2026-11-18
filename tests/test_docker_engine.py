@@ -523,6 +523,7 @@ def test_every_docker_client_is_made_after_the_one_helper():
                 sites.append((path.relative_to(REPO_ROOT).as_posix(), func.name,
                               bool(helper) and min(h.lineno for h in helper) < min(c.lineno for c in calls)))
     assert sorted(sites) == [("orchestrator/Core/builder.py", "__init__", True),
+                             ("orchestrator/Core/searxng_setup.py", "_client", True),
                              ("orchestrator/runtime/build/executor.py", "client", True),
                              ("orchestrator/runtime/container_server.py", "client", True)]
 
