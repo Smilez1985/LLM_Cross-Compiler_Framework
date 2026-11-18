@@ -43,6 +43,11 @@ HEADLESS="${LCF_HEADLESS:-0}"
 # Dittos lokale Laufzeit (selbst gebauter llama-server und sein Modell): --ditto=auto|bare-metal|docker|skip, für
 # unbeaufsichtigte Läufe auch LCF_DITTO=... (ohne Rückfragen; Größe und Lizenz des Modells werden trotzdem gezeigt).
 DITTO_CHOICE="${LCF_DITTO:-auto}"
+# Dittos Websuche kann eine eigene Suchmaschine (SearXNG) haben; sie ist freiwillig und kommt nur mit dem Ditto-Schritt
+# (nicht mit --ditto=skip): --searxng=ask|own|container|skip, für unbeaufsichtigte Läufe auch LCF_SEARXNG=...
+# ask (Standard) fragt, wenn eine Eingabe möglich ist, mit Nein als Vorgabe, und richtet sonst nichts ein; own ist ein
+# eigener Python-Ordner ohne Docker, container braucht Docker oder Podman (nur wer das will). Nichts wird ohne Ja installiert.
+SEARXNG_CHOICE="${LCF_SEARXNG:-ask}"
 # Der Framework-Modus: private (Standard) oder enterprise (nimmt auf Boards nur OpenSSH mit sudo, die Schlüsselzeile in
 # Root-Besitz). --mode=private|enterprise, für unbeaufsichtigte Läufe auch LCF_MODE=...; ohne Angabe fragt der
 # Installer am Terminal (Enter: der jetzige Modus einer Aktualisierung, neu: privat). Ohne Angabe und ohne Terminal
@@ -2451,6 +2456,7 @@ ditto_option() {
             --preload-sha256) next=sha ;;
             --preload-sha256=*) PRELOAD_SHA256="${arg#--preload-sha256=}" ;;
             --ditto=*) DITTO_CHOICE="${arg#--ditto=}" ;;
+            --searxng=*) SEARXNG_CHOICE="${arg#--searxng=}" ;;
             --headless) HEADLESS=1 ;;
             --dry-run) DRY_RUN=1 ;;
             --rootful) ROOTFUL=1 ;;
@@ -2476,6 +2482,10 @@ ditto_option() {
     case "$DITTO_CHOICE" in
         auto|bare-metal|docker|skip) ;;
         *) log_error "Unbekannter Wert für --ditto: '$DITTO_CHOICE' (auto, bare-metal, docker oder skip)." ;;
+    esac
+    case "$SEARXNG_CHOICE" in
+        ask|own|container|skip) ;;
+        *) log_error "Unbekannter Wert für --searxng: '$SEARXNG_CHOICE' (ask, own, container oder skip)." ;;
     esac
 }
 
@@ -2606,6 +2616,43 @@ setup_ditto() {
         log_success "Ditto: fertig (Meldungen oben)."
     else
         log_warn "Ditto ließ sich nicht einrichten (Meldungen oben); die Installation ist trotzdem fertig. Später erneut: llm-cli ditto runtime ensure"
+    fi
+    setup_search_engine
+    return 0
+}
+
+# Die Suchmaschine für Dittos Websuche (SearXNG), nur im Ditto-Schritt und nur mit einem Ja: Sie sagt zuerst, was
+# installiert wird und wie sie läuft, und fragt mit Nein als Vorgabe. Ohne Eingabemöglichkeit (kein Terminal) richtet sie
+# nichts ein. 'llm-cli ditto web setup --yes' läuft als die Person (nie als root; $as_user kommt aus setup_ditto), und ein
+# Fehler lässt die Installation nie scheitern. Die Websuche geht auch ohne sie (Such-APIs mit eigenen Schlüsseln).
+setup_search_engine() {
+    local way="$SEARXNG_CHOICE"
+    if [ "$way" = "skip" ]; then
+        log_info "[Websuche] Keine eigene Suchmaschine (--searxng=skip). Später: llm-cli ditto web setup"
+        return 0
+    fi
+    if [ "$way" = "ask" ]; then
+        if [ ! -t 0 ]; then
+            log_info "[Websuche] Keine eigene Suchmaschine eingerichtet (hier ist keine Antwort möglich; sie ist freiwillig). Später: llm-cli ditto web setup, oder beim Installieren --searxng=own"
+            return 0
+        fi
+        echo ""
+        echo "[Websuche] Dittos Websuche kann eine eigene Suchmaschine (SearXNG) nutzen. Sie ist freiwillig; die Websuche geht auch ohne sie mit Such-APIs und eigenen Schlüsseln."
+        echo "  Installiert wird: eine feste Kopie von SearXNG von github.com mit eigenen Python-Paketen, etwa 200 MB, in deinem eigenen Ordner."
+        echo "  Sie läuft mit deinen eigenen Rechten, nur während einer Suche und nur auf diesem Rechner. Kein Docker, keine Administratorrechte."
+        echo "  Wieder entfernen: llm-cli ditto web setup --remove   (mit Docker oder Podman als Container: --searxng=container)"
+        local answer=""
+        read -r -p "Einrichten? [j/N] " answer || answer=""
+        case "$answer" in
+            j|J|ja|Ja|JA|y|Y|yes|Yes) way="own" ;;
+            *) log_info "Übersprungen. Später: llm-cli ditto web setup"; return 0 ;;
+        esac
+    fi
+    log_info "[Websuche] Suchmaschine für Dittos Websuche ($way)..."
+    if (cd "$INSTALL_DIR" && "${as_user[@]}" "$INSTALL_DIR/.venv/bin/python" -m orchestrator.cli ditto web setup --way "$way" --yes); then
+        log_success "Websuche: Suchmaschine eingerichtet (Meldungen oben)."
+    else
+        log_warn "Die Suchmaschine ließ sich nicht einrichten (Meldungen oben); die Installation ist trotzdem fertig. Später erneut: llm-cli ditto web setup"
     fi
     return 0
 }
@@ -2748,7 +2795,7 @@ plan_installation() {
         echo "   rsync: fehlt -> ${PKG_ARGV[*]} rsync"
     fi
     plan_sevenzip
-    echo "   Danach: Programmdateien nach $INSTALL_DIR, .venv (${PYTHON:-dem eben installierten Python}) mit den neuesten verträglichen Versionen (uv, 5 Tage Wartezeit, pip-audit, Selbstprüfung; sonst $requirements, der getestete Stand), Starter /usr/local/bin/llm-framework, ${START_ENTRY_PLAN}Ditto ($DITTO_CHOICE)"
+    echo "   Danach: Programmdateien nach $INSTALL_DIR, .venv (${PYTHON:-dem eben installierten Python}) mit den neuesten verträglichen Versionen (uv, 5 Tage Wartezeit, pip-audit, Selbstprüfung; sonst $requirements, der getestete Stand), Starter /usr/local/bin/llm-framework, ${START_ENTRY_PLAN}Ditto ($DITTO_CHOICE; eigene Suchmaschine für die Websuche: $SEARXNG_CHOICE)"
     if [ -n "$PRELOAD_FILE" ]; then
         echo "   Offline mit Preload $PRELOAD_FILE: geprüft (SHA256SUMS, Plattform, Python, Lock), Python-Pakete nur daraus (pip --no-index), keine Paketverwaltung, Ditto später"
     elif [ "$OFFLINE" = "1" ]; then

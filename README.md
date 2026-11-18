@@ -284,6 +284,12 @@ Choose the Ditto step with `sudo ./install.sh --ditto=auto|bare-metal|docker|ski
 run set `LCF_DITTO` instead (for example `sudo LCF_DITTO=auto ./install.sh`): then nothing is asked, and a model under
 a permissive licence (such as Apache 2.0) is downloaded after its size and licence are shown.
 
+Inside the Ditto step the installer can also offer a search engine for Ditto's web search (SearXNG), and only there: it is not
+asked with `--ditto=skip`. It says what it installs (about 200 MB in a folder of your own, no Docker, no administrator rights, it
+runs only while a search needs it) and asks, with No as the default; without a terminal it sets up nothing. Choose with
+`--searxng=ask|own|container|skip` (default `ask`; `LCF_SEARXNG` for an unattended run; `container` is only for whoever wants Docker
+or Podman). The web search also works without it, with search APIs and keys of your own.
+
 The installer also asks for the framework mode: private or enterprise; Enter keeps the current mode on an update (the prompt shows it as the default, `[P/e]` or `[p/E]`) and picks private on a fresh install. Enterprise takes only OpenSSH with sudo on a board; `--mode=private|enterprise` (or `LCF_MODE`) answers it for an unattended run, and you change it later in File > Settings... or with `llmcf config set framework_mode`.
 
 To see what the installer would do on this computer without changing anything, run `./install.sh --dry-run` (no

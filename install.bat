@@ -54,11 +54,21 @@ $UserDataHint = "%USERPROFILE%\.llm-framework"
 # Ditto's local runtime: --ditto=auto|bare-metal|docker|skip, for unattended runs also LCF_DITTO (no questions; the
 # model's size and licence are still shown). An unknown value stops here, before anything is installed.
 $DittoChoice = if ($env:LCF_DITTO) { $env:LCF_DITTO } else { "auto" }
+# Ditto's web search can have a search engine of its own (SearXNG); it is voluntary and comes only with the Ditto step
+# (not with --ditto=skip): --searxng=ask|own|container|skip, for unattended runs also LCF_SEARXNG. ask (the default) asks
+# when an answer is possible, with No as the default, and sets up nothing otherwise; own is a Python folder of the
+# person's own (no Docker, no WSL, no administrator rights); container needs Docker or Podman. Nothing is installed
+# without a yes.
+$SearxngChoice = if ($env:LCF_SEARXNG) { $env:LCF_SEARXNG } else { "ask" }
 foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
     if ($InstallArg -like "--ditto=*") { $DittoChoice = $InstallArg.Substring(8) }
+    if ($InstallArg -like "--searxng=*") { $SearxngChoice = $InstallArg.Substring(10) }
 }
 if ($DittoChoice -notin @("auto", "bare-metal", "docker", "skip")) {
     Write-Error "Unbekannter Wert fuer --ditto: '$DittoChoice' (auto, bare-metal, docker oder skip)."
+}
+if ($SearxngChoice -notin @("ask", "own", "container", "skip")) {
+    Write-Error "Unbekannter Wert fuer --searxng: '$SearxngChoice' (ask, own, container oder skip)."
 }
 # The container engine (step [Engine] below): Podman without administrator rights by default, Docker Desktop only
 # with --rootful. An unknown --engine value stops here too, before anything is installed.
@@ -707,6 +717,39 @@ try {
         & $PythonVenv @DittoArgs
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "Ditto liess sich nicht einrichten (Meldungen oben); die Installation ist trotzdem fertig. Spaeter erneut: llm-cli ditto runtime ensure"
+        }
+        # The search engine for Ditto's web search (SearXNG), only here and only with a yes: it says what is installed and
+        # how it runs first, and asks with No as the default. Without a way to answer (no console) it sets up nothing.
+        # It runs as the signed-in person, never as another administrator account, and a failure never stops the
+        # installation.
+        $SearxngWay = $SearxngChoice
+        if ($SearxngWay -eq "skip") {
+            Write-Host "[Websuche] Keine eigene Suchmaschine (--searxng=skip). Spaeter: llm-cli ditto web setup"
+        } else {
+            if ($SearxngWay -eq "ask") {
+                if ([Console]::IsInputRedirected -or -not [Environment]::UserInteractive) {
+                    Write-Host "[Websuche] Keine eigene Suchmaschine eingerichtet (hier ist keine Antwort moeglich; sie ist freiwillig). Spaeter: llm-cli ditto web setup, oder beim Installieren --searxng=own"
+                    $SearxngWay = ""
+                } else {
+                    Write-Host ""
+                    Write-Host "[Websuche] Dittos Websuche kann eine eigene Suchmaschine (SearXNG) nutzen. Sie ist freiwillig; die Websuche geht auch ohne sie mit Such-APIs und eigenen Schluesseln."
+                    Write-Host "  Installiert wird: eine feste Kopie von SearXNG von github.com mit eigenen Python-Paketen, etwa 200 MB, in deinem eigenen Ordner."
+                    Write-Host "  Sie laeuft mit deinen eigenen Rechten, nur waehrend einer Suche und nur auf diesem Rechner. Kein Docker, kein WSL, keine Administratorrechte."
+                    Write-Host "  Wieder entfernen: llm-cli ditto web setup --remove   (mit Docker oder Podman als Container: --searxng=container)"
+                    $Answer = Read-Host "Einrichten? [j/N]"
+                    if ($Answer -match '^(j|ja|y|yes)$') { $SearxngWay = "own" } else {
+                        Write-Host "Uebersprungen. Spaeter: llm-cli ditto web setup"
+                        $SearxngWay = ""
+                    }
+                }
+            }
+            if ($SearxngWay) {
+                Write-Host "[Websuche] Suchmaschine fuer Dittos Websuche ($SearxngWay)..." -ForegroundColor Yellow
+                & $PythonVenv -m orchestrator.cli ditto web setup --way $SearxngWay --yes
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warning "Die Suchmaschine liess sich nicht einrichten (Meldungen oben); die Installation ist trotzdem fertig. Spaeter erneut: llm-cli ditto web setup"
+                }
+            }
         }
     }
 } catch {

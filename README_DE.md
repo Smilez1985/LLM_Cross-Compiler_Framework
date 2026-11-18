@@ -301,6 +301,12 @@ unbeaufsichtigten Lauf setzt du stattdessen `LCF_DITTO` (zum Beispiel `sudo LCF_
 nichts gefragt, und ein Modell unter einer freien Lizenz (etwa Apache 2.0) wird heruntergeladen, nachdem Größe und
 Lizenz angezeigt wurden.
 
+Im Ditto-Schritt kann der Installer auch eine Suchmaschine für Dittos Websuche (SearXNG) anbieten, und nur dort: Mit `--ditto=skip`
+wird nicht gefragt. Er sagt, was installiert wird (etwa 200 MB in einem eigenen Ordner, kein Docker, keine Administratorrechte, sie
+läuft nur während einer Suche), und fragt mit Nein als Vorgabe; ohne Terminal richtet er nichts ein. Wählen kannst du mit
+`--searxng=ask|own|container|skip` (Standard `ask`; `LCF_SEARXNG` für einen unbeaufsichtigten Lauf; `container` ist nur für den, der
+Docker oder Podman will). Die Websuche geht auch ohne sie, mit Such-APIs und eigenen Schlüsseln.
+
 Der Installer fragt auch nach dem Framework-Modus: privat oder enterprise; Enter behält bei einer Aktualisierung den jetzigen Modus (die Frage zeigt ihn als Vorgabe, `[P/e]` oder `[p/E]`) und wählt bei einer neuen Installation privat. Enterprise nimmt auf einem Board nur OpenSSH mit sudo; `--mode=private|enterprise` (oder `LCF_MODE`) beantwortet das für einen unbeaufsichtigten Lauf, und später änderst du ihn unter Datei > Einstellungen... oder mit `llmcf config set framework_mode`.
 
 Was der Installer auf diesem Rechner täte, ohne etwas zu verändern, zeigt `./install.sh --dry-run` (ohne `sudo`):

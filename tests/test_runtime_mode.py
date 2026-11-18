@@ -1568,3 +1568,102 @@ class TestInstaller:
         assert '"ditto", "runtime", "ensure", "--mode", $DittoChoice' in step
         assert "Write-Error" not in step, "a failing Ditto step only warns; the installation goes on"
         assert "Win32_ComputerSystem" in step, "only for the signed-in person, never another administrator account"
+
+    # --- the search engine for Ditto's web search (SearXNG): only inside the Ditto step, only with a yes -------------------
+
+    def _web_calls(self, calls):
+        return [line for line in calls.splitlines() if "ditto web setup" in line]
+
+    def test_without_a_way_to_answer_nothing_is_set_up_and_the_step_says_so(self, tmp_path):
+        run, calls = self._run(tmp_path, "setup_ditto")                       # the default is ask; no terminal here
+        assert run.returncode == 0 and self._web_calls(calls) == [] and "keine Antwort möglich" in run.stdout
+        assert "freiwillig" in run.stdout and calls.rstrip().endswith("ensure --mode auto")
+
+    @pytest.mark.parametrize("way", ["own", "container"])
+    def test_a_chosen_way_runs_the_setup_as_the_person_with_the_yes(self, tmp_path, way):
+        run, calls = self._run(tmp_path, f"ditto_option --searxng={way}; setup_ditto")
+        assert run.returncode == 0, run.stdout + run.stderr
+        web = self._web_calls(calls)
+        assert len(web) == 1 and web[0].startswith("sudo -H --preserve-env=https_proxy,") and " -u anna " in web[0]
+        assert web[0].endswith(f"-m orchestrator.cli ditto web setup --way {way} --yes"), web
+        assert calls.splitlines()[-1] == web[0]                                # after Ditto's own setup
+
+    def test_the_unattended_variable_works_like_the_option(self, tmp_path):
+        run, calls = self._run(tmp_path, "setup_ditto", env={"LCF_SEARXNG": "own"})
+        assert run.returncode == 0 and self._web_calls(calls)[0].endswith("ditto web setup --way own --yes")
+
+    def test_skip_sets_up_nothing_and_says_how_to_do_it_later(self, tmp_path):
+        run, calls = self._run(tmp_path, "ditto_option --searxng=skip; setup_ditto")
+        assert run.returncode == 0 and self._web_calls(calls) == [] and "Später: llm-cli ditto web setup" in run.stdout
+
+    def test_without_ditto_there_is_no_question_and_no_search_engine(self, tmp_path):
+        run, calls = self._run(tmp_path, "ditto_option --ditto=skip --searxng=own; setup_ditto")
+        assert run.returncode == 0 and calls == "" and "Websuche" not in run.stdout
+
+    def test_offline_and_the_container_build_set_up_no_search_engine(self, tmp_path):
+        run, calls = self._run(tmp_path, "ditto_option --offline --searxng=own; setup_ditto")
+        assert run.returncode == 0 and calls == ""
+        run, calls = self._run(tmp_path, "ditto_option --searxng=own; setup_ditto", env={"LCF_CONTAINER_BUILD": "1"})
+        assert run.returncode == 0 and calls == ""
+
+    def test_for_root_there_is_no_search_engine_either(self, tmp_path):
+        run, calls = self._run(tmp_path, "ditto_option --searxng=own; setup_ditto", env={"SUDO_USER": "root"})
+        assert run.returncode == 0 and calls == ""
+
+    def test_an_unknown_way_stops_before_anything_is_installed(self, tmp_path):
+        run, _ = self._run(tmp_path, "ditto_option --searxng=docker; echo AFTER")
+        assert run.returncode != 0 and "AFTER" not in run.stdout and "Unbekannter Wert für --searxng" in run.stdout
+
+    def test_a_failing_search_engine_never_fails_the_installation(self, tmp_path):
+        run, _ = self._run(tmp_path, "ditto_option --searxng=own; setup_ditto; echo AFTER", exit_code=1)
+        assert run.returncode == 0 and "AFTER" in run.stdout and "Suchmaschine ließ sich nicht einrichten" in run.stdout
+
+    def _ask(self, tmp_path, answer):
+        """setup_ditto on a terminal (a pseudo terminal) that answers the question with `answer`."""
+        import pty
+        import select
+        tmp = Path(tempfile.mkdtemp(dir=tmp_path))
+        stubs = tmp / "bin"
+        _recorder(stubs, "sudo")
+        for tool in ("bash", "date", "id"):
+            if shutil.which(tool):
+                (stubs / tool).symlink_to(shutil.which(tool))
+        master, slave = pty.openpty()
+        process = subprocess.Popen(["/bin/bash", "-c", 'source "$1"; INSTALL_DIR="$2"; setup_ditto; echo AFTER', "test",
+                                    str(INSTALL_SH), str(tmp)], stdin=slave, stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT, env={"PATH": str(stubs), "HOME": str(tmp), "SUDO_USER": "anna"})
+        os.close(slave)
+        end = __import__("time").monotonic() + 30
+        os.write(master, (answer + "\n").encode())
+        out = process.communicate(timeout=30)[0].decode()
+        os.close(master)
+        assert __import__("time").monotonic() < end
+        calls = (stubs / "calls.log").read_text() if (stubs / "calls.log").exists() else ""
+        return out, calls
+
+    def test_on_a_terminal_it_says_what_is_installed_and_a_yes_sets_it_up(self, tmp_path):
+        out, calls = self._ask(tmp_path, "j")
+        assert "etwa 200 MB" in out and "Kein Docker, keine Administratorrechte" in out and "--remove" in out
+        assert "nur während einer Suche" in out and "AFTER" in out
+        assert self._web_calls(calls)[0].endswith("ditto web setup --way own --yes")
+
+    @pytest.mark.parametrize("answer", ["", "n", "N", "nein", "irgendwas"])
+    def test_anything_but_a_yes_sets_up_nothing(self, tmp_path, answer):
+        out, calls = self._ask(tmp_path, answer)
+        assert self._web_calls(calls) == [] and "Übersprungen" in out and "AFTER" in out
+
+    def test_install_bat_has_the_same_question_with_the_same_rules(self):
+        text = (REPO_ROOT / "install.bat").read_text(encoding="utf-8")
+        assert "--searxng=*" in text and "$env:LCF_SEARXNG" in text
+        assert '@("ask", "own", "container", "skip")' in text and "Unbekannter Wert fuer --searxng" in text
+        step = text[text.index("[Ditto]"):text.index("# MODUS:")]
+        assert '"ditto web setup --way' not in step and "ditto web setup --way $SearxngWay --yes" in step
+        assert "IsInputRedirected" in step and "Read-Host" in step and "[j/N]" in step
+        assert "Kein Docker, kein WSL, keine Administratorrechte" in step and "Write-Error" not in step
+        assert step.index("runtime\", \"ensure\"") < step.index("ditto web setup"), "after Ditto's own setup, inside its branch"
+
+    def test_the_search_engine_step_names_no_docker_default_and_installs_nothing_without_a_yes(self):
+        text = INSTALL_SH.read_text(encoding="utf-8")
+        step = text[text.index("setup_search_engine() {"):text.index("# --- SCHRITT 5: ABSCHLUSS")]
+        assert 'read -r -p "Einrichten? [j/N] "' in step and 'way="own"' in step and "container" not in step.split(
+            'case "$answer"')[1].split("esac")[0]

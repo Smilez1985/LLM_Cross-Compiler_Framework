@@ -2393,7 +2393,8 @@ search page's HTML results. They run together, and the same page found twice is 
   SearXNG after it told you what it installs, how big it is and what it runs with, and after you said yes (No is the
   default). The default way is a **folder of your own**: no Docker, no administrator rights, no WSL, also on Windows;
   Docker or Podman is the opt-in of whoever wants it. It comes with a finished settings file and a secret of its own;
-  nobody edits a settings file.
+  nobody edits a settings file. The installer offers it inside its Ditto step (never with
+  `--ditto=skip`), says what it installs and asks, with No as the default (`--searxng=ask|own|container|skip`).
 - **Nothing runs in between:** SearXNG starts only while a search needs it and stops right after, on this computer only.
   **Remove...** takes it away again.
 - **A hit is never a page:** an address, a title and a short text from a stranger, read as data. Reading a page is Deep

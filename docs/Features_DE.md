@@ -2637,7 +2637,8 @@ gefunden, ist ein Treffer.
   im Fenster SearXNG, nachdem es gesagt hat, was installiert wird, wie groß es ist und mit welchen Rechten es läuft, und
   nachdem du ja gesagt hast (Nein ist die Vorgabe). Der Standardweg ist ein **eigener Ordner**: kein Docker, keine
   Administratorrechte, kein WSL, auch unter Windows; Docker oder Podman ist das Opt-in dessen, der es will. Sie kommt mit
-  einer fertigen Einstellungsdatei und einem eigenen Geheimnis; niemand bearbeitet eine Einstellungsdatei.
+  einer fertigen Einstellungsdatei und einem eigenen Geheimnis; niemand bearbeitet eine Einstellungsdatei. Der Installer bietet sie in seinem Ditto-Schritt an (nie mit
+  `--ditto=skip`), sagt, was installiert wird, und fragt, mit Nein als Vorgabe (`--searxng=ask|own|container|skip`).
 - **Dazwischen läuft nichts:** SearXNG startet nur, solange eine Suche es braucht, und endet gleich danach, nur auf diesem
   Rechner. **Entfernen...** nimmt es wieder weg.
 - **Ein Treffer ist nie eine Seite:** eine Adresse, ein Titel und ein kurzer Text von Fremden, als Daten gelesen. Eine Seite
