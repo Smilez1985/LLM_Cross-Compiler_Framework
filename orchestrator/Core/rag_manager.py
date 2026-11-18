@@ -781,6 +781,11 @@ class RAGManager:
                 self._close_client()
 
     def _close_client(self) -> None:
+        """Closes the storage and lets go of it, in this order: the client is closed, the manager stops claiming it (client,
+        store, connected), and only then is the cross-process lock released. A process that finds the lock free therefore never
+        meets a manager that still claims an open storage (tests/test_rag.py pins the order). Callers hold self._lock: the
+        close is half done only for a reader that does not take it, and nothing in the framework reads these fields without
+        it."""
         store = self._store
         if store is not None and getattr(store, "written", 0) >= OPTIMIZE_AFTER_WRITES:
             try:  # Qdrant Edge: merge segments and drop deleted points before the storage is released

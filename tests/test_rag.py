@@ -429,19 +429,40 @@ class TestCollections:
         rag.idle_close_seconds = 0.2
         ingest_all(rag)
         collection = rag.get_status()["collection"]
-        deadline = time.monotonic() + 5
-        while rag.client is not None and time.monotonic() < deadline:
-            time.sleep(0.05)
-        assert rag.client is None
-
+        # What another process does (RAGManager._open_local): it asks for the lock again and again until the idle close has
+        # released it. One single try at the moment `client` turns None was a race (seen once, on Python 3.11): the close
+        # drops the client first and releases the lock after it, and nothing promises the lock to anybody before that.
         lock = storage_lock(rag.storage_dir)
-        assert try_lock(lock), "the framework's lock was not released"
+        deadline = time.monotonic() + 5
+        while not try_lock(lock):
+            assert time.monotonic() < deadline, "the framework's lock was not released after its idle time"
+            time.sleep(0.05)
         try:
+            assert rag.client is None, "the lock is free before the client was dropped"
             shard = qdrant_edge.EdgeShard.load(str(rag.storage_dir / "collections" / collection))  # raises when held
             shard.close()
         finally:
             lock.release()
         assert rag.search("what does E2041 mean")[0].source == "https://docs.example/e2041"
+
+    def test_the_storage_lock_is_released_after_the_client_is_dropped_never_before(self, make_rag):
+        """The order of a close (Core/rag_manager._close_client): the storage is closed, the manager stops claiming it (client,
+        store, connected), and only then does the cross-process lock go. So a process that holds the lock now, or finds it
+        free, never meets a manager that still claims an open storage; the idle test above rests on it."""
+        rag = make_rag()
+        ingest_all(rag)
+        assert rag.client is not None and rag._file_lock is not None
+        seen = []
+        real = rag._file_lock
+
+        class Recorder:
+            def release(self):
+                seen.append((rag.client is None, rag._store is None, rag._connected))
+                real.release()
+        rag._file_lock = Recorder()
+        rag.close()
+        assert seen == [(True, True, False)], "the lock was released while the manager still claimed the storage"
+        assert rag._file_lock is None and rag.client is None
 
     def test_storage_held_by_another_process_is_a_clear_error(self, make_rag, monkeypatch):
         """A second framework process (here a real one holding the lock, e.g. the MCP server while the GUI asks) never
