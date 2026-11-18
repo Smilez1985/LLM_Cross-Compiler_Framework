@@ -458,7 +458,35 @@ pacman_database_text() {
 PKG_LISTS_READ=0
 # Offline ruft der Installer keine Paketverwaltung auf: Er nennt, was fehlt (OFFLINE_MISSING, am Ende noch einmal).
 OFFLINE_MISSING=()
+
+# Was dieser Lauf selbst installiert hat, weil es vorher nicht da war: Zeilen "Titel<TAB>Paket". Daraus schreibt
+# write_install_manifest die Datei install-manifest.json, mit der scripts/uninstall.sh genau das (und nur das) entfernt.
+INSTALLED_BY_US=()
+PKG_TITLE=""
+# Ist das Paket $1 mit PKG installiert? (Ein Name, den die Paketverwaltung nicht als Paket kennt, gilt als nicht installiert.)
+pkg_present() {
+    case "$PKG" in
+        apt) dpkg-query -W -f='${Status}' "$1" 2> /dev/null | grep -q "install ok installed" ;;
+        dnf|zypper) rpm -q "$1" &> /dev/null ;;
+        pacman) pacman -Q "$1" &> /dev/null ;;
+        apk) apk info -e "$1" &> /dev/null ;;
+        *) return 1 ;;
+    esac
+}
+
+# pkg_install für das Bauteil $1 (sein Titel im Manifest und in den Fragen des Uninstallers): die übrigen Wörter sind die Pakete.
+pkg_install_as() {
+    local rc
+    PKG_TITLE="$1"
+    shift
+    pkg_install "$@"
+    rc=$?
+    PKG_TITLE=""
+    return "$rc"
+}
+
 pkg_install() {
+    local fresh=() pkg rc
     if [ "$OFFLINE" = "1" ]; then
         OFFLINE_MISSING+=("$*")
         log_warn "Offline (--offline): $* wird nicht installiert; die Paketverwaltung bräuchte ihre Paketquellen im Netz. Installiere es von einem lokalen Medium (dem Installationsmedium oder einem lokalen Spiegel der Distribution; system-packages.txt im Preload nennt, was der Installer braucht)."
@@ -473,7 +501,49 @@ pkg_install() {
         esac
         PKG_LISTS_READ=1
     fi
+    # Nur Pakete, die vorher nicht da waren, gehören ins Manifest: Was schon installiert war, bleibt unberührt, auch wenn
+    # ein anderes Paket derselben Gruppe fehlte.
+    for pkg in "$@"; do
+        case "$pkg" in -*) continue ;; esac
+        pkg_present "$pkg" || fresh+=("$pkg")
+    done
     "${PKG_ARGV[@]}" "$@"
+    rc=$?
+    if [ "$rc" -eq 0 ] && [ "${#fresh[@]}" -gt 0 ]; then
+        for pkg in "${fresh[@]}"; do
+            if pkg_present "$pkg"; then INSTALLED_BY_US+=("${PKG_TITLE:-$pkg}"$'\t'"$pkg"); fi
+        done
+    fi
+    return "$rc"
+}
+
+# Schreibt auf, was dieser Lauf installiert hat (INSTALLED_BY_US), in $INSTALL_DIR/install-manifest.json, mit demselben Code, den
+# der Uninstaller liest (orchestrator/utils/install_manifest.py, aus dem Quellordner und mit dem Python, das der Installer
+# gefunden oder installiert hat). Je Bauteil ein Eintrag, "shared": Andere Programme können es benutzen, der Uninstaller fragt
+# also einzeln nach und entfernt es nur nach einem Ja. Kein Fehler hier hält die Installation an: Ein fehlender Eintrag heißt nur,
+# dass der Uninstaller das Paket in Ruhe lässt. Sicher mehrfach aufrufbar (am Ende und beim Beenden).
+write_install_manifest() {
+    local line title pkg id python file pending=("${INSTALLED_BY_US[@]+"${INSTALLED_BY_US[@]}"}")
+    [ "${#pending[@]}" -gt 0 ] || return 0
+    [ -n "${PKG:-}" ] || return 0
+    [ -d "$INSTALL_DIR" ] || return 0
+    python="${PYTHON:-}"
+    if [ -z "$python" ]; then python="$(command -v python3 2> /dev/null || true)"; fi
+    if [ -z "$python" ]; then
+        log_warn "Es gibt kein Python, um install-manifest.json zu schreiben; der Uninstaller lässt die Pakete, die dieser Lauf installiert hat, dann in Ruhe."
+        return 0
+    fi
+    file="$INSTALL_DIR/install-manifest.json"
+    INSTALLED_BY_US=()
+    for line in "${pending[@]}"; do
+        title="${line%%$'\t'*}"
+        pkg="${line#*$'\t'}"
+        id="$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g; s/^-*//' | cut -c1-64)"
+        [ -n "$id" ] || id="paket"
+        PYTHONPATH="$REPO_ROOT" "$python" -m orchestrator.utils.install_manifest record --file "$file" --id "$id" \
+            --scope shared --kind "$PKG" --ref "$pkg" --title "$title" || INSTALLED_BY_US+=("$line")
+    done
+    return 0
 }
 
 # Ein Hinweis, wenn PKG Pakete nicht installieren konnte und es einen bekannten Grund dafür gibt.
@@ -518,7 +588,7 @@ ensure_sevenzip() {
     while IFS= read -r set; do
         [ -n "$set" ] || continue
         read -r -a pkgs <<< "$set"
-        if pkg_install "${pkgs[@]}" && sevenzip_present; then
+        if pkg_install_as "7-Zip" "${pkgs[@]}" && sevenzip_present; then
             log_success "7-Zip installiert (${pkgs[*]})."
             return 0
         fi
@@ -652,7 +722,7 @@ python_try_versioned() {
         pkg_ready "Python 3.11 bis 3.14"
         log_info "$(python3 --version 2>&1) passt nicht (3.11 bis 3.14); versuche die Pakete $set..."
         read -r -a pkgs <<< "$set"
-        if pkg_install "${pkgs[@]}" && find_python; then return 0; fi
+        if pkg_install_as "Python" "${pkgs[@]}" && find_python; then return 0; fi
     done
     return 1
 }
@@ -668,7 +738,7 @@ ensure_python() {
         log_warn "Python3 fehlt. Installiere..."
         pkg_ready "Python 3.11 bis 3.14"
         read -r -a pkgs <<< "$(python_packages)"
-        if ! pkg_install "${pkgs[@]}"; then log_error "Konnte Python nicht installieren.$(pkg_failure_hint)"; fi
+        if ! pkg_install_as "Python" "${pkgs[@]}"; then log_error "Konnte Python nicht installieren.$(pkg_failure_hint)"; fi
         find_python && return 0
     fi
     python_try_versioned && return 0
@@ -1233,13 +1303,13 @@ install_docker_distro() {
     if [ "$PKG" = "apk" ] && ! apk_enable_community; then
         docker_stop "Alpines Repository community ließ sich in $APK_REPOSITORIES nicht einschalten (keine eingeschaltete main-Zeile gefunden oder die Datei nicht schreibbar)."
     fi
-    if ! pkg_install "${DOCKER_PACKAGES[@]}"; then
-        if ! sles_containers_module || ! pkg_install "${DOCKER_PACKAGES[@]}"; then
+    if ! pkg_install_as "Docker" "${DOCKER_PACKAGES[@]}"; then
+        if ! sles_containers_module || ! pkg_install_as "Docker" "${DOCKER_PACKAGES[@]}"; then
             docker_stop "Die Pakete ${DOCKER_PACKAGES[*]} ließen sich mit $tool nicht installieren (Meldungen oben).$(pkg_failure_hint)"
         fi
     fi
     for package in ${DOCKER_OPTIONAL[@]+"${DOCKER_OPTIONAL[@]}"}; do
-        if ! pkg_install "$package"; then
+        if ! pkg_install_as "Docker" "$package"; then
             log_warn "$package ließ sich nicht installieren; das Framework baut Images dann mit Dockers älterem Builder (langsamer)."
         fi
     done
@@ -1482,12 +1552,12 @@ setup_rootless_podman() {
             ROOTLESS_PODMAN_WHY="Alpines Repository community ließ sich in $APK_REPOSITORIES nicht einschalten."
             return 1
         fi
-        if ! pkg_install "${PODMAN_PACKAGES[@]}"; then
+        if ! pkg_install_as "Podman" "${PODMAN_PACKAGES[@]}"; then
             ROOTLESS_PODMAN_WHY="Die Pakete ${PODMAN_PACKAGES[*]} ließen sich mit $tool nicht installieren (Meldungen oben).$(pkg_failure_hint)"
             return 1
         fi
         for package in ${PODMAN_OPTIONAL[@]+"${PODMAN_OPTIONAL[@]}"}; do
-            if ! pkg_install "$package"; then
+            if ! pkg_install_as "Podman" "$package"; then
                 log_warn "$package ließ sich nicht installieren: Ohne es gibt es den Befehl docker nicht; das Framework spricht Podman über seinen Socket an."
             fi
         done
@@ -1773,7 +1843,7 @@ alpine_image_tools() {
     if [ -z "$missing" ]; then ALPINE_TOOLS=ok; return 0; fi
     log_info "Für das Framework-Image (scripts/build_container_image.sh) fehlen: $missing. Installiere sie über apk..."
     # shellcheck disable=SC2086 # die Paketnamen sind einzelne Wörter
-    if pkg_install $missing; then ALPINE_TOOLS=ok; else ALPINE_TOOLS=failed; fi
+    if pkg_install_as "git und GNU tar" $missing; then ALPINE_TOOLS=ok; else ALPINE_TOOLS=failed; fi
 }
 
 # --- SCHRITT 2: DATEIEN KOPIEREN ---
@@ -1827,7 +1897,7 @@ deploy_files() {
     # Wir nutzen rsync für sauberes Kopieren (exklusive Müll); fehlt es, über die Paketverwaltung dieses Systems.
     if ! command -v rsync &> /dev/null; then
         pkg_ready "rsync"
-        if ! pkg_install rsync; then
+        if ! pkg_install_as "rsync" rsync; then
             log_error "rsync ließ sich mit $(pkg_tool) nicht installieren (Meldungen oben); ohne rsync wird nichts kopiert.$(pkg_failure_hint)"
         fi
     fi
@@ -2843,6 +2913,7 @@ plan_installation() {
     elif [ "$OFFLINE" = "1" ]; then
         echo "   Offline (--offline): ohne Prüfung des Netzes und ohne neue Auflösung, gleich $requirements; keine Paketverwaltung, Ditto später"
     fi
+    echo "   $INSTALL_DIR/install-manifest.json: schreibt auf, was der Installer selbst installiert (nur Pakete, die vorher fehlten); scripts/uninstall.sh entfernt genau das, nach Rückfrage, und nichts, was schon da war"
     echo "   Framework-Modus: ${MODE_CHOICE:-wird gefragt (ohne Terminal: bleibt, wie er ist; neu: privat)}"
     log_success "Probelauf fertig: Die Installation liefe hier durch."
 }
@@ -2852,6 +2923,8 @@ main() {
     ditto_option "$@"
     if [ "$DRY_RUN" = "1" ]; then plan_installation; return 0; fi
     check_root
+    # Auch ein Abbruch (log_error beendet das Skript) schreibt noch auf, was bis dahin installiert wurde.
+    trap 'write_install_manifest || true' EXIT
     preload_open
     install_role
     if [ "$INSTALL_ROLE" = "person" ]; then person_install; return 0; fi
@@ -2865,6 +2938,7 @@ main() {
     configure
     share_installation
     record_installation
+    write_install_manifest
     setup_mode
     setup_start_entry
     setup_ditto

@@ -90,6 +90,8 @@ OS_RELEASE = {
 # $LCF_STASH/fail-output, when a test put dnf's real error there), answers dnf's --assumeno with the transaction in
 # $LCF_STASH/dnf-plan (dnf's real output; it changes nothing and ends with "Operation aborted.", exit 1), and
 # "installs" what it is asked for (the package's command appears on the PATH).
+# What pkg_present asks each package manager; recorded by the fakes like every call, but not an action.
+QUERIES = ("rpm -q ", "pacman -Q ", "apk info -e ")
 PACKAGE_MANAGER = r'''#!/bin/sh
 echo "$(basename "$0") $*" >> "$LCF_CALLS"
 for f in "$LCF_FAILS"/*; do
@@ -397,7 +399,9 @@ class Box:
                               self.pinned or ""], env=self.env, capture_output=True, text=True, timeout=60,
                              cwd=self.root)
         calls = self.calls.read_text().splitlines() if self.calls.exists() else []
-        return run, calls
+        # The questions "is it installed already?" (pkg_present, for the install manifest) are no actions: the tests
+        # list what the installer does, not what it asks (tests/test_install_manifest_linux.py pins the questions).
+        return run, [call for call in calls if not call.startswith(QUERIES)]
 
 
 @pytest.fixture(scope="module")

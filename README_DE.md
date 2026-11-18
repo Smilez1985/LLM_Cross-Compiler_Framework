@@ -417,6 +417,14 @@ verändern oder löschen sie nie, sie sagen, dass es sie gibt und wie du sie ent
   Cache und Modelle (`output/`, `cache/`, `models/`) sowie Targets oder Packs von dir unter `targets/` und
   `community/`. Kopiere, was du noch brauchst, sieh dir an, was übrig ist (`ls -la /opt/llm-conversion-framework`),
   und entferne den alten Ordner selbst: `sudo rm -rf /opt/llm-conversion-framework`.
+  `install.sh` schreibt außerdem in `install-manifest.json` (im Installationsordner) auf, welche Pakete es **selbst**
+  installiert hat: nur die, die vorher nicht installiert waren; ein Python oder ein rsync, das schon da war, wird nie
+  aufgeschrieben und nie entfernt. `sudo ./scripts/uninstall.sh` zeigt sie und fragt bei jedem einzeln, mit einer Warnung
+  und Nein als Antwort, und entfernt ein Paket nur, wenn kein anderes Paket es braucht (die Werkzeuge, die es dafür nutzt,
+  `dpkg -r`, `rpm -e` und `pacman -R`, lehnen sonst ab). Die Suchmaschine der Websuche in deinem eigenen Ordner wird mit
+  derselben Frage entfernt. `--dry-run` zeigt nur, wonach gefragt würde. Es entfernt nicht den Installationsordner, den
+  Starter `/usr/local/bin/llm-framework`, die Gruppe `llmcf`, den Menüeintrag und deinen Ordner `~/.llm-framework`; es
+  nennt sie.
 - **Windows:** Die neue Installation kommt nach `C:\Program Files\LLM-Cross-Compiler-Framework` mit der Verknüpfung
   **LLM-Cross-Compiler-Framework**; die alte Verknüpfung **LLM-Conversion-Framework** startet weiter die alte
   Installation. Der Installer schreibt in `install-manifest.json` auf, was er **selbst** installiert hat: Ein Python, ein

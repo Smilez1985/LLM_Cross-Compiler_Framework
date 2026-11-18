@@ -396,6 +396,13 @@ never change or delete it, they say that it is there and how to remove it.
   `cache/`, `models/`) and targets or packs of yours under `targets/` and `community/`. Copy what you still need,
   look at what is left (`ls -la /opt/llm-conversion-framework`) and remove the old folder yourself:
   `sudo rm -rf /opt/llm-conversion-framework`.
+  `install.sh` also writes down in `install-manifest.json` (in the installation folder) the packages it installed
+  **itself**: only those that were not installed before, so a Python or an rsync that was there is never written down and
+  never removed. `sudo ./scripts/uninstall.sh` shows them and asks about each on its own, with a warning and No as the
+  answer, and removes a package only when no other package needs it (the tools it uses, `dpkg -r`, `rpm -e` and
+  `pacman -R`, refuse otherwise). The search engine of the web search, in your own folder, is removed with the same
+  question. `--dry-run` only shows what it would ask about. It does not remove the installation folder, the launcher
+  `/usr/local/bin/llm-framework`, the group `llmcf`, the menu entry or your folder `~/.llm-framework`; it names them.
 - **Windows:** the new installation goes to `C:\Program Files\LLM-Cross-Compiler-Framework` with the shortcut
   **LLM-Cross-Compiler-Framework**; the old shortcut **LLM-Conversion-Framework** still starts the old installation.
   `scripts\Uninstall-LLM-Cross-Compiler-Framework.bat` finds both installations, lists for each one what it

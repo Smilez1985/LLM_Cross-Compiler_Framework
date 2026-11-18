@@ -7,17 +7,24 @@ What is not written down was not installed by the installer and is never removed
 stays, because other programs may need it. What is written down is shown first. What only the framework uses (`own`) is asked
 once for all, and every system program (`shared`) is asked on its own, with a warning and with No as the answer.
 
+A package of a Linux package manager is removed with the tool that REFUSES when another package needs it (`dpkg -r`, `rpm -e`,
+`pacman -R`; for apk the reverse dependencies are read first), never with `apt-get remove`, `dnf remove` or `apk del`, which
+remove the packages that depend on it as well: something that was there before the framework must never go with it. A package
+that came as a dependency of one the installer installed was not written down and stays (`apt autoremove` is the person's
+choice, and it shows what it would remove first).
+
 `python -m orchestrator.Core.uninstall_components list|uninstall [--dry-run] --machine FILE --person FILE` is what
-scripts/Uninstall-LLM-Cross-Compiler-Framework.bat calls. It reads and writes UTF-8 itself, so a path with an umlaut is no
+scripts/Uninstall-LLM-Cross-Compiler-Framework.bat and scripts/uninstall.sh call. It reads and writes UTF-8 itself, so a path with an umlaut is no
 problem for a batch file. The calls into the system (`run`, `which`, `ask`) are parameters, so the tests need none.
 """
 
+import os
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, Optional, Sequence
+from typing import Callable, List, Optional, Sequence
 
 from orchestrator.utils import atomic
 from orchestrator.utils import install_manifest as manifest
@@ -34,6 +41,63 @@ def _inside(path: Path, base: Path) -> bool:
         return True
     except (ValueError, OSError):
         return False
+
+
+# The tool that removes a package without removing the packages that need it (they make it refuse).
+PACKAGE_REMOVERS = {"apt": ("dpkg", ["-r"]), "dnf": ("rpm", ["-e"]), "zypper": ("rpm", ["-e"]),
+                    "pacman": ("pacman", ["-R", "--noconfirm"]), "apk": ("apk", ["del"])}
+
+
+def _last_line(text: str) -> str:
+    lines = [line.strip() for line in (text or "").strip().splitlines() if line.strip()]
+    return lines[-1][:200] if lines else ""
+
+
+APK_VERSION = re.compile(r"-[0-9][0-9A-Za-z.+~_]*(-r[0-9]+)?$")
+
+
+def _apk_dependents(run: Callable, exe: str, names: List[str]) -> List[str]:
+    """The packages that need one of `names`, by `apk info -r` (its lines after the heading, each as name-version-release,
+    so the version is cut off before it is compared with the names of the entry itself); a failure to ask gives none here
+    and apk itself decides then, which is why the answer is only used to refuse early."""
+    found: List[str] = []
+    for name in names:
+        done = run([exe, "info", "-r", name], capture_output=True, text=True)
+        if done.returncode != 0:
+            continue
+        for line in (done.stdout or "").splitlines()[1:]:
+            word = line.strip().split(" ")[0] if line.strip() else ""
+            if word and APK_VERSION.sub("", word) not in names and word not in found:
+                found.append(word)
+    return found
+
+
+def remove_packages(entry: Entry, run: Callable = subprocess.run, which: Callable = shutil.which,
+                    is_root: Optional[Callable[[], bool]] = None) -> str:
+    """Removes the packages of an entry of a package manager, only when no other package needs them (see the module text).
+    One plain line says what happened; a refusal says why and how to do it by hand."""
+    names = manifest.package_names(entry)
+    if not names:
+        return "uebersprungen: ein Name im Manifest ist kein Paketname."
+    tool, args = PACKAGE_REMOVERS[entry.kind]
+    by_hand = f"sudo {tool} {' '.join(args)} {' '.join(names)}"
+    root = is_root() if is_root is not None else getattr(os, "geteuid", lambda: 0)() == 0
+    if not root:
+        return f"nicht entfernt: dafuer braucht der Uninstaller Root-Rechte (mit sudo starten). Selbst: {by_hand}"
+    exe = which(tool)
+    if exe is None:
+        return f"nicht entfernt: {tool} fehlt. Selbst: {by_hand}"
+    if entry.kind == "apk":
+        needed_by = _apk_dependents(run, exe, names)
+        if needed_by:
+            return ("nicht entfernt: andere Pakete brauchen es (" + ", ".join(needed_by[:6]) + "). Der Uninstaller entfernt nie "
+                    "Pakete, die er nicht aufgeschrieben hat.")
+    done = run([exe, *args, *names], capture_output=True, text=True)
+    if done.returncode == 0:
+        return "entfernt."
+    reason = _last_line(done.stderr) or _last_line(done.stdout) or f"Code {done.returncode}"
+    return (f"nicht entfernt: {reason} Meist braucht ein anderes Paket es. Der Uninstaller entfernt nie Pakete, die er nicht "
+            f"aufgeschrieben hat. Selbst: {by_hand}")
 
 
 def remove_entry(entry: Entry, manifest_file: Path, run: Callable = subprocess.run, which: Callable = shutil.which) -> str:
@@ -56,7 +120,9 @@ def remove_entry(entry: Entry, manifest_file: Path, run: Callable = subprocess.r
             return "uebersprungen: der Ordner liegt nicht unter dem Ordner dieses Manifests."
         left = atomic.remove_tree(folder)
         return "entfernt." if not left else "nicht ganz entfernt: einiges liegt noch in " + str(folder)
-    return f"nicht von hier entfernt: {entry.kind} {entry.ref} (mit der Paketverwaltung)."
+    if entry.kind in manifest.PACKAGE_KINDS:
+        return remove_packages(entry, run, which)
+    return f"nicht von hier entfernt: {entry.kind} {entry.ref}."
 
 
 def uninstall(machine: Optional[Path], person: Optional[Path], ask: Callable[[str], str] = input,
@@ -123,4 +189,4 @@ def main(argv: Sequence[str]) -> int:
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
 
-__all__ = ["SHARED_WARNING", "main", "remove_entry", "uninstall"]
+__all__ = ["PACKAGE_REMOVERS", "SHARED_WARNING", "main", "remove_entry", "remove_packages", "uninstall"]
