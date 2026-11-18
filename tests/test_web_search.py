@@ -50,6 +50,8 @@ class TestPreparingTheQuery:
 
     @pytest.mark.parametrize("query", [
         "why does /home/alice/projects/model.onnx fail", r"error in C:\Users\alice\build.log",
+        # the values are put together here: a value in a provider's exact format is found by the secret scan even when it is a
+        # test value, and the formats are what this test is about
         "token " + "sk-" + "abcdefghijklmnopqrstuvwxyz123456" + " rejected", "gh" + "p_" + "abcdefghijklmnopqrstuvwxyz0123456789" + " fails",
         "AK" + "IA" + "ABCDEFGHIJKLMNOP" + " is denied", "-----BEGIN RSA " + "PRIVATE KEY----- shows"])
     def test_a_query_with_a_path_or_a_secret_is_never_sent(self, query):
