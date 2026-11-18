@@ -506,6 +506,37 @@ class TestCollections:
         rag_a.close()
         assert rag_b._connect() is True and rag_b.get_status()["vector_count"] > 0
 
+    def test_the_wait_is_longer_than_the_idle_time_and_both_are_short(self):
+        """DESIGN, Knowledge base and Deep Ingest: Qdrant Edge reopens in tens of milliseconds, so the storage is released after
+        1 second without use and a second process waits up to 2 seconds. The wait must be longer than the idle time, or a
+        process that asks while the other one is idle could be turned away."""
+        import orchestrator.Core.rag_manager as rm
+        assert rm.RAGManager.IDLE_CLOSE_SECONDS == 1.0 and rm.LOCK_WAIT_SECONDS == 2.0
+        assert rm.LOCK_WAIT_SECONDS > rm.RAGManager.IDLE_CLOSE_SECONDS
+
+    def test_the_busy_error_names_the_idle_time_of_the_constant(self, make_rag):
+        rag = make_rag()
+        text = str(rag._busy_error())
+        assert f"released after {int(type(rag).IDLE_CLOSE_SECONDS)} s without use" in text
+        assert "in use by another framework process" in text
+
+    def test_a_second_manager_gets_the_storage_by_waiting_while_the_first_is_idle(self, make_rag, monkeypatch):
+        """The real protocol with shortened times: the first manager holds the storage and is idle, the second one asks and
+        waits until the idle close has released the lock (RAGManager._open_local), and then has the storage, no error."""
+        import orchestrator.Core.rag_manager as rm
+
+        rag_a, rag_b = make_rag(), make_rag()
+        ingest_all(rag_a)
+        assert rag_a.client is not None
+        rag_a.idle_close_seconds = 0.3
+        rag_a._schedule_idle_close()                 # idle from now on, as after the last use
+        monkeypatch.setattr(rm, "LOCK_WAIT_SECONDS", 3.0)
+        started = time.monotonic()
+        assert rag_b._connect() is True, rag_b.last_error
+        assert time.monotonic() - started < 3.0
+        assert rag_a.client is None and rag_b.client is not None
+        assert rag_b.get_status()["vector_count"] > 0
+
 
 class TestServerMode:
 

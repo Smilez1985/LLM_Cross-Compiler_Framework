@@ -13,8 +13,9 @@ Only one process may open the storage at a time. Qdrant Edge locks a shard's wri
 cannot open a shard another process holds. The framework takes its own lock first (`<state>/qdrant_edge.lock`,
 filelock: works on Linux and Windows), for the whole time the storage is open and around the conversion of the old
 storage, so the GUI, the CLI and the MCP server take turns: each one releases the storage after a short idle time
-(RAGManager.IDLE_CLOSE_SECONDS), and a second process waits a few seconds for it (RAGManager.LOCK_WAIT_SECONDS) and
-then gets a clear "in use by another framework process" error instead of a broken read.
+(RAGManager.IDLE_CLOSE_SECONDS, one second), and a second process waits for it a little longer than that
+(RAGManager.LOCK_WAIT_SECONDS, two seconds) and then gets a clear "in use by another framework process" error instead of
+a broken read.
 """
 
 import json

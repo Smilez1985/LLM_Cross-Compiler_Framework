@@ -66,8 +66,11 @@ COLLECTION_NAME = "framework_knowledge"  # alias of the active collection (one c
 MIN_SPARSE_QUERY_TOKENS = 3  # shorter queries use the dense ranking only, unless they hold an identifier
 _IDENTIFIER = re.compile(r"\d|_|[A-Z]{2,}|\w[.-]\w")  # E2041, GGML_CUDA, RKNN, librkllmrt.so
 # How long a process waits for the local storage while another framework process (GUI, CLI, MCP server) holds it; that
-# one releases it after IDLE_CLOSE_SECONDS without use.
-LOCK_WAIT_SECONDS = 5.0
+# one releases it after IDLE_CLOSE_SECONDS without use. The wait is longer than the idle time, so a process that asks while
+# the other one is idle always gets the storage (docs/DESIGN.md, Knowledge base and Deep Ingest: the values are 2 and 1
+# seconds because Qdrant Edge reopens in tens of milliseconds; the old storage needed seconds, which was the reason for the
+# 30 and 5 seconds they had before).
+LOCK_WAIT_SECONDS = 2.0
 # Points written or deleted in the local storage after which it is optimized when it is released (segments merged,
 # deleted points dropped; without a graph index this takes moments).
 OPTIMIZE_AFTER_WRITES = 1000
@@ -416,7 +419,7 @@ class RAGManager:
     models after rag_model_idle_minutes (reloading them takes seconds, so not with the storage).
     """
 
-    IDLE_CLOSE_SECONDS = 30.0
+    IDLE_CLOSE_SECONDS = 1.0   # a reopen costs a few hundredths of a second; see LOCK_WAIT_SECONDS
 
     def __init__(self, framework_manager, embedder: Optional[DenseEmbedder] = None,
                  sparse_embedder: Optional[SparseEmbedder] = None, reranker=None):

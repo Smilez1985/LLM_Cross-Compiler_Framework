@@ -2102,8 +2102,8 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
 - **Storage:** Qdrant Edge, the Rust engine of Qdrant, runs inside the framework process (PyPI `qdrant-edge-py`,
   Apache-2.0), with its data in `~/.llm-framework/qdrant_edge` (no Docker, no server, no open port). One process at a
   time opens it: the GUI, the CLI and the MCP server take turns. The framework holds a lock file
-  (`qdrant_edge.lock` next to the folder) while the storage is open, and releases it after 30 idle seconds. A second
-  process that wants it (also only to read) waits up to 5 seconds and then gets a clear "in use by another framework
+  (`qdrant_edge.lock` next to the folder) while the storage is open, and releases it after 1 idle second. A second
+  process that wants it (also only to read) waits up to 2 seconds and then gets a clear "in use by another framework
   process" error; it never reads a half-written state. To use the knowledge base from several processes at the same
   time, set `qdrant_url` to a Qdrant server; a remote server needs https and the API key stored as the secret
   `qdrant_api_key` (never credentials in the URL). Searches are exact (no approximate graph index), as before. On a
@@ -2255,7 +2255,7 @@ knowledge base keep their old chunks: import them again (for example a new Deep 
 The embedding models and the reranker are unloaded after `rag_model_idle_minutes` (default 10) without use and
 loaded again on the next search, which takes a few seconds. The time counts from the end of the last search or
 import, never during one. `0` keeps them loaded; a longer time than 7 days (10080 minutes) counts as 7 days. The
-embedded storage is released separately, after 30 idle seconds (see **Storage** above).
+embedded storage is released separately, after 1 idle second (see **Storage** above).
 
 ---
 

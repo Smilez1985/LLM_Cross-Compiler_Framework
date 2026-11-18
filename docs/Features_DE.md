@@ -2316,8 +2316,8 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
 - **Speicher:** Qdrant Edge, die Rust-Engine von Qdrant, läuft im Framework-Prozess (PyPI `qdrant-edge-py`,
   Apache-2.0), mit seinen Daten in `~/.llm-framework/qdrant_edge` (kein Docker, kein Server, kein offener Port). Es
   öffnet ihn immer nur ein Prozess: GUI, CLI und MCP-Server wechseln sich ab. Das Framework hält eine Sperrdatei
-  (`qdrant_edge.lock` neben dem Ordner), solange der Speicher offen ist, und gibt sie nach 30 Sekunden ohne Zugriff
-  frei. Ein zweiter Prozess, der ihn will (auch nur zum Lesen), wartet bis zu 5 Sekunden und bekommt dann einen klaren
+  (`qdrant_edge.lock` neben dem Ordner), solange der Speicher offen ist, und gibt sie nach 1 Sekunde ohne Zugriff
+  frei. Ein zweiter Prozess, der ihn will (auch nur zum Lesen), wartet bis zu 2 Sekunden und bekommt dann einen klaren
   Fehler "in use by another framework process"; er liest nie einen halb geschriebenen Stand. Wer die Wissensbasis aus
   mehreren Prozessen gleichzeitig nutzen will, setzt `qdrant_url` auf einen Qdrant-Server; ein entfernter Server
   braucht https und den API-Schlüssel als Geheimnis `qdrant_api_key` (nie Zugangsdaten in der URL). Suchen sind exakt
@@ -2483,7 +2483,7 @@ Beispiel mit einem neuen Deep Ingest derselben URL), damit es wirkt.
 Die Embedding-Modelle und der Reranker werden nach `rag_model_idle_minutes` (Standard 10) ohne Nutzung entladen und
 bei der nächsten Suche wieder geladen, was einige Sekunden dauert. Die Zeit zählt ab dem Ende der letzten Suche oder
 Aufnahme, nie währenddessen. `0` hält sie geladen; eine längere Zeit als 7 Tage (10080 Minuten) gilt als 7 Tage.
-Der eingebettete Speicher wird davon getrennt nach 30 Sekunden ohne Zugriff freigegeben (siehe **Speicher** oben).
+Der eingebettete Speicher wird davon getrennt nach 1 Sekunde ohne Zugriff freigegeben (siehe **Speicher** oben).
 
 ---
 
