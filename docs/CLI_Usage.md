@@ -4080,6 +4080,7 @@ lines per file) and notes.
 | `--to FILE` | Encrypt the pack for private sharing to the age recipients (`age1...`) in this file: what `llm-cli zoo keys` printed on the recipient's computer, or a public key from `age-keygen`/`rage-keygen`; repeatable. |
 | `--passphrase` | Encrypt the pack for private sharing with a passphrase (asked twice, at least 12 characters). Not together with `--to` (exit code 2): age encrypts to keys or to one passphrase. |
 | `--out DIRECTORY` | Folder for the pack. Default: `community/contributions/` in the installation. |
+| `--accept-proposals` | A target, recipe or block that holds data private to this computer stops the export: a path on a network drive or an external volume, a Windows drive or share path, an internal domain (`nas.lan`, `git.company.internal`), a line of an SSH configuration or the key file of `ssh -i`. The error names every place with a proposed replacement (an example such as `/path/to/example`); this option accepts them all. Without it nothing is changed and no pack is made. Nothing private stays in a pack either way. |
 | `--pr` | Hand the pack to a pull request on the community repository (see below). |
 | `--yes` | With `--pr`: submit without asking after the summary. |
 

@@ -81,6 +81,7 @@ CLI_PATHS: Dict[str, str] = {
     "zoo export --target": "btn_zoo_export",         # a knowledge pack: Belongs to: a target
     "zoo export --to": "btn_zoo_export",             # Encrypt: to the keys in key files
     "zoo export --passphrase": "btn_zoo_export",     # Encrypt: with a passphrase
+    "zoo export --accept-proposals": "btn_zoo_export",   # the tick: Accept the proposed replacements
     "zoo export --out": "btn_zoo_export",            # Folder: Choose folder...
     "zoo export --pr": "btn_zoo_export",             # the export window's Open pull request, after the summary
     "zoo keys": "btn_zoo_keys",                      # with Copy and Save...

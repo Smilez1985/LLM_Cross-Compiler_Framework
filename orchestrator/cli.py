@@ -12355,18 +12355,24 @@ def zoo_verify(ctx: FrameworkContext, pack_file: Optional[Path]):
               help='Encrypt for private sharing to the age recipients (age1...) in this file (repeatable)')
 @click.option('--passphrase', 'use_passphrase', is_flag=True, help='Encrypt for private sharing with a passphrase')
 @click.option('--out', type=click.Path(file_okay=False, path_type=Path), help='Folder for the pack')
+@click.option('--accept-proposals', 'accept_proposals', is_flag=True,
+              help='A target, recipe or block that holds data private to this computer (a path on a network drive, an '
+              'internal domain, an SSH configuration line) stops the export with a proposed replacement for each; this '
+              'accepts them all')
 @click.option('--pr', 'open_pr', is_flag=True,
               help='Hand the pack to a pull request on the community repository (gh if installed, else the browser)')
 @click.option('--yes', is_flag=True, help='With --pr: submit without asking after the summary')
 @pass_context
 def zoo_export(ctx: FrameworkContext, kind: str, source: Optional[str], author: str, license_: Optional[str],
                model_license: str, pack_id: Optional[str], topic: Optional[str], target: Optional[str],
-               recipients: Tuple[Path, ...], use_passphrase: bool, out: Optional[Path], open_pr: bool, yes: bool):
+               recipients: Tuple[Path, ...], use_passphrase: bool, out: Optional[Path], accept_proposals: bool,
+               open_pr: bool, yes: bool):
     """Export a target (SOURCE: target id), a recipe (SOURCE: a build folder or its build_info.json) or your
     knowledge base (on a --topic or a --target) as a scrubbed pack signed with your key. Shows what the privacy scrub
-    changed."""
+    changed. Data that is private to this computer never stays in a pack: what a replacement would change in a script
+    stops the export with a proposal (--accept-proposals takes them)."""
     from pyrage.x25519 import Recipient
-    from orchestrator.Core.community_manager import submit_contribution
+    from orchestrator.Core.community_manager import PackReviewNeeded, submit_contribution
     from orchestrator.Core.community_pack import PackError
     if kind in ("target", "recipe", "block") and not source:
         what = {"target": "target id", "recipe": "build folder", "block": "block id"}[kind]
@@ -12386,7 +12392,11 @@ def zoo_export(ctx: FrameworkContext, kind: str, source: Optional[str], author: 
     try:
         result = cm.export_pack(kind, source, author=author, license=license_, pack_id=pack_id,
                                 model_license=model_license, recipients=_public_keys(recipients, Recipient),
-                                passphrase=passphrase, out_dir=out, topic=topic, target=target)
+                                passphrase=passphrase, out_dir=out, topic=topic, target=target,
+                                accept_proposals=accept_proposals)
+    except PackReviewNeeded as e:
+        click.echo("Private to this computer, with the proposed replacement:\n" + e.details(), err=True)
+        _zoo_fail(e)
     except (PackError, OSError, ValueError) as e:
         _zoo_fail(e)
     click.echo(result.summary())

@@ -4273,6 +4273,7 @@ Datei), und Hinweise.
 | `--to FILE` | Das Paket zum privaten Teilen an die age-Empfänger (`age1...`) in dieser Datei verschlüsseln: was `llm-cli zoo keys` auf dem Rechner des Empfängers ausgegeben hat, oder ein öffentlicher Schlüssel aus `age-keygen`/`rage-keygen`; wiederholbar. |
 | `--passphrase` | Das Paket zum privaten Teilen mit einer Passphrase verschlüsseln (zweimal abgefragt, mindestens 12 Zeichen). Nicht zusammen mit `--to` (Exit-Code 2): age verschlüsselt an Schlüssel oder an eine Passphrase. |
 | `--out DIRECTORY` | Ordner für das Paket. Standard: `community/contributions/` in der Installation. |
+| `--accept-proposals` | Ein Target, Rezept oder Block mit Daten, die nur zu diesem Computer gehören, hält den Export an: ein Pfad auf einem Netzlaufwerk oder einem externen Datenträger, ein Windows-Laufwerks- oder Freigabepfad, eine interne Domain (`nas.lan`, `git.firma.internal`), eine Zeile einer SSH-Konfiguration oder die Schlüsseldatei von `ssh -i`. Der Fehler nennt jede Stelle mit einem Ersetzungsvorschlag (ein Beispiel wie `/path/to/example`); diese Option nimmt alle an. Ohne sie wird nichts geändert und kein Paket gemacht. Nichts Privates bleibt in jedem Fall in einem Paket. |
 | `--pr` | Das Paket an einen Pull-Request im Community-Repository übergeben (siehe unten). |
 | `--yes` | Mit `--pr`: ohne Nachfrage nach der Zusammenfassung einreichen. |
 

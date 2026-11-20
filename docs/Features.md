@@ -3805,7 +3805,13 @@ trash, the pack's pages are imported again at the next knowledge import.
   and `<mac>`, e-mail addresses `<email>`, JWTs `<jwt>`, the host name `<host>`, the user name `<user>`, and API
   keys are redacted. Loopback addresses, image digests, `git@` remotes and default accounts such as `root` or
   `runner` stay, so a scrubbed target still builds. The changes are shown as a diff before you share anything.
-  Binary files are refused.
+  Binary files are refused. In a target, recipe or block, a probe's serial number, machine id, UUID and host name line and a
+  known_hosts entry are replaced too; and what is private to this computer but sits in a script or a file (a path on a
+  network drive or an external volume, a Windows drive or share path, an internal domain, a line of an SSH configuration,
+  the key file of `ssh -i`) stops the export with the place and a proposed replacement, an example such as
+  `/path/to/example`. You accept the proposals (`--accept-proposals`, the tick "Accept the proposed replacements" in the
+  export dialog) or edit the lines and export again; nothing private is ever kept in a pack, and `zoo verify` checks the
+  same rule.
 - The pack is checked like an installation and signed with your key. It is written to `community/contributions/`
   (or `--out`).
 - **Licence:** MIT by default for your own target or recipe (`--license`; a list in the GUI). Knowledge packs hold

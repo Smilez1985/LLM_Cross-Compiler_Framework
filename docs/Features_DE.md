@@ -4216,7 +4216,14 @@ beim nächsten Wissensimport erneut importiert.
   MAC-Adressen zu `<ip>` und `<mac>`, E-Mail-Adressen zu `<email>`, JWTs zu `<jwt>`, der Hostname zu `<host>`, der
   Benutzername zu `<user>`, und API-Schlüssel werden geschwärzt. Loopback-Adressen, Image-Digests, `git@`-Remotes und
   Standardkonten wie `root` oder `runner` bleiben, damit ein bereinigtes Target weiter baut. Die Änderungen werden als
-  Diff gezeigt, bevor du etwas teilst. Binärdateien werden abgelehnt.
+  Diff gezeigt, bevor du etwas teilst. Binärdateien werden abgelehnt. In einem Target, Rezept oder Block werden außerdem
+  Seriennummer, Machine-ID, UUID und Hostname-Zeile einer Probe und ein known_hosts-Eintrag ersetzt; und was nur zu
+  diesem Computer gehört, aber in einem Skript oder einer Datei steht (ein Pfad auf einem Netzlaufwerk oder einem externen
+  Datenträger, ein Windows-Laufwerks- oder Freigabepfad, eine interne Domain, eine Zeile einer SSH-Konfiguration, die
+  Schlüsseldatei von `ssh -i`), hält den Export mit der Stelle und einem Ersetzungsvorschlag an, einem Beispiel wie
+  `/path/to/example`. Du nimmst die Vorschläge an (`--accept-proposals`, das Häkchen „Die vorgeschlagenen Ersetzungen
+  annehmen“ im Export-Dialog) oder bearbeitest die Zeilen und exportierst erneut; nichts Privates bleibt je in einem
+  Paket, und `zoo verify` prüft dieselbe Regel.
 - Das Pack wird wie bei einer Installation geprüft und mit deinem Schlüssel signiert. Es wird nach
   `community/contributions/` geschrieben (oder nach `--out`).
 - **Lizenz:** standardmäßig MIT für dein eigenes Target oder Rezept (`--license`; in der GUI eine Liste).

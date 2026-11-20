@@ -77,6 +77,7 @@ from orchestrator.Core.community_pack import (ID_PATTERN, LICENSE_PATTERN, MAX_P
                                               read_manifest, read_pack, scrub, sign_manifest, tree_sha256, utc_now,
                                               verify_index, verify_manifest, write_pack)
 from orchestrator.rag import licence_texts, licences, pack_licences
+from orchestrator.security import export_review
 from orchestrator.rag.licences import FULL_TEXT, LINK_AND_FACTS, SharePlan
 from orchestrator.utils.download import DownloadError, PinnedDownloader, sha256_file, with_reason
 from orchestrator.utils.file_lock import file_lock
@@ -503,6 +504,27 @@ def share_pages(records: Iterable[dict]) -> Tuple[List[dict], List[PageShare]]:
         shares.append(PageShare(scrub(source), scrub(title), plan))
     pages = [page for page in pages if page["source"] and page["content"]]
     return pages, shares
+
+
+class PackReviewNeeded(PackError):
+    """The export stopped at data that is private to this computer and cannot be replaced without changing a script or
+    a file (a path on a network drive, an internal domain, an SSH configuration line, the key file of `ssh -i`). The
+    message names the places with the proposed replacements and never the originals (an AI that reads an error must not
+    get them); `details()` is for the person, who accepts the proposals (`zoo export --accept-proposals`, the tick of
+    the export dialog), or edits or removes the lines and exports again. Nothing private is ever kept in a pack."""
+
+    def __init__(self, pending: List[Tuple[str, "export_review.Finding"]]):
+        self.pending = pending
+        lines = [export_review.describe(f, rel, with_original=False) for rel, f in pending[:20]]
+        more = f"\n- ... and {len(pending) - 20} more" if len(pending) > 20 else ""
+        super().__init__("The export stopped: " + str(len(pending)) + " place(s) hold data that is private to this "
+                         "computer, which a replacement would change in a script or a file. Proposed replacements:\n- "
+                         + "\n- ".join(lines) + more + "\nAccept the proposals (zoo export --accept-proposals, or the "
+                         "tick in the export dialog), or edit or remove these lines and export again.")
+
+    def details(self) -> str:
+        """The same places with the originals, for the person at the terminal or in the dialog."""
+        return "\n".join(export_review.describe(f, rel, with_original=True) for rel, f in self.pending)
 
 
 @dataclass
@@ -1714,6 +1736,11 @@ class CommunityManager:
                 text = file.read_text(encoding="utf-8", errors="replace")
                 if scrub(text) != text:
                     problems.append(f"{rel}: contains personal data the privacy scrub would remove")
+                elif contents.manifest.kind != "knowledge":
+                    private = export_review.findings(text)
+                    if private:
+                        problems.append(f"{rel}: contains data that is private to the computer it came from "
+                                        f"({', '.join(export_review.kinds(private))}), line {private[0].line}")
             return contents.manifest, problems
         finally:
             remove_tree(work)
@@ -1729,7 +1756,8 @@ class CommunityManager:
                     pack_id: Optional[str] = None, model_license: str = "unknown",
                     root_urls: Optional[Iterable[str]] = None, recipients: Sequence = (),
                     passphrase: Optional[str] = None, out_dir: Optional[Path] = None,
-                    topic: Optional[str] = None, target: Optional[str] = None) -> ExportResult:
+                    topic: Optional[str] = None, target: Optional[str] = None,
+                    accept_proposals: bool = False) -> ExportResult:
         """A scrubbed pack signed with your key: kind target (source: target id), recipe (source: a build's
         build_info.json) or knowledge (optionally only the pages of root_urls). With recipients or a passphrase
         it is encrypted for private sharing. Nothing is uploaded. The licence defaults to MIT for your own work;
@@ -1771,7 +1799,7 @@ class CommunityManager:
                 notes += files.notes()
                 notes.append(f"its pages belong to the {'target' if target else 'topic'} {target or topic}: a "
                              "recipient finds them under it")
-            changes = self._scrub_tree(root)
+            changes = self._scrub_tree(root, review=kind != "knowledge", accept=accept_proposals)
             manifest = build_manifest(root, kind=kind, id=pack_id, version=version, author=author, license=license,
                                       topic=topic, target=target)
             problems = self._validate(manifest, root, notes, exporting=True)
@@ -1904,10 +1932,14 @@ class CommunityManager:
         return recipe.id
 
     @staticmethod
-    def _scrub_tree(root: Path) -> List[Tuple[str, str]]:
+    def _scrub_tree(root: Path, review: bool = False, accept: bool = False) -> List[Tuple[str, str]]:
         """Applies the privacy scrub to every file in place; returns a diff per changed file. Binary files are
-        refused: packs carry scripts, recipes and text."""
+        refused: packs carry scripts, recipes and text. With `review` (a target, recipe or block pack, never crawled
+        pages) the data that is certainly personal (a probe's serial number, machine id, host name) is replaced too,
+        and what is private but sits in a script or a file (export_review) stops the export with PackReviewNeeded,
+        unless the person accepted the proposals."""
         changes = []
+        pending: List[Tuple[str, "export_review.Finding"]] = []
         for rel, path in list_files(root):
             data = path.read_bytes()
             if licence_texts.canonical_file(rel, data):
@@ -1919,10 +1951,19 @@ class CommunityManager:
             except UnicodeDecodeError:
                 raise PackError(f"{rel} is a binary file; packs carry text only.") from None
             cleaned = scrub(text)
+            if review:
+                cleaned = export_review.certain(cleaned)
+                asked = export_review.to_review(cleaned)
+                if asked and accept:
+                    cleaned = export_review.apply(cleaned, asked)
+                else:
+                    pending += [(rel, f) for f in asked]
             if cleaned != text:
                 path.write_bytes(cleaned.encode("utf-8"))
                 diff = list(difflib.unified_diff(text.splitlines(), cleaned.splitlines(), lineterm="", n=0))[2:]
                 changes.append((rel, "\n".join(diff[:40] + (["..."] if len(diff) > 40 else []))))
+        if pending:
+            raise PackReviewNeeded(pending)
         return changes
 
     # --- knowledge base ---------------------------------------------------------------------------------------

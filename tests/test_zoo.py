@@ -22,7 +22,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from orchestrator.Core import community_manager as zoo_mod
 from orchestrator.Core import community_pack as cp
-from orchestrator.Core.community_manager import CommunityManager, TrustLevel, build_trust_check, submit_contribution
+from orchestrator.Core.community_manager import (CommunityManager, PackReviewNeeded, TrustLevel, build_trust_check,
+                                                  submit_contribution)
 from orchestrator.Core.community_pack import PROVENANCE_NAME, PackError, build_manifest, sign_manifest, write_pack
 
 INDEX_URL = "https://zoo.invalid/index.json"
@@ -653,6 +654,47 @@ class TestExport:
         assert cp.verify_manifest(contents.manifest, contents.signature, [contents.signature.embedded_key()])
         assert world.secrets.store, "signed with the user's key from the secrets store"
         assert CommunityManager(None).verify_file(result.path)[1] == []
+
+    def test_a_target_with_data_private_to_the_computer_stops_the_export_with_proposals(self, world):
+        folder = make_target(world.root / "targets" / "nas-board",
+                             script="SDK=/mnt/nas/acme/sdk\nssh -i ~/.ssh/id_acme board\necho build\n")
+        with pytest.raises(PackReviewNeeded) as caught:
+            world.cm.export_pack("target", "nas-board", author="a")
+        message = str(caught.value)
+        assert "modules/build.sh:" in message and "/path/to/example" in message and "~/.ssh/id_example" in message
+        assert "acme" not in message, "the message goes to an AI too: the places and the proposals, never the originals"
+        assert "/mnt/nas/acme/sdk" in caught.value.details() and "id_acme" in caught.value.details()
+        assert not list(world.cm.contributions_dir.glob("*.zip")), "no pack was made"
+        assert "/mnt/nas/acme/sdk" in (folder / "modules" / "build.sh").read_text(), "the person's module is untouched"
+
+    def test_accepting_the_proposals_exports_a_pack_that_holds_none_of_it(self, world):
+        make_target(world.root / "targets" / "nas-board",
+                    script="SDK=/mnt/nas/acme/sdk\nssh -i ~/.ssh/id_acme board\necho build\n")
+        result = world.cm.export_pack("target", "nas-board", author="a", accept_proposals=True)
+        with zipfile.ZipFile(result.path) as zf:
+            script = zf.read("modules/build.sh").decode()
+        assert "acme" not in script and "SDK=/path/to/example" in script and "-i ~/.ssh/id_example" in script
+        assert [c[0] for c in result.changes] == ["modules/build.sh"]
+        assert CommunityManager(None).verify_file(result.path)[1] == [], "a pack that passes the export passes the check"
+
+    def test_data_that_is_certainly_personal_is_replaced_without_asking(self, world):
+        make_target(world.root / "targets" / "probe-board", script="SERIAL=ABCD1234567\nHOSTNAME=acme-pi\necho build\n")
+        result = world.cm.export_pack("target", "probe-board", author="a")
+        with zipfile.ZipFile(result.path) as zf:
+            script = zf.read("modules/build.sh").decode()
+        assert "ABCD1234567" not in script and "acme-pi" not in script and "serial-removed" in script and "host-removed" in script
+
+    def test_the_check_of_a_pack_refuses_private_data_that_is_still_in_it(self, world, tmp_path):
+        (tmp_path / "p.zip").write_bytes(world.target_pack(script="SDK=/mnt/nas/acme/sdk\necho build\n"))
+        problems = CommunityManager(None).verify_file(tmp_path / "p.zip")[1]
+        assert any("private to the computer" in p and "modules/build.sh" in p for p in problems), problems
+
+    def test_a_knowledge_export_is_not_reviewed_for_paths_and_domains(self, tmp_path):
+        # crawled pages are other people's public text: /mnt/... and internal domains in a vendor's guide stay
+        (tmp_path / "knowledge.json").write_text('[{"content": "mount it at /mnt/nas/data, see git.vendor.internal"}]')
+        assert CommunityManager._scrub_tree(tmp_path) == []
+        with pytest.raises(PackReviewNeeded):
+            CommunityManager._scrub_tree(tmp_path, review=True)
 
     def test_export_refuses_binaries_and_invalid_targets(self, world):
         folder = make_target(world.root / "targets" / "bin-board")

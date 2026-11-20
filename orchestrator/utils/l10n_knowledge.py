@@ -262,6 +262,11 @@ TEXTS = {
                                "encrypting it...",
         "zoo.export.encrypted_no_pr": "This pack is encrypted for private sharing: give the file to the people it is "
                                       "meant for. It is not submitted to the community.",
+        "zoo.export.accept": "Accept the proposed replacements",
+        "zoo.export.accept.tip": "A target, recipe or block that holds data private to this computer (a path on a "
+                                 "network drive, an internal domain, an SSH configuration line) stops the export with "
+                                 "a proposed replacement for each place. Tick this to take them all; nothing private "
+                                 "is ever kept in a pack.",
         "zoo.export.submit.title": "Open pull request",
         "zoo.export.submit.ask": "Submit this pack to the public community repository?",
         "zoo.export.submit.no": "Not submitted; the pack is ready at {path}.",
@@ -562,6 +567,11 @@ TEXTS = {
                                "Teilen, verschlüsselt...",
         "zoo.export.encrypted_no_pr": "Dieses Paket ist zum privaten Teilen verschlüsselt: gib die Datei den Leuten, "
                                       "für die sie bestimmt ist. Es wird nicht bei der Community eingereicht.",
+        "zoo.export.accept": "Die vorgeschlagenen Ersetzungen annehmen",
+        "zoo.export.accept.tip": "Ein Target, Rezept oder Block mit Daten, die nur zu diesem Computer gehören (ein "
+                                 "Pfad auf einem Netzlaufwerk, eine interne Domain, eine Zeile einer "
+                                 "SSH-Konfiguration), hält den Export mit einem Ersetzungsvorschlag je Stelle an. "
+                                 "Das Häkchen nimmt alle an; nichts Privates bleibt je in einem Paket.",
         "zoo.export.submit.title": "Pull Request öffnen",
         "zoo.export.submit.ask": "Dieses Paket beim öffentlichen Community-Repository einreichen?",
         "zoo.export.submit.no": "Nicht eingereicht; das Paket liegt bereit unter {path}.",

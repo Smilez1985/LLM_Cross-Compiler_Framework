@@ -28,7 +28,7 @@ from PySide6.QtCore import Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtGui import Qt as QtText
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+    QAbstractItemView, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
     QWidget
 )
@@ -644,6 +644,12 @@ class CommunityExportDialog(QDialog):
         self.choose_folder_btn.clicked.connect(self.choose_folder)
         folder_row.addWidget(self.choose_folder_btn)
         form.addRow(plain_label(self._t("zoo.export.folder"), wrap=False), folder_row)
+        # The CLI's --accept-proposals: a target, recipe or block with data private to this computer stops the export
+        # with a proposed replacement for each place; this takes them all (Core/community_manager.PackReviewNeeded)
+        self.accept_check = QCheckBox(self._t("zoo.export.accept"))
+        self.accept_check.setObjectName("chk_zoo_export_accept")
+        self.accept_check.setToolTip(plain_tooltip(self._t("zoo.export.accept.tip")))
+        form.addRow(self.accept_check)
         layout.addLayout(form)
         self.output = QPlainTextEdit()
         self.output.setReadOnly(True)
@@ -744,7 +750,7 @@ class CommunityExportDialog(QDialog):
         arguments = dict(author=author, license=self.license_combo.currentText().strip() or None,
                          pack_id=(self.id_edit.text().strip() or None) if self.kind == "knowledge" else None,
                          model_license=self.model_license_edit.text().strip() or "unknown", recipients=recipients,
-                         out_dir=self.out_dir)
+                         out_dir=self.out_dir, accept_proposals=self.accept_check.isChecked())
         if self.kind == "knowledge":
             arguments.update(topic=topic, target=target)
         self.create_btn.setEnabled(False)
@@ -757,7 +763,11 @@ class CommunityExportDialog(QDialog):
 
     def _export(self, arguments: dict, secret: list):
         passphrase = secret.pop() if secret else None
-        return self.comm_manager.export_pack(self.kind, self.source, passphrase=passphrase, **arguments)
+        from orchestrator.Core.community_manager import PackReviewNeeded
+        try:
+            return self.comm_manager.export_pack(self.kind, self.source, passphrase=passphrase, **arguments)
+        except PackReviewNeeded as e:   # the person reads this: the places with the originals and the proposals
+            raise ValueError(f"{e}\n\nWhere, with the original and the proposal:\n{e.details()}") from None
 
     def _created(self, result):
         self.result = result
