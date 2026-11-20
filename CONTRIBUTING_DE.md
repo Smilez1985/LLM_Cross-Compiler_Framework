@@ -1091,7 +1091,8 @@ Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
 
 ## 9. Commits und Pull-Requests
 
-- Branches: die laufende Arbeit geschieht auf `development`; `main` hält den stabilen Stand und übernimmt
+- Branches: `development` ist der Arbeitszweig: Jeder Push, der das Repository direkt betrifft, geht zuerst dorthin.
+  `gate` ist die Sicherung (unten). `main` hält die echten Meilensteine, die, die die Version anheben, und übernimmt
   `development` per Pull-Request, sobald es stabil ist (CI grün unter Linux und Windows, geprüft). Zweige von
   `development` ab und richte deinen Pull-Request darauf; ein Thema je Pull-Request. Die CI läuft bei jedem Push
   auf `main` und `development` und bei jedem Pull-Request.
@@ -1105,8 +1106,10 @@ Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
   behebe den Fehler und starte neu. Bündle zusammengehörige Arbeit auf einem Zweig und lass die CI einmal dafür
   laufen, nicht für jeden Commit: Die Actions-Minuten werden geteilt.
 - **Sicherung auf `gate`:** Eine Arbeitsumgebung kann flüchtig sein, und Commits, die nur dort liegen, gehen mit ihr
-  verloren. Pushe die lokalen Commits nach jedem Commit, der die lokalen Prüfungen bestanden hat (Tests, ruff,
-  Secret-Scan), auf den Zweig `gate`, nie auf einen neuen Zweig für das Stück Arbeit: Das Remote hält nur `main`,
+  verloren. Pushe die lokalen Commits, die die lokalen Prüfungen bestanden haben (Tests, ruff, Secret-Scan), dann
+  auf den Zweig `gate`, wenn es sich lohnt, nach einem fertigen Schritt oder vor einer Pause, nicht nach jedem
+  Commit; und fasse zusammengehörige lokale Commits vor dem Push zu einem zusammen, damit eine Korrektur an schon
+  gepushter Arbeit kein eigener Commit wird. Pushe nie auf einen neuen Zweig für das Stück Arbeit: Das Remote hält nur `main`,
   `development`, `gate` und `deps/update`. `gate` hält Arbeit in Arbeit und wird nie so zusammengeführt; fertige,
   geprüfte Arbeit geht nach `development` (die CI oben ist das Tor davor), und danach wird `gate` auf dessen Stand
   gebracht.

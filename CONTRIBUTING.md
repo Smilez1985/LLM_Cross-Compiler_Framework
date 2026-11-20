@@ -1016,8 +1016,9 @@ text:
 
 ## 9. Commits and pull requests
 
-- Branches: ongoing work happens on `development`; `main` holds the stable state and takes `development` in by a
-  pull request once that is stable (CI green on Linux and Windows, reviewed). Branch from `development` and aim
+- Branches: `development` is the working branch: every push that concerns the repository directly goes there first.
+  `gate` is the backup (below). `main` holds the real milestones, the ones that raise the version, and takes
+  `development` in by a pull request once that is stable (CI green on Linux and Windows, reviewed). Branch from `development` and aim
   your pull request at it; one topic per pull request. CI runs on every push to `main` and `development` and on
   every pull request.
 - CI is a gate: before you ask for a merge onto `development`, run the CI on your branch itself and wait until it
@@ -1029,8 +1030,10 @@ text:
   read its log, fix and run again. Bundle related work on one branch and run the CI once for it, not once per
   commit: the Actions minutes are shared.
 - **Backup to `gate`:** a working environment can be temporary, and commits that exist only there are lost with it.
-  After every commit that passed the local checks (tests, ruff, secret scan) push the local commits to the branch
-  `gate`, and never to a new branch for the piece of work: the remote holds only `main`, `development`, `gate` and
+  Push the local commits that passed the local checks (tests, ruff, secret scan) to the branch `gate` when it pays
+  off, after a finished step or before a pause, not after every commit; and combine related local commits into one
+  before the push, so that a fix for work that was already pushed does not become a commit of its own. Never push to
+  a new branch for the piece of work: the remote holds only `main`, `development`, `gate` and
   `deps/update`. `gate` holds work in progress and is never merged as it is; finished, checked work goes to
   `development` (the CI above is the gate before that), and `gate` is brought level with it afterwards.
 - Commit messages: a summary line in English, in the imperative, sentence case, no type prefix, ideally no longer
