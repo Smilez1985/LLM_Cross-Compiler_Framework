@@ -95,6 +95,8 @@ HARMLESS = [
     "SERIAL=",
     "git@github.com:Smilez1985/LLM_Cross-Compiler_Framework.git",
     "FROM debian:bookworm-slim@sha256:" + "b" * 64,
+    "USER llmbuilder",
+    "RUN useradd llmbuilder\nUSER llmbuilder\nHostName is a word\n",
 ]
 
 
@@ -135,3 +137,20 @@ def test_the_detectors_stay_linear_on_a_hostile_text():
     start = time.perf_counter()
     er.findings(hostile)
     assert time.perf_counter() - start < 5.0
+
+
+def test_no_file_of_a_shipped_target_stops_an_export():
+    """The first version flagged `USER llmbuilder` in every Dockerfile, so no shipped target could be exported; the
+    export test of the CI found it. The files the framework ships must hold nothing this module would stop at."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "targets"
+    flagged = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.suffix in (".png", ".zip", ".gz", ".pyc"):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        flagged += [f"{path.relative_to(root)}:{f.line}: {f.kind}: {f.original}" for f in er.to_review(text)]
+    assert not flagged, "\n".join(flagged[:20])

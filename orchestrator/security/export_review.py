@@ -75,6 +75,9 @@ _HOST = re.compile(
     r"|(?:[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?\.){2,}(?:internal|local|home|private|priv))(?![\w.\-])(?::\d+)?")
 _NOT_A_HOST = {"self", "cls", "os", "sys", "this", "config", "cfg", "settings", "args", "ctx", "app"}
 _SSH_CONFIG = re.compile(r"(?im)^([ \t]*(HostName|User|IdentityFile|CertificateFile|ProxyJump)[ \t]+)(\S.*?)[ \t]*$")
+# An SSH configuration has a Host or Match line before its settings; a Dockerfile's `USER llmbuilder` has none (the first
+# version flagged it, and with it every shipped target: the CI's export test found that).
+_SSH_BLOCK = re.compile(r"(?im)^[ \t]*(?:Host|Match)[ \t]+\S")
 _SSH_CONFIG_PROPOSAL = {"hostname": EXAMPLE_HOST, "user": "user", "identityfile": EXAMPLE_KEY,
                         "certificatefile": EXAMPLE_KEY + "-cert.pub", "proxyjump": "jump.example.com"}
 _COMMON_USERS = {"root", "pi", "ubuntu", "debian", "user", "dietpi", "runner", "llmcf"}
@@ -123,8 +126,11 @@ def findings(text: str) -> List[Finding]:
     found += _find(_UNC, text, "a Windows network share", EXAMPLE_SHARE,
                    accept=lambda m: m.group(0) != EXAMPLE_SHARE)
     found += _find(_HOST, text, "an internal domain", _host_proposal, accept=_host_ok)
-    found += _find(_SSH_CONFIG, text, "a line of an SSH configuration",
-                   lambda m: _SSH_CONFIG_PROPOSAL[m.group(2).lower()], group=3, accept=_ssh_config_ok)
+    block = _SSH_BLOCK.search(text)
+    if block:
+        found += _find(_SSH_CONFIG, text, "a line of an SSH configuration",
+                       lambda m: _SSH_CONFIG_PROPOSAL[m.group(2).lower()], group=3,
+                       accept=lambda m: m.start() > block.start() and _ssh_config_ok(m))
     found += _find(_SSH_KEY_OPTION, text, "the key file of an ssh command", EXAMPLE_KEY, group=1, accept=_ssh_key_ok)
     found += _find(_SERIAL, text, "a serial number", "serial-removed", group=1, certain=True)
     found += _find(_MACHINE_ID, text, "a machine id or UUID", "machine-id-removed", group=1, certain=True)
