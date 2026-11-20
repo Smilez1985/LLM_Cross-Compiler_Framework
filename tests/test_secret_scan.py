@@ -76,6 +76,22 @@ REDACT_ONLY_SAMPLES = {
     "Bearer token": "rejected bearer " + body(40, ALNUM + "._-"),
     "quoted secret": '{"access_' + 'token": "ya29.' + body(60, ALNUM + "._-") + '"}',
     "environment variable": "export LLAMA_" + "API_KEY=" + body(28, ALNUM + "-_"),
+    # secrets that only their place gives away (tests/test_secret_by_place.py has the cases around them)
+    "password flag": "tool login --password " + body(12),
+    "sshpass": "sshpass -p " + body(12) + " ssh dev@board.invalid",
+    "mysql password": "mysql -u root -p" + body(12) + " -h db",
+    "curl user": "curl -u dev:" + body(12) + " https://x.invalid/api",
+    "netrc password": "machine host.invalid login dev password " + body(12),
+    "password variable": "SSHPASS=" + body(12) + " sshpass -e ssh dev@board.invalid",
+    "password key, quoted": '{"password": "' + body(12) + '"}',
+    "password key, unquoted": "db_password: " + body(12),
+    "key value, unquoted": "api_token: " + body(24),
+    "password on standard input": "echo 'dev:" + body(12) + "' | chpasswd",
+    "sudo -S password": "echo " + body(12) + " | sudo -S apt-get update",
+    "wpa passphrase": 'wpa_passphrase "Net" ' + body(12),
+    "wpa psk": '  psk="' + body(12) + '"',
+    "openssl password": "openssl rsa -in k.pem -passin pass:" + body(12),
+    "docker login password": "docker login -u dev -p " + body(12) + " registry.invalid",
 }
 
 

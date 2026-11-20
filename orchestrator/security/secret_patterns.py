@@ -123,6 +123,60 @@ PATTERNS: Tuple[SecretPattern, ...] = (
           r"(?<![A-Z0-9])(?:API_?KEY|ACCESS_KEY|TOKEN|SECRET|PASSWORD|PASSWD)(?:_[A-Z0-9]{1,32}){0,4}(?:=|:[ \t]*)"
           r"['\"]?(?P<secret>[^\s'\"<>|(){}\[\]]{8,})",
           scan=False, hints=("api_key", "apikey", "access_key", "token", "secret", "password", "passwd")),
+    # Secrets that only their place gives away, not their shape (measured on 2026-11-20: 12 of 15 such samples got
+    # through every rule above): a flag of a command, the value of a password key without quotes, a password handed
+    # to a program on its standard input. Runtime only (the repository scan reads documentation and tests, where
+    # these words are examples). A value that is a reference ($VAR, <placeholder>, {template}) or a flag is no
+    # secret; the word list spares configuration words ("password: required"); and a value that an earlier rule
+    # already replaced ("AIza-REDACTED") stays as that rule wrote it.
+    _rule("password flag",
+          r"(?i)(?<![\w-])--(?:password|passwd|pwd|passphrase|token|secret|api[-_]?key|access[-_]?token|auth[-_]?token"
+          r"|client[-_]?secret)(?:=|[ \t]+)['\"]?(?P<secret>(?![^\s'\"]*REDACTED)(?![$<{\-])[^\s'\"<>|;&]{4,})",
+          scan=False, hints=("--password", "--passwd", "--pwd", "--passphrase", "--token", "--secret", "--api",
+                             "--access", "--auth", "--client")),
+    _rule("sshpass", r"(?i)\bsshpass[ \t]+-p[ \t]*['\"]?(?P<secret>(?![^\s'\"]*REDACTED)(?![$<{\-])[^\s'\"<>|;&]+)",
+          scan=False, hints=("sshpass",)),
+    _rule("mysql password",
+          r"(?i)\b(?:mysql|mysqldump|mysqladmin|mariadb)\b[^\n|;&]{0,200}?[ \t]-p(?P<secret>(?![^\s'\"]*REDACTED)(?![$<{\-])[^\s'\"<>|;&]{4,})",
+          scan=False, hints=("mysql", "mariadb")),
+    _rule("curl user",
+          r"(?i)\bcurl\b[^\n|;&]{0,200}?[ \t](?:-u|--user)(?:=|[ \t]+)['\"]?[^\s:'\"]+:(?P<secret>(?![^\s'\"]*REDACTED)(?![$<{])[^\s'\"<>|;&]{4,})",
+          scan=False, hints=("curl",)),
+    _rule("netrc password", r"(?i)\bmachine[ \t]+\S+[ \t]+login[ \t]+\S+[ \t]+password[ \t]+(?P<secret>(?![^\s'\"]*REDACTED)[^\s'\"]{4,})",
+          scan=False, hints=("machine",)),
+    _rule("password variable",
+          r"(?<![A-Za-z0-9_])(?:SSHPASS|PGPASSWORD|MYSQL_PWD|[A-Z][A-Z0-9]*_PWD)=['\"]?"
+          r"(?P<secret>(?![^\s'\"]*REDACTED)(?![$<{])[^\s'\"<>|;&(){}\[\]]{4,})",
+          scan=False, hints=("sshpass", "pgpassword", "mysql_pwd", "_pwd")),
+    _rule("password key, quoted",
+          r"(?i)(?<![\w-])(?:\\?[\"'])?(?:[\w.]{0,40}_)?(?:password|passwd|passphrase|pwd)(?:\\?[\"'])?[ \t]*[:=][ \t]*\\?['\"]"
+          r"(?P<secret>(?![^\s'\"]*REDACTED)(?![$<{])[^\s'\"<>|\\]{4,})\\?['\"]",
+          scan=False, hints=("password", "passwd", "passphrase", "pwd")),
+    _rule("password key, unquoted",
+          r"(?im)(?<![\w-])(?:\\?[\"'])?(?:[\w.]{0,40}[_.\-])?(?:password|passwd|passphrase|pwd)(?:\\?[\"'])?[ \t]*[:=][ \t]*"
+          r"(?P<secret>(?![^\s'\"]*REDACTED)(?![$<{'\"\s]|(?:null|none|true|false|yes|no|required|optional|empty|ask|prompt)\b)"
+          r"[^\s'\"#<>|;&,{}\[\]\\]{4,})",
+          scan=False, hints=("password", "passwd", "passphrase", "pwd")),
+    # The value of a token, secret or key without quotes: it needs a digit or a capital and 12 characters, so
+    # "max_token: 1024" and "secret: required" stay.
+    _rule("key value, unquoted",
+          r"(?im)(?<![\w-])(?:\\?[\"'])?(?:[\w.]{0,40}[_.\-])?(?:token|secret|api[_-]?key|apikey|access[_-]?key)(?:\\?[\"'])?[ \t]*[:=][ \t]*"
+          r"(?P<secret>(?![^\s'\"]*REDACTED)(?![$<{'\"\s])(?-i:(?=[^\s'\"]{0,200}[A-Z0-9]))[^\s'\"#<>|;&,{}\[\]\\]{12,})",
+          scan=False, hints=("token", "secret", "api_key", "api-key", "apikey", "access_key", "access-key")),
+    _rule("password on standard input",
+          r"(?i)['\"]?[\w.\-]+:(?P<secret>(?![^\s'\"]*REDACTED)[^\s'\"|]{4,})['\"]?[ \t]*\|[ \t]*(?:sudo[ \t]+)?chpasswd\b",
+          scan=False, hints=("chpasswd",)),
+    _rule("sudo -S password",
+          r"(?i)\becho[ \t]+(?:-n[ \t]+)?['\"]?(?P<secret>(?![^\s'\"]*REDACTED)[^\s'\"|]{4,})['\"]?[ \t]*\|[ \t]*sudo[ \t]+(?:-[A-Za-z]+[ \t]+)*-S\b",
+          scan=False, hints=("sudo",)),
+    _rule("wpa passphrase",
+          r"(?i)\bwpa_passphrase[ \t]+(?:\"[^\"]*\"|'[^']*'|[^\s\"']+)[ \t]+(?P<secret>(?![^\s'\"]*REDACTED)[^\s'\"]{8,})",
+          scan=False, hints=("wpa_passphrase",)),
+    _rule("wpa psk", r"(?im)^[ \t]*psk[ \t]*=[ \t]*\"(?P<secret>(?![^\s'\"]*REDACTED)[^\"\n]{8,63})\"", scan=False, hints=("psk",)),
+    _rule("openssl password", r"(?i)-pass(?:in|out)?[ \t]+pass:(?P<secret>(?![^\s'\"]*REDACTED)[^\s'\"]+)", scan=False, hints=("pass:",)),
+    _rule("docker login password",
+          r"(?i)\bdocker[ \t]+login\b[^\n|;&]{0,200}?[ \t]-p[ =]['\"]?(?P<secret>(?![^\s'\"]*REDACTED)(?![$<{\-])[^\s'\"<>|;&]{4,})",
+          scan=False, hints=("docker",)),
 )
 
 # Obvious placeholders in documentation and tests: marker words, runs a random key never has (sequential digits
