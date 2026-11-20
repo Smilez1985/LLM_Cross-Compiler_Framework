@@ -243,9 +243,16 @@ class TestQuestions:
             await anyio.sleep(30)
 
         async def go():
+            # The client abandons the call at the moment its question is open, not after a fixed time: a fixed 0.5
+            # seconds asked for the question to be open that soon, which a loaded Windows runner did not keep (the
+            # CI of 2026-11-20 found it); the wait for the question is generous, the cancel follows at once.
             async with Client(server, elicitation_callback=hang, mode="legacy") as client:
-                with anyio.move_on_after(0.5):
-                    await client.call_tool(name, {"text": "x"})
+                async with anyio.create_task_group() as group:
+                    async def ask():
+                        await client.call_tool(name, {"text": "x"})
+                    group.start_soon(ask)
+                    await anyio.to_thread.run_sync(lambda: opened.wait(30))
+                    group.cancel_scope.cancel()
         asyncio.run(go())
         assert opened.is_set() and wait_for(lambda: len(entries(registry)) == 2)
         requested, end = entries(registry)

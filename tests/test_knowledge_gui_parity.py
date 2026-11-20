@@ -686,13 +686,50 @@ def test_export_an_existing_target_with_a_passphrase_into_a_chosen_folder(qapp, 
         args, kwargs, thread = calls[0]
         assert args == ("target", "my-board") and thread != threading.current_thread().name
         assert kwargs == {"author": "pat", "license": "MIT", "pack_id": None, "model_license": "unknown",
-                          "recipients": [], "out_dir": out, "passphrase": secret}
+                          "recipients": [], "out_dir": out, "passphrase": secret, "accept_proposals": False}
         dialog = ended[0]
         assert dialog.result.encrypted and dialog.result.path.parent == out and dialog.result.path.suffix == ".lcfpack"
         assert not dialog.pr_btn.isEnabled(), "an encrypted pack is never submitted"
         assert dialog.passphrase_edit.text() == "" and dialog.passphrase2_edit.text() == ""
         data, _ = cp.decrypt_pack(dialog.result.path.read_bytes(), passphrase=secret)
         assert cp.read_manifest(data).id == "my-board"
+    finally:
+        hub.close()
+
+
+def test_the_tick_accepts_the_proposed_replacements_like_the_option_of_the_command(qapp, world, monkeypatch):
+    """`zoo export --accept-proposals`: a module with data private to this computer stops the export with the places and
+    the proposals; the tick takes them (CommunityManager.PackReviewNeeded, DESIGN: the release check)."""
+    from test_zoo import make_target
+    make_target(world.root / "targets" / "nas-board", script="SDK=/mnt/nas/acme/sdk\necho build\n")
+    calls = spy(monkeypatch, world.cm, "export_pack")
+
+    def without_tick(dialog):
+        dialog.author_edit.setText("pat")
+        assert dialog.accept_check.objectName() == "chk_zoo_export_accept" and not dialog.accept_check.isChecked()
+    ended = export_through(monkeypatch, qapp, "target", "nas-board", without_tick)
+    hub = hub_for(world)
+    try:
+        settle(hub, qapp)
+        hub.export_btn.click()
+        assert calls[0][1]["accept_proposals"] is False
+        shown = ended[0].output.toPlainText()
+        assert "The pack was not created" in shown and "/path/to/example" in shown, shown
+        assert "/mnt/nas/acme/sdk" in shown, "the person reads the original in the dialog"
+        assert ended[0].result is None
+    finally:
+        hub.close()
+
+    def with_tick(dialog):
+        dialog.author_edit.setText("pat")
+        dialog.accept_check.setChecked(True)
+    ended = export_through(monkeypatch, qapp, "target", "nas-board", with_tick)
+    hub = hub_for(world)
+    try:
+        settle(hub, qapp)
+        hub.export_btn.click()
+        assert calls[-1][1]["accept_proposals"] is True
+        assert ended[0].result is not None and ended[0].result.path.exists()
     finally:
         hub.close()
 
