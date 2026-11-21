@@ -412,6 +412,7 @@ TEXTS = {
         "bld.wizard.ai_filled": "Values filled in from the AI analysis.\nReview them on the next pages, especially "
                                 "the shell code.",
         "bld.wizard.create_failed": "The module was not created:\n{reason}",
+        "bld.wizard.private_moved": "{count} value(s) private to this computer were taken out of the module and written to {where}: {names}. The module holds ${{NAME}} in their place, so a pack of it carries none.",
         # the "edit all files" step (orchestrator/gui/module_edit.py, Core/module_edit.py)
         "bld.edit.form": "Edit all files",
         "bld.edit.page": "Edit all files",
@@ -952,6 +953,7 @@ TEXTS = {
         "bld.wizard.ai_filled": "Werte aus der KI-Analyse übernommen.\nPrüfe sie auf den nächsten Seiten, vor allem "
                                 "den Shell-Code.",
         "bld.wizard.create_failed": "Das Modul wurde nicht erstellt:\n{reason}",
+        "bld.wizard.private_moved": "{count} Wert(e), die nur zu diesem Computer gehören, wurden aus dem Modul genommen und nach {where} geschrieben: {names}. Das Modul enthält an ihrer Stelle ${{NAME}}, ein Paket davon enthält also keinen.",
         # the "edit all files" step (orchestrator/gui/module_edit.py, Core/module_edit.py)
         "bld.edit.form": "Alle Dateien bearbeiten",
         "bld.edit.page": "Alle Dateien bearbeiten",

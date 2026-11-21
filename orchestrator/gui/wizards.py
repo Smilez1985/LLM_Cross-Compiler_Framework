@@ -1451,6 +1451,7 @@ class ModuleCreationWizard(QWizard):
     def _generator(self, targets_dir):
         """The module generator for `targets_dir`; in a scratch folder it renders the targets folder's template."""
         generator = ModuleGenerator(targets_dir)
+        self._last_generator = generator   # what the latest module moved to the person's file (_saved says it)
         if self.other_roots:
             generator.other_roots = list(self.other_roots)
         if Path(targets_dir) != Path(self.targets_dir):
@@ -1644,6 +1645,12 @@ class ModuleCreationWizard(QWizard):
         message = f"{ui_text('msg.module_created')}\n{output_path}"
         if roots and not (Path(output_path) / KNOWLEDGE_SNAPSHOT).is_file():
             message += "\n\n" + ui_text("crawl.snapshot_missing")
+        moved = getattr(getattr(self, "_last_generator", None), "last_moved", None)
+        if moved:   # the values private to this computer are in modules_env/, never in the module
+            from orchestrator.Core import modules_env
+            message += "\n\n" + ui_text("bld.wizard.private_moved", count=len(moved),
+                                         where=f"{modules_env.FOLDER}/{Path(output_path).name}{modules_env.FILE_SUFFIX}",
+                                         names=", ".join(f"{m.name} ({m.kind})" for m in moved))
         checked = self._check_created(output_path)   # `llm-cli targets validate` on the new target
         if checked:
             message += "\n\n" + ui_text("bld.check.after_create") + "\n" + checked

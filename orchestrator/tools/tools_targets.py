@@ -312,6 +312,11 @@ class CreateModuleOut(ToolOutput):
     formats: List[str]
     runtime_from_probe: Optional[str] = Field(default=None, description="The probe the runtime block was planned "
                                                                         "from")
+    private_values: List[str] = Field(default_factory=list, description="Values private to the computer (a path on a "
+                                      "network drive, an internal domain, a key file, a password) that were taken out "
+                                      "of the setup commands and the quantization logic into the person's own file "
+                                      "(modules_env/) and replaced by ${LOCAL_NAME}: each name and what it is, never "
+                                      "the value")
 
 
 MODULE_EXAMPLE = {"module_name": "Orin Nano", "architecture": "aarch64", "base_os": "ubuntu:22.04", "sdk": "cuda",
@@ -726,7 +731,8 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
         return CreateModuleOut(target=tid, folder=folder.name, base_image=BaseImageOut(
             registry=image["registry"], image=image["repository"], tag=image["tag"], digest=image["digest"],
             official=bool(image["official"])), boards=list(caps.boards) if caps else [],
-            formats=list(caps.formats) if caps else [], runtime_from_probe=inp.probe_id)
+            formats=list(caps.formats) if caps else [], runtime_from_probe=inp.probe_id,
+            private_values=[f"{m.name}: {m.kind}" for m in getattr(generator, "last_moved", None) or []])
 
     def probe_name(value) -> Optional[str]:
         try:

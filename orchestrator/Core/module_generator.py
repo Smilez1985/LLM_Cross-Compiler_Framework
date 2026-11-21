@@ -1022,7 +1022,7 @@ class ModuleGenerator:
     Now capable of attaching Knowledge Snapshots (RAG Data).
     """
     
-    def __init__(self, targets_dir: Path, other_roots: Iterable[Path] = ()):
+    def __init__(self, targets_dir: Path, other_roots: Iterable[Path] = (), state_dir: Optional[Path] = None):
         """
         Initialize the ModuleGenerator.
         
@@ -1030,10 +1030,14 @@ class ModuleGenerator:
             targets_dir: The folder the module is written to (the person's own targets folder, own_targets_dir)
             other_roots: The other targets folders whose names a new module must not capture (target_roots: the
                 targets the framework ships, when they are in another folder)
+            state_dir: The person's state folder, where the values private to this computer go (modules_env/); the
+                default is the framework's own (ConfigManager.user_state_path)
         """
         self.logger = get_logger(__name__)
         self.targets_dir = targets_dir
         self.other_roots = [Path(r) for r in other_roots]
+        self.state_dir = Path(state_dir) if state_dir else None
+        self.last_moved: List[Any] = []   # what the last module's private values were moved to (private_values.Moved)
         
         # Template Verzeichnis liegt parallel zu den Targets
         # Wir suchen es relativ zum targets_dir oder via absolutem Fallback
@@ -1066,6 +1070,8 @@ class ModuleGenerator:
         Returns:
             Path: Path to the created module directory
         """
+        data = self._without_private_values(data)
+        private = data.pop("_private_values", {})   # the values never go into the data the templates are filled from
         data = validate_module_data(data)
         data["formats"] = module_formats(data)
         found = None if data.get("supported_boards") else probe_board(profile)
@@ -1148,6 +1154,11 @@ class ModuleGenerator:
             if problems:
                 raise ValueError("The generated module is not usable:\n- " + "\n- ".join(problems[:20]))
             
+            # 8. The values private to this computer (the setup commands' and the quantization logic's paths, addresses,
+            # key files and passwords) are in the person's own file, never in this module (DESIGN: the wizard's local
+            # layer). Written last, so a module that failed leaves no file; the file is the person's, never in a pack.
+            self._write_private_values(slug, private)
+
             self.logger.info(f"Module generation for '{module_name}' completed successfully.")
             return target_dir
             
@@ -1157,6 +1168,42 @@ class ModuleGenerator:
             # neither shows up as a buildable target nor blocks a corrected retry.
             remove_tree(target_dir)
             raise e
+
+    def _local_state(self) -> Path:
+        if self.state_dir is not None:
+            return self.state_dir
+        from orchestrator.Core.config_manager import ConfigManager
+        return ConfigManager.user_state_path()
+
+    def _without_private_values(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """The definition with each value private to this computer replaced by ${LOCAL_NAME} in the shell fields; the
+        values wait in data["_private_values"] (the caller takes them out at once) for _write_private_values.
+        self.last_moved says what moved."""
+        from orchestrator.Core import modules_env, private_values
+        self.last_moved = []
+        data = dict(data)
+        name = str(data.get("module_name", "")).strip()
+        if not name:
+            return data   # the validation names the missing name
+        try:
+            existing = modules_env.read(self._local_state(), module_slug(name))
+        except (modules_env.LocalValuesError, OSError):
+            existing = {}
+        fields = {f: data.get(f) for f in private_values.SHELL_FIELDS if isinstance(data.get(f), str)}
+        clean, values, moved = private_values.extract(fields, existing)
+        data.update(clean)
+        data["_private_values"] = values
+        self.last_moved = moved
+        return data
+
+    def _write_private_values(self, slug: str, values: Dict[str, str]) -> None:
+        if not values:
+            return
+        from orchestrator.Core import modules_env
+        state = self._local_state()
+        merged = modules_env.read(state, slug)
+        merged.update(values)
+        modules_env.write(state, slug, merged)
 
     def _helper_files(self, data: Dict[str, Any]) -> List[str]:
         """The template files the declared formats' converters need (the Rockchip helpers: rknn_module.sh with

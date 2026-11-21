@@ -575,16 +575,24 @@ def module_create(ctx: FrameworkContext, name: Optional[str], arch: Optional[str
             generator.other_roots = list(others)
         if Path(folder) != Path(targets_dir):   # the edit step's scratch folder renders the targets folder's template
             generator.template_dir = template_for(targets_dir)
+        def said(made_path):   # the values private to this computer went to the person's file, not into the module
+            from orchestrator.Core import modules_env, private_values
+            text = private_values.describe(getattr(generator, "last_moved", None) or [], Path(made_path).name,
+                                           f"{modules_env.FOLDER}/{Path(made_path).name}{modules_env.FILE_SUFFIX}")
+            if text:
+                console.print(f"[yellow]{escape(text)}[/yellow]")
+            return made_path
         if roots:   # the knowledge base is the framework's: booted only for the attachment
             ctx.require_framework()
             made = generator.generate_module(module_data, ctx.framework_manager, knowledge_roots=roots,
                                              profile=profile)
+            said(made)
             from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT
             if not (Path(made) / KNOWLEDGE_SNAPSHOT).is_file():
                 console.print("[yellow]The knowledge snapshot was not attached: no stored page comes from these "
                               "addresses, or the knowledge base could not be read.[/yellow]")
             return made
-        return generator.generate_module(module_data, profile=profile)
+        return said(generator.generate_module(module_data, profile=profile))
 
     try:
         if edit_files:
