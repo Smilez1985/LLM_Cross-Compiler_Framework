@@ -567,7 +567,9 @@ READ_TODAY = {
 # Read by the stage runner for its resume digest (MODEL_REVISION: the BuildEngine sets it for a Hugging Face model;
 # HARDWARE_CONFIG_FILE: the hardware profile of version 1.x, never set by the BuildEngine) and by the source stage,
 # which says that a llama.cpp repository override has no effect inside a build container.
-NEW_FOR_THE_STAGE_RUNNER = {"MODEL_REVISION", "HARDWARE_CONFIG_FILE", "LLAMA_CPP_REPO_OVERRIDE"}
+# LOCAL_ENV_FILE: the file of the target's private values that the build mounts (Core/modules_env.py); the runner
+# exports its LOCAL_NAME=value lines to the stages and never evaluates them.
+NEW_FOR_THE_STAGE_RUNNER = {"MODEL_REVISION", "HARDWARE_CONFIG_FILE", "LLAMA_CPP_REPO_OVERRIDE", "LOCAL_ENV_FILE"}
 # Read only by stage code started by hand with an option (source_module.sh --clone-llama-cpp), never in a build.
 ONLY_ON_REQUEST = {"LLAMA_CPP_COMMIT"}
 # Set by the BuildEngine for the module's CMake flags (DESIGN round 25 Q6): the person's decision on options outside

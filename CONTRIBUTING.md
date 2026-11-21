@@ -1029,13 +1029,14 @@ text:
   (files that cannot be deleted while read-only, sparse files that take real room). A red run blocks the merge;
   read its log, fix and run again. Bundle related work on one branch and run the CI once for it, not once per
   commit: the Actions minutes are shared.
-- **Backup to `gate`:** a working environment can be temporary, and commits that exist only there are lost with it.
-  Push the local commits that passed the local checks (tests, ruff, secret scan) to the branch `gate` when it pays
-  off, after a finished step or before a pause, not after every commit; and combine related local commits into one
-  before the push, so that a fix for work that was already pushed does not become a commit of its own. Never push to
-  a new branch for the piece of work: the remote holds only `main`, `development`, `gate` and
-  `deps/update`. `gate` holds work in progress and is never merged as it is; finished, checked work goes to
-  `development` (the CI above is the gate before that), and `gate` is brought level with it afterwards.
+- **`development` is the normal channel, `gate` only the backup:** finished work that passed the local checks (tests,
+  ruff, secret scan) goes straight to `development`, and its CI runs on that push; `main` takes only the milestones that
+  raise the version, from `development` after a successful CI. Do not keep finished commits in the working
+  environment and do not stop them on `gate`: a working environment can be temporary (it was empty once, and
+  everything that was not in git was lost), and `gate` is the backup of what is not ready for `development`, not a
+  step on the way to it. Combine related local commits into one before the push, so that a fix for work that was
+  already pushed does not become a commit of its own. Never push to a new branch for the piece of work: the remote
+  holds only `main`, `development`, `gate` and `deps/update`.
 - Commit messages: a summary line in English, in the imperative, sentence case, no type prefix, ideally no longer
   than about 72 characters. Examples from the history: `Add a secret scan: pre-commit and pre-push hooks and a CI
   job` and `Pin the provider SDKs and local embeddings, drop LiteLLM and tiktoken`. The body explains why.

@@ -124,6 +124,25 @@ esac
 JOB_TYPE="$JOB"
 export JOB_TYPE
 
+# --- The target's private values (docs/DESIGN.md, the wizard's local layer for private values) ---------------------
+# LOCAL_ENV_FILE names a read-only file of LOCAL_NAME=value lines: the person's modules_env/<target>.env, which the
+# build copies into its own folder and mounts. It is read line by line and never evaluated (a line is a name, an equals
+# sign and the rest as it stands), and the stage modules get the values as variables: the module's text holds
+# ${LOCAL_NAME}, never the value, and no image layer or merged copy of a module ever holds it.
+load_local_values() {
+    [ -n "${LOCAL_ENV_FILE:-}" ] || return 0
+    [ -f "$LOCAL_ENV_FILE" ] || die "LOCAL_ENV_FILE names '$LOCAL_ENV_FILE', which is no file."
+    while IFS= read -r _local_line || [ -n "$_local_line" ]; do
+        case "$_local_line" in
+            LOCAL_[A-Z]*=*)
+                _local_name="${_local_line%%=*}"
+                case "$_local_name" in *[!A-Z0-9_]*) continue ;; esac
+                export "$_local_name=${_local_line#*=}" ;;
+        esac
+    done < "$LOCAL_ENV_FILE"
+}
+load_local_values
+
 valid_stage_name() {  # NAME: a module name a stage list may hold (stage_order on the host has the same rule)
     case "$1" in
         ''|*[!a-z0-9_]*|[!a-z]*) return 1 ;;
@@ -278,6 +297,8 @@ inputs_digest() {
         # The profile config_module.sh reads, also the one it reads when none is named
         _profile="${HARDWARE_CONFIG_FILE:-${BUILD_CACHE_DIR:-/build-cache}/target_hardware_config.txt}"
         printf 'hardware=%s %s\n' "$_profile" "$(file_digest "$_profile")"
+        # The private values are inputs too (a changed value builds again); only their digest enters this one
+        printf 'local=%s\n' "$(file_digest "${LOCAL_ENV_FILE:-}")"
         printf 'output=%s %s %s\n' "${BUILD_CACHE_DIR:-}" "${OUTPUT_DIR:-}" "$CONVERT_OUTPUT"
         printf 'pythonpath=%s\n' "${PYTHONPATH:-}"
         if [ -z "${MODEL_SOURCE:-}" ] && [ "$STAGE_LAST" = config ]; then

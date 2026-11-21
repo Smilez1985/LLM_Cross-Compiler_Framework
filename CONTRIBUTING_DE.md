@@ -1105,14 +1105,14 @@ Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
   lassen, dünn besetzte Dateien, die echten Platz brauchen). Ein roter Lauf sperrt das Zusammenführen; lies sein Log,
   behebe den Fehler und starte neu. Bündle zusammengehörige Arbeit auf einem Zweig und lass die CI einmal dafür
   laufen, nicht für jeden Commit: Die Actions-Minuten werden geteilt.
-- **Sicherung auf `gate`:** Eine Arbeitsumgebung kann flüchtig sein, und Commits, die nur dort liegen, gehen mit ihr
-  verloren. Pushe die lokalen Commits, die die lokalen Prüfungen bestanden haben (Tests, ruff, Secret-Scan), dann
-  auf den Zweig `gate`, wenn es sich lohnt, nach einem fertigen Schritt oder vor einer Pause, nicht nach jedem
-  Commit; und fasse zusammengehörige lokale Commits vor dem Push zu einem zusammen, damit eine Korrektur an schon
-  gepushter Arbeit kein eigener Commit wird. Pushe nie auf einen neuen Zweig für das Stück Arbeit: Das Remote hält nur `main`,
-  `development`, `gate` und `deps/update`. `gate` hält Arbeit in Arbeit und wird nie so zusammengeführt; fertige,
-  geprüfte Arbeit geht nach `development` (die CI oben ist das Tor davor), und danach wird `gate` auf dessen Stand
-  gebracht.
+- **`development` ist der normale Kanal, `gate` nur das Backup:** Fertige Arbeit, die die lokalen Prüfungen bestanden
+  hat (Tests, ruff, Secret-Scan), geht gleich nach `development`, und ihre CI läuft bei diesem Push; `main` übernimmt nur
+  die Meilensteine, die die Version anheben, von `development` nach erfolgreicher CI. Behalte fertige Commits nicht in
+  der Arbeitsumgebung und halte sie nicht auf `gate` an: Eine Arbeitsumgebung kann flüchtig sein (sie war einmal
+  leer, und alles, was nicht in Git war, ging verloren), und `gate` ist das Backup dessen, was für `development` nicht
+  fertig ist, keine Station auf dem Weg dorthin. Fasse zusammengehörige lokale Commits vor dem Push zu einem zusammen,
+  damit eine Korrektur an schon gepushter Arbeit kein eigener Commit wird. Pushe nie auf einen neuen Zweig für das
+  Stück Arbeit: Das Remote hält nur `main`, `development`, `gate` und `deps/update`.
 - Commit-Nachrichten: eine Zusammenfassungszeile auf Englisch, im Imperativ, nur der erste Buchstabe groß, ohne
   Typ-Präfix, möglichst nicht länger als etwa 72 Zeichen. Beispiele aus der Historie: `Add a secret scan:
   pre-commit and pre-push hooks and a CI job` und `Pin the provider SDKs and local embeddings, drop LiteLLM and

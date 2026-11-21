@@ -2359,6 +2359,39 @@ class BuildEngine:
         return ({str(folder): {"bind": self.HARDWARE_MOUNT, "mode": "ro"}},
                 {"HARDWARE_CONFIG_FILE": f"{self.HARDWARE_MOUNT}/{PROFILE_FILE_NAME}"})
 
+    def _local_values_mount(self, config: BuildConfiguration, progress: BuildProgress,
+                            build_temp: Path) -> Tuple[Dict[str, Dict[str, str]], Dict[str, str]]:
+        """(volumes, environment) that hand the target's private values to a build container (DESIGN, the wizard's
+        local layer for private values): the person's file modules_env/<target>.env copied into the build's own
+        folder and mounted read-only, with LOCAL_ENV_FILE naming it; the stage runner exports its variables to the
+        stages. The values are never merged into the module's text and never reach an image layer (the module is
+        copied into the image; the layers are cached and can be exported). Nothing for a target without values. The
+        log names the variables, never a value."""
+        state = getattr(self.config, "user_state_dir", None)
+        target = str(getattr(config, "target_arch", "") or "")
+        if not isinstance(state, (str, Path)) or not target:
+            return {}, {}
+        from orchestrator.Core import modules_env
+        try:
+            staged = modules_env.stage(state, target, build_temp)
+        except modules_env.LocalValuesError:
+            return {}, {}   # a target id that cannot name a file has no values
+        if staged is None:
+            return {}, {}
+        names = sorted(modules_env.parse(staged.read_text(encoding="utf-8")))
+        progress.add_log(f"Private values of the target {target}: {', '.join(names) or 'none'} (read-only in the "
+                         f"container at {modules_env.MOUNT}; the stages get them as variables).")
+        return ({str(staged.parent): {"bind": modules_env.MOUNT, "mode": "ro"}},
+                {modules_env.ENV_NAME: f"{modules_env.MOUNT}/{modules_env.STAGED_NAME}"})
+
+    def _stage_mounts(self, config: BuildConfiguration, progress: BuildProgress,
+                      build_temp: Path) -> Tuple[Dict[str, Dict[str, str]], Dict[str, str]]:
+        """What every build container gets from this computer besides the model: the board's probe and the target's
+        private values, as (volumes, environment)."""
+        probe_vols, probe_env = self._hardware_probe_mount(config, progress, build_temp)
+        local_vols, local_env = self._local_values_mount(config, progress, build_temp)
+        return {**probe_vols, **local_vols}, {**probe_env, **local_env}
+
     SANDBOX_FALLBACK_USER = FALLBACK_USER  # the image's build user, used when the host user is root or on Windows
 
     def _sandbox(self, config: BuildConfiguration, build_temp: Path, target_path: Optional[Path] = None,
@@ -2538,7 +2571,7 @@ class BuildEngine:
         imatrix_dir = build_temp / "imatrix"
 
         # Volumes for IMatrix run (the board's probe too: the config stage plans with it in this job as well)
-        probe_vols, probe_env = self._hardware_probe_mount(config, progress, build_temp)
+        probe_vols, probe_env = self._stage_mounts(config, progress, build_temp)
         sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp, target_path=target_path, job="imatrix",
                                                            progress=progress)
         vols = {
@@ -2603,7 +2636,7 @@ class BuildEngine:
         
         build_temp = self.cache_dir / "builds" / config.build_id
         # The board's hardware probe, read-only (DESIGN round 23 item 5): the config stage plans the build for it
-        probe_vols, probe_env = self._hardware_probe_mount(config, progress, build_temp)
+        probe_vols, probe_env = self._stage_mounts(config, progress, build_temp)
         sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp, target_path=target_path, job="build",
                                                            progress=progress)
 
@@ -2710,7 +2743,7 @@ class BuildEngine:
         text_dir = build_temp / "tune-text"
         ensure_directory(tune_out)
         text = write_evaluation_text(text_dir / "evaluation.txt")
-        probe_vols, probe_env = self._hardware_probe_mount(config, progress, build_temp)
+        probe_vols, probe_env = self._stage_mounts(config, progress, build_temp)
         sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp, target_path=target_path, job="tune",
                                                            progress=progress)
         vols = {str(tune_out): {"bind": "/build-cache/output", "mode": "rw"},
