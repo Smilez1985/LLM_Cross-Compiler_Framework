@@ -104,6 +104,16 @@ def set_value(state_dir: Any, target: str, name: str, value: str) -> Path:
     return write(state_dir, target, values)
 
 
+def remove_value(state_dir: Any, target: str, name: str) -> bool:
+    """One value out of the file (the file goes with its last value); False when the target has no such value."""
+    values = read(state_dir, target)
+    if name not in values:
+        return False
+    del values[name]
+    write(state_dir, target, values)
+    return True
+
+
 def remove(state_dir: Any, target: str) -> bool:
     path = path_for(state_dir, target)
     if not path.is_file():

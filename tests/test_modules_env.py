@@ -195,3 +195,124 @@ def test_a_build_without_the_file_runs_as_before(box):
     result = box.run("--job", "build", "--to", "source", LLMCF_STAGES="source config convert target")
     assert result.returncode == 0, result.stdout + result.stderr
     assert (box.work / "seen").read_text() == "[unset]"
+
+
+# --- the command `module local` and the box of the edit step -----------------------------------------------------
+
+def _cli(monkeypatch, tmp_path, *args, input=None):
+    from click.testing import CliRunner
+
+    from orchestrator import cli as cli_module
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "home"))
+    return CliRunner().invoke(cli_module.cli, ["-q", "module", "local", *args], input=input)
+
+
+def test_the_command_lists_the_names_and_shows_a_value_only_on_request(monkeypatch, tmp_path):
+    secret = value("list")
+    me.write(tmp_path / "home", "t", {"LOCAL_PW": secret, "LOCAL_SDK_DIR": "/mnt/nas/x"})
+    plain = _cli(monkeypatch, tmp_path, "list", "t")
+    assert plain.exit_code == 0 and "LOCAL_PW = (hidden)" in plain.output and secret not in plain.output
+    shown = _cli(monkeypatch, tmp_path, "list", "t", "--reveal")
+    assert f"LOCAL_PW = {secret}" in shown.output and "LOCAL_SDK_DIR = /mnt/nas/x" in shown.output
+    assert "no private values" in _cli(monkeypatch, tmp_path, "list", "other").output
+
+
+def test_the_command_takes_a_value_hidden_or_from_standard_input_and_never_as_an_argument(monkeypatch, tmp_path):
+    secret = value("set")
+    asked = _cli(monkeypatch, tmp_path, "set", "t", "LOCAL_PW", input=secret + "\n")
+    assert asked.exit_code == 0 and secret not in asked.output
+    assert me.read(tmp_path / "home", "t") == {"LOCAL_PW": secret}
+    piped = _cli(monkeypatch, tmp_path, "set", "t", "LOCAL_TOKEN", "--stdin", input="ab c\n")
+    assert piped.exit_code == 0 and me.read(tmp_path / "home", "t")["LOCAL_TOKEN"] == "ab c"
+    refused = _cli(monkeypatch, tmp_path, "set", "t", "NOT_LOCAL", "--stdin", input="x\n")
+    assert refused.exit_code == 2 and "no name of a local value" in refused.output
+    assert _cli(monkeypatch, tmp_path, "set", "t", "LOCAL_X", "--value", "x").exit_code == 2, "no --value option"
+    assert _cli(monkeypatch, tmp_path, "set", "../t", "LOCAL_X", "--stdin", input="x\n").exit_code == 2
+
+
+def test_the_command_removes_one_value_or_all_of_them_after_asking(monkeypatch, tmp_path):
+    me.write(tmp_path / "home", "t", {"LOCAL_A": "1", "LOCAL_B": "2"})
+    assert _cli(monkeypatch, tmp_path, "remove", "t", "LOCAL_A").exit_code == 0
+    assert me.read(tmp_path / "home", "t") == {"LOCAL_B": "2"}
+    assert _cli(monkeypatch, tmp_path, "remove", "t", "LOCAL_NONE").exit_code == 1
+    # all of them: without a terminal and without --yes nothing is removed, No is the default
+    assert _cli(monkeypatch, tmp_path, "remove", "t").exit_code == 1
+    assert me.read(tmp_path / "home", "t") == {"LOCAL_B": "2"}
+    assert _cli(monkeypatch, tmp_path, "remove", "t", "--yes").exit_code == 0
+    assert me.read(tmp_path / "home", "t") == {} and not me.path_for(tmp_path / "home", "t").exists()
+
+
+def _panel_for(tmp_path, monkeypatch, **fields):
+    from orchestrator.Core.module_edit import ModuleEdit
+    from orchestrator.Core.module_generator import ModuleGenerator
+    from orchestrator.gui.module_edit import ModuleEditPanel
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "home"))
+    (tmp_path / "targets").mkdir(exist_ok=True)
+    folder = ModuleGenerator(tmp_path / "targets").generate_module(
+        dict(module_name="Panel Demo", architecture="aarch64", sdk="none", **fields))
+    panel = ModuleEditPanel()
+    panel.load(ModuleEdit(Path(folder)))
+    return panel
+
+
+def test_the_edit_step_shows_the_names_and_never_a_value_in_its_list(qapp, tmp_path, monkeypatch):
+    secret = value("gui")
+    panel = _panel_for(tmp_path, monkeypatch, setup_commands=f"export DB_PASSWORD={secret}\nexport SDK=/mnt/nas/acme/sdk\n")
+    try:
+        assert not panel.local_box.isHidden()
+        rows = [panel.local_list.item(i).text() for i in range(panel.local_list.count())]
+        assert rows == ["LOCAL_PASSWORD_1 = (hidden)", "LOCAL_PATH_1 = (hidden)"] or len(rows) == 2
+        assert all("(hidden)" in row and secret not in row for row in rows)
+        assert all(secret not in editor.toPlainText() for editor in panel.editors.values())
+        assert "${LOCAL_PASSWORD_1}" in panel.editors["modules/source_module.sh"].toPlainText()
+    finally:
+        panel.unload()
+        panel.deleteLater()
+
+
+def test_the_box_adds_changes_shows_and_removes_a_value_and_asks_before_it_removes(qapp, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog, QMessageBox
+    panel = _panel_for(tmp_path, monkeypatch, setup_commands="export SDK=/mnt/nas/acme/sdk\n")
+    state = tmp_path / "home"
+    try:
+        answers = iter([("LOCAL_NEW", True), ("n" + value("new"), True)])
+        monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: next(answers)))
+        panel.add_local_value()
+        assert me.read(state, "panel_demo")["LOCAL_NEW"] == "n" + value("new")
+        panel.local_list.setCurrentRow(0)
+        name = panel._picked_local()
+        monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("changed", True)))
+        panel.change_local_value()
+        assert me.read(state, "panel_demo")[name] == "changed"
+        shown = []
+        from orchestrator.gui import module_edit as gui
+        monkeypatch.setattr(gui, "plain_box", lambda parent, kind, title, text, **k: shown.append((kind, text)) or QMessageBox.Yes)
+        panel.show_local_value()
+        assert shown[-1] == ("information", f"{name} = changed")
+        # asked first: No keeps it, Yes removes it
+        monkeypatch.setattr(gui, "plain_box", lambda *a, **k: QMessageBox.No)
+        panel.remove_local_value()
+        assert name in me.read(state, "panel_demo")
+        monkeypatch.setattr(gui, "plain_box", lambda *a, **k: QMessageBox.Yes)
+        panel.remove_local_value()
+        assert name not in me.read(state, "panel_demo")
+        # a name that is no local name is refused with the reason and nothing is written
+        told = []
+        monkeypatch.setattr(gui, "plain_box", lambda parent, kind, title, text, **k: told.append(text) or QMessageBox.Ok)
+        answers = iter([("PATH", True), ("x", True)])
+        monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: next(answers)))
+        before = me.read(state, "panel_demo")
+        panel.add_local_value()
+        assert "no name of a local value" in told[-1] and me.read(state, "panel_demo") == before
+    finally:
+        panel.unload()
+        panel.deleteLater()
+
+
+def test_a_module_without_values_and_without_a_variable_shows_no_box(qapp, tmp_path, monkeypatch):
+    panel = _panel_for(tmp_path, monkeypatch, setup_commands="make -j4\n")
+    try:
+        assert panel.local_box.isHidden() and panel.local_values() == {}
+    finally:
+        panel.unload()
+        panel.deleteLater()

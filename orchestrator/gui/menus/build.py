@@ -61,6 +61,11 @@ CLI_PATHS: Dict[str, str] = {
     "module edit --variables": "btn_targets_edit",   # the step's variables, shown first
     "module edit --set": "btn_targets_edit",           # the step's form per value
     "module edit --ask-values": "btn_targets_edit",
+    # the same step's box of the module's private values (gui/module_edit.py: Add, Change, Show, Remove)
+    "module local list": "btn_targets_edit",
+    "module local list --reveal": "btn_targets_edit",   # its Show the Value
+    "module local set": "btn_targets_edit",             # its Add a Value... and Change the Value...
+    "module local remove": "btn_targets_edit",          # its Remove the Value (asked first, No is the default)
     # Build > Targets... > Vendor Files...: the guided fetch of vendor files (gui/vendor_files_window.py)
     "vendor list": "btn_targets_vendor",
     "vendor fetch": "btn_targets_vendor",
@@ -187,6 +192,10 @@ MACHINE_ONLY: Dict[str, str] = {
     "build tune list --json": "machine-readable output for scripts; the Auto-Tuning tab lists the same runs",
     "build tune show --json": "the report as JSON for scripts; the Auto-Tuning tab shows the same report",
     "module fields --json": "the template's fields as JSON for scripts; the wizard's form shows the same fields",
+    "module local set --stdin": "reads the value from one line of standard input, for scripts; the box asks for it "
+                                "hidden in a dialog of its own",
+    "module local remove --yes": "removes all values of a target without asking, for scripts; the box asks before "
+                                 "it removes one",
     "module propose-values --json": "the proposal as JSON for scripts; the wizard's form shows each value beside "
                                     "its field",
     "vendor list --json": "machine-readable output for scripts; Vendor Files... shows the same rows as a table",

@@ -3057,6 +3057,34 @@ solange eine Prüfung scheitert. Eine KI-App oder Ditto kann dort über die GUI-
 Diff im Feld „Vorschlag“: Er wird im Fenster angewendet, markiert und mit einem Rückgängig gelistet, und nur dein
 **Speichern** schreibt ihn. Die Variablen der Vorlage sind dasselbe Formular je Wert wie im Assistenten (mit **YAML (erweitert)**); **Variablen anwenden** erzeugt die Dateien neu.
 
+### module local
+
+```
+llm-cli module local list TARGET [--reveal]
+llm-cli module local set TARGET NAME [--stdin]
+llm-cli module local remove TARGET [NAME] [--yes]
+```
+
+Die Werte, die ein Modul für diesen Computer privat hält: ein Pfad auf einem Netzlaufwerk, eine interne Domain, eine
+Schlüsseldatei, ein Passwort. Das Modul enthält `${LOCAL_NAME}`; der Wert liegt in deiner eigenen Datei
+`modules_env/<target>.env` deines Zustandsordners (Modus 0600, nie in einem Modulordner, in der `.gitignore`), und ein
+Build gibt ihn an die Stufen. `module create` und der Wizard verschieben solche Werte von selbst dorthin (siehe
+[module create](#module-create)); diese Befehle zeigen und ändern sie. Die KI-Werkzeuge des Frameworks sehen nur die
+Namen.
+
+| Befehl / Option | Bedeutung |
+|---|---|
+| `list TARGET` | Die Namen der Werte des Targets; die Werte erscheinen als `(hidden)`. |
+| `list --reveal` | Zeigt auch die Werte: Sie sind privat für diesen Computer, und nur du siehst dieses Terminal. |
+| `set TARGET NAME` | Setzt oder ändert einen Wert. `NAME` ist `LOCAL_` und Großbuchstaben, Ziffern oder `_` (sonst Exit-Code 2). Der Wert wird verdeckt abgefragt. Es gibt keine Option, die ihn als Argument nimmt: Die Shell würde ihn in ihrem Verlauf behalten. |
+| `set --stdin` | Liest den Wert aus einer Zeile der Standardeingabe, für Skripte. |
+| `remove TARGET NAME` | Entfernt einen Wert (Exit-Code 1, wenn das Target keinen dieses Namens hat). |
+| `remove TARGET` | Entfernt alle Werte des Targets nach einer Frage (Nein ist die Vorgabe; ohne Terminal und ohne `--yes` wird nichts entfernt, Exit-Code 1). Ein Modul, das `${LOCAL_NAME}` eines entfernten Werts noch enthält, bekommt im nächsten Build eine leere Variable. |
+| `remove --yes` | Ohne `NAME`: entfernt alle Werte ohne Frage, für Skripte. |
+
+In der GUI ist dasselbe der Kasten „Private Werte dieses Moduls“ im Bearbeiten-Schritt (die letzte Seite des Wizards und
+Build > Targets... > Dateien bearbeiten...): Wert hinzufügen..., Wert ändern..., Wert zeigen und Wert entfernen (vorher gefragt).
+
 ### module repair
 
 ```

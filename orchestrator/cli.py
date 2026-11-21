@@ -1261,6 +1261,90 @@ def module_fields(as_json: bool):
     click.echo(catalogue_text())
 
 
+@module.group('local')
+def module_local():
+    """The values a module keeps private to this computer (a path on a network drive, an internal domain, a key
+    file, a password): the module holds ${LOCAL_NAME}, your file modules_env/<target>.env holds the value, and a
+    build hands it to the stages. The framework's AI tools see the names only."""
+
+
+def _local_state() -> Path:
+    from orchestrator.Core.config_manager import ConfigManager
+    return ConfigManager.user_state_path()
+
+
+def _local_values_or_exit(target: str) -> Dict[str, str]:
+    from orchestrator.Core import modules_env
+    try:
+        return modules_env.read(_local_state(), target)
+    except modules_env.LocalValuesError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+
+
+@module_local.command('list')
+@click.argument('target')
+@click.option('--reveal', is_flag=True, help='Show the values too (they are private to this computer: only you see '
+              'this terminal)')
+def module_local_list(target: str, reveal: bool):
+    """The private values of a target by name; the values stay hidden unless --reveal"""
+    values = _local_values_or_exit(target)
+    if not values:
+        click.echo(f"{target} has no private values.")
+        return
+    for name in sorted(values):
+        click.echo(f"{name} = {values[name] if reveal else '(hidden)'}")
+
+
+@module_local.command('set')
+@click.argument('target')
+@click.argument('name')
+@click.option('--stdin', 'from_stdin', is_flag=True, help='Read the value from one line of standard input (it is '
+              'never an argument: the shell would keep it in its history)')
+def module_local_set(target: str, name: str, from_stdin: bool):
+    """Set or change one private value of a target (NAME is LOCAL_ and capital letters, digits or _); the value is
+    asked hidden, or read from one line of standard input"""
+    from orchestrator.Core import modules_env
+    value = sys.stdin.readline().rstrip("\r\n") if from_stdin else click.prompt("Value", hide_input=True, err=True)
+    try:
+        modules_env.set_value(_local_state(), target, name, value)
+    except modules_env.LocalValuesError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+    click.echo(f"{name} of {target} is set.")
+
+
+@module_local.command('remove')
+@click.argument('target')
+@click.argument('name', required=False)
+@click.option('--yes', is_flag=True, help='Without a NAME: remove all values of the target without asking')
+def module_local_remove(target: str, name: Optional[str], yes: bool):
+    """Remove one private value of a target, or, without NAME, all of them (asked first, No is the default). A module
+    that still holds ${LOCAL_NAME} of a removed value gets an empty variable in its next build."""
+    from orchestrator.Core import modules_env
+    state = _local_state()
+    values = _local_values_or_exit(target)
+    try:
+        if name:
+            if not modules_env.remove_value(state, target, name):
+                console.print(f"[red]{escape(target)} has no value named {escape(name)}.[/red]")
+                sys.exit(1)
+            click.echo(f"{name} of {target} is removed.")
+            return
+        if not values:
+            click.echo(f"{target} has no private values.")
+            return
+        if not yes and not (sys.stdin.isatty() and click.confirm(
+                f"Remove all {len(values)} private value(s) of {target}?", default=False, err=True)):
+            console.print("[yellow]Nothing was removed.[/yellow]")
+            sys.exit(1)
+        modules_env.remove(state, target)
+        click.echo(f"All private values of {target} are removed.")
+    except modules_env.LocalValuesError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+
+
 @module.command('propose-values')
 @click.argument('probe_file', type=click.Path(exists=True, dir_okay=False))
 @click.option('--provider', help='AI provider for this run; default: AI settings')

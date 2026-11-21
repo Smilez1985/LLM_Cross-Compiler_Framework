@@ -25,8 +25,9 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QListWidget, QPlainTextEdit,
-                               QPushButton, QSplitter, QStackedWidget, QTabWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QInputDialog, QLineEdit,
+                               QListWidget, QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QStackedWidget,
+                               QTabWidget, QVBoxLayout, QWidget)
 
 from orchestrator.Core.module_edit import EditRefused, ModuleEdit
 from orchestrator.gui.plain import button_text, one_line, plain_box, plain_label
@@ -81,6 +82,29 @@ class ModuleEditPanel(QWidget):
         box.addWidget(self.btn_variables)
         self.variables_box.setVisible(False)
         layout.addWidget(self.variables_box)
+        # the values private to this computer (Core/modules_env.py): names here, values in the person's own file
+        self.local_box = QWidget(self)
+        local = QVBoxLayout(self.local_box)
+        local.setContentsMargins(0, 0, 0, 0)
+        local.addWidget(plain_label(self._t("bld.local.title")))
+        self.local_list = QListWidget(self.local_box)
+        self.local_list.setObjectName("list_module_local")
+        self.local_list.setMaximumHeight(110)
+        local.addWidget(self.local_list)
+        local_row = QHBoxLayout()
+        self.local_buttons = {}
+        for key, slot in (("add", self.add_local_value), ("change", self.change_local_value),
+                          ("show", self.show_local_value), ("remove", self.remove_local_value)):
+            button = QPushButton(button_text(self._t(f"bld.local.{key}")), self.local_box)
+            button.setObjectName(f"btn_module_local_{key}")
+            button.setAutoDefault(False)
+            button.clicked.connect(lambda *_a, s=slot: s())
+            local_row.addWidget(button)
+            self.local_buttons[key] = button
+        local_row.addStretch(1)
+        local.addLayout(local_row)
+        self.local_box.setVisible(False)
+        layout.addWidget(self.local_box)
         split = QSplitter(Qt.Horizontal, self)
         self.file_list = QListWidget(split)
         self.file_list.setObjectName("list_module_edit_files")
@@ -142,11 +166,96 @@ class ModuleEditPanel(QWidget):
         variables = edit.variables()
         self.variables_edit.setPlainText(variables or "")
         self.variables_box.setVisible(variables is not None)
+        self.refresh_local_values()
         self._bind()
         self.show_note(note)
         self.problems_view.setPlainText("")
         self._set_enabled(True)
         self.refresh()
+
+    # --- the values private to this computer -----------------------------------------------------------------------
+
+    def _local_target(self) -> Optional[str]:
+        return self.edit.folder.name if self.edit is not None else None
+
+    def _local_state(self) -> Path:
+        from orchestrator.Core.config_manager import ConfigManager
+        return ConfigManager.user_state_path()
+
+    def local_values(self) -> Dict[str, str]:
+        from orchestrator.Core import modules_env
+        target = self._local_target()
+        if target is None:
+            return {}
+        try:
+            return modules_env.read(self._local_state(), target)
+        except (modules_env.LocalValuesError, OSError):
+            return {}
+
+    def refresh_local_values(self, keep: Optional[str] = None) -> None:
+        """The names of the target's values (never the values); the box is there when the module has values or holds a
+        ${LOCAL_NAME}, and the Add button is always there with it. `keep` is the name that stays selected."""
+        values = self.local_values()
+        self.local_list.clear()
+        for name in sorted(values):
+            self.local_list.addItem(f"{name} = {self._t('bld.local.hidden')}")
+            self.local_list.item(self.local_list.count() - 1).setData(Qt.UserRole, name)
+            if name == keep:
+                self.local_list.setCurrentRow(self.local_list.count() - 1)
+        holds = self.edit is not None and any("${LOCAL_" in self.edit.text(rel) for rel in self.edit.files)
+        self.local_box.setVisible(self.edit is not None and (bool(values) or holds))
+        picked = bool(values)
+        for key in ("change", "show", "remove"):
+            self.local_buttons[key].setEnabled(picked)
+
+    def _picked_local(self) -> Optional[str]:
+        item = self.local_list.currentItem() or (self.local_list.item(0) if self.local_list.count() == 1 else None)
+        return item.data(Qt.UserRole) if item is not None else None
+
+    def _store_local(self, name: str, value: str) -> bool:
+        from orchestrator.Core import modules_env
+        try:
+            modules_env.set_value(self._local_state(), self._local_target(), name, value)
+        except (modules_env.LocalValuesError, OSError) as e:
+            plain_box(self, "warning", self._t("bld.local.title"), self._t("bld.local.refused", reason=e))
+            return False
+        self.refresh_local_values(keep=name)
+        return True
+
+    def add_local_value(self) -> None:
+        name, ok = QInputDialog.getText(self, self._t("bld.local.add"), self._t("bld.local.name"))
+        if not ok or not name.strip():
+            return
+        value, ok = QInputDialog.getText(self, self._t("bld.local.add"), self._t("bld.local.value", name=name.strip()),
+                                         QLineEdit.Password)
+        if ok:
+            self._store_local(name.strip(), value)
+
+    def change_local_value(self) -> None:
+        name = self._picked_local()
+        if name is None:
+            return
+        value, ok = QInputDialog.getText(self, self._t("bld.local.change"), self._t("bld.local.value", name=name),
+                                         QLineEdit.Password)
+        if ok:
+            self._store_local(name, value)
+
+    def show_local_value(self) -> None:
+        name = self._picked_local()
+        if name is not None:   # the person's own file on the person's own screen
+            plain_box(self, "information", self._t("bld.local.show"),
+                      self._t("bld.local.shown", name=name, value=self.local_values().get(name, "")))
+
+    def remove_local_value(self) -> None:
+        from orchestrator.Core import modules_env
+        name = self._picked_local()
+        if name is None:
+            return
+        answer = plain_box(self, "question", self._t("bld.local.remove"), self._t("bld.local.confirm_remove", name=name),
+                           buttons=QMessageBox.Yes | QMessageBox.No, default=QMessageBox.No)
+        if answer == QMessageBox.Yes:
+            modules_env.remove_value(self._local_state(), self._local_target(), name)
+            self.refresh_local_values()
 
     def show_error(self, text: str) -> None:
         """The step has no files (they could not be made or opened): only the reason is shown."""
@@ -175,6 +284,8 @@ class ModuleEditPanel(QWidget):
         self.diff_view.setPlainText("")
         self.variables_edit.setPlainText("")
         self.variables_box.setVisible(False)
+        self.local_list.clear()
+        self.local_box.setVisible(False)
         self._set_enabled(False)
 
     def _bind(self) -> None:

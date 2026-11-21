@@ -2927,6 +2927,33 @@ Checks**, **Apply a Diff...** (`--apply`) and **Save**, which is refused with th
 app or Ditto may propose a change there through the GUI tools, as a diff in the field "proposal": it is applied in the
 window, marked and listed with an Undo, and only your **Save** writes it. The template variables are the same form per value as in the wizard (with **YAML (advanced)**); **Apply the Variables** makes the files anew.
 
+### module local
+
+```
+llm-cli module local list TARGET [--reveal]
+llm-cli module local set TARGET NAME [--stdin]
+llm-cli module local remove TARGET [NAME] [--yes]
+```
+
+The values a module keeps private to this computer: a path on a network drive, an internal domain, a key file, a
+password. The module holds `${LOCAL_NAME}`; the value lives in your own file `modules_env/<target>.env` of your state
+folder (mode 0600, never in a module folder, in `.gitignore`), and a build hands it to the stages. `module create` and
+the wizard move such values there by themselves (see [module create](#module-create)); these commands show and change
+them. The framework's AI tools see the names only.
+
+| Command / option | Meaning |
+|---|---|
+| `list TARGET` | The names of the target's values; the values show as `(hidden)`. |
+| `list --reveal` | Shows the values too: they are private to this computer, and only you see this terminal. |
+| `set TARGET NAME` | Sets or changes one value. `NAME` is `LOCAL_` and capital letters, digits or `_` (exit code 2 otherwise). The value is asked hidden. There is no option that takes it as an argument: the shell would keep it in its history. |
+| `set --stdin` | Reads the value from one line of standard input, for scripts. |
+| `remove TARGET NAME` | Removes one value (exit code 1 when the target has none of that name). |
+| `remove TARGET` | Removes all values of the target after asking (No is the default; without a terminal and without `--yes` nothing is removed, exit code 1). A module that still holds `${LOCAL_NAME}` of a removed value gets an empty variable in its next build. |
+| `remove --yes` | Without a `NAME`: removes all values without asking, for scripts. |
+
+In the GUI the same is the box "Private values of this module" in the edit step (the wizard's last page and Build >
+Targets... > Edit Files...): Add a Value..., Change the Value..., Show the Value and Remove the Value (asked first).
+
 ### module repair
 
 ```
