@@ -186,6 +186,7 @@ belongs.
 | Item | Status |
 |---|---|
 | **Which further Orange Pi boards and SoCs follow the Orange Pi 6**: the ones the maintainer owns or wants to support (for example the RK3566 and RK3588 boards with an NPU, and the Allwinner and Amlogic boards on the CPU), and whether a board's NPU is in scope on every SoC that has one. The Orange Pi 6 is first (answered 2026-11-20); asked on 2026-11-18, with the recon of the row above. | open question |
+| **How do the private values reach a build: as a file mounted into the stage container, or as a merged copy of the module?** Recommended: the file `modules_env/<target>.env`, copied into the build's temporary folder and mounted read-only into the stage container (as the board's probe is), which the module's shell variables `${LOCAL_NAME}` read; nothing is merged into text and nothing is baked into the image. The maintainer's wording of 2026-11-21 was a temporary copy of the module merged with the values; the recon found that the module is copied into the image layers (cached, exportable), so a merged copy would have to be a second one, mounted over the image's `modules/` when a stage runs, and its text would hold the values (a log with `set -x` could show them). Asked on 2026-11-21, with the recon of the row "The wizard's local layer for private values" ([design](DESIGN.md#knowledge-base-and-deep-ingest)). | open question |
 
 
 ## Next - build service, queue and modes (planned; starts right after the architecture consolidation)
