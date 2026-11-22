@@ -1734,7 +1734,7 @@ class CommunityManager:
                 if licence_texts.canonical_file(rel, file.read_bytes()):
                     continue  # a canonical licence text is checked byte for byte instead (_check_licence_files)
                 text = file.read_text(encoding="utf-8", errors="replace")
-                if scrub(text) != text:
+                if scrub(text, words=contents.manifest.kind != "knowledge") != text:
                     problems.append(f"{rel}: contains personal data the privacy scrub would remove")
                 elif contents.manifest.kind != "knowledge":
                     private = export_review.findings(text)
@@ -1950,7 +1950,7 @@ class CommunityManager:
                 text = data.decode("utf-8")
             except UnicodeDecodeError:
                 raise PackError(f"{rel} is a binary file; packs carry text only.") from None
-            cleaned = scrub(text)
+            cleaned = scrub(text, words=review)   # a script or file of a pack gets shell-safe words
             if review:
                 cleaned = export_review.certain(cleaned)
                 asked = export_review.to_review(cleaned)

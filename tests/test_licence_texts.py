@@ -300,7 +300,7 @@ def test_an_apache_page_without_a_crawled_notice_file_says_so(world):
 def test_the_privacy_scrub_never_changes_a_licence_text(world, monkeypatch):
     from orchestrator.Core import community_manager
 
-    def scrub(text):   # as on a computer named "software": the host name is replaced wherever it stands
+    def scrub(text, words=False):   # as on a computer named "software": the host name is replaced wherever it stands
         return text.replace("SOFTWARE", "<host>").replace("Software", "<host>")
     monkeypatch.setattr(community_manager, "scrub", scrub)
     world.rag.records = [record(f"{DOCS}/mit", "Text.", title="MIT page", licence="MIT")]

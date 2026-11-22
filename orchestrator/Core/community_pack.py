@@ -1115,10 +1115,23 @@ def _replace_name(text: str, name: str, placeholder: str) -> str:
     return re.sub(rf"(?<!\w){re.escape(name)}(?!\w)", placeholder, text, flags=re.IGNORECASE)
 
 
-def scrub(text: str) -> str:
+# What stands in the place of what was removed: readable marks for prose (a knowledge page, a log line) and, for a
+# script or a file that a program reads (a target, recipe or block pack), words that are safe in a shell script and a
+# YAML file: '<' and '>' are redirections in a shell. The words are fixed points of the scrub, so a pack that
+# carries them passes its own check.
+PLACEHOLDER_MARKS = {"ip": "<ip>", "mac": "<mac>", "email": "<email>", "jwt": "<jwt>", "host": "<host>",
+                     "user": "<user>"}
+PLACEHOLDER_WORDS = {"ip": "ip-removed", "mac": "mac-removed", "email": "email-removed", "jwt": "jwt-removed",
+                     "host": "host-removed", "user": "user-removed"}
+
+
+def scrub(text: str, words: bool = False) -> str:
     """Removes what identifies this machine or its user before text leaves it, irreversibly: home folders
     become '~', IP and MAC addresses '<ip>'/'<mac>', e-mail addresses '<email>', JWTs '<jwt>', the host name
-    '<host>', the user name '<user>', and API keys are redacted. 127.0.0.1 and other loopback addresses stay."""
+    '<host>', the user name '<user>', and API keys are redacted. 127.0.0.1 and other loopback addresses stay.
+    With `words` the marks are shell-safe words ('ip-removed', 'user-removed'; PLACEHOLDER_WORDS) for the files of
+    a target, recipe or block pack."""
+    marks = PLACEHOLDER_WORDS if words else PLACEHOLDER_MARKS
     import getpass
     import socket
 
@@ -1126,7 +1139,7 @@ def scrub(text: str) -> str:
 
     if not text:
         return ""
-    text = _JWT.sub("<jwt>", text)
+    text = _JWT.sub(marks["jwt"], text)
     home = Path.home()
     if len(str(home)) > 3 and home.name.casefold() not in _COMMON_NAMES:  # /root is a path of every container
         text = re.sub(re.escape(str(home)) + r"(?![\w.-])", "~", text)
@@ -1136,15 +1149,15 @@ def scrub(text: str) -> str:
     # Secrets, IPv4/IPv6, MAC and e-mail addresses and user@host logins (the mapping back is dropped).
     text, _ = PrivacyFilter("BALANCED", reversible_secrets=False).sanitize(text)
     text = text.translate(_UNSHIELD)
-    text = _GENERIC_PLACEHOLDER.sub(lambda m: f"<{m.group(1).lower()}>", text)
+    text = _GENERIC_PLACEHOLDER.sub(lambda m: marks[m.group(1).lower()], text)
     try:
         host = socket.gethostname()
     except OSError:
         host = ""
     for name in sorted({host, host.split(".")[0]} - {""}, key=len, reverse=True):
-        text = _replace_name(text, name, "<host>")
+        text = _replace_name(text, name, marks["host"])
     try:
         user = getpass.getuser()
     except (KeyError, OSError):
         user = ""
-    return _replace_name(text, user, "<user>") if user else text
+    return _replace_name(text, user, marks["user"]) if user else text
