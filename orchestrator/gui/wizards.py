@@ -342,6 +342,12 @@ class ModuleCreationWizard(QWizard):
                     "quantizations, default_quantization, runtime_libraries, board_paths, sdk, vendor_files) from "
                     "the probe and the vendor's documentation; empty: GGUF")
 
+        b.text("dependencies", "gui.field.wizard.dependencies", self.dependencies_edit, page=3,
+               hint="YAML list of what the SDK and toolchain need (name, version, kind: system_package, pip_package, "
+                    "vendor_file, base_image or board_driver, origin, source, url, sha256, check, redistributable, "
+                    "note); a system package becomes a pinned apt package and a pip package a hash-checked wheel of "
+                    "the build image, a vendor file waits for the person's licence acceptance; empty: none")
+
         def person_only():
             return "only the person decides what a module shares"
         b.check("attach_knowledge", "gui.field.wizard.attach_knowledge", self.chk_knowledge, page=4,
@@ -749,6 +755,12 @@ class ModuleCreationWizard(QWizard):
         self.format_proposal = None   # Ditto's proposal of the format values the form shows (None: none)
         layout.addRow(ui_text("bld.wizard.formats_label"), self.btn_formats_propose)
         layout.addRow(self.formats_form)
+        # What the SDK and toolchain need, as data (Core/target_dependencies.py): YAML, one entry per dependency
+        self.dependencies_edit = QTextEdit()
+        self.dependencies_edit.setAcceptRichText(False)
+        self.dependencies_edit.setStyleSheet(mono)
+        self.dependencies_edit.setPlaceholderText(ui_text("bld.wizard.dependencies_hint"))
+        layout.addRow(ui_text("bld.wizard.dependencies_label"), self.dependencies_edit)
         
         page.setLayout(layout)
         return page
@@ -1520,6 +1532,7 @@ class ModuleCreationWizard(QWizard):
             "quantization_logic": self.quant_logic.toPlainText(),
             "detection_commands": "lscpu",
             "formats": self.formats_edit.toPlainText(),
+            "dependencies": self.dependencies_edit.toPlainText(),
         }
         if self._pinned_image and self._ai_chose_base_image() and \
                 self.module_data["base_os"].strip() == self._pinned_image[0]:

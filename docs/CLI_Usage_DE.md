@@ -2968,6 +2968,7 @@ experimentell: Vor dem ersten Lauf an einem Terminal geht der Hinweis zu Ditto e
 |---|---|
 | `--provider TEXT` | Anbieter für diesen Lauf, z. B. `anthropic`, `openai`, `ollama`. Standard: KI-Einstellungen. |
 | `--model TEXT` | Modell für diesen Lauf. Standard: KI-Einstellungen. |
+| `--dependencies DATEI` | Was SDK und Toolchain des Moduls brauchen, als Daten (siehe [module deps](#module-deps)): eine YAML- oder JSON-Liste von Einträgen mit Name, gepinnter Version, Art (`system_package`, `pip_package`, `vendor_file`, `base_image`, `board_driver`), Herkunft, der Quelle der Aussage (`excerpt:N`, `probe:KEY` oder `template`; keine ist eine benannte Lücke), einer Download-Adresse, dem sha256 des Wheels bei einem pip-Paket, einer Prüfung (ein Programm und seine Argumente) und der Angabe, ob die Lizenz die Weitergabe erlaubt. Ein Systempaket wird ein gepinntes apt-Paket und ein pip-Paket ein per Hash geprüftes Wheel des Build-Images des Moduls; eine Herstellerdatei wartet auf Deine eigene Lizenzannahme; ein Treiber des Boards wird nur aufgelistet. |
 | `--formats-out DATEI` | Dittos Vorschlag der Werte der Ausgabeformate in diese YAML-Datei schreiben, zur Prüfung und für `module create --formats DATEI --ask-values`. |
 
 Nennt die Probe einen eigenen Beschleuniger (eine NPU oder eine GPU), schlägt Ditto auch die Werte seines Ausgabeformats vor, Wert für Wert, aus der Probe und der gecrawlten Herstellerdokumentation (wie [`module propose-values`](#module-propose-values)); der Vorschlag wird je Wert mit Quelle und Sicherheit ausgegeben. Das Modul wird nur damit erzeugt, wenn er vollständig ist (keine Lücke, jede Prüfung bestanden) und du Ja sagst; sonst baut das Modul GGUF, und der Entwurf ist deiner zum Füllen.
@@ -3059,6 +3060,31 @@ In der GUI: **Build > Targets...**, das Target wählen, **Dateien bearbeiten...*
 solange eine Prüfung scheitert. Eine KI-App oder Ditto kann dort über die GUI-Werkzeuge eine Änderung vorschlagen, als
 Diff im Feld „Vorschlag“: Er wird im Fenster angewendet, markiert und mit einem Rückgängig gelistet, und nur dein
 **Speichern** schreibt ihn. Die Variablen der Vorlage sind dasselbe Formular je Wert wie im Assistenten (mit **YAML (erweitert)**); **Variablen anwenden** erzeugt die Dateien neu.
+
+### module deps
+
+```
+llm-cli module deps TARGET [--in-image IMAGE]
+```
+
+Was SDK und Toolchain eines Moduls brauchen und ob es da ist: die Einträge der `target.yml` des Moduls
+(`template_variables.dependencies`), jeder **da**, **fehlt**, **wartet auf Dein Ja** (eine Herstellerdatei unter ihrer
+eigenen Lizenz: hol sie mit `llm-cli vendor fetch`), **auf dem Board** (ein Treiber oder Firmware, der Vorabprüfung
+überlassen, nie installiert) oder **keine Prüfung angegeben**; ein Eintrag ohne Quelle ist als Lücke markiert. Jede Prüfung
+ist ein Programm mit Argumenten, ohne Shell gestartet, und das Programm ist eines, das nur schaut (`dpkg`, `dpkg-query`,
+`pkg-config`, `test`, `ls`, `stat`, `which`, `ldconfig`, `modinfo`, `lsmod`, `pip`, `pip3`). Hier wird nichts
+installiert: Ein Systempaket ist ein gepinntes apt-Paket und ein pip-Paket ein per Hash geprüftes Wheel
+(`--no-deps --require-hashes`, jedes Paket eines Baums ist also ein eigener Eintrag) im Dockerfile des Build-Images des
+Moduls, das ein Build installiert, nie Dein Computer. Der Exit-Code ist 1, wenn ein Eintrag fehlt oder wartet, 2, wenn die
+Liste nicht gültig ist.
+
+| Option | Bedeutung |
+|---|---|
+| `--in-image IMAGE` | Fragt jede Prüfung in diesem Build-Image ab (`docker run --rm --network none`), sodass gilt, was das Image hat, sieht der Build. Ohne sie laufen die Prüfungen auf diesem Computer. |
+
+In der GUI: das Feld „Abhängigkeiten von SDK und Toolchain“ des Modul-Wizards (die Flags-Seite) macht die Liste, und der
+Kasten „Abhängigkeiten dieses Moduls“ im Bearbeiten-Schritt (die letzte Seite des Wizards und **Build > Targets... >
+Dateien bearbeiten...**) zeigt sie mit **Prüfen**.
 
 ### module local
 

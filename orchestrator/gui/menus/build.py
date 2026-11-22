@@ -66,6 +66,8 @@ CLI_PATHS: Dict[str, str] = {
     "module local list --reveal": "btn_targets_edit",   # its Show the Value
     "module local set": "btn_targets_edit",             # its Add a Value... and Change the Value...
     "module local remove": "btn_targets_edit",          # its Remove the Value (asked first, No is the default)
+    "module deps": "btn_targets_edit",                  # its box "Dependencies of this module" with Check
+    "module create --dependencies": "act_tools_module_wizard",   # the flags page: the dependencies field
     "module delete": "btn_targets_delete",              # Build > Targets... > Delete Module... (asked first, No is the default)
     # Build > Targets... > Vendor Files...: the guided fetch of vendor files (gui/vendor_files_window.py)
     "vendor list": "btn_targets_vendor",
@@ -194,6 +196,8 @@ MACHINE_ONLY: Dict[str, str] = {
     "build tune list --json": "machine-readable output for scripts; the Auto-Tuning tab lists the same runs",
     "build tune show --json": "the report as JSON for scripts; the Auto-Tuning tab shows the same report",
     "module fields --json": "the template's fields as JSON for scripts; the wizard's form shows the same fields",
+    "module deps --in-image": "runs each check inside a named build image, for scripts and CI; the box checks on this "
+                              "computer",
     "module local set --stdin": "reads the value from one line of standard input, for scripts; the box asks for it "
                                 "hidden in a dialog of its own",
     "module local remove --yes": "removes all values of a target without asking, for scripts; the box asks before "

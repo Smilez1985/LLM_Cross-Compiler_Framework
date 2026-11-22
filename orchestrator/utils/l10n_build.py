@@ -376,6 +376,21 @@ TEXTS = {
                                  "unprivileged build user, without network), e.g. exporting SDK variables; what they "
                                  "export reaches the later stages",
         "bld.wizard.formats_label": "Output formats (template variables):",
+        "bld.wizard.dependencies_label": "Dependencies of the SDK and toolchain (YAML):",
+        "bld.wizard.dependencies_hint": "- name: libusb-1.0-0\n  version: 2:1.0.26-1\n  kind: system_package\n  origin: distribution\n  source: template\n  check: [dpkg, -s, libusb-1.0-0]\n(a list; empty: none. A system package becomes a pinned apt package and a pip package a hash-checked wheel of the build image; a vendor file waits for your own licence acceptance)",
+        "bld.deps.title": "Dependencies of this module",
+        "bld.deps.check": "Check",
+        "bld.deps.check_tip": "Asks each entry's check on this computer: there, missing or waiting for your yes. Nothing is installed; a system or pip package is a pinned step of the module's build image.",
+        "bld.deps.checking": "Checking...",
+        "bld.deps.invalid": "The dependencies of target.yml are not valid: {reason}",
+        "bld.deps.summary": "{n} entries: {present} there, {missing} missing, {waiting} waiting for your yes, {gaps} without a source.",
+        "bld.deps.state.present": "there",
+        "bld.deps.state.missing": "missing",
+        "bld.deps.state.waiting": "waits for your yes",
+        "bld.deps.state.board": "on the board (the pre-flight check)",
+        "bld.deps.state.unchecked": "no check given",
+        "bld.deps.state.unknown": "not checked yet",
+        "bld.deps.gap": "a gap, it has no source",
         "bld.wizard.formats_hint": "Optional, YAML: a list of formats, each a preset (gguf, rknn, rkllm) or its "
                                    "values: id, label, converter (command: the vendor's program in the image by its "
                                    "absolute path; args: words with {input} {output} {quant} {model_name}), input "
@@ -937,6 +952,21 @@ TEXTS = {
                                  "Build-Benutzer ohne Rechte, ohne Netz), z. B. SDK-Variablen exportieren; was sie "
                                  "exportieren, erreicht die späteren Stufen",
         "bld.wizard.formats_label": "Ausgabeformate (Variablen der Vorlage):",
+        "bld.wizard.dependencies_label": "Abhängigkeiten von SDK und Toolchain (YAML):",
+        "bld.wizard.dependencies_hint": "- name: libusb-1.0-0\n  version: 2:1.0.26-1\n  kind: system_package\n  origin: distribution\n  source: template\n  check: [dpkg, -s, libusb-1.0-0]\n(eine Liste; leer: keine. Ein Systempaket wird ein gepinntes apt-Paket und ein pip-Paket ein per Hash geprüftes Wheel des Build-Images; eine Herstellerdatei wartet auf Deine eigene Lizenzannahme)",
+        "bld.deps.title": "Abhängigkeiten dieses Moduls",
+        "bld.deps.check": "Prüfen",
+        "bld.deps.check_tip": "Fragt die Prüfung jedes Eintrags auf diesem Computer ab: da, fehlt oder wartet auf Dein Ja. Es wird nichts installiert; ein System- oder pip-Paket ist ein gepinnter Schritt des Build-Images des Moduls.",
+        "bld.deps.checking": "Prüfe...",
+        "bld.deps.invalid": "Die Abhängigkeiten der target.yml sind nicht gültig: {reason}",
+        "bld.deps.summary": "{n} Einträge: {present} da, {missing} fehlen, {waiting} warten auf Dein Ja, {gaps} ohne Quelle.",
+        "bld.deps.state.present": "da",
+        "bld.deps.state.missing": "fehlt",
+        "bld.deps.state.waiting": "wartet auf Dein Ja",
+        "bld.deps.state.board": "auf dem Board (die Vorabprüfung)",
+        "bld.deps.state.unchecked": "keine Prüfung angegeben",
+        "bld.deps.state.unknown": "noch nicht geprüft",
+        "bld.deps.gap": "eine Lücke, sie hat keine Quelle",
         "bld.wizard.formats_hint": "Optional, YAML: eine Liste von Formaten, jedes eine Vorgabe (gguf, rknn, rkllm) "
                                    "oder seine Werte: id, label, converter (command: das Programm des Herstellers im "
                                    "Image mit absolutem Pfad; args: Wörter mit {input} {output} {quant} "

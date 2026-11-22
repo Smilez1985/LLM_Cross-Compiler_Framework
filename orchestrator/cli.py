@@ -498,6 +498,12 @@ def _target_profile(probe_file, strict: bool):
 @click.option('--ask-values', 'ask_values', is_flag=True,
               help="Ask for each value of the output formats at the terminal, with its explanation and the current "
                    "value (from --formats or --set) as the default")
+@click.option('--dependencies', 'dependencies_file', type=click.Path(exists=True, dir_okay=False), default=None,
+              help="YAML or JSON file with what the module's SDK and toolchain need: a list of entries (name, version, "
+                   "kind: system_package, pip_package, vendor_file, base_image or board_driver, origin, source, url, "
+                   "sha256, check, redistributable, note). A system package becomes a pinned apt package and a pip "
+                   "package a hash-checked wheel of the build image; a vendor file waits for your own licence "
+                   "acceptance, a driver of the board is only listed ('llm-cli module deps' shows the list)")
 @click.option('--edit', 'edit_files', is_flag=True,
               help="The module wizard's \"edit all files\" step: the module is made in a scratch folder, each of its "
                    "stage modules, target.yml and Dockerfile opens in $EDITOR, the diff is shown and the checks run "
@@ -507,7 +513,7 @@ def module_create(ctx: FrameworkContext, name: Optional[str], arch: Optional[str
                   probe_file: Optional[str], description: Optional[str], base_image: Optional[str],
                   packages: Optional[str], cpu_flags: Optional[str], cmake_flags: str, setup_file: Optional[str],
                   quant_file: Optional[str], knowledge_roots: tuple, formats_file: Optional[str], edit_files: bool,
-                  set_values: tuple = (), ask_values: bool = False):
+                  set_values: tuple = (), ask_values: bool = False, dependencies_file: Optional[str] = None):
     """Create a new hardware target module (the module wizard's values as options; what is not given is asked)"""
     if ask_values and not _interactive():
         console.print("[red]--ask-values asks at a terminal; without one give the values with --formats FILE or "
@@ -558,6 +564,7 @@ def module_create(ctx: FrameworkContext, name: Optional[str], arch: Optional[str
         "quantization_logic": read(quant_file),
         "detection_commands": "lscpu",
         "formats": read(formats_file),
+        "dependencies": read(dependencies_file),
     }
     if set_values or ask_values:
         try:
@@ -1259,6 +1266,32 @@ def module_fields(as_json: bool):
         click.echo(json.dumps({"fields": [f.as_dict() for f in format_fields()]}, indent=2, ensure_ascii=False))
         return
     click.echo(catalogue_text())
+
+
+@module.command('deps')
+@click.argument('target')
+@click.option('--in-image', 'image', default=None, metavar='IMAGE',
+              help="Run each check inside this build image (docker run --rm --network none) instead of on this "
+                   "computer: what the image has is what the build sees")
+@pass_context
+def module_deps(ctx: FrameworkContext, target: str, image: Optional[str]):
+    """What a module's SDK and toolchain need, and whether it is there: each entry present, missing or waiting for your
+    own yes (a vendor file under its licence); a driver of the board is listed and left to the pre-flight check.
+    Nothing is installed here: a system or pip package is a pinned step of the module's build image"""
+    from orchestrator.Core import target_dependencies as deps
+    folder = _module_folder(_target_folders(ctx)[1], target)
+    try:
+        entries = deps.load(folder)
+    except ValueError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+    if not entries:
+        click.echo(f"{target} lists no dependencies.")
+        return
+    rows = deps.statuses(entries, deps.ImageRunner(image) if image else deps.HostRunner())
+    for line in deps.table(rows):
+        click.echo(_printable(line))
+    sys.exit(1 if any(r.state in ("missing", "waiting") for r in rows) else 0)
 
 
 @module.group('local')

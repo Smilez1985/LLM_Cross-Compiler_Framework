@@ -419,9 +419,19 @@ def vendor_blocks(data: Dict[str, Any]) -> Dict[str, str]:
         blocks["# [VENDOR_SOURCES]"] = "\n".join(lines)
     pips = data.get("pip_packages") or []
     if pips:
-        index = data.get("pip_index_url") or ""
-        args = (f"--index-url {_q(index)} " if index else "") + " ".join(_q(p) for p in pips)
-        blocks["# [PIP_PACKAGES]"] = f"RUN python3 -m pip install --no-cache-dir {args}"
+        index = (f"--index-url {_q(data['pip_index_url'])} " if data.get("pip_index_url") else "")
+        hashes = data.get("pip_hashes") or {}
+        hashed = [p for p in pips if hashes.get(p.split("==", 1)[0].lower())]
+        loose = [p for p in pips if p not in hashed]
+        steps = []
+        if loose:
+            steps.append("RUN python3 -m pip install --no-cache-dir " + index + " ".join(_q(p) for p in loose))
+        if hashed:   # a dependency's wheel: its hash is checked, and its own dependencies are entries of their own
+            lines = " ".join(_q(f"{p} --hash=sha256:{hashes[p.split('==', 1)[0].lower()]}") for p in hashed)
+            steps.append(f"RUN set -eu; printf '%s\\n' {lines} > /tmp/lcf-pip.txt; \\\n"
+                         f"    python3 -m pip install --no-cache-dir --no-deps --require-hashes {index}-r /tmp/lcf-pip.txt; "
+                         "\\\n    rm -f /tmp/lcf-pip.txt")
+        blocks["# [PIP_PACKAGES]"] = "\n".join(steps)
     downloads = data.get("pinned_downloads") or []
     if downloads:
         lines = ["RUN set -eu; \\", f"    mkdir -p {VENDOR_DIR}; \\"]
@@ -465,10 +475,44 @@ def generator_input(definition: Dict[str, Any], module_name: Optional[str] = Non
     return data
 
 
+def _with_dependencies(data: Dict[str, Any], problems: List[str]) -> Any:
+    """(the module data with its dependencies' apt and pip packages merged in, the entries as plain values): the
+    entries of `dependencies` (schemas/target_template.py Dependency) become pinned apt packages and hash-checked pip
+    packages of the build image through the fields the generator already checks (Core/target_dependencies.py). A vendor
+    file, a base image and a board driver are only recorded."""
+    from orchestrator.Core import target_dependencies as deps
+    raw = data.get("dependencies")
+    if isinstance(raw, str):   # the wizard's field and `--dependencies FILE`: YAML or JSON text of the list
+        try:
+            raw = yaml.safe_load(raw) if raw.strip() else None
+        except yaml.YAMLError as e:
+            problems.append(f"dependencies: not valid YAML or JSON ({str(e).splitlines()[0][:200]})")
+            return data, []
+        if isinstance(raw, dict) and "dependencies" in raw:
+            raw = raw["dependencies"]   # a template_variables block
+    if not raw:
+        return data, []
+    try:
+        entries = deps.entries_of(list(raw) if isinstance(raw, (list, tuple)) else [raw])
+    except ValueError as e:
+        problems.append(str(e)[:300])
+        return data, []
+    merged = deps.merge_into(data, deps.install_plan(entries))
+    return merged, [entry_values(e) for e in entries]
+
+
+def entry_values(entry: Any) -> Dict[str, Any]:
+    """A dependency entry as the plain values target.yml keeps: what it says, without the defaults."""
+    values = entry.model_dump(mode="json", exclude_none=True)
+    return {k: v for k, v in values.items() if v not in ([], "", False)}
+
+
 def validate_module_data(data: Dict[str, Any]) -> Dict[str, Any]:
     """Returns a normalized copy of the module data or raises ValueError listing every problem."""
     problems: List[str] = []
+    data, dependencies = _with_dependencies(data, problems)
     out = dict(data)
+    out["dependencies"] = dependencies
 
     name = str(data.get("module_name", "")).strip()
     if not MODULE_NAME_RE.fullmatch(name):
@@ -715,10 +759,17 @@ def template_variable_problems(root: Path) -> List[str]:
     if record is None:
         return []
     if not isinstance(record, dict) or record.get("schema_version", 1) != 1 or \
-            set(record) - {"schema_version", "formats", "source_images"}:
-        return ["target.yml: template_variables holds schema_version 1, formats and optionally source_images"]
+            set(record) - {"schema_version", "formats", "source_images", "dependencies"}:
+        return ["target.yml: template_variables holds schema_version 1, formats and optionally source_images and "
+                "dependencies"]
     values, problems = format_problems(record.get("formats") or [])
     problems += source_image_problems(record.get("source_images"))[1]
+    if record.get("dependencies"):
+        from orchestrator.Core import target_dependencies
+        try:
+            target_dependencies.entries_of(record)
+        except ValueError as e:
+            problems.append(str(e)[:300])
     problems = [f"target.yml: template_variables: {p}" for p in problems]
     if not values:
         return problems or ["target.yml: template_variables declares no format"]
@@ -1418,6 +1469,8 @@ class ModuleGenerator:
         # The template's variables the module was made with: the one record of its formats, rendered into the config
         # stage (the folder check compares them; the edit step shows them first)
         config["template_variables"] = {"schema_version": 1, "formats": formats}
+        if data.get("dependencies"):   # what the SDK and toolchain need, as data (Core/target_dependencies.py)
+            config["template_variables"]["dependencies"] = [dict(d) for d in data["dependencies"]]
         # The Python packages of its build image, for the build's preload of a computer without a network
         config["build_preload"] = generated_build_preload(data, uses_gpu_template(data))
         # One optimization profile per board: the build recipe's plan for the board's probe (or the plain defaults of

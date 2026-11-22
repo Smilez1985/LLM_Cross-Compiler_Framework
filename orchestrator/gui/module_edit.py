@@ -24,16 +24,32 @@ import copy
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QInputDialog, QLineEdit,
                                QListWidget, QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QStackedWidget,
                                QTabWidget, QVBoxLayout, QWidget)
 
 from orchestrator.Core.module_edit import EditRefused, ModuleEdit
-from orchestrator.gui.plain import button_text, one_line, plain_box, plain_label
+from orchestrator.gui.plain import button_text, one_line, plain_box, plain_label, plain_tooltip
 from orchestrator.utils.localization import current_language, ui_text
 
 PROPOSAL_FIELD = "proposal"
+
+
+class _DependencyCheck(QThread):
+    """Asks the checks of a target's dependencies off the GUI thread (a check may run for seconds)."""
+    done = Signal(object)
+
+    def __init__(self, entries: List[Any], runner: Any, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.entries, self.runner = entries, runner
+
+    def run(self) -> None:
+        from orchestrator.Core import target_dependencies as deps
+        try:
+            self.done.emit(deps.statuses(self.entries, self.runner))
+        except Exception as e:  # noqa: BLE001 - said in the list, never a crash of the thread
+            self.done.emit(e)
 
 
 def problems_text(problems: List[str]) -> str:
@@ -105,6 +121,29 @@ class ModuleEditPanel(QWidget):
         local.addLayout(local_row)
         self.local_box.setVisible(False)
         layout.addWidget(self.local_box)
+        # what the SDK and toolchain need (Core/target_dependencies.py): the entries, and their state after a check
+        self.deps_box = QWidget(self)
+        deps = QVBoxLayout(self.deps_box)
+        deps.setContentsMargins(0, 0, 0, 0)
+        deps.addWidget(plain_label(self._t("bld.deps.title")))
+        self.deps_list = QListWidget(self.deps_box)
+        self.deps_list.setObjectName("list_module_deps")
+        self.deps_list.setMaximumHeight(120)
+        deps.addWidget(self.deps_list)
+        deps_row = QHBoxLayout()
+        self.btn_deps_check = QPushButton(button_text(self._t("bld.deps.check")), self.deps_box)
+        self.btn_deps_check.setObjectName("btn_module_deps_check")
+        self.btn_deps_check.setToolTip(plain_tooltip(self._t("bld.deps.check_tip")))
+        self.btn_deps_check.setAutoDefault(False)
+        self.btn_deps_check.clicked.connect(lambda *_a: self.check_dependencies())
+        deps_row.addWidget(self.btn_deps_check)
+        self.lbl_deps = plain_label("", self.deps_box)
+        deps_row.addWidget(self.lbl_deps, 1)
+        deps.addLayout(deps_row)
+        self.deps_box.setVisible(False)
+        self.deps_runner: Any = None        # a check's runner (tests); None: this computer (HostRunner)
+        self._deps_thread: Optional[_DependencyCheck] = None
+        layout.addWidget(self.deps_box)
         split = QSplitter(Qt.Horizontal, self)
         self.file_list = QListWidget(split)
         self.file_list.setObjectName("list_module_edit_files")
@@ -167,11 +206,72 @@ class ModuleEditPanel(QWidget):
         self.variables_edit.setPlainText(variables or "")
         self.variables_box.setVisible(variables is not None)
         self.refresh_local_values()
+        self.refresh_dependencies()
         self._bind()
         self.show_note(note)
         self.problems_view.setPlainText("")
         self._set_enabled(True)
         self.refresh()
+
+    # --- what the SDK and toolchain need ---------------------------------------------------------------------------
+
+    def dependencies(self) -> List[Any]:
+        """The entries of the module's target.yml (an empty list: none); ValueError when one is not valid."""
+        from orchestrator.Core import target_dependencies as deps
+        return deps.load(self.edit.folder) if self.edit is not None else []
+
+    def refresh_dependencies(self) -> None:
+        """The list of entries, each 'not checked yet'; the box is there when the module lists any (or says why not)."""
+        self.deps_list.clear()
+        self.lbl_deps.setText("")
+        try:
+            entries = self.dependencies()
+        except ValueError as e:
+            entries = []
+            self.lbl_deps.setText(self._t("bld.deps.invalid", reason=one_line(str(e))))
+            self.deps_box.setVisible(True)
+            self.btn_deps_check.setEnabled(False)
+            return
+        for entry in entries:
+            self.deps_list.addItem(self._dependency_line(entry, "unknown", "", entry.is_gap))
+        self.deps_box.setVisible(bool(entries))
+        self.btn_deps_check.setEnabled(bool(entries))
+
+    def _dependency_line(self, entry: Any, state: str, why: str, gap: bool) -> str:
+        line = f"{entry.name} {entry.version} ({entry.kind.replace('_', ' ')}): {self._t('bld.deps.state.' + state)}"
+        if why:
+            line += f"; {why}"
+        return one_line(line + (f"; {self._t('bld.deps.gap')}" if gap else ""))
+
+    def check_dependencies(self, wait: bool = False) -> None:
+        """Check: asks each entry's check on this computer, off the GUI thread (`wait`: here and now, for tests)."""
+        from orchestrator.Core import target_dependencies as deps
+        try:
+            entries = self.dependencies()
+        except ValueError:
+            return
+        runner = self.deps_runner or deps.HostRunner()
+        if wait:
+            self._dependencies_checked(deps.statuses(entries, runner))
+            return
+        self.btn_deps_check.setEnabled(False)
+        self.lbl_deps.setText(self._t("bld.deps.checking"))
+        self._deps_thread = _DependencyCheck(entries, runner, self)
+        self._deps_thread.done.connect(self._dependencies_checked)
+        self._deps_thread.start()
+
+    def _dependencies_checked(self, rows: Any) -> None:
+        self.btn_deps_check.setEnabled(True)
+        if isinstance(rows, Exception):
+            self.lbl_deps.setText(one_line(str(rows)))
+            return
+        self.deps_list.clear()
+        for row in rows:
+            self.deps_list.addItem(self._dependency_line(row.entry, row.state, row.why, row.gap))
+        count = lambda state: sum(1 for r in rows if r.state == state)  # noqa: E731
+        self.lbl_deps.setText(self._t("bld.deps.summary", n=len(rows), present=count("present"),
+                                      missing=count("missing"), waiting=count("waiting"),
+                                      gaps=sum(1 for r in rows if r.gap)))
 
     # --- the values private to this computer -----------------------------------------------------------------------
 

@@ -340,6 +340,88 @@ def archive_label(name: str, sha256: str) -> str:
     return f"the image file {name + ' ' if name else ''}(sha256 {sha256[:12]}...)"
 
 
+DependencyKind = Literal["system_package", "pip_package", "vendor_file", "base_image", "board_driver"]
+DependencyOrigin = Literal["distribution", "package_index", "vendor_page"]
+# Where a statement came from: the number of a crawled excerpt, a key of the board's probe, or the template itself. An
+# entry without one stays a named gap (nobody read it).
+DEPENDENCY_SOURCE_RE = r"^(?:excerpt:\d{1,9}|probe:[A-Z][A-Z0-9_]{0,63}|template)$"
+DEPENDENCY_VERSION_RE = r"^[A-Za-z0-9][A-Za-z0-9.+_~:-]{0,63}$"
+APT_NAME_RE = r"^[a-z0-9][a-z0-9+.-]{1,99}(?::[a-z0-9-]{1,20})?$"
+PIP_NAME_RE = r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$"
+CHECK_WORD_RE = r"^[A-Za-z0-9_.,:=+/@%-]{1,200}$"
+# The programs a check may start: they only look (no shell, no interpreter, no downloader, nothing that changes a file).
+CHECK_PROGRAMS = ("dpkg", "dpkg-query", "pkg-config", "test", "ls", "stat", "which", "ldconfig", "modinfo", "lsmod",
+                  "pip", "pip3")
+# kind -> the origins it may come from
+KIND_ORIGINS = {"system_package": ("distribution",), "pip_package": ("package_index",),
+                "vendor_file": ("vendor_page",), "base_image": ("distribution", "vendor_page"),
+                "board_driver": ("distribution", "vendor_page")}
+
+
+class Dependency(BaseModel):
+    """One thing a target's SDK and toolchain need, as data: what it is, which version, where the statement comes from,
+    where it is fetched, how to see whether it is there, and whether its licence lets it be passed on. A package of the
+    build image's system or a pip package with a source the framework can check becomes a pinned step of the build
+    image's Dockerfile; a vendor file stays the guided fetch with the person's own yes (Core/vendor_files.py); a driver
+    or firmware of the board is shown, checked by the pre-flight check and never installed behind the person's back."""
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=2, max_length=100, description="The package, file, image or driver by its own name")
+    version: str = Field(pattern=DEPENDENCY_VERSION_RE, description="The pinned version (a Debian version may hold "
+                                                                    "~, + and :)")
+    kind: DependencyKind
+    origin: DependencyOrigin = Field(description="distribution (the system's repository), package_index (pip, with a "
+                                                 "sha256) or vendor_page (the vendor's download page)")
+    source: Optional[str] = Field(default=None, pattern=DEPENDENCY_SOURCE_RE,
+                                  description="excerpt:N, probe:KEY or template; none: a named gap")
+    url: Optional[str] = Field(default=None, pattern=HTTPS_RE, max_length=500,
+                               description="The vendor's download page (required for a vendor page)")
+    sha256: Optional[str] = Field(default=None, pattern=SHA256_HEX_RE,
+                                  description="The wheel's sha256 (required for a pip package)")
+    check: List[str] = Field(default_factory=list, max_length=12,
+                             description="'Is it there?' as a program and its arguments, no shell: exit code 0 is yes")
+    redistributable: bool = Field(default=False, description="Whether the licence lets it be passed on")
+    note: str = Field(default="", max_length=200, pattern=TEXT_RE, description="A short note the list shows")
+
+    @field_validator("check")
+    @classmethod
+    def _check(cls, v: List[str]) -> List[str]:
+        bad = [w for w in v if not re.fullmatch(CHECK_WORD_RE, w)]
+        if bad:
+            raise ValueError(f"check: plain words only (no quote, space, $, backtick or ;): {bad[0][:60]}")
+        if v and not re.fullmatch(COMMAND_RE.pattern, v[0]):
+            raise ValueError("check: the first word is a program by name or absolute path")
+        if v and v[0].rsplit("/", 1)[-1] not in CHECK_PROGRAMS:
+            raise ValueError(f"check: a check only looks; its program is one of {', '.join(CHECK_PROGRAMS)}")
+        return v
+
+    @model_validator(mode="after")
+    def _consistent(self):
+        problems = []
+        if self.origin not in KIND_ORIGINS[self.kind]:
+            problems.append(f"a {self.kind} comes from {' or '.join(KIND_ORIGINS[self.kind])}, not {self.origin}")
+        if self.kind == "system_package" and not re.fullmatch(APT_NAME_RE, self.name):
+            problems.append("a system package is named as Debian names it (lower case, digits, + . -)")
+        if self.kind == "pip_package":
+            if not re.fullmatch(PIP_NAME_RE, self.name):
+                problems.append("a pip package is named as the index names it")
+            if not self.sha256:
+                problems.append("a pip package carries the sha256 of its wheel: it is installed hash-checked")
+        if self.origin == "vendor_page" and not self.url:
+            problems.append("a vendor page needs url, the address of the vendor's download page")
+        if self.kind == "vendor_file" and self.redistributable:
+            problems.append("a vendor file is licence-bound: it may not be passed on (use a runtime library with "
+                            "redistributable for what may)")
+        if problems:
+            raise ValueError("; ".join(problems))
+        return self
+
+    @property
+    def is_gap(self) -> bool:
+        """An entry nobody read: it has no source (a statement without a source is not made)."""
+        return self.source is None
+
+
 class TemplateVariables(BaseModel):
     """The `template_variables:` block of a generated target.yml: the formats the module was made with and the files
     its build image takes from source images."""
@@ -348,12 +430,17 @@ class TemplateVariables(BaseModel):
     schema_version: Literal[1] = 1
     formats: List[FormatVariables] = Field(min_length=1, max_length=8)
     source_images: List[SourceImage] = Field(default_factory=list, max_length=8)
+    dependencies: List[Dependency] = Field(default_factory=list, max_length=100,
+                                           description="What the SDK and toolchain need (Core/target_dependencies.py)")
 
     @model_validator(mode="after")
     def _unique(self):
         ids = [f.id for f in self.formats]
         if len(set(ids)) != len(ids):
             raise ValueError("formats: each id once")
+        keys = [(d.kind, d.name) for d in self.dependencies]
+        if len(set(keys)) != len(keys):
+            raise ValueError("dependencies: each name once per kind")
         dests = [f.dest for image in self.source_images for f in image.files]
         if len(set(dests)) != len(dests):
             raise ValueError("source_images: each dest once")
