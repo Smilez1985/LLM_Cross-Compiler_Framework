@@ -66,6 +66,7 @@ CLI_PATHS: Dict[str, str] = {
     "module local list --reveal": "btn_targets_edit",   # its Show the Value
     "module local set": "btn_targets_edit",             # its Add a Value... and Change the Value...
     "module local remove": "btn_targets_edit",          # its Remove the Value (asked first, No is the default)
+    "module delete": "btn_targets_delete",              # Build > Targets... > Delete Module... (asked first, No is the default)
     # Build > Targets... > Vendor Files...: the guided fetch of vendor files (gui/vendor_files_window.py)
     "vendor list": "btn_targets_vendor",
     "vendor fetch": "btn_targets_vendor",
@@ -180,7 +181,8 @@ WINDOW_OBJECTS: Dict[str, str] = {"btn_build_deps_fetch": "act_build_deps", "btn
                                    "btn_f16_delete": "act_build_f16",
                                    "btn_history_interrupted": "act_build_history",
                                    "btn_targets_edit": "act_build_targets",
-                                   "btn_targets_vendor": "act_build_targets"}
+                                   "btn_targets_vendor": "act_build_targets",
+                                   "btn_targets_delete": "act_build_targets"}
 # The switches of this area that are for scripts only, with the reason (as the other menu modules list theirs; the
 # hidden, deprecated build start --parallel is not offered at all).
 MACHINE_ONLY: Dict[str, str] = {

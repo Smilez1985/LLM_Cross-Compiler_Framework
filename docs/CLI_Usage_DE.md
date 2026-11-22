@@ -3085,6 +3085,23 @@ Namen.
 In der GUI ist dasselbe der Kasten „Private Werte dieses Moduls“ im Bearbeiten-Schritt (die letzte Seite des Wizards und
 Build > Targets... > Dateien bearbeiten...): Wert hinzufügen..., Wert ändern..., Wert zeigen und Wert entfernen (vorher gefragt).
 
+### module delete
+
+```
+llm-cli module delete TARGET
+```
+
+Löscht ein eigenes Modul: zuerst die genaue Liste (sein Ordner mit seiner Größe und die Datei seiner privaten Werte mit
+deren Anzahl, nie ein Name oder ein Wert), dann, an einem Terminal, die Wahl zwischen Papierkorb (`llm-cli trash restore`
+holt Ordner und Werte zurück) und endgültigem Löschen sowie „Genau N Einträge löschen?“ mit Nein als Vorgabe. Ohne
+Terminal wird nichts gelöscht (Exit-Code 1). Das Audit-Log hält es zuerst fest. Nur ein Modul des eigenen
+Targets-Ordners: Ein Target, das das Framework mitliefert, ein Modul aus einem Paket (es geht durch das Deinstallieren
+des Pakets) und ein Modul, das ein laufender Build dieses Programms benutzt, werden mit dem Grund abgelehnt (Exit-Code 1).
+Kein KI-Werkzeug löscht ein Modul. Die Protokolle und Dateien von Builds bleiben. Danach wird die Target-Registry neu gelesen.
+
+In der GUI: **Build > Targets...**, das Modul wählen, **Modul löschen...** (nur für eigene Module aktiv): dieselbe Liste im
+Löschfenster, dieselbe Wahl, dasselbe Ergebnis.
+
 ### module repair
 
 ```

@@ -414,6 +414,7 @@ class BuildEngine:
         self._active_containers: Dict[str, Container] = {}
         self._active_processes: Dict[str, subprocess.Popen] = {}
         self._running: set = set()  # builds whose worker thread has not returned yet
+        self._build_targets: Dict[str, str] = {}  # build id -> the target it builds (targets_in_use)
         self._settled: set = set()  # builds whose outcome is fixed; a cancel comes too late for them
         self._build_images: Dict[str, str] = {}
         # offline mode: the checked local addresses of the llama.cpp repository override per build (--add-host)
@@ -505,6 +506,7 @@ class BuildEngine:
                 raise RuntimeError(f"Build {config.build_id} is still running")
             self._builds[config.build_id] = progress
             self._running.add(config.build_id)
+            self._build_targets[config.build_id] = str(config.target_arch or "")
 
         self._records[config.build_id] = {
             "build_id": config.build_id, "request_id": config.request_id, **build_records.this_process(),
@@ -543,6 +545,12 @@ class BuildEngine:
 
     def get_build_status(self, build_id: str) -> Optional[BuildProgress]:
         return self._builds.get(build_id)
+
+    def targets_in_use(self) -> set:
+        """The targets (ids, as the builds were asked for them) that a build whose worker still runs uses; a module of
+        one of them is not deleted (Core/module_delete.py)."""
+        with self._lock:
+            return {self._build_targets[b] for b in self._running if self._build_targets.get(b)}
 
     def is_active(self, build_id: str) -> bool:
         """True while the build's worker runs (also after a cancel, until its container has stopped and its files

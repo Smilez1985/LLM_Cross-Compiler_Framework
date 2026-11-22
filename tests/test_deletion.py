@@ -129,6 +129,9 @@ DELETION_SITES = {
     # an installed pack's folder and import notes: only the person's accepted plan (tests/test_pack_uninstall.py
     # covers no plan, another actor and a changed list)
     ("orchestrator/Core/community_manager.py", "CommunityManager.uninstall"): PERSON,
+    # a module of the person's own targets folder and its file of private values: the person's accepted plan only
+    # (tests/test_module_delete.py covers every actor, a changed list, the audit and a running build)
+    ("orchestrator/Core/module_delete.py", "delete_module"): PERSON,
     ("orchestrator/Core/community_manager.py", "CommunityManager.import_again"): IMPORT_MARKS,
     # an ACP agent the person removes (Manage agents..., llm-cli agents remove): its program and working folders,
     # its entry and keys, only the person's accepted plan (tests/test_acp_hosts.py covers no plan and an AI actor)

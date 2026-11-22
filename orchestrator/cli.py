@@ -1345,6 +1345,41 @@ def module_local_remove(target: str, name: Optional[str], yes: bool):
         sys.exit(2)
 
 
+@module.command('delete')
+@click.argument('target')
+@pass_context
+def module_delete(ctx: FrameworkContext, target: str):
+    """Delete a module of your own: the exact list first (its folder and the file of its private values, counted, never
+    shown), to the trash or for good, "No" by default. Never a target the framework ships or one installed from a pack
+    ('zoo uninstall' removes that), and not while a build uses it"""
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    from orchestrator.Core.module_delete import ModuleDeleteError, delete_module, module_plan
+    own, roots = _target_folders(ctx)
+    state = _local_state()
+    engine = getattr(ctx, "build_engine", None) or getattr(getattr(ctx, "orchestrator", None), "build_engine", None)
+    busy = engine.targets_in_use() if callable(getattr(engine, "targets_in_use", None)) else ()
+    try:
+        plan = module_plan(roots, own, target, state, busy)
+    except ModuleDeleteError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    accepted = confirm_deletion(plan, title=f"Delete the module {target} ({size_text(plan.total_bytes)})",
+                                again=f"llm-cli module delete {target}")
+    if accepted is None:
+        sys.exit(1)
+    trash, audit = _person_trash(ctx, state)
+    try:
+        result = delete_module(roots, own, target, accepted, state, busy, trash=trash, audit=audit)
+    except (ModuleDeleteError, PlanChanged, PermissionError, RuntimeError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    _print_deletion_result(result, accepted)
+    manager = getattr(getattr(ctx, "framework_manager", None), "target_manager", None)
+    if manager is not None and callable(getattr(manager, "initialize", None)):
+        manager.initialize()   # the registry loses the module at once
+    sys.exit(1 if result.failed else 0)
+
+
 @module.command('propose-values')
 @click.argument('probe_file', type=click.Path(exists=True, dir_okay=False))
 @click.option('--provider', help='AI provider for this run; default: AI settings')

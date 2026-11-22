@@ -19,7 +19,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox, QHeaderView, QPushButton, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
-from orchestrator.gui.plain import button_text, one_line, plain_box, plain_label
+from orchestrator.gui.plain import button_text, one_line, plain_box, plain_label, plain_tooltip
 from orchestrator.utils.localization import current_language, ui_text
 
 COLUMNS = ("bld.targets.col.id", "bld.targets.col.name", "bld.targets.col.arch", "bld.targets.col.boards",
@@ -131,13 +131,19 @@ class TargetsDialog(QDialog):
         # the guided fetch of the vendor files the selected target names (`llm-cli vendor fetch`)
         self.btn_vendor = QPushButton(button_text(self._t("bld.targets.vendor")), self)
         self.btn_vendor.setObjectName("btn_targets_vendor")
+        # deletes the selected module of your own (`llm-cli module delete`), through the deletion plan
+        self.btn_delete = QPushButton(button_text(self._t("bld.targets.delete")), self)
+        self.btn_delete.setObjectName("btn_targets_delete")
+        self.btn_delete.setToolTip(plain_tooltip(self._t("bld.targets.delete.tip")))
         for button, slot in ((self.btn_check, self._check), (self.btn_boards, self._boards),
-                             (self.btn_edit, self._edit), (self.btn_vendor, self._vendor), (self.btn_reload, self._reload)):
+                             (self.btn_edit, self._edit), (self.btn_vendor, self._vendor),
+                             (self.btn_delete, self._delete), (self.btn_reload, self._reload)):
             button.setAutoDefault(False)
             button.clicked.connect(slot)
             buttons.addButton(button, QDialogButtonBox.ActionRole)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self.table.itemSelectionChanged.connect(self._update_delete)
         self.refresh(select)
 
     def _t(self, key: str, **values) -> str:
@@ -179,6 +185,7 @@ class TargetsDialog(QDialog):
         self.btn_boards.setEnabled(has)
         self.btn_edit.setEnabled(has)
         self.btn_vendor.setEnabled(has)
+        self._update_delete()
 
     def selected(self) -> Optional[str]:
         rows = self.table.selectionModel().selectedRows() if self.table.selectionModel() else []
@@ -262,6 +269,77 @@ class TargetsDialog(QDialog):
             state = default_state_dir()
         from orchestrator.gui.vendor_files_window import open_vendor_files
         return open_vendor_files(self, Path(folder), state)
+
+    def _module_places(self) -> Any:
+        """(every targets folder, the own targets folder, the state folder) the deletion reads."""
+        tm = _target_manager(self.framework)
+        config = getattr(self.framework, "config", None)
+        state = getattr(config, "user_state_dir", None)
+        if state is None:
+            from orchestrator.runtime.profile import default_state_dir
+            state = default_state_dir()
+        return list(tm.target_roots), Path(tm.user_targets_dir), Path(state)
+
+    def _busy_targets(self) -> Any:
+        engine = getattr(self.framework, "build_engine", None) or getattr(
+            getattr(self.framework, "orchestrator", None), "build_engine", None)
+        return engine.targets_in_use() if callable(getattr(engine, "targets_in_use", None)) else ()
+
+    def _update_delete(self) -> None:
+        """The delete button is enabled for a module of your own only (never a shipped target or a pack's)."""
+        name = self.selected()
+        enabled = False
+        if name:
+            from orchestrator.Core.module_delete import ModuleDeleteError, module_folder
+            try:
+                roots, own, _state = self._module_places()
+                module_folder(roots, own, name)
+                enabled = True
+            except (ModuleDeleteError, AttributeError, OSError):
+                enabled = False
+        self.btn_delete.setEnabled(enabled)
+
+    def _delete(self) -> None:
+        """Delete Module...: the exact list through the deletion dialog (the folder and the values file, "No" by
+        default), then the deletion; the registry is read again."""
+        from orchestrator.Core.deletion import PlanChanged
+        from orchestrator.Core.module_delete import ModuleDeleteError, delete_module, module_plan
+        from orchestrator.Core.trash import Trash
+        from orchestrator.gui.deletion_dialog import ask_deletion
+        name = self.selected()
+        if not name:
+            plain_box(self, "information", self._t("bld.targets.title"), self._t("bld.targets.pick"))
+            return
+        shown = one_line(name)
+        try:
+            roots, own, state = self._module_places()
+            busy = self._busy_targets()
+            plan = module_plan(roots, own, name, state, busy)
+        except (ModuleDeleteError, AttributeError, OSError) as e:
+            plain_box(self, "warning", self._t("bld.delete.title", target=shown),
+                      self._t("bld.delete.refused", target=shown, reason=one_line(str(e))))
+            return
+        accepted = ask_deletion(self, plan, title=self._t("bld.delete.title", target=shown),
+                                intro=self._t("bld.delete.intro"), lang=self.lang)
+        if accepted is None:
+            return
+        audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
+        try:
+            result = delete_module(roots, own, name, accepted, state, busy,
+                                   trash=Trash.for_framework(self.framework), audit=audit)
+        except (ModuleDeleteError, PlanChanged, PermissionError, RuntimeError) as e:
+            plain_box(self, "critical", self._t("bld.delete.title", target=shown),
+                      self._t("bld.delete.failed", target=shown, reason=one_line(str(e))))
+            return
+        if result.failed:
+            from orchestrator.Core.deletion import kept_lines
+            plain_box(self, "warning", self._t("bld.delete.title", target=shown),
+                      self._t("bld.delete.failed", target=shown,
+                              reason="\n".join(one_line(line) for line in kept_lines(result, self.lang))))
+        else:
+            plain_box(self, "information", self._t("bld.delete.title", target=shown),
+                      self._t("bld.delete.done", target=shown, count=len(result.done)))
+        self._reload()
 
     def _reload(self) -> None:
         tm = _target_manager(self.framework)

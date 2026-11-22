@@ -519,6 +519,16 @@ TEXTS = {
                                        "before you click Finish.",
         "bld.wizard.formats_failed": "Ditto could not propose the values of the output formats:\n{reason}",
         "bld.targets.vendor": "Vendor Files...",
+        "bld.targets.delete": "Delete Module...",
+        "bld.targets.delete.tip": "Deletes the selected module of your own: its folder and the file of its private "
+                                  "values, after the exact list. A target the framework ships or one installed from a "
+                                  "pack cannot be deleted here.",
+        "bld.delete.title": "Delete module {target}",
+        "bld.delete.intro": "This is exactly what goes: the module's folder and the file of its private values (the "
+                            "number of values is shown, never a value). The records and files of builds stay.",
+        "bld.delete.refused": "{target} cannot be deleted:\n{reason}",
+        "bld.delete.done": "The module {target} is deleted ({count} item(s)).",
+        "bld.delete.failed": "The module {target} was not deleted:\n{reason}",
         "bld.vendor.title": "Vendor files of {target}",
         "bld.vendor.intro": "Files the target's formats need that may not be passed on. The framework never ships "
                             "them: you "
@@ -1078,6 +1088,16 @@ TEXTS = {
                                        "wird erzeugt, bevor du auf Finish klickst.",
         "bld.wizard.formats_failed": "Ditto konnte die Werte der Ausgabeformate nicht vorschlagen:\n{reason}",
         "bld.targets.vendor": "Herstellerdateien...",
+        "bld.targets.delete": "Modul löschen...",
+        "bld.targets.delete.tip": "Löscht das gewählte eigene Modul: seinen Ordner und die Datei seiner privaten Werte, "
+                                  "nach der genauen Liste. Ein Target, das das Framework mitliefert, oder eines aus "
+                                  "einem Paket lässt sich hier nicht löschen.",
+        "bld.delete.title": "Modul {target} löschen",
+        "bld.delete.intro": "Genau das wird gelöscht: der Ordner des Moduls und die Datei seiner privaten Werte (die "
+                            "Anzahl der Werte steht dabei, nie ein Wert). Die Protokolle und Dateien von Builds bleiben.",
+        "bld.delete.refused": "{target} lässt sich nicht löschen:\n{reason}",
+        "bld.delete.done": "Das Modul {target} ist gelöscht ({count} Eintrag/Einträge).",
+        "bld.delete.failed": "Das Modul {target} wurde nicht gelöscht:\n{reason}",
         "bld.vendor.title": "Herstellerdateien von {target}",
         "bld.vendor.intro": "Dateien, die die Formate des Targets brauchen und die nicht weitergegeben werden dürfen. "
                             "Das Framework liefert sie nie mit: Du liest die Lizenz und nimmst sie selbst an, lädst die Datei "

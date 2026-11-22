@@ -2954,6 +2954,23 @@ them. The framework's AI tools see the names only.
 In the GUI the same is the box "Private values of this module" in the edit step (the wizard's last page and Build >
 Targets... > Edit Files...): Add a Value..., Change the Value..., Show the Value and Remove the Value (asked first).
 
+### module delete
+
+```
+llm-cli module delete TARGET
+```
+
+Deletes a module of your own: the exact list first (its folder with its size, and the file of its private values with
+their number, never a name or a value), then, at a terminal, the choice between the trash (`llm-cli trash restore` brings
+back the folder and the values) and deleting for good, and "Delete exactly N items?" with No as the default. Without a
+terminal nothing is deleted (exit code 1). The audit log records it first. Only a module of your own targets folder:
+a target the framework ships, a module installed from a pack (it leaves by uninstalling the pack) and a module that a
+running build of this program uses are refused with the reason (exit code 1). No AI tool deletes a module. The records
+and files of builds stay. Afterwards the target registry is read again.
+
+In the GUI: **Build > Targets...**, select the module, **Delete Module...** (enabled for your own modules only): the same list
+in the deletion window, the same choice, the same result.
+
 ### module repair
 
 ```
