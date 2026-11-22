@@ -7,9 +7,11 @@ Every value is made at run time from random characters, so this file holds no se
 """
 
 import pytest
-from PySide6.QtCore import Qt
-from test_chat_panel import feed, make_panel  # noqa: F401 - the fixtures
-from test_secret_by_place import value
+
+pytest.importorskip("PySide6")   # the run without the GUI extra skips this file
+
+from test_chat_panel import feed, make_panel  # noqa: E402, F401 - the fixtures
+from test_secret_by_place import value  # noqa: E402
 
 from orchestrator.Core.ditto_manager import ChatReply
 from orchestrator.gui.chat_panel import filter_hint
