@@ -53,6 +53,10 @@ CLI_PATHS: Dict[str, str] = {
     "module propose-values": "act_tools_module_wizard",          # the flags page: Ditto: Propose the Values
     "module propose-values --provider": "act_tools_module_wizard",
     "module propose-values --model": "act_tools_module_wizard",
+    "module propose-dependencies": "act_tools_module_wizard",    # the flags page: Ditto: Propose Dependencies
+    "module propose-dependencies --provider": "act_tools_module_wizard",
+    "module propose-dependencies --model": "act_tools_module_wizard",
+    "module propose-dependencies --out": "act_tools_module_wizard",   # the field's YAML holds the same
     "module propose-values --out": "act_tools_module_wizard",    # the form's YAML (advanced) view holds the same
     # Build > Targets... > Edit Files...: the edit step for an existing target (its Apply a Diff... button)
     "module edit": "btn_targets_edit",
@@ -202,6 +206,8 @@ MACHINE_ONLY: Dict[str, str] = {
                                 "hidden in a dialog of its own",
     "module local remove --yes": "removes all values of a target without asking, for scripts; the box asks before "
                                  "it removes one",
+    "module propose-dependencies --json": "the proposal as JSON for scripts; the wizard's field holds each entry with a "
+                                          "comment that names its source, confidence and reason",
     "module propose-values --json": "the proposal as JSON for scripts; the wizard's form shows each value beside "
                                     "its field",
     "vendor list --json": "machine-readable output for scripts; Vendor Files... shows the same rows as a table",

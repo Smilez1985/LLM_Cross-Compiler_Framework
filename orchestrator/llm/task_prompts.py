@@ -108,6 +108,22 @@ FORMAT_VALUES_TASK = (
     "vendor's licence does not allow to pass on goes into vendor_files with its download page and licence address; "
     "a runtime library is redistributable only when an excerpt says the licence allows it. The person reviews every "
     "value before anything is made; the framework checks each value again.")
+DEPENDENCIES_TASK = (
+    "A target's SDK and toolchain need packages and files besides the framework's own. Propose the dependency entries "
+    "the hardware's SDK needs, from the hardware probe and the numbered documentation excerpts only. For each entry "
+    "give its name (a Debian package, a pip package, a vendor file, a base image or a driver, exactly as the source "
+    "names it), its version as the source states it, its kind (system_package, pip_package, vendor_file, base_image or "
+    "board_driver), where it comes from (origin: distribution for the system's repository, package_index for pip, "
+    "vendor_page for the vendor's download page, with url), the source (S1, S2 ... for an excerpt, or probe:KEY for a "
+    "key of the probe), a check (a program of dpkg, dpkg-query, pkg-config, test, ls, stat, which, ldconfig, modinfo, "
+    "lsmod, pip or pip3 and its arguments, as a list of single words, that exits with 0 when the entry is there), "
+    "whether the licence lets it be passed on (only when the source says so), the reason and a confidence from 0 to 1. "
+    "A pip package carries the sha256 of its wheel, copied from the source. Never guess: the name and the version must "
+    "stand in the cited excerpt or the probe value, and a sha256 only if the excerpt prints it; what you cannot read "
+    "goes into missing with why. A file the vendor gives only after an application or a licence acceptance is a "
+    "vendor_file with the address of the download page; a driver or firmware that belongs on the board is a "
+    "board_driver. Never a shell string, no sudo, no download piped into a shell. The person reviews every entry before "
+    "anything is made; the framework checks each entry again.")
 OPTIMIZER_TASK = (
     "Recommend build settings "
     "for a model on a target: a format and a quantization type strictly from the options given, and an "
@@ -128,6 +144,9 @@ FORMAT_VALUES_SYSTEM = (f"You are Ditto, an expert embedded systems engineer for
                         f"{FRAMEWORK} " + FORMAT_VALUES_TASK + " When there is nothing to base a value on at all "
                         "(no accelerator in the probe and no excerpt), fill cannot.\n" + CANNOT_RULE + "\n"
                         + UNTRUSTED_RULE)
+DEPENDENCIES_SYSTEM = (f"You are Ditto, an expert embedded systems engineer for the LLM Cross-Compiler Framework. "
+                       f"{FRAMEWORK} " + DEPENDENCIES_TASK + " When there is nothing to base an entry on at all (no "
+                       "accelerator in the probe and no excerpt), fill cannot.\n" + CANNOT_RULE + "\n" + UNTRUSTED_RULE)
 OPTIMIZER_SYSTEM = (f"You are Ditto, the build engineer of the LLM Cross-Compiler Framework. {FRAMEWORK} "
                     + OPTIMIZER_TASK + " When you cannot, fill cannot.\n" + CANNOT_RULE + "\n" + UNTRUSTED_RULE)
 
@@ -274,6 +293,24 @@ def format_value_parts(fields: str, probe: str = "", board: str = "", excerpts: 
     if log_content:
         parts.append("The end of the failed build's log:\n" + wrap_untrusted(log_for_ai(log_content, roots=roots),
                                                                                "build log", max_len=LOG_CHARS + 200))
+    return parts
+
+
+def dependency_parts(probe: str = "", board: str = "", excerpts: Sequence[Any] = ()) -> List[str]:
+    """The user turns of a dependencies task: the probe or the board, and each documentation excerpt numbered S1, S2 ...
+    with its source (untrusted)."""
+    parts = module_parts(probe, board)
+    used = 0
+    for number, (source, content) in enumerate(excerpts, 1):
+        text = str(content or "")[:FORMAT_EXCERPT_CHARS]
+        if used + len(text) > FORMAT_EXCERPTS_CHARS:
+            break
+        used += len(text)
+        parts.append(f"Documentation excerpt S{number} (source: {sanitize_untrusted(str(source), 300)}):\n"
+                     + wrap_untrusted(text, f"documentation excerpt S{number}", max_len=FORMAT_EXCERPT_CHARS + 200))
+    if not excerpts:
+        parts.append("No documentation excerpt was found for this hardware: every entry needs the vendor's "
+                     "documentation or the probe as its source, so propose only what the probe states.")
     return parts
 
 

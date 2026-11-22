@@ -276,6 +276,8 @@ class ModuleCreationWizard(QWizard):
         worker_relay().done.connect(self._on_pin_relay, Qt.QueuedConnection)
         self._formats_request: Optional[object] = None   # Ditto's proposal of the format values (Propose the Values)
         worker_relay().done.connect(self._on_formats_relay, Qt.QueuedConnection)
+        self._dependencies_request: Optional[object] = None   # Ditto's proposal of the dependency entries
+        worker_relay().done.connect(self._on_dependencies_relay, Qt.QueuedConnection)
         
         # Container for Avatar (Stacked to switch widgets)
         self.avatar_container = QStackedWidget()
@@ -753,6 +755,7 @@ class ModuleCreationWizard(QWizard):
         self.btn_formats_propose.setAutoDefault(False)
         self.btn_formats_propose.clicked.connect(lambda *_a: self.propose_formats())
         self.format_proposal = None   # Ditto's proposal of the format values the form shows (None: none)
+        self.dependency_proposal = None   # Ditto's proposal of the dependency entries (None: none)
         layout.addRow(ui_text("bld.wizard.formats_label"), self.btn_formats_propose)
         layout.addRow(self.formats_form)
         # What the SDK and toolchain need, as data (Core/target_dependencies.py): YAML, one entry per dependency
@@ -761,6 +764,12 @@ class ModuleCreationWizard(QWizard):
         self.dependencies_edit.setStyleSheet(mono)
         self.dependencies_edit.setPlaceholderText(ui_text("bld.wizard.dependencies_hint"))
         layout.addRow(ui_text("bld.wizard.dependencies_label"), self.dependencies_edit)
+        self.btn_dependencies_propose = QPushButton(ui_text("bld.wizard.dependencies_propose"))
+        self.btn_dependencies_propose.setObjectName("btn_wizard_dependencies_propose")
+        self.btn_dependencies_propose.setToolTip(ui_text("bld.wizard.dependencies_propose_tip"))
+        self.btn_dependencies_propose.setAutoDefault(False)
+        self.btn_dependencies_propose.clicked.connect(lambda *_a: self.propose_dependencies())
+        layout.addRow("", self.btn_dependencies_propose)
         
         page.setLayout(layout)
         return page
@@ -1247,6 +1256,60 @@ class ModuleCreationWizard(QWizard):
             relay.done.emit(token, result)
         threading.Thread(target=work, name="ai-formats", daemon=True).start()
         return True
+
+    def propose_dependencies(self) -> bool:
+        """Ditto: Propose Dependencies: the entries the SDK and toolchain need, from the imported probe and the crawled
+        documentation, in a worker thread; the field takes their YAML (on_dependencies_proposed). False when nothing
+        was asked."""
+        if not self.probe_path:
+            self._run_problem(ui_text("bld.wizard.formats_no_probe"))
+            return False
+        ditto = self._ditto()
+        if ditto is None:
+            QMessageBox.critical(self, ui_text("status.error"), ui_text("bld.wizard.no_ditto"))
+            return False
+        if not ditto.is_configured("json"):
+            self.configure_ai()
+            if not ditto.is_configured("json"):
+                return False
+        self.btn_dependencies_propose.setEnabled(False)
+        token = self._dependencies_request = object()
+        relay = worker_relay()
+
+        def work():
+            from orchestrator.Core import dependency_proposal
+            from orchestrator.Core.ditto_manager import DittoError
+            try:
+                result = ("dependencies", dependency_proposal.propose(ditto, Path(self.probe_path)))
+            except (DittoError, OSError, ValueError) as e:
+                result = ("dependencies_error", str(e))
+            relay.done.emit(token, result)
+        threading.Thread(target=work, name="ai-dependencies", daemon=True).start()
+        return True
+
+    def _on_dependencies_relay(self, token, result) -> None:
+        if token is not getattr(self, "_dependencies_request", None) or not isinstance(result, tuple):
+            return
+        self._dependencies_request = None
+        self.btn_dependencies_propose.setEnabled(True)
+        kind, value = result
+        if kind == "dependencies":
+            self.on_dependencies_proposed(value)
+        else:
+            self._run_problem(ui_text("bld.wizard.dependencies_failed", reason=value))
+
+    def on_dependencies_proposed(self, proposal) -> None:
+        """Ditto's proposal of the dependency entries fills the field: each entry under a comment with its source,
+        confidence and reason, the gaps as comments. The field counts as Ditto's (marked, with its Undo, the module
+        untested); what the person had typed there is not overwritten without that Undo."""
+        self.dependency_proposal = proposal
+        text = proposal.entries_yaml()
+        form = getattr(self, "gui_form", None)
+        outcome = form.fill({"dependencies": text}) if form is not None else None
+        if outcome is None or "dependencies" not in outcome.filled:
+            self.dependencies_edit.setPlainText(text)
+        if proposal.problems or proposal.gaps or proposal.dropped or proposal.cannot:
+            self._run_problem("\n".join(proposal.lines()))
 
     def _on_formats_relay(self, token, result) -> None:
         if token is not getattr(self, "_formats_request", None) or not isinstance(result, tuple):

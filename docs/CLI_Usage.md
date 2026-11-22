@@ -2895,6 +2895,36 @@ llm-cli module create --probe target_hardware_config.txt --formats formats.yml -
 In the GUI: **Tools > Create Hardware Module...**, flags page, **Ditto: Propose the Values**; Ditto's AI analysis on
 the first page proposes them by itself when the probe names an accelerator.
 
+### module propose-dependencies
+
+```
+llm-cli module propose-dependencies PROBE_FILE [--provider TEXT] [--model TEXT] [--out FILE] [--json]
+```
+
+Ditto proposes the entries of what a board's SDK and toolchain need (see [module deps](#module-deps)), from the hardware
+probe and the excerpts of the crawled vendor documentation the knowledge base retrieves for it: each entry with its
+reason, its source (the page's address or a key of the probe) and its confidence. The framework checks the answer before
+you see it: an entry is read, never guessed. An entry whose source is no excerpt Ditto was given and no key of the probe
+is not made, and neither is one whose name or version the cited source does not say, or a pip package whose sha256 the
+excerpt does not print; each is named as a gap. An entry with a dangerous command is refused, and every entry goes
+through the schema (a pip package needs its sha256, a check is a program that only looks), each reason named. The result
+is a draft, never a module and never an install: `--out FILE` writes the entries as YAML, each under a comment with its
+source, confidence and reason, for `module create --dependencies FILE`; `--json` prints it whole for scripts.
+
+| Option | Meaning |
+|---|---|
+| `--provider TEXT`, `--model TEXT` | Provider and model for this run. Default: AI settings. |
+| `--out FILE` | Write the proposed entries as YAML to this file. |
+| `--json` | The proposal as JSON: the entries with reason, source and confidence, the gaps and the checks. |
+
+```bash
+llm-cli module propose-dependencies target_hardware_config.txt --out dependencies.yml
+llm-cli module create --probe target_hardware_config.txt --dependencies dependencies.yml
+```
+
+In the GUI: **Tools > Create Hardware Module...**, flags page, **Ditto: Propose Dependencies** fills the field
+"Dependencies of the SDK and toolchain".
+
 ### module edit
 
 ```

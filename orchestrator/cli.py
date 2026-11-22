@@ -1451,6 +1451,44 @@ def module_propose_values(ctx: FrameworkContext, probe_file: str, provider: Opti
         console.print(f"The proposed formats are in {escape(out_file)}.")
 
 
+@module.command('propose-dependencies')
+@click.argument('probe_file', type=click.Path(exists=True, dir_okay=False))
+@click.option('--provider', help='AI provider for this run; default: AI settings')
+@click.option('--model', help='Model for this run; default: AI settings')
+@click.option('--out', 'out_file', type=click.Path(dir_okay=False), default=None,
+              help="Write the proposed entries as YAML to this file (for 'module create --dependencies FILE')")
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def module_propose_dependencies(ctx: FrameworkContext, probe_file: str, provider: Optional[str], model: Optional[str],
+                                out_file: Optional[str], as_json: bool):
+    """Ditto's proposal of what the SDK and toolchain need, from a hardware probe and the crawled vendor documentation:
+    each entry with its reason, source and confidence. A name, a version or a hash that the cited source does not say
+    is not made into an entry; it is named as a gap. A draft for you to check, never a module and never an install."""
+    from orchestrator.Core.ditto_manager import DittoError
+    from orchestrator.tools.confirmation import visible
+    if not as_json:
+        _ditto_notice_once()
+    ctx.require_framework()
+    ditto = _run_ditto(ctx, provider, model)
+    try:
+        from orchestrator.Core.dependency_proposal import propose
+        proposal = propose(ditto, Path(probe_file))
+    except (DittoError, OSError) as e:
+        if as_json:
+            click.echo(json.dumps({"error": _printable(e)}))
+        else:
+            console.print(f"[red]{escape(_printable(e))}[/red]")
+        sys.exit(1)
+    if out_file and proposal.entries:
+        Path(out_file).write_text(proposal.entries_yaml(), encoding="utf-8")
+    if as_json:
+        click.echo(json.dumps(proposal.as_json(), indent=2, ensure_ascii=False))
+        return
+    click.echo("\n".join(visible(line) for line in proposal.lines()) or "Ditto proposed no entry.")
+    if out_file and proposal.entries:
+        console.print(f"The proposed entries are in {escape(out_file)}.")
+
+
 # ============================================================================
 # VENDOR FILES (the guided fetch: Core/vendor_files.py)
 # ============================================================================

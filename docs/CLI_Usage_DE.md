@@ -3024,6 +3024,37 @@ llm-cli module create --probe target_hardware_config.txt --formats formats.yml -
 In der GUI: **Tools > Create Hardware Module...**, Flags-Seite, **Ditto: Werte vorschlagen**; Dittos KI-Analyse auf
 der ersten Seite schlägt sie von sich aus vor, wenn die Probe einen Beschleuniger nennt.
 
+### module propose-dependencies
+
+```
+llm-cli module propose-dependencies PROBE_FILE [--provider TEXT] [--model TEXT] [--out FILE] [--json]
+```
+
+Ditto schlägt die Einträge dessen vor, was SDK und Toolchain eines Boards brauchen (siehe [module deps](#module-deps)),
+aus der Hardware-Prüfdatei und den Auszügen der gecrawlten Herstellerdokumentation, die die Wissensbasis dafür liefert:
+jeder Eintrag mit seinem Grund, seiner Quelle (die Adresse der Seite oder ein Schlüssel der Prüfdatei) und seiner
+Zuversicht. Das Framework prüft die Antwort, bevor Du sie siehst: Ein Eintrag wird gelesen, nie geraten. Ein Eintrag,
+dessen Quelle kein Auszug ist, den Ditto bekam, und kein Schlüssel der Prüfdatei, wird nicht gemacht, ebenso keiner, dessen
+Name oder Version die genannte Quelle nicht sagt, oder ein pip-Paket, dessen sha256 der Auszug nicht nennt; jeder wird als
+Lücke benannt. Ein Eintrag mit einem gefährlichen Befehl wird abgelehnt, und jeder Eintrag geht durch das Schema (ein
+pip-Paket braucht seinen sha256, eine Prüfung ist ein Programm, das nur schaut), jeder Grund wird genannt. Das Ergebnis
+ist ein Entwurf, nie ein Modul und nie eine Installation: `--out FILE` schreibt die Einträge als YAML, jeden unter einem
+Kommentar mit Quelle, Zuversicht und Grund, für `module create --dependencies FILE`; `--json` gibt ihn ganz für Skripte aus.
+
+| Option | Bedeutung |
+|---|---|
+| `--provider TEXT`, `--model TEXT` | Anbieter und Modell für diesen Lauf. Standard: KI-Einstellungen. |
+| `--out FILE` | Die vorgeschlagenen Einträge als YAML in diese Datei schreiben. |
+| `--json` | Der Vorschlag als JSON: die Einträge mit Grund, Quelle und Zuversicht, die Lücken und die Prüfungen. |
+
+```bash
+llm-cli module propose-dependencies target_hardware_config.txt --out dependencies.yml
+llm-cli module create --probe target_hardware_config.txt --dependencies dependencies.yml
+```
+
+In der GUI: **Tools > Create Hardware Module...**, Flags-Seite, **Ditto: Abhängigkeiten vorschlagen** füllt das Feld
+„Abhängigkeiten von SDK und Toolchain“.
+
 ### module edit
 
 ```
