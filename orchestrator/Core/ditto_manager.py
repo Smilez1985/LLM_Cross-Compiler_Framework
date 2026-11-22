@@ -558,6 +558,10 @@ class ChatReply:
     cache_turn: Any = None
     cache_lines: List[Any] = field(default_factory=list)
     cache_cap: bool = False
+    # What the prompt filter replaced in the turn's last request and put back in its answer (llm/filter_report.py);
+    # None for a local model and when nothing was replaced. The report says no value; it finds the stretches of the
+    # person's own text to mark (FilterReport.stretches).
+    filter: Any = None
 
 
 # The transcript notice of a conversation summarized into a new one, by ChatReply.new_conversation_reason (the chat
@@ -901,6 +905,14 @@ class DittoCoder:
         client = self.client
         self._attach_local_runtime(client)
         return client
+
+    def filter_preview(self, text: str) -> Any:
+        """What the prompt filter would replace in `text` before it went to Ditto's provider (a FilterReport), or None:
+        a local provider, no provider set up, nothing to replace (the chat panel marks the person's own text with it)."""
+        try:
+            return self._client_for_call().filter_preview(text)
+        except Exception:  # noqa: BLE001 - no preview is no problem: the filter still runs when the question is sent
+            return None
 
     def for_run(self, provider: Optional[str] = None, model: Optional[str] = None) -> "DittoCoder":
         """Ditto with the AI provider and/or model chosen for one run only (`--provider/--model`, the module wizard's
@@ -1443,4 +1455,5 @@ class DittoCoder:
                          provider=getattr(last, "provider", ""), model=getattr(last, "model", ""), usage=usage,
                          source_changed=source_changed, new_conversation_reason=reason if new_conversation else "",
                          kept_messages=kept, compaction=compaction, budget=budget, context_lines=context_lines,
-                         cache=cache, cache_turn=cache_turn, cache_lines=cache_lines, cache_cap=cache_cap)
+                         cache=cache, cache_turn=cache_turn, cache_lines=cache_lines, cache_cap=cache_cap,
+                         filter=getattr(last, "filter", None))

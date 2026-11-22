@@ -24,6 +24,7 @@ import re
 import secrets
 from typing import Callable, Dict, List, Optional, Tuple
 
+from orchestrator.llm.filter_report import HIDDEN_FOR_GOOD, FilterReport
 from orchestrator.security import secret_patterns
 from orchestrator.security.paths import ACCOUNT_NAME
 from orchestrator.utils.helpers import redact_secrets
@@ -100,9 +101,11 @@ class PrivacyFilter:
         digest = hmac.new(self._key, f"{kind}\0{value}".encode("utf-8"), hashlib.sha256).hexdigest()[:8]
         return f"<{kind}_{digest}>"
 
-    def sanitize(self, text: str) -> Tuple[str, Dict[str, str]]:
-        """Returns (clean_text, {placeholder: original})."""
-        text, mapping = self._hide_secrets(text or "")
+    def sanitize(self, text: str, place: str = "input",
+                 report: Optional[FilterReport] = None) -> Tuple[str, Dict[str, str]]:
+        """Returns (clean_text, {placeholder: original}). `report` (llm/filter_report.py) is told each replacement
+        with its `place` in the request; it holds the values in memory only, never in what it says."""
+        text, mapping = self._hide_secrets(text or "", place, report)
         if self.level == "OFF" or not text:
             return text, mapping
         spans: List[_Span] = []
@@ -115,13 +118,16 @@ class PrivacyFilter:
                 continue
             token = self.placeholder(span.kind, span.value)
             mapping[token] = span.value
+            if report is not None:
+                report.add(place, span.kind, token, span.value)
             out.append(text[pos:span.start])
             out.append(token)
             pos = span.end
         out.append(text[pos:])
         return "".join(out), mapping
 
-    def _hide_secrets(self, text: str) -> Tuple[str, Dict[str, str]]:
+    def _hide_secrets(self, text: str, place: str = "input",
+                      report: Optional[FilterReport] = None) -> Tuple[str, Dict[str, str]]:
         """`text` with each secret replaced by its placeholder (or for good without reversible_secrets), then
         redact_secrets over the rest as the safety net: the placeholders themselves are never touched by it."""
         if not text:
@@ -130,13 +136,23 @@ class PrivacyFilter:
         pieces: List[str] = []
         pos = 0
         spans = secret_patterns.secret_spans(text) if self.reversible_secrets else []
-        for start, end, _rule in spans:
+        for start, end, rule in spans:
             token = self.placeholder(SECRET_KIND, text[start:end])
             mapping[token] = text[start:end]
-            pieces += [_redact_around(text[pos:start]), token]
+            if report is not None:
+                report.add(place, rule, token, text[start:end])
+            pieces += [self._safety_net(text[pos:start], place, report), token]
             pos = end
-        pieces.append(_redact_around(text[pos:]))
+        pieces.append(self._safety_net(text[pos:], place, report))
         return "".join(pieces), mapping
+
+    @staticmethod
+    def _safety_net(text: str, place: str, report: Optional[FilterReport]) -> str:
+        """_redact_around, and a credential it hid for good (a header, a query parameter) is reported as such."""
+        clean = _redact_around(text)
+        if report is not None and clean != text:
+            report.add(place, HIDDEN_FOR_GOOD)
+        return clean
 
     def _detectors(self) -> List[Callable[[str], List[_Span]]]:
         detectors = [_find_emails, _find_logins, _find_macs, _find_ipv4, _find_ipv6, _find_home_users]

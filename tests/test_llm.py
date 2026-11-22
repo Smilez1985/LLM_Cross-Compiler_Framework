@@ -749,6 +749,38 @@ class TestPrivacy:
         assert secret not in json.dumps([m.model_dump(mode="json") for m in result.new_messages], default=str)
         assert token in json.dumps(result.message.native.payload)
 
+    def test_the_client_reports_what_it_replaced_by_place_and_what_it_put_back(self, make_client):
+        import random
+        import string
+        secret = "".join(random.Random("report").choices(string.ascii_letters + string.digits, k=14))
+        http = FakeHTTP()
+        client = make_client(http, SECRETS, **ANTHROPIC)
+        token = PrivacyFilter("STRICT", client._privacy_key()).placeholder("SECRET", secret)
+        http.add(claude_message([text_block(f"Use {token} on the board.")]))
+        request = ChatRequest(system="You help with boards at 10.0.0.9.", messages=[
+            Message(role="user", content="earlier I used mail a@b.invalid"),
+            Message(role="assistant", content="ok"),
+            Message(role="user", content=[
+                {"type": "text", "text": "Possibly relevant knowledge-base excerpts:\nsee /home/alice/notes.md"},
+                {"type": "text", "text": f"log in with tool login --password {secret}"}])])
+        result = client.chat(request)
+        assert result.filter is not None
+        assert result.filter.lines() == ["your input: 1 password flag (SECRET_1)", "history: 1 e-mail address",
+                                         "system prompt: 1 IP address", "knowledge excerpts: 1 path"]
+        assert result.filter.restored_lines() == ["put back in this answer: 1 password flag (SECRET_1)"]
+        assert secret not in json.dumps(result.filter.as_data()) and secret not in repr(result.filter)
+        assert [text[a:b] for text in (f"log in with tool login --password {secret}",)
+                for a, b, _ in result.filter.stretches(text)] == [secret]
+        assert "filter" not in result.model_dump(), "a saved result never carries the report"
+
+    def test_a_local_model_has_no_report_and_a_request_without_values_none(self, make_client):
+        http = FakeHTTP().add(completion("ok"))
+        assert make_client(http, ai_provider="ollama").chat(ask("Deploy to 192.168.1.20")).filter is None
+        http = FakeHTTP()
+        client = make_client(http, SECRETS, **ANTHROPIC)
+        http.add(claude_message([text_block("fine")]))
+        assert client.chat(ask("How do I build llama.cpp?")).filter is None
+
     def test_local_requests_are_not_filtered(self, make_client):
         http = FakeHTTP().add(completion("ok"))
         make_client(http, ai_provider="ollama").chat(ask("Deploy to 192.168.1.20 as alice@example.com"))

@@ -5109,6 +5109,9 @@ def ditto_ask(ctx: FrameworkContext, question: str, no_tools: bool, provider: Op
     except DittoError as e:   # may quote the provider's or a tool's text
         err.print(f"[red]{escape(_printable(e))}[/red]")
         sys.exit(1)
+    report = getattr(reply, "filter", None)   # what the prompt filter replaced and put back: quiet, never a value
+    if report is not None and report.summary():
+        err.print(f"[dim]{escape(_printable(report.summary()))}[/dim]")
     from orchestrator.Core.chat_feed import feed_text
     for key, params in getattr(reply, "cache_lines", None) or ():   # the turn's cloud cache numbers (framework's words)
         err.print(f"[dim]{escape(feed_text(key, 'en', **params))}[/dim]")

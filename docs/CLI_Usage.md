@@ -1564,7 +1564,9 @@ tools are the framework's own on this computer. The answer goes to stdout, tool 
 control characters (escape sequences, carriage returns, bidi and zero-width characters; the joiner inside an emoji
 stays). Ctrl+C or the end of input at a confirmation is a no. Nothing is saved to the chat history, and
 `--provider`/`--model` hold for this command only: they are never saved, also not when a tool saves the settings
-during the question.
+during the question. For a cloud provider, one dim line on stderr says what the prompt filter replaced before the question left
+this computer, by place and kind with a count, and what it put back in the answer (never a value; a secret is named by
+a label such as SECRET_1); nothing is printed for a local model or when nothing was replaced.
 
 | Option | Meaning |
 |---|---|

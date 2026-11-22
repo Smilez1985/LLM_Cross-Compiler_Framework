@@ -1632,7 +1632,10 @@ abgelehnt). Die Tools sind die eigenen des Frameworks auf diesem Computer. Die A
 Tool-Hinweise und Fehler nach stderr, ohne Steuerzeichen (Escape-Sequenzen, Wagenrückläufe, Bidi- und
 Nullbreitenzeichen; der Verbinder in einem Emoji bleibt). Strg+C oder das Ende der Eingabe an einer Bestätigung ist
 ein Nein. Nichts wird im Chatverlauf gespeichert, und `--provider`/`--model` gelten nur für diesen Befehl: Sie werden
-nie gespeichert, auch nicht, wenn ein Tool während der Frage die Einstellungen speichert.
+nie gespeichert, auch nicht, wenn ein Tool während der Frage die Einstellungen speichert. Bei einem Cloud-Anbieter sagt eine
+gedämpfte Zeile auf stderr, was der Prompt-Filter ersetzt hat, bevor die Frage diesen Computer verließ, nach Ort und Art mit
+Anzahl, und was er in der Antwort wieder eingesetzt hat (nie ein Wert; ein Secret heißt mit einem Etikett wie SECRET_1);
+bei einem lokalen Modell oder wenn nichts ersetzt wurde, wird nichts ausgegeben.
 
 | Option | Bedeutung |
 |---|---|

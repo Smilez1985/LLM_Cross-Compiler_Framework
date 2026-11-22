@@ -152,6 +152,9 @@ class ChatResult(BaseModel):
     # "pending" when the comparison was not finished; None when not asked.
     cache_miss_reason: Optional[str] = None
     cache_missed_tokens: Optional[int] = None  # the provider's estimate of what the miss cost, when it names one
+    # What the prompt filter replaced in this call's request, by place and kind, and what was put back in the answer
+    # (llm/filter_report.FilterReport); None for a local model (nothing leaves) and when nothing was replaced.
+    filter: Optional[Any] = Field(default=None, exclude=True, repr=False)
 
     def model_post_init(self, __context: Any) -> None:
         if not self.new_messages:

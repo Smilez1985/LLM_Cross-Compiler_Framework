@@ -425,6 +425,7 @@ class ChatPanel(QWidget):
         self.lbl_access = self.header.lbl_access
 
         self.composer.send_requested.connect(self.send_message)
+        self.composer.previewer = self._filter_preview   # marks what the filter will replace (filter_hint.py)
         self.composer.to_feed.connect(self.feed_view.focus_last)
         self.feed_view.escape_pressed.connect(self.focus_composer)
         self.feed_view.earlier_requested.connect(self._load_earlier)
@@ -813,6 +814,12 @@ class ChatPanel(QWidget):
         self._post("person_message", FeedSender(role="person"), person_text=question, refs=FeedRefs(reply_to=reply_to))
         self.agents.send(self.agent_picker.current(), self.agent_picker.name(), question)
 
+    def _filter_preview(self, value: str) -> Any:
+        """The report of what the prompt filter would replace in `value` before it went to Ditto's provider, or None
+        (a local provider, no Ditto, nothing to replace)."""
+        preview = getattr(self.ditto, "filter_preview", None)
+        return preview(value) if callable(preview) else None
+
     def send_message(self) -> None:
         question = self.txt_input.text().strip()
         if question and self.agent_picker.current():
@@ -825,6 +832,7 @@ class ChatPanel(QWidget):
             return
         self.sync_history()
         self.txt_input.clear()
+        self.composer.clear_filter()   # the notice of the last question goes with the next one
         self.build_turns.person_spoke()
         reply_to = self.composer.reply_to
         self.composer.clear_reply()
@@ -883,6 +891,7 @@ class ChatPanel(QWidget):
             self.post_notice("chat.notice.cache_cap", {"cost": dollars(reply.cache.cost_usd),
                                                        "limit": dollars(float(reply.cache.cap_told or 0))},
                              level="warning")
+        self.composer.show_sent(getattr(reply, "filter", None))   # what the filter replaced and put back, quietly
         if reply.text:
             self._post("ditto_answer", self._ditto_sender(), ai_text=reply.text, ai_text_kind="answer",
                        announce_row=True)

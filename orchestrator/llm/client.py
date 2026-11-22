@@ -44,6 +44,7 @@ from orchestrator.llm.auth.resolver import CredentialResolver, ResolvedCredentia
 from orchestrator.llm.auth.store import CredentialStore
 from orchestrator.llm.catalog import Catalog, ProviderPreset, load_catalog
 from orchestrator.llm.errors import LLMError, NotConfigured, ProviderUnavailable, RateLimited, Refused
+from orchestrator.llm.filter_report import FilterReport
 from orchestrator.llm.privacy import PrivacyFilter, normalize_level, restore, restore_obj, without_secrets
 from orchestrator.llm.providers import adapter_class
 from orchestrator.llm.types import EFFORTS, TASKS, ChatRequest, ChatResult, Message, ModelInfo, TokenCount
@@ -433,43 +434,72 @@ class LLMClient:
         except Exception:
             return "STRICT"
 
-    def _sanitize(self, request: ChatRequest) -> Tuple[ChatRequest, Dict[str, str]]:
+    # The text block that Ditto puts the knowledge-base excerpts in (core/ditto_manager.py): a place of its own in the
+    # filter's report.
+    KNOWLEDGE_BLOCK = "Possibly relevant knowledge-base excerpts:"
+
+    def _sanitize(self, request: ChatRequest) -> Tuple[ChatRequest, Dict[str, str], FilterReport]:
+        """The request as it may leave (every personal value and every secret a placeholder), the mapping that puts
+        the values back locally, and the report of what was replaced where (llm/filter_report.py)."""
         privacy = PrivacyFilter(self.privacy_level(), self._privacy_key())
         mapping: Dict[str, str] = {}
+        report = FilterReport()
 
-        def clean(text: str) -> str:
-            out, found = privacy.sanitize(text)
+        def clean(text: str, place: str) -> str:
+            out, found = privacy.sanitize(text, place, report)
             mapping.update(found)
             return out
 
-        def clean_obj(value):
+        def clean_obj(value, place: str):
             if isinstance(value, str):
-                return clean(value)
+                return clean(value, place)
             if isinstance(value, list):
-                return [clean_obj(v) for v in value]
+                return [clean_obj(v, place) for v in value]
             if isinstance(value, dict):
-                return {k: clean_obj(v) for k, v in value.items()}
+                return {k: clean_obj(v, place) for k, v in value.items()}
             return value
 
+        last_user = max((i for i, m in enumerate(request.messages) if m.role == "user"), default=-1)
         messages = []
-        for msg in request.messages:
+        for index, msg in enumerate(request.messages):
             update: Dict[str, Any] = {}
+            place = "tool_results" if msg.role == "tool" else "input" if index == last_user else "history"
             if isinstance(msg.content, str):
-                update["content"] = clean(msg.content)
+                update["content"] = clean(msg.content, place)
             else:
-                update["content"] = [{**b, "text": clean(b.get("text", ""))} if b["type"] == "text" else b
-                                     for b in msg.content]
+                update["content"] = [
+                    {**b, "text": clean(b.get("text", ""), "knowledge" if place == "input" and
+                                        b.get("text", "").startswith(self.KNOWLEDGE_BLOCK) else place)}
+                    if b["type"] == "text" else b for b in msg.content]
             if msg.tool_calls:
-                update["tool_calls"] = [c.model_copy(update={"arguments": clean_obj(c.arguments)})
+                update["tool_calls"] = [c.model_copy(update={"arguments": clean_obj(c.arguments, "tool_arguments")})
                                         for c in msg.tool_calls]
             messages.append(msg.model_copy(update=update))  # `native` stays untouched
-        return request.model_copy(update={"system": clean(request.system), "messages": messages}), mapping
+        return request.model_copy(update={"system": clean(request.system, "system"), "messages": messages}), \
+            mapping, report
+
+    def filter_preview(self, text: str, task: str = "chat") -> Optional[FilterReport]:
+        """What the prompt filter would replace in `text` if it went to the provider of `task` as the person's input:
+        the report (llm/filter_report.py), or None when the provider is a local one (nothing leaves this computer),
+        when there is no provider set up, or when nothing would be replaced. Nothing is sent and nothing is kept."""
+        try:
+            target = self.resolve(task)
+        except LLMError:
+            return None
+        if target.local:
+            return None
+        report = FilterReport()
+        PrivacyFilter(self.privacy_level(), self._privacy_key()).sanitize(text or "", "input", report)
+        return None if report.empty else report
 
     @staticmethod
-    def _restore(result: ChatResult, mapping: Dict[str, str]) -> ChatResult:
+    def _restore(result: ChatResult, mapping: Dict[str, str], report: Optional[FilterReport] = None) -> ChatResult:
         """Puts the values back locally. A secret comes back in the answer's text only, the words the person reads;
         the history, a tool's arguments and the structured result keep its placeholder (without_secrets), so a
         secret never travels on through them. A tool that needs it takes a credential by name."""
+        if report is not None and not report.empty:
+            report.note_restored(result.text, mapping)
+            result = result.model_copy(update={"filter": report})
         if not mapping:
             return result
         kept = without_secrets(mapping)
@@ -511,18 +541,19 @@ class LLMClient:
     def _call(self, target: Target, request: ChatRequest) -> ChatResult:
         adapter = self.adapter(target)
         mapping: Dict[str, str] = {}
+        report: Optional[FilterReport] = None
         if not target.local:
-            request, mapping = self._sanitize(request)
+            request, mapping, report = self._sanitize(request)
         max_wait = float(self._setting("ai_max_retry_wait", 30))
         attempt = 0
         while True:
             try:
                 result = adapter.chat(request, target.model)
                 self._calibrate(target, request, result)
-                return self._restore(result, mapping)
+                return self._restore(result, mapping, report)
             except Refused as e:
                 if e.result is not None:
-                    e.result = self._restore(e.result, mapping)
+                    e.result = self._restore(e.result, mapping, report)
                 raise
             except (RateLimited, ProviderUnavailable) as e:
                 wait = e.retry_after if e.retry_after is not None else self._backoff(attempt)
@@ -609,7 +640,7 @@ class LLMClient:
             raise NotConfigured(f"{target.preset.label} has no token count endpoint in this framework.",
                                 provider=target.provider)
         if not target.local:
-            request, _ = self._sanitize(request)
+            request, _, _ = self._sanitize(request)
         return counter(request, target.model)
 
     def describe(self, task: str = "chat") -> Dict[str, Any]:
