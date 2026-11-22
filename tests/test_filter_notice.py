@@ -9,6 +9,7 @@ Every value is made at run time from random characters, so this file holds no se
 import pytest
 
 pytest.importorskip("PySide6")   # the run without the GUI extra skips this file
+from PySide6.QtCore import Qt  # noqa: E402
 
 from test_chat_panel import feed, make_panel  # noqa: E402, F401 - the fixtures
 from test_secret_by_place import value  # noqa: E402
@@ -158,3 +159,66 @@ def test_a_ditto_without_a_preview_gives_no_symbol(make_panel, feed, qapp):  # n
     panel.txt_input.setPlainText(TYPED)
     panel.composer._preview()
     assert not panel.composer.btn_filter.isVisibleTo(panel.composer)
+
+
+# --- the marks in the bubbles -----------------------------------------------------------------------------------
+
+def _turn(panel, text, answer, report):
+    panel.txt_input.setPlainText(text)
+    panel.send_message()
+    panel._on_ai_response(ChatReply(question=text, text=answer, filter=report,
+                                    new_messages=[Message.user(text), Message(role="assistant", content=answer)]))
+
+
+def _editors(bubble):
+    from orchestrator.gui.chat_panel.filter_hint import MarkedText
+    return bubble.findChildren(MarkedText)
+
+
+def test_the_sent_question_and_the_answer_carry_the_marks_of_what_was_replaced(make_panel, feed, qapp):  # noqa: F811
+    panel = make_panel(feed)
+    report = report_of(TYPED)
+    answer = f"Done: I logged in with {PASSWORD} at 10.1.2.3."
+    _turn(panel, TYPED, answer, report)
+    question_bubble = panel.feed_view.bubble_of(panel._turn_person_id)
+    [editor] = _editors(question_bubble)
+    # the chat's own protection already shows a password as REDACTED in the person's bubble; the stretch that is
+    # still readable there, the address, is the one that gets a mark
+    assert editor.marked() == ["10.1.2.3"] and editor.isReadOnly()
+    assert PASSWORD not in editor.toPlainText()
+    assert all(s.format.underlineStyle() != s.format.UnderlineStyle.NoUnderline for s in editor.extraSelections())
+    answer_bubble = panel.feed_view.bubble_of(panel._marked_ids[1])
+    assert [m for e in _editors(answer_bubble) for m in e.marked()] == [PASSWORD, "10.1.2.3"]
+    shown = TYPED.replace(PASSWORD, "REDACTED")
+    assert editor.toPlainText() == shown, "the marks change no character"
+    assert question_bubble.plain_text().count(shown) == 1 and answer in answer_bubble.plain_text()
+
+
+def test_the_marks_go_with_a_click_on_the_symbol_and_with_the_next_question(make_panel, feed, qapp):  # noqa: F811
+    panel = make_panel(feed)
+    _turn(panel, TYPED, f"Use {PASSWORD}.", report_of(TYPED))
+    question = panel.feed_view.bubble_of(panel._turn_person_id)
+    assert [m for e in _editors(question) for m in e.marked()]
+    panel.composer.btn_filter.click()
+    assert [m for e in _editors(question) for m in e.marked()] == [] and panel._marked_ids == []
+    _turn(panel, TYPED, f"Use {PASSWORD}.", report_of(TYPED))
+    first = panel.feed_view.bubble_of(panel._turn_person_id)
+    panel.txt_input.setPlainText("and now something else")
+    panel.send_message()
+    assert [m for e in _editors(first) for m in e.marked()] == [], "the next question takes the old marks away"
+
+
+def test_a_bubble_without_a_replaced_stretch_stays_a_plain_label(make_panel, feed, qapp):  # noqa: F811
+    from PySide6.QtWidgets import QLabel
+    panel = make_panel(feed)
+    _turn(panel, "how do I build llama.cpp?", "With cmake.", report_of(TYPED))
+    bubble = panel.feed_view.bubble_of(panel._turn_person_id)
+    assert _editors(bubble) == [] and any(label.text() == "how do I build llama.cpp?"
+                                          for label in bubble.findChildren(QLabel))
+    assert all(label.textFormat() == Qt.PlainText for label in bubble.findChildren(QLabel))
+
+
+def test_an_answer_without_a_report_is_not_marked(make_panel, feed, qapp):  # noqa: F811
+    panel = make_panel(feed)
+    _turn(panel, TYPED, "Done.", None)
+    assert _editors(panel.feed_view.bubble_of(panel._turn_person_id)) == [] and panel._marked_ids == []

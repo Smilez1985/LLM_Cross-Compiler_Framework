@@ -426,6 +426,9 @@ class ChatPanel(QWidget):
 
         self.composer.send_requested.connect(self.send_message)
         self.composer.previewer = self._filter_preview   # marks what the filter will replace (filter_hint.py)
+        self.composer.filter_cleared.connect(self._unmark_bubbles)
+        self._marked_ids: list = []   # the bubbles that carry the filter's marks (this turn's question and answer)
+        self._turn_person_id = ""
         self.composer.to_feed.connect(self.feed_view.focus_last)
         self.feed_view.escape_pressed.connect(self.focus_composer)
         self.feed_view.earlier_requested.connect(self._load_earlier)
@@ -814,6 +817,22 @@ class ChatPanel(QWidget):
         self._post("person_message", FeedSender(role="person"), person_text=question, refs=FeedRefs(reply_to=reply_to))
         self.agents.send(self.agent_picker.current(), self.agent_picker.name(), question)
 
+    def _mark_bubbles(self, report: Any, entry_ids: list) -> None:
+        """Underlines the filter's stretches in the bubbles of this turn (the question the person sent and the answer);
+        they go with the filter notice (`_unmark_bubbles`)."""
+        self._unmark_bubbles()
+        for entry_id in entry_ids:
+            bubble = self.feed_view.bubble_of(entry_id) if entry_id else None
+            if bubble is not None and bubble.mark_filtered(report):
+                self._marked_ids.append(entry_id)
+
+    def _unmark_bubbles(self) -> None:
+        for entry_id in self._marked_ids:
+            bubble = self.feed_view.bubble_of(entry_id)
+            if bubble is not None:
+                bubble.unmark_filtered()
+        self._marked_ids = []
+
     def _filter_preview(self, value: str) -> Any:
         """The report of what the prompt filter would replace in `value` before it went to Ditto's provider, or None
         (a local provider, no Ditto, nothing to replace)."""
@@ -836,8 +855,9 @@ class ChatPanel(QWidget):
         self.build_turns.person_spoke()
         reply_to = self.composer.reply_to
         self.composer.clear_reply()
-        self._post("person_message", FeedSender(role="person"), person_text=question,
-                   refs=FeedRefs(reply_to=reply_to))
+        stored = self._post("person_message", FeedSender(role="person"), person_text=question,
+                            refs=FeedRefs(reply_to=reply_to))
+        self._turn_person_id = stored.entry.entry_id if stored is not None else ""
         self._choice = choice
         if not choice.is_default:   # said in this window (not saved): what this one question uses
             self._local_notice(ui_text("ditto_models.chat.notice", self.lang, what=choice.summary(self.lang)),
@@ -891,10 +911,15 @@ class ChatPanel(QWidget):
             self.post_notice("chat.notice.cache_cap", {"cost": dollars(reply.cache.cost_usd),
                                                        "limit": dollars(float(reply.cache.cap_told or 0))},
                              level="warning")
-        self.composer.show_sent(getattr(reply, "filter", None))   # what the filter replaced and put back, quietly
+        report = getattr(reply, "filter", None)
+        self.composer.show_sent(report)   # what the filter replaced and put back, quietly
+        answer = None
         if reply.text:
-            self._post("ditto_answer", self._ditto_sender(), ai_text=reply.text, ai_text_kind="answer",
-                       announce_row=True)
+            answer = self._post("ditto_answer", self._ditto_sender(), ai_text=reply.text, ai_text_kind="answer",
+                                announce_row=True)
+        if report is not None and not report.empty:
+            # the person's own question and the answer with its values put back: the stretches the filter replaced
+            self._mark_bubbles(report, [self._turn_person_id, answer.entry.entry_id if answer is not None else ""])
         self.history.apply(reply)
         self.save_history()
         QTimer.singleShot(0, self._next_build_turn)   # a build end that came in during this turn

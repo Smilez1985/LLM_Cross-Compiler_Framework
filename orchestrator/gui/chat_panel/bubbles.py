@@ -435,7 +435,19 @@ class Bubble(QFrame):
 
     def plain_text(self) -> str:
         """Everything the bubble shows, as text (for the accessible description and tests)."""
-        return "\n".join(label.text() for label in self.findChildren(QLabel) if label.text())
+        from orchestrator.gui.chat_panel.filter_hint import MarkedText
+        return "\n".join([label.text() for label in self.findChildren(QLabel) if label.text()]
+                         + [editor.toPlainText() for editor in self.findChildren(MarkedText)])
+
+    def mark_filtered(self, report: Any) -> int:
+        """Underlines in this bubble the stretches that the prompt filter replaced in the request (the person's own
+        words, or the answer with its values put back); returns the number of marks (filter_hint.mark_labels)."""
+        from orchestrator.gui.chat_panel.filter_hint import mark_labels
+        return mark_labels(self, report)
+
+    def unmark_filtered(self) -> None:
+        from orchestrator.gui.chat_panel.filter_hint import unmark_all
+        unmark_all(self)
 
     def update_accessibility(self) -> None:
         self.setAccessibleName(text("chat.sender.accessible", self.lang, sender=self.sender_text(),

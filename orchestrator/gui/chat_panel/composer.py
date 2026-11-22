@@ -62,6 +62,7 @@ class ComposerInput(QPlainTextEdit):
 class Composer(QWidget):
     send_requested = Signal()
     to_feed = Signal()
+    filter_cleared = Signal()   # the filter notice went away (the panel takes the marks out of the bubbles too)
 
     def __init__(self, lang: str = "en", parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -169,9 +170,12 @@ class Composer(QWidget):
     def clear_filter(self) -> None:
         """Symbol and marks go: with the next question, an empty field or a click on the symbol."""
         self._preview_timer.stop()
+        had = self._report is not None
         self._report = None
         self.btn_filter.setVisible(False)
         filter_hint.unmark(self.input)
+        if had:
+            self.filter_cleared.emit()
 
     # --- the reply chip --------------------------------------------------------------------------------------------
 

@@ -9,10 +9,11 @@ colour alone; `unmark` takes the marks away. No rich text anywhere: the marks ar
 document (extra selections), and every text is plain text.
 """
 
-from typing import List, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextCharFormat, QTextCursor
-from PySide6.QtWidgets import QPlainTextEdit, QTextEdit
+from PySide6.QtWidgets import QFrame, QLabel, QPlainTextEdit, QSizePolicy, QTextEdit, QWidget
 
 from orchestrator.llm.filter_report import HIDDEN_FOR_GOOD, PLACES, FilterReport
 from orchestrator.utils.localization import ui_text
@@ -86,4 +87,65 @@ def unmark(field: QPlainTextEdit) -> None:
     field.setExtraSelections([])
 
 
-__all__ = ["describe", "kind_text", "mark", "notice_text", "restored_text", "unmark"]
+class MarkedText(QPlainTextEdit):
+    """A bubble's text with marks: a read-only plain-text document that looks like the label it replaces (no frame,
+    transparent, as high as its text, selectable) and carries the wavy underline of the stretches the filter replaced.
+    A QLabel cannot underline a part of a plain text; this keeps the text plain (no rich text API)."""
+
+    def __init__(self, value: str, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setPlainText(value)
+        self.setReadOnly(True)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        self.setStyleSheet("QPlainTextEdit { background: transparent; }")
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.document().documentLayout().documentSizeChanged.connect(lambda _size: self._fit())
+        self._fit()
+
+    def _fit(self) -> None:
+        """As high as its text: a plain-text document's size is its number of (wrapped) lines."""
+        lines = max(1, int(self.document().size().height()))
+        self.setFixedHeight(int(lines * self.fontMetrics().lineSpacing() + 2 * self.document().documentMargin() + 2))
+
+    def marked(self) -> List[str]:
+        """The marked stretches of the text (for tests and the accessible description)."""
+        text = self.toPlainText()
+        return [text[_chars(text, s.cursor.selectionStart()):_chars(text, s.cursor.selectionEnd())]
+                for s in self.extraSelections()]
+
+
+def _chars(text: str, units: int) -> int:
+    """The index of a UTF-16 position in the Python string."""
+    return len(text.encode("utf-16-le")[:units * 2].decode("utf-16-le", "ignore"))
+
+
+def mark_labels(root: QWidget, report) -> int:
+    """Marks, in the labels under `root` (a bubble), the stretches of the person's own text that the filter replaced
+    (`report.stretches`): such a label is replaced by a MarkedText with the same text. Returns the number of marks."""
+    count = 0
+    for label in root.findChildren(QLabel):
+        value = label.text()
+        stretches = report.stretches(value) if value else []
+        layout = label.parentWidget().layout() if label.parentWidget() is not None else None
+        if not stretches or layout is None:
+            continue
+        editor = MarkedText(value, label.parentWidget())
+        editor.setAccessibleName(label.accessibleName())
+        layout.replaceWidget(label, editor)
+        label.hide()
+        label.setParent(None)   # gone from the bubble at once, not only at the next event loop turn
+        label.deleteLater()
+        count += mark(editor, stretches)
+    return count
+
+
+def unmark_all(root: QWidget) -> None:
+    for editor in root.findChildren(MarkedText):
+        unmark(editor)
+
+
+__all__ = ["MarkedText", "describe", "kind_text", "mark", "mark_labels", "notice_text", "restored_text", "unmark",
+           "unmark_all"]
