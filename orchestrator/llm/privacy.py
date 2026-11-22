@@ -2,13 +2,19 @@
 """
 Data-leak protection for cloud providers (config key ai_security_level).
 
-  OFF       only secrets are redacted (always, and irreversibly)
+  OFF       only secrets are replaced (always; by a placeholder that is put back only where the person looks)
   BALANCED  + IPv4/IPv6 addresses, MAC addresses, e-mail addresses, user@host logins, user names in home paths
   STRICT    + host names announced in probe files (HOSTNAME=...), serial numbers, UUIDs, directories of absolute paths
 
 Placeholders are derived from an HMAC of the value with a per-install key: the same value always gets the same
 placeholder, so a re-sent history stays byte-identical (prompt caches, preserved thinking) and nothing has to be
 remembered between calls. The returned mapping turns placeholders in the answer back into the real values locally.
+
+A secret (a key, a token, a password that only its place gives away) gets a placeholder of its own kind, <SECRET_...>,
+built the same way. Its value comes back only in the answer the person reads (`restore`, which takes the whole
+mapping); `without_secrets(mapping)` is the mapping for everything else (the history, a tool's arguments), where a
+secret stays a placeholder, so no secret reaches the model, a log or a tool through a mapping. What the secret rules
+have no span for (credential headers, query parameters) is still redacted for good.
 """
 
 import hashlib
@@ -18,6 +24,7 @@ import re
 import secrets
 from typing import Callable, Dict, List, Optional, Tuple
 
+from orchestrator.security import secret_patterns
 from orchestrator.security.paths import ACCOUNT_NAME
 from orchestrator.utils.helpers import redact_secrets
 
@@ -47,11 +54,24 @@ _UUID = re.compile(r"(?<![0-9A-Fa-f-])[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{
                    r"(?![0-9A-Fa-f-])")
 _POSIX_PATH = re.compile(r"(?<![\w.:/~<>-])/(?:[\w.@+-]+/)+[\w.@+-]*")
 _WIN_PATH = re.compile(r"\b[A-Za-z]:\\(?:[^\\/:*?\"<>|\s]+\\)+[^\\/:*?\"<>|\s]*")
-_PLACEHOLDER = re.compile(r"<(?:IP|MAC|EMAIL|USER|HOST|SERIAL|UUID|PATH)_[0-9a-f]{8}>")
+SECRET_KIND = "SECRET"
+_SECRET_PLACEHOLDER = re.compile(rf"<{SECRET_KIND}_[0-9a-f]{{8}}>")
+_PLACEHOLDER = re.compile(r"<(?:IP|MAC|EMAIL|USER|HOST|SERIAL|UUID|PATH|SECRET)_[0-9a-f]{8}>")
 
 # Directories that say nothing about the user; paths below them stay readable in STRICT mode.
 _SYSTEM_ROOTS = ("/usr/", "/bin/", "/sbin/", "/lib/", "/lib32/", "/lib64/", "/libx32/", "/etc/", "/dev/", "/proc/",
                  "/sys/", "/run/", "/var/lib/", "/var/log/", "/opt/rocm/", "/workspace/")
+
+
+def _redact_around(text: str) -> str:
+    """redact_secrets over `text` without touching a secret placeholder already in it (text that was filtered
+    before, a re-sent history): each stretch between placeholders is redacted on its own."""
+    parts = _SECRET_PLACEHOLDER.split(text)
+    holders = _SECRET_PLACEHOLDER.findall(text)
+    out = [redact_secrets(parts[0])]
+    for holder, part in zip(holders, parts[1:]):
+        out += [holder, redact_secrets(part)]
+    return "".join(out)
 
 
 def normalize_level(level: Optional[str]) -> str:
@@ -69,9 +89,12 @@ class _Span:
 class PrivacyFilter:
     """Replaces personal data by stable placeholders. One instance can serve many calls."""
 
-    def __init__(self, level: str = "STRICT", key: Optional[bytes] = None):
+    def __init__(self, level: str = "STRICT", key: Optional[bytes] = None, reversible_secrets: bool = True):
+        """`reversible_secrets`: a secret becomes a placeholder that the mapping can put back (the default); False
+        redacts it for good, for text that is shared and never answered (a pack's scrub)."""
         self.level = normalize_level(level)
         self._key = key or _PROCESS_KEY
+        self.reversible_secrets = reversible_secrets
 
     def placeholder(self, kind: str, value: str) -> str:
         digest = hmac.new(self._key, f"{kind}\0{value}".encode("utf-8"), hashlib.sha256).hexdigest()[:8]
@@ -79,13 +102,12 @@ class PrivacyFilter:
 
     def sanitize(self, text: str) -> Tuple[str, Dict[str, str]]:
         """Returns (clean_text, {placeholder: original})."""
-        text = redact_secrets(text or "")
+        text, mapping = self._hide_secrets(text or "")
         if self.level == "OFF" or not text:
-            return text, {}
+            return text, mapping
         spans: List[_Span] = []
         for detector in self._detectors():
             spans.extend(detector(text))
-        mapping: Dict[str, str] = {}
         out, pos = [], 0
         # Earliest first; on overlap the longer span wins (a whole path beats the user name inside it).
         for span in sorted(spans, key=lambda s: (s.start, -(s.end - s.start))):
@@ -98,6 +120,23 @@ class PrivacyFilter:
             pos = span.end
         out.append(text[pos:])
         return "".join(out), mapping
+
+    def _hide_secrets(self, text: str) -> Tuple[str, Dict[str, str]]:
+        """`text` with each secret replaced by its placeholder (or for good without reversible_secrets), then
+        redact_secrets over the rest as the safety net: the placeholders themselves are never touched by it."""
+        if not text:
+            return "", {}
+        mapping: Dict[str, str] = {}
+        pieces: List[str] = []
+        pos = 0
+        spans = secret_patterns.secret_spans(text) if self.reversible_secrets else []
+        for start, end, _rule in spans:
+            token = self.placeholder(SECRET_KIND, text[start:end])
+            mapping[token] = text[start:end]
+            pieces += [_redact_around(text[pos:start]), token]
+            pos = end
+        pieces.append(_redact_around(text[pos:]))
+        return "".join(pieces), mapping
 
     def _detectors(self) -> List[Callable[[str], List[_Span]]]:
         detectors = [_find_emails, _find_logins, _find_macs, _find_ipv4, _find_ipv6, _find_home_users]
@@ -205,6 +244,11 @@ def _find_path_dirs(text: str) -> List[_Span]:
 def sanitize_for_cloud(text: str, level: str = "STRICT", key: Optional[bytes] = None) -> Tuple[str, Dict[str, str]]:
     """Cleans text before it goes to a cloud provider. Returns (clean_text, {placeholder: original})."""
     return PrivacyFilter(level, key).sanitize(text)
+
+
+def without_secrets(mapping: Dict[str, str]) -> Dict[str, str]:
+    """The mapping minus the secrets: for the history and a tool's arguments, where a secret stays a placeholder."""
+    return {token: value for token, value in mapping.items() if not token.startswith(f"<{SECRET_KIND}_")}
 
 
 def restore(text: str, mapping: Dict[str, str]) -> str:

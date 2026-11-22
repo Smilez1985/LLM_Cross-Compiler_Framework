@@ -682,11 +682,11 @@ class TestPrivacy:
                        "02:42:ac:11:00:02", "alice@example.com", "alice", "Bob", "3f2504e0", "10.0.0.7",
                        "hf_ABCDEFGHIJKLMNOPQRSTUVWX12", "admin@"):
             assert secret not in clean, secret
-        assert "hf_REDACTED" in clean and "127.0.0.1" in clean and "::1" in clean and "12:30:45" in clean
+        assert "<SECRET_" in clean and "127.0.0.1" in clean and "::1" in clean and "12:30:45" in clean
         assert "std::vector" in clean and "qwen.gguf" in clean and "x.txt" in clean
         assert "rk3588" in clean
         restored = restore(clean, mapping)
-        assert restored == self.PROBE.replace("hf_ABCDEFGHIJKLMNOPQRSTUVWX12", "hf_REDACTED")
+        assert restored == self.PROBE, "every value, a secret too, comes back in the text the person reads"
 
     def test_balanced_level_keeps_hostnames_and_paths(self):
         clean, _ = sanitize_for_cloud(self.PROBE, "BALANCED")
@@ -694,10 +694,11 @@ class TestPrivacy:
         assert "/home/<USER_" in clean and "C:\\Users\\<USER_" in clean
         assert "HOSTNAME=orangepi5" in clean and "00000000deadbeef" in clean and "3f2504e0" in clean
 
-    def test_off_level_only_redacts_secrets(self):
+    def test_off_level_only_replaces_secrets(self):
         text = f"key {KEY} at 10.0.0.7 by alice@example.com"
-        clean, mapping = sanitize_for_cloud(text, "OFF")
-        assert clean == "key sk-REDACTED at 10.0.0.7 by alice@example.com" and mapping == {}
+        clean, mapping = sanitize_for_cloud(text, "OFF", b"k" * 32)
+        token = PrivacyFilter("OFF", b"k" * 32).placeholder("SECRET", KEY)
+        assert clean == f"key {token} at 10.0.0.7 by alice@example.com" and mapping == {token: KEY}
 
     def test_placeholders_are_stable_and_keyed(self):
         a = PrivacyFilter("STRICT", b"k" * 32)
@@ -729,6 +730,24 @@ class TestPrivacy:
         assert result.tool_calls[0].arguments == {"target": "board@192.168.1.20"}
         # the provider's own turn stays exactly as returned (placeholders), so the next request matches
         assert placeholder in json.dumps(result.message.native.payload)
+
+    def test_a_secret_comes_back_in_the_answer_text_only(self, make_client):
+        import random
+        import string
+        secret = "".join(random.Random("answer").choices(string.ascii_letters + string.digits, k=14))
+        http = FakeHTTP()
+        client = make_client(http, SECRETS, **ANTHROPIC)
+        token = PrivacyFilter("STRICT", client._privacy_key()).placeholder("SECRET", secret)
+        http.add(claude_message([text_block(f"Logging in with {token}."),
+                                 {"type": "tool_use", "id": "t1", "name": "start_build",
+                                  "input": {"target": f"board", "password": token}}], stop="tool_use"))
+        result = client.chat(ask(f"Log in to the board, tool login --password {secret}", tools=TOOLS))
+        sent = json.dumps(http.last.json)
+        assert secret not in sent and token in sent, "the request that leaves holds the placeholder only"
+        assert result.text == f"Logging in with {secret}.", "the text the person reads has the value"
+        assert result.tool_calls[0].arguments["password"] == token, "a tool's arguments keep the placeholder"
+        assert secret not in json.dumps([m.model_dump(mode="json") for m in result.new_messages], default=str)
+        assert token in json.dumps(result.message.native.payload)
 
     def test_local_requests_are_not_filtered(self, make_client):
         http = FakeHTTP().add(completion("ok"))

@@ -337,6 +337,36 @@ def _replacer(rule: SecretPattern):
     return replace
 
 
+def secret_spans(text: str) -> List[Tuple[int, int, str]]:
+    """(start, end, rule name) of each value the redacting rules hide in `text`, in order and without overlaps: the
+    group "secret" of a rule that has one, else the whole match. The prompt filter replaces exactly these spans by a
+    placeholder that can be put back (llm/privacy.py); `redact` stays the safety net for what has no span (credential
+    headers, query parameters). A value that already is a placeholder or says REDACTED is left."""
+    lowered = text.lower()
+    found: List[Tuple[int, int, str]] = []
+    for rule in PATTERNS:
+        if not rule.redact or not _may_match(rule, lowered):
+            continue
+        group = "secret" if "secret" in rule.regex.groupindex else 0
+        for m in rule.regex.finditer(text):
+            if group == "secret" and m.group("secret") is None:
+                group_used: "str | int" = 0
+            else:
+                group_used = group
+            start, end = m.span(group_used)
+            value = text[start:end]
+            if not value or "REDACTED" in value or value.startswith("<SECRET_"):
+                continue
+            found.append((start, end, rule.name))
+    found.sort(key=lambda f: (f[0], -(f[1] - f[0])))
+    out: List[Tuple[int, int, str]] = []
+    for item in found:
+        if out and item[0] < out[-1][1]:
+            continue
+        out.append(item)
+    return out
+
+
 def _header_value(m: "re.Match[str]") -> str:
     for group in ("v1", "v2", "v3"):
         if m.group(group):  # an empty value hides nothing (headers.get("authorization", ""))

@@ -1134,7 +1134,7 @@ def scrub(text: str) -> str:
                           if m.group(3).casefold() in _COMMON_NAMES else "~", text)
     text = _KEEP_AT.sub(_SHIELD["@"], text)
     # Secrets, IPv4/IPv6, MAC and e-mail addresses and user@host logins (the mapping back is dropped).
-    text, _ = PrivacyFilter("BALANCED").sanitize(text)
+    text, _ = PrivacyFilter("BALANCED", reversible_secrets=False).sanitize(text)
     text = text.translate(_UNSHIELD)
     text = _GENERIC_PLACEHOLDER.sub(lambda m: f"<{m.group(1).lower()}>", text)
     try:

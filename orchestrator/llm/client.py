@@ -44,7 +44,7 @@ from orchestrator.llm.auth.resolver import CredentialResolver, ResolvedCredentia
 from orchestrator.llm.auth.store import CredentialStore
 from orchestrator.llm.catalog import Catalog, ProviderPreset, load_catalog
 from orchestrator.llm.errors import LLMError, NotConfigured, ProviderUnavailable, RateLimited, Refused
-from orchestrator.llm.privacy import PrivacyFilter, normalize_level, restore, restore_obj
+from orchestrator.llm.privacy import PrivacyFilter, normalize_level, restore, restore_obj, without_secrets
 from orchestrator.llm.providers import adapter_class
 from orchestrator.llm.types import EFFORTS, TASKS, ChatRequest, ChatResult, Message, ModelInfo, TokenCount
 from orchestrator.security.redaction import SecretStr, reveal
@@ -467,23 +467,27 @@ class LLMClient:
 
     @staticmethod
     def _restore(result: ChatResult, mapping: Dict[str, str]) -> ChatResult:
+        """Puts the values back locally. A secret comes back in the answer's text only, the words the person reads;
+        the history, a tool's arguments and the structured result keep its placeholder (without_secrets), so a
+        secret never travels on through them. A tool that needs it takes a credential by name."""
         if not mapping:
             return result
+        kept = without_secrets(mapping)
 
         def fix(msg: Message) -> Message:
             if msg.role != "assistant":
                 return msg
-            content = restore(msg.content, mapping) if isinstance(msg.content, str) else msg.content
-            calls = [c.model_copy(update={"arguments": restore_obj(c.arguments, mapping)}) for c in msg.tool_calls]
+            content = restore(msg.content, kept) if isinstance(msg.content, str) else msg.content
+            calls = [c.model_copy(update={"arguments": restore_obj(c.arguments, kept)}) for c in msg.tool_calls]
             return msg.model_copy(update={"content": content, "tool_calls": calls})
 
         new_messages = [fix(m) for m in result.new_messages]
         parsed = result.parsed
         if parsed is not None:
-            parsed = type(parsed).model_validate(restore_obj(parsed.model_dump(mode="json"), mapping))
+            parsed = type(parsed).model_validate(restore_obj(parsed.model_dump(mode="json"), kept))
         return result.model_copy(update={
             "text": restore(result.text, mapping),
-            "tool_calls": [c.model_copy(update={"arguments": restore_obj(c.arguments, mapping)})
+            "tool_calls": [c.model_copy(update={"arguments": restore_obj(c.arguments, kept)})
                            for c in result.tool_calls],
             "parsed": parsed, "new_messages": new_messages,
             "message": new_messages[-1] if new_messages else result.message,
