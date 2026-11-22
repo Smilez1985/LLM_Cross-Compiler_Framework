@@ -6,6 +6,7 @@ do, and are fixed points of the scrub. Prose (a knowledge page) keeps the readab
 Every address is built at run time, so this file holds no address of a person.
 """
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -41,7 +42,8 @@ def test_the_words_are_a_fixed_point_of_the_scrub():
     assert scrub(once, words=True) == once, "a pack that carries the words passes its own check"
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+# On Windows the bash on the PATH is the WSL launcher (no distribution there: it only prints a message), not a shell
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="needs a POSIX bash")
 def test_a_scrubbed_script_is_valid_shell_where_the_marks_were_not(tmp_path):
     safe, readable = tmp_path / "safe.sh", tmp_path / "readable.sh"
     safe.write_text(scrub(SCRIPT, words=True), encoding="utf-8")
