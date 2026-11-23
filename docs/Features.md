@@ -1267,8 +1267,17 @@ entry with the same key replaces the older one; when you had confirmed the older
 The archive lives in its own collection of the knowledge base's storage, so it needs the knowledge base to be on
 (`enable_rag_knowledge`) and uses its embedding model; a new embedding model fills the archive again from the stored
 texts. A tool call never downloads that model, so an entry waits for a call after the model is on this computer.
-Making the same statement from several domains comparable, which is what lets Ditto confirm by itself, is planned (see
-the roadmap).
+
+The same statement in other words is one claim: an entry can carry a typed value (text, number, version or flag),
+normalized so that "6.0 TOPS" and "6 tops" or "v1.09.5" and "1.9.5" are the same, and a second source of the same value
+adds to the entry instead of replacing it. Ditto (or an AI app) can propose a claim about a web page that is already in
+the knowledge base with the optional tool `propose_archive_claim`, hidden until you enable it: fixed rules check it
+against the stored page (the quote is on it, the value is in the quote, a public web page), and the framework, never the
+model, sets its ground. One page enters unconfirmed and waits for more; two pages of different domains with the same
+passage count once (a mirror). When pages give another value for the same key, it is kept as a competing claim, never
+replacing the entry, and Ditto confirms neither, also above the level's number. Asking you before an unconfirmed claim
+is used, with an expert model on request, and the research that starts from the hardware probe are planned (see the
+roadmap).
 
 ### The chat panel
 
@@ -1478,6 +1487,7 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `start_tuning` | local write, optional | Auto-Tuning of a model for a board (a build that measures its quantization types; no model is kept); hidden until you enable it, and you answer every run: no standing approval covers it |
 | `get_tuning_report` | read, optional | The finished tuning runs and one run's report: per type the size, the memory verdict, the KL divergence, the top-1 agreement and the speed measured on the board, and the recommendation; hidden until you enable it |
 | `web_search` | external, optional | Ditto's web search for an AI: addresses, titles and short texts of strangers with their origin (manufacturer, repository, forum, other), never a page; hidden until you enable it, and you answer every search with the exact words that leave this computer (after the privacy filter) and where they go; a question with a path of this computer or a secret is refused before it is shown; no standing approval covers it; at most 60 a day |
+| `propose_archive_claim` | local write, optional | Proposes one claim for Ditto's archive about a web page already in the knowledge base: key, typed value, sentence, the page's address and a quote; fixed rules check it against the stored page, the framework sets the ground, a claim that fails a rule is not stored and says why; hidden until you enable it, then no question per claim |
 | `remove_pack` | external, optional | Ask to uninstall one installed community pack: you see its folder, its import notes and the excerpts only it holds in the framework's own window and decide; it goes to the trash; hidden until you enable it, always asked |
 | `list_trash` / `restore_from_trash` | read / local write, optional | See the trash by name, kind and size; restore what this AI asked to delete itself (always asked); hidden until you enable them. No tool empties the trash |
 | `restore_knowledge_snapshot` | external, optional | Replace the knowledge base with an earlier snapshot, after a backup of the current content (a job); hidden until you enable it, always asked |

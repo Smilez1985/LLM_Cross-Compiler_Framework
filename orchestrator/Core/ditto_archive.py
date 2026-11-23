@@ -17,6 +17,10 @@ knowledge base has. Everyone who uses the harness may read it; only the person c
   (`value_type`, `value`: text, number, version or flag) and the normalized values are equal, whatever the wording of the
   sentence; without values the sentences are compared, case ignored except inside code. The same claim adds its
   evidence to the entry (and so its independent sources) instead of replacing it.
+- Phase 2, part 2: an offer from a web page (`origin="web"`, the tool propose_archive_claim after its checks) never
+  replaces an entry: another value of the key is kept as a competing claim with its own evidence, and while a key has
+  one, Ditto confirms neither (a confirmation of Ditto's own is taken back; the person's stays). Two addresses of
+  different domains whose stored passage around the quote is the same count as one source (a mirror).
 - Ditto confirms an entry only when enough independent sources (different registrable domains) say the same: 3, 5 or 7
   by the person's level `ditto_archive_security`. A manufacturer's page or a passed test lets an entry in and never
   confirms it alone.
@@ -34,8 +38,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from orchestrator.rag.embeddings import check_vectors
 from orchestrator.rag.errors import EmbeddingModelNotCached, KnowledgeBaseError
 from orchestrator.schemas.archive import (
-    ARCHIVE_ALIAS, DEFAULT_LEVEL, EVIDENCE_MAX, GROUNDS, LEVELS, SETTING, TEXT_MAX, VALUE_TYPES, ArchiveEntry,
-    comparable_text, confirm_needed, normalize_level, normalize_value, valid_evidence, valid_key)
+    ARCHIVE_ALIAS, COMPETING_MAX, DEFAULT_LEVEL, EVIDENCE_MAX, GROUNDS, LEVELS, SETTING, TEXT_MAX, VALUE_TYPES,
+    ArchiveEntry, CompetingClaim, comparable_text, confirm_needed, normalize_level, normalize_value, valid_evidence,
+    valid_key)
 from orchestrator.security import personal_data, secret_patterns
 from orchestrator.security.paths import scrub_for_ai
 from orchestrator.utils import archive_sources
@@ -47,6 +52,8 @@ GROUND_RANK = {"sources": 0, "vendor": 1, "tested": 2}
 _URL = re.compile(r"https?://\S+")
 _PATH = re.compile(r"(?:(?<![\w/:.-])|^)(?:~/|/[A-Za-z0-9_.-]+/|[A-Za-z]:\\|\\\\)")
 _SPACE = re.compile(r"\s+")
+_FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
+ORIGINS = ("tool", "web")
 
 
 class ArchiveError(KnowledgeBaseError):
@@ -63,6 +70,8 @@ class Candidate:
     evidence: List[str] = field(default_factory=list)
     value_type: str = ""    # a typed claim (phase 2): text, number, version or flag, with its value; "" for none
     value: str = ""
+    origin: str = "tool"    # "tool": a tool's result (may replace); "web": a page's claim (never replaces)
+    passages: Dict[str, str] = field(default_factory=dict)   # evidence address -> fingerprint of its passage
 
 
 def same_claim(old: ArchiveEntry, candidate: Candidate) -> bool:
@@ -71,6 +80,11 @@ def same_claim(old: ArchiveEntry, candidate: Candidate) -> bool:
     if old.value is not None and candidate.value_type:
         return old.value_type == candidate.value_type and old.value == candidate.value
     return comparable_text(old.text) == comparable_text(candidate.text)
+
+
+def _merge_passages(old: Dict[str, str], new: Dict[str, str], evidence: List[str]) -> Dict[str, str]:
+    merged = {**old, **new}
+    return {a: merged[a] for a in evidence if a in merged}
 
 
 @dataclass
@@ -163,8 +177,8 @@ class DittoArchive:
     def suffixes(self) -> set:
         return archive_sources.suffixes_of(self.table)
 
-    def independent(self, evidence: List[str]) -> int:
-        return archive_sources.independent_sources(evidence, self.suffixes)
+    def independent(self, evidence: List[str], passages: Optional[Dict[str, str]] = None) -> int:
+        return archive_sources.independent_sources(evidence, self.suffixes, passages)
 
     def _rag(self) -> Any:
         rag = self._rag_source()
@@ -195,8 +209,30 @@ class DittoArchive:
             confirmed_by=payload.get("confirmed_by") if payload.get("confirmed_by") in ("person", "ditto") else None,
             kind="copy" if payload.get("kind") == "copy" else "entry", created=str(payload.get("created") or ""),
             updated=str(payload.get("updated") or ""), copied_from=payload.get("copied_from") or None,
-            copied_at=payload.get("copied_at") or None, independent_sources=self.independent(evidence),
-            **self._stored_value(payload))
+            copied_at=payload.get("copied_at") or None,
+            independent_sources=self.independent(evidence, self._stored_passages(payload.get("passages"), evidence)),
+            passages=self._stored_passages(payload.get("passages"), evidence),
+            competing=self._stored_competing(payload.get("competing")), **self._stored_value(payload))
+
+    @staticmethod
+    def _stored_passages(raw: Any, evidence: List[str]) -> Dict[str, str]:
+        """The passages' fingerprints of a stored point, for its evidence addresses only."""
+        if not isinstance(raw, dict):
+            return {}
+        return {a: f for a, f in raw.items() if a in evidence and isinstance(f, str) and _FINGERPRINT.match(f)}
+
+    def _stored_competing(self, raw: Any) -> List[CompetingClaim]:
+        """The competing claims of a stored point; one that is not valid any more is left out."""
+        found: List[CompetingClaim] = []
+        for item in raw if isinstance(raw, list) else []:
+            try:
+                claim = CompetingClaim.model_validate(item)
+            except (TypeError, ValueError):
+                continue
+            if normalize_value(claim.value_type, claim.value) == claim.value:
+                found.append(claim.model_copy(update={"independent_sources": self.independent(
+                    claim.evidence, claim.passages)}))
+        return found[:COMPETING_MAX]
 
     @staticmethod
     def _stored_value(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -212,6 +248,7 @@ class DittoArchive:
                 "status": entry.status, "confirmed_by": entry.confirmed_by, "kind": entry.kind,
                 "created": entry.created, "updated": entry.updated, "copied_from": entry.copied_from,
                 "copied_at": entry.copied_at, "value_type": entry.value_type, "value": entry.value,
+                "passages": dict(entry.passages), "competing": [c.model_dump() for c in entry.competing],
                 "embedding_model": model_id}
 
     @staticmethod
@@ -291,7 +328,15 @@ class DittoArchive:
             value = normalize_value(value_type, value) or ""
             if not value:
                 return None, f"the value is not a {value_type}"
-        return Candidate(candidate.key, text, candidate.ground, evidence, value_type, value), ""
+        origin = candidate.origin or "tool"
+        if origin not in ORIGINS:
+            return None, "an offer comes from a tool or a web page"
+        if origin == "web" and not value_type:
+            return None, "a claim of a web page needs a typed value"
+        passages = dict(candidate.passages or {})
+        if any(a not in evidence or not isinstance(f, str) or not _FINGERPRINT.match(f) for a, f in passages.items()):
+            return None, "a passage's fingerprint belongs to no evidence address"
+        return Candidate(candidate.key, text, candidate.ground, evidence, value_type, value, origin, passages), ""
 
     def record(self, candidate: Candidate) -> RecordResult:
         """Offers an entry: checked, then stored as a new entry, as more evidence for the same sentence, or as the
@@ -316,11 +361,17 @@ class DittoArchive:
                 # the same claim: its evidence joins the entry, whose sentence stays the first one's wording
                 evidence = list(dict.fromkeys(old.evidence + candidate.evidence))[:EVIDENCE_MAX]
                 ground = max(old.ground, candidate.ground, key=GROUND_RANK.get)
-                update = {"evidence": evidence, "ground": ground}
+                update = {"evidence": evidence, "ground": ground,
+                          "passages": _merge_passages(old.passages, candidate.passages, evidence)}
                 if old.value is None and candidate.value_type:
                     update.update(value_type=candidate.value_type, value=candidate.value)
                 entry = old.model_copy(update=update)
                 outcome = "merged" if entry != old else "unchanged"
+            elif old is not None and candidate.origin == "web":
+                # another value from a web page never replaces: it is a competing claim of the key
+                entry, outcome = self._compete(old, candidate), "contested"
+                if entry == old:
+                    return RecordResult("unchanged", entry=old)
             else:
                 if old is not None and old.status == "confirmed" and old.confirmed_by == "person":
                     copy = old.model_copy(update={"id": entry_id(old.key, now), "kind": "copy", "copied_from": old.id,
@@ -328,18 +379,43 @@ class DittoArchive:
                     self._put(rag, store, copy)
                 entry = ArchiveEntry(id=pid, key=candidate.key, text=candidate.text, ground=candidate.ground,
                                      evidence=candidate.evidence, created=now,
-                                     value_type=candidate.value_type or None, value=candidate.value or None)
+                                     value_type=candidate.value_type or None, value=candidate.value or None,
+                                     passages=_merge_passages({}, candidate.passages, candidate.evidence))
                 outcome = "replaced" if old is not None else "created"
-            sources = self.independent(entry.evidence)
-            if entry.ground == "sources" and sources < 2:
+            sources = self.independent(entry.evidence, entry.passages)
+            # a tool's result needs two domains for the ground "sources"; a web page's claim enters with one and waits,
+            # unconfirmed, for more (the person is asked before it is used: maintainer, 2026-11-23)
+            if entry.ground == "sources" and sources < (1 if candidate.origin == "web" else 2):
                 return self._drop("the ground 'sources' needs at least two independent sources")
-            if sources >= self.needed() and not (entry.status == "confirmed" and entry.confirmed_by == "person"):
+            by_person = entry.status == "confirmed" and entry.confirmed_by == "person"
+            if entry.competing and not by_person:
+                entry = entry.model_copy(update={"status": "unconfirmed", "confirmed_by": None})
+            elif sources >= self.needed() and not by_person:
                 entry = entry.model_copy(update={"status": "confirmed", "confirmed_by": "ditto"})
             if outcome == "unchanged" and entry.status == old.status and entry.confirmed_by == old.confirmed_by:
                 return RecordResult("unchanged", entry=old)
             entry = entry.model_copy(update={"updated": now, "independent_sources": sources})
             self._put(rag, store, entry)
             return RecordResult(outcome if outcome != "unchanged" else "merged", entry=entry)
+
+    def _compete(self, old: ArchiveEntry, candidate: Candidate) -> ArchiveEntry:
+        """`old` with `candidate` among its competing claims: the same value as one of them adds its evidence there, a
+        new one joins while there is room (COMPETING_MAX; one more is not kept, and the entry stays contested)."""
+        claims = list(old.competing)
+        for i, claim in enumerate(claims):
+            if claim.value_type == candidate.value_type and claim.value == candidate.value:
+                evidence = list(dict.fromkeys(claim.evidence + candidate.evidence))[:EVIDENCE_MAX]
+                passages = _merge_passages(claim.passages, candidate.passages, evidence)
+                claims[i] = claim.model_copy(update={"evidence": evidence, "passages": passages,
+                                                     "independent_sources": self.independent(evidence, passages)})
+                break
+        else:
+            if len(claims) < COMPETING_MAX:
+                passages = _merge_passages({}, candidate.passages, candidate.evidence)
+                claims.append(CompetingClaim(value_type=candidate.value_type, value=candidate.value,
+                                             text=candidate.text, evidence=candidate.evidence, passages=passages,
+                                             independent_sources=self.independent(candidate.evidence, passages)))
+        return old.model_copy(update={"competing": claims})
 
     # --- reading ---------------------------------------------------------------------------------------------------
 

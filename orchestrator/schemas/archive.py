@@ -16,7 +16,7 @@ high 7). Only the shapes and the numbers live here; the rules that use them are 
 
 import re
 from decimal import Decimal, InvalidOperation
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -119,6 +119,29 @@ def valid_evidence(item: object) -> bool:
     return isinstance(item, str) and len(item) <= EVIDENCE_LENGTH and bool(_ADDRESS.match(item) or _LABEL.match(item))
 
 
+COMPETING_MAX = 5                  # competing claims kept per key (phase 2, part 2)
+
+
+class CompetingClaim(BaseModel):
+    """Another value for the key of an entry, offered from a web page (phase 2, part 2): kept beside the entry with its
+    own evidence, never merged into it and never replacing it. While a key has one, Ditto confirms neither."""
+    model_config = ConfigDict(extra="forbid")
+
+    value_type: Literal["text", "number", "version", "flag"]
+    value: str = Field(max_length=VALUE_MAX * 2)
+    text: str = Field(min_length=1, max_length=TEXT_MAX)
+    evidence: List[str] = Field(default_factory=list, max_length=EVIDENCE_MAX)
+    passages: Dict[str, str] = Field(default_factory=dict)
+    independent_sources: int = 0
+
+    @field_validator("evidence")
+    @classmethod
+    def _evidence_is_public(cls, value: List[str]) -> List[str]:
+        if any(not valid_evidence(v) for v in value):
+            raise ValueError("evidence must be public https addresses or build and test labels")
+        return value
+
+
 class ArchiveEntry(BaseModel):
     """One archive entry as the person, the CLI, the window and the tools see it (the storage's payload without the
     vectors)."""
@@ -139,6 +162,10 @@ class ArchiveEntry(BaseModel):
     independent_sources: int = 0          # how many different registrable domains the evidence names
     value_type: Optional[Literal["text", "number", "version", "flag"]] = None   # the claim's value (phase 2)
     value: Optional[str] = Field(default=None, max_length=VALUE_MAX * 2)       # normalized (normalize_value)
+    # phase 2, part 2: the fingerprint of the stored passage around the quote, per evidence address (two addresses of
+    # different domains with the same passage are one source, a mirror), and the competing claims of the key
+    passages: Dict[str, str] = Field(default_factory=dict)
+    competing: List[CompetingClaim] = Field(default_factory=list, max_length=COMPETING_MAX)
 
     @field_validator("evidence")
     @classmethod
@@ -149,6 +176,6 @@ class ArchiveEntry(BaseModel):
         return value
 
 
-__all__ = ["ARCHIVE_ALIAS", "ArchiveEntry", "CONFIRMERS", "DEFAULT_LEVEL", "EVIDENCE_MAX", "GROUNDS", "KEY_PATTERN",
+__all__ = ["ARCHIVE_ALIAS", "ArchiveEntry", "COMPETING_MAX", "CONFIRMERS", "CompetingClaim", "DEFAULT_LEVEL", "EVIDENCE_MAX", "GROUNDS", "KEY_PATTERN",
            "KINDS", "LEVELS", "LEVEL_SOURCES", "SETTING", "STATUSES", "TEXT_MAX", "VALUE_MAX", "VALUE_TYPES",
            "comparable_text", "confirm_needed", "normalize_level", "normalize_value", "valid_evidence", "valid_key"]

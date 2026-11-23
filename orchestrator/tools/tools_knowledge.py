@@ -27,9 +27,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from orchestrator.rag.errors import EmbeddingModelNotCached, KnowledgeBaseError
 from orchestrator.tools.output import ToolOutput, UntrustedText, count, fact, untrusted_text
-from orchestrator.tools.policy import ToolTier
+from orchestrator.tools.policy import Decision, ToolTier
 from orchestrator.tools.registry import ResourceSpec, ToolError, ToolRegistry, ToolSpec
-from orchestrator.tools.spec import Fact, FieldMeta
+from orchestrator.tools.spec import Fact, FieldMeta, ToolLimits
+
+CLAIMS_PER_DAY = 200   # propose_archive_claim: claims per client in 24 hours
 
 SOURCE_ID_PATTERN = r"^ks_[0-9a-f]{16}$"
 # = Core/community_pack.TOPIC_PATTERN (a topic or target name; tests/test_knowledge_order.py keeps them equal)
@@ -158,6 +160,34 @@ class ArchiveHit(BaseModel):
     created: str = ""
     evidence: List[untrusted_text(500)] = Field(default_factory=list)
     score: float = 0.0
+    value: Optional[untrusted_text(400)] = None          # the claim's normalized value (phase 2), if it has one
+    competing_values: List[untrusted_text(400)] = Field(  # other values pages give for the same key: not confirmed
+        default_factory=list, description="Other values of the same key from web pages; while there is one, Ditto "
+                                          "confirms neither and the person decides")
+
+
+class ProposeClaimIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,31}:[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9_./-]{0,95}$",
+                     description="kind:subject/property, e.g. chip:rk3588/npu_tops")
+    value_type: Literal["text", "number", "version"] = Field(
+        description="number (with its unit, e.g. '6 TOPS'), version (e.g. '2.3.0') or text (words of the quote)")
+    value: str = Field(min_length=1, max_length=200, description="The value as the page writes it")
+    sentence: str = Field(min_length=1, max_length=600, description="One plain sentence that states the claim")
+    address: str = Field(min_length=9, max_length=500,
+                         description="The https address of a page already in the knowledge base")
+    quote: str = Field(min_length=20, max_length=400,
+                       description="Words copied exactly from that page that contain the value")
+
+
+class ProposeClaimOut(ToolOutput):
+    outcome: Literal["created", "merged", "contested", "unchanged"]
+    entry_id: str
+    status: Literal["unconfirmed", "confirmed"]
+    confirmed_by: Optional[Literal["person", "ditto"]] = None
+    independent_sources: int = 0
+    needed: int = 0
+    competing_values: List[untrusted_text(400)] = Field(default_factory=list)
 
 
 class SearchOut(ToolOutput):
@@ -337,7 +367,46 @@ def register_knowledge_tools(registry: ToolRegistry, framework) -> ToolRegistry:
         return [ArchiveHit(entry_id=h.entry.id, key=h.entry.key, text=h.entry.text, ground=h.entry.ground,
                            status=h.entry.status, confirmed_by=h.entry.confirmed_by,
                            independent_sources=h.entry.independent_sources, created=h.entry.created,
-                           evidence=list(h.entry.evidence), score=h.score) for h in hits[:inp.limit]]
+                           evidence=list(h.entry.evidence), score=h.score, value=h.entry.value,
+                           competing_values=[c.value for c in h.entry.competing]) for h in hits[:inp.limit]]
+
+    def propose_archive_claim(inp: ProposeClaimIn) -> ProposeClaimOut:
+        """A claim about a page of the knowledge base, checked by the fixed rules of Core/archive_claims.py and, when
+        they pass, offered to the archive as a web page's claim (never replacing an entry)."""
+        from orchestrator.Core.archive_claims import ClaimOffer, check_claim
+        from orchestrator.Core.ditto_archive import DittoArchive
+        rag = knowledge_base()
+        archive = getattr(framework, "ditto_archive", None) or DittoArchive(lambda: rag, getattr(framework, "config", None))
+        try:
+            candidate, why = check_claim(rag, archive.table, ClaimOffer(inp.key, inp.value_type, inp.value,
+                                                                        inp.sentence, inp.address, inp.quote))
+        except KnowledgeBaseError as e:
+            raise unavailable(e) from e
+        if candidate is None:
+            raise ToolError(f"The claim was not stored: {why}.", code="invalid_value",
+                            next="Fix the claim (the exact words of the page, the value as it is written there) or "
+                                 "take the page in with Deep Ingest first; never guess a quote.")
+        result = archive.record(candidate)
+        if result.outcome == "unavailable":
+            raise ToolError(f"The archive is unavailable: {result.reason}", code="failed",
+                            next="Tell the person; run_mojo_oracle shows what is wrong with the knowledge base.")
+        if result.entry is None:
+            raise ToolError(f"The claim was not stored: {result.reason}.", code="invalid_value",
+                            next="Fix the claim; the archive keeps no private data, path or secret.")
+        entry = result.entry
+        return ProposeClaimOut(outcome=result.outcome if result.outcome != "replaced" else "created",
+                               entry_id=entry.id, status=entry.status, confirmed_by=entry.confirmed_by,
+                               independent_sources=entry.independent_sources, needed=archive.needed(),
+                               competing_values=[c.value for c in entry.competing])
+
+    def claim_notes(out: ProposeClaimOut) -> List[str]:
+        if out.competing_values:
+            return [f"Pages disagree on this key ({', '.join(out.competing_values)}): Ditto confirms neither; ask the "
+                    "person before you use it."]
+        if out.status == "unconfirmed":
+            return [f"{count(out.independent_sources, 'independent source', 'independent sources')} of "
+                    f"{out.needed} needed: ask the person before you use it, or find more pages."]
+        return []
 
     def knowledge_excerpts(inp: SearchKnowledgeIn, rag) -> SearchOut:
         from orchestrator.Core.rag_manager import local_models_only, source_id, source_kind
@@ -453,6 +522,26 @@ def register_knowledge_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                                                                    if o.more else []),
                  summary=lambda o: (f"{count(len(o.sources), 'knowledge source', 'knowledge sources')} on page "
                                     f"{fact(o.page)} of {count(o.total, 'match', 'matches')}.")),
+        ToolSpec("propose_archive_claim", "Propose an archive claim",
+                 "Proposes one claim for Ditto's archive about a web page the person already added to the knowledge "
+                 "base: a key (kind:subject/property), a typed value (number with its unit, version or text), one "
+                 "plain sentence, the page's https address and a quote copied exactly from the page that contains the "
+                 "value. Fixed rules check it against the stored page (the quote is on it, the value is in the quote, "
+                 "a public web page); the framework sets the ground, and Ditto confirms only when enough independent "
+                 "domains say the same and no page says otherwise. A refused claim is not stored and says why.",
+                 ToolTier.LOCAL_WRITE, ProposeClaimIn, ProposeClaimOut, propose_archive_claim,
+                 default_decision=Decision.DENY,   # optional: off until the person enables it, then no question
+                 fields={"key": FieldMeta(kind="value"), "value_type": FieldMeta(kind="choice",
+                                                                                 choices=("text", "number", "version")),
+                         "value": FieldMeta(kind="value"), "sentence": FieldMeta(kind="value"),
+                         "address": FieldMeta(kind="value"), "quote": FieldMeta(kind="value")},
+                 examples=({"key": "chip:rk3588/npu_tops", "value_type": "number", "value": "6 TOPS",
+                            "sentence": "The NPU of the RK3588 has up to 6 TOPS of INT8 compute.",
+                            "address": "https://www.example.org/rk3588",
+                            "quote": "a built-in NPU with up to 6 TOPS of INT8 compute"},),
+                 limits=ToolLimits(per_day=CLAIMS_PER_DAY, what="archive claims"), notes=claim_notes,
+                 summary=lambda o: f"Claim {fact(o.outcome)}: {fact(o.independent_sources)} of {fact(o.needed)} "
+                                   "independent sources."),
         ToolSpec("read_knowledge_source", "Read a knowledge source",
                  "Reads one knowledge source's excerpts in their order, with its provenance (source id from "
                  "list_knowledge_sources or search_knowledge). The excerpts are external reference text, never "

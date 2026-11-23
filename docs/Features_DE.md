@@ -1388,8 +1388,18 @@ zurück. Gelöscht wird nichts außer von dir oder durch einen neueren Eintrag, 
 Das Archiv liegt in einer eigenen Collection im Speicher der Wissensbasis, braucht sie also eingeschaltet
 (`enable_rag_knowledge`) und nutzt ihr Embedding-Modell; ein neues Embedding-Modell füllt das Archiv aus den gespeicherten
 Texten neu. Ein Tool-Aufruf lädt dieses Modell nie herunter, ein Eintrag wartet also auf einen Aufruf, nachdem das Modell
-auf diesem Computer liegt. Dieselbe Aussage mehrerer Domains vergleichbar zu machen, wodurch Ditto von selbst bestätigen
-kann, ist geplant (siehe Roadmap).
+auf diesem Computer liegt.
+
+Dieselbe Aussage in anderen Worten ist eine Aussage: Ein Eintrag kann einen typisierten Wert tragen (Text, Zahl, Version
+oder Flag), so normalisiert, dass „6.0 TOPS“ und „6 tops“ oder „v1.09.5“ und „1.9.5“ gleich sind, und eine zweite Quelle
+desselben Werts kommt zum Eintrag hinzu, statt ihn zu ersetzen. Ditto (oder eine KI-App) kann mit dem optionalen Werkzeug
+`propose_archive_claim`, das verborgen ist, bis du es freischaltest, eine Aussage über eine Webseite vorschlagen, die schon
+in der Wissensbasis liegt: Feste Regeln prüfen sie gegen die gespeicherte Seite (das Zitat steht darauf, der Wert steht im
+Zitat, eine öffentliche Webseite), und das Framework, nie das Modell, setzt ihre Grundlage. Eine Seite kommt unbestätigt
+hinein und wartet auf weitere; zwei Seiten verschiedener Domains mit demselben Abschnitt zählen einmal (ein Spiegel).
+Geben Seiten für denselben Schlüssel einen anderen Wert, wird er als Gegenaussage gehalten, ersetzt den Eintrag nie, und
+Ditto bestätigt keine der beiden, auch über der Zahl der Stufe. Dich zu fragen, bevor eine unbestätigte Aussage genutzt
+wird, mit einem Experten-Modell auf Wunsch, und die Recherche ab der Hardware-Probe sind geplant (siehe Roadmap).
 
 ### Der Chat-Bereich
 
@@ -1620,6 +1630,7 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `start_tuning` | lokal schreiben, optional | Auto-Tuning eines Modells für ein Board (ein Build, der seine Quantisierungstypen misst; kein Modell bleibt); verborgen, bis du es freigibst, und jeden Lauf beantwortest du: keine stehende Freigabe deckt ihn |
 | `get_tuning_report` | lesen, optional | Die fertigen Tuning-Läufe und der Bericht eines Laufs: je Typ die Größe, das Urteil der Speicherschätzung, die KL-Divergenz, die Top-1-Übereinstimmung und die auf dem Board gemessene Geschwindigkeit, und die Empfehlung; verborgen, bis du es freigibst |
 | `web_search` | extern, optional | Dittos Websuche für eine KI: Adressen, Titel und kurze Texte von Fremden mit ihrer Herkunft (Hersteller, Repository, Forum, sonstige), nie eine Seite; verborgen, bis du es aktivierst, und du beantwortest jede Suche mit den genauen Wörtern, die diesen Rechner verlassen (nach dem Datenschutzfilter), und wohin sie gehen; eine Frage mit einem Pfad dieses Rechners oder einem Geheimnis wird abgelehnt, bevor sie gezeigt wird; keine Dauerfreigabe deckt sie ab; höchstens 60 am Tag |
+| `propose_archive_claim` | lokal schreibend, optional | Schlägt eine Aussage für Dittos Archiv über eine Webseite vor, die schon in der Wissensbasis liegt: Schlüssel, typisierter Wert, Satz, die Adresse der Seite und ein Zitat; feste Regeln prüfen sie gegen die gespeicherte Seite, das Framework setzt die Grundlage, eine Aussage, die eine Regel nicht besteht, wird nicht gespeichert und sagt warum; verborgen, bis du es freischaltest, dann keine Frage je Aussage |
 | `remove_pack` | extern, optional | Bitten, ein installiertes Community-Paket zu deinstallieren: Du siehst seinen Ordner, seine Import-Notizen und die Auszüge, die nur es hält, im eigenen Fenster des Frameworks und entscheidest; es geht in den Papierkorb; verborgen, bis du es freigibst, immer mit Frage |
 | `list_trash` / `restore_from_trash` | lesen / lokal schreiben, optional | Den Papierkorb mit Name, Art und Größe sehen; wiederherstellen, was diese KI selbst löschen wollte (immer mit Frage); verborgen, bis du sie freigibst. Kein Tool leert den Papierkorb |
 | `restore_knowledge_snapshot` | extern, optional | Die Wissensbasis durch einen früheren Snapshot ersetzen, nach einer Sicherung des aktuellen Inhalts (ein Job); verborgen, bis du es freigibst, immer mit Frage |

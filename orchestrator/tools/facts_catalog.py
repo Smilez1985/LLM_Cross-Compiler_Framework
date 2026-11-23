@@ -310,6 +310,7 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
                              "delete the exported file (deletion dialog)"),
     # the web search asks each time and is no delegation's business: the question leaves the computer; nothing to undo
     "web_search": ToolFacts(delegable="never", undo="nothing to undo"),
+    "propose_archive_claim": ToolFacts(delegable="not_needed", undo="the person deletes the entry in the archive window"),
     "crawl_docs_site": ToolFacts(
         _FS({"ingest_notice_unread", "offline_mode", "knowledge_off", "url_not_public", "crawl_caps", "crawl_quota",
              "crawl_running", "snapshot_no_room"}),

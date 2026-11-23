@@ -80,9 +80,33 @@ def domains_of(evidence: Iterable[str], suffixes: Iterable[str] = ()) -> List[st
     return sorted(d for d in found if d)
 
 
-def independent_sources(evidence: Iterable[str], suffixes: Iterable[str] = ()) -> int:
-    """How many independent sources the evidence names: its different registrable domains."""
-    return len(domains_of(evidence, suffixes))
+def independent_sources(evidence: Iterable[str], suffixes: Iterable[str] = (),
+                        passages: Optional[Dict[str, str]] = None) -> int:
+    """How many independent sources the evidence names: its different registrable domains, where two domains whose
+    pages hold the same passage (`passages`: address -> fingerprint of the stored passage around the quote) are one
+    source, a mirror, and so is every domain joined to them that way."""
+    suffixes = set(suffixes)
+    domains = domains_of(evidence, suffixes)
+    if not passages:
+        return len(domains)
+    parent = {d: d for d in domains}
+
+    def root(d: str) -> str:
+        while parent[d] != d:
+            parent[d] = parent[parent[d]]
+            d = parent[d]
+        return d
+
+    first: Dict[str, str] = {}
+    for address, fingerprint in passages.items():
+        domain = registrable_domain(host_of(address), suffixes)
+        if domain not in parent or not fingerprint:
+            continue
+        if fingerprint in first:
+            parent[root(domain)] = root(first[fingerprint])
+        else:
+            first[fingerprint] = domain
+    return len({root(d) for d in domains})
 
 
 def vendor_of(address: str, table: Dict[str, Any]) -> Optional[Dict[str, Any]]:
