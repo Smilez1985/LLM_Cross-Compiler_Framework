@@ -103,8 +103,6 @@ TEXTS = {
         "acp.login.agent": "{name} opens its own sign-in (in your browser, with your provider's sign-in and second "
                            "factor); finish it there.",
         "acp.login.console": "{name}'s own sign-in opens in a console window; finish it there.",
-        "acp.login.keys": "Enter the keys {name} asks for. They are stored in the credential vault and go only to "
-                          "this agent.",
         "acp.login.none": "{name} lists no sign-in: it signs in by itself, or needs none.",
         "acp.login.done": "Signed in to {name}.",
         "acp.login.go": "Sign in",
@@ -243,8 +241,6 @@ TEXTS = {
                            "Anbieters und dem zweiten Faktor); schließe sie dort ab.",
         "acp.login.console": "Die eigene Anmeldung von {name} öffnet sich in einem Konsolenfenster; schließe sie dort "
                              "ab.",
-        "acp.login.keys": "Gib die Schlüssel ein, die {name} braucht. Sie liegen im Tresor für Zugangsdaten und gehen "
-                          "nur an diesen Agenten.",
         "acp.login.none": "{name} nennt keine Anmeldung: er meldet sich selbst an oder braucht keine.",
         "acp.login.done": "Bei {name} angemeldet.",
         "acp.login.go": "Anmelden",

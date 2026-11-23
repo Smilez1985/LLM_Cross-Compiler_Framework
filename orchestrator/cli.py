@@ -12996,15 +12996,12 @@ def agents_login(ctx: FrameworkContext, name: str, method_id: Optional[str], var
         if chosen.type == "agent":
             console.print("The agent opens its own sign-in (in your browser); finish it there.")
             session.authenticate(chosen.id)
-        elif chosen.type == "terminal":
+        else:   # terminal
             session.close()
             code = run_login_attached(spec, chosen, store)
             store.record_event("cli", spec.entry, f"terminal sign-in ended ({code})")
             if code:
                 _agent_fail(AgentError(f"The agent's own sign-in ended with exit code {code}."))
-        else:
-            for var in chosen.variables:
-                store.set_key(name, var, click.prompt(f"Key for {var}", hide_input=True), "cli")
         console.print(f"[green]Signed in to {escape(spec.entry.name)}.[/green]")
     except AgentError as e:
         _agent_fail(e)

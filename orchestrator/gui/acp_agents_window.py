@@ -470,13 +470,6 @@ class ManageAgentsWindow(QDialog):
             self.store.record_event("gui", spec.entry, "terminal sign-in opened")
             self._say(ui_text("acp.login.console", self.lang, name=name))
             return
-        if method.type == "env_var":
-            close_in_background(session)
-            plain_box(self, "information", dialog.windowTitle(), ui_text("acp.login.keys", self.lang, name=name))
-            for variable in method.variables:
-                if not self.store_key(variable):
-                    break
-            return
         self._say(ui_text("acp.login.agent", self.lang, name=name))
         self._set_busy(True)
 

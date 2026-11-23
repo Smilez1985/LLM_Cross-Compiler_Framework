@@ -104,13 +104,13 @@ class FakeAgent:
         text = " ".join(getattr(block, "text", "") for block in prompt)
         report("prompt", text)
         if text == "hello":
-            await self.conn.session_update(session_id, acp.update_agent_message_text("Hel"))
-            await self.conn.session_update(session_id, acp.update_agent_thought_text("thinking about it"))
-            await self.conn.session_update(session_id, acp.start_tool_call("t1", "List the builds", status="pending"))
-            await self.conn.session_update(session_id, acp.update_tool_call("t1", status="completed"))
-            await self.conn.session_update(session_id, acp.update_plan([acp.plan_entry("Look", status="completed"),
-                                                                        acp.plan_entry("Answer")]))
-            await self.conn.session_update(session_id, acp.update_agent_message_text("lo"))
+            await self.conn.session_update(session_id, schema.AgentMessageChunk(content=schema.TextContentBlock(text="Hel")))
+            await self.conn.session_update(session_id, schema.AgentThoughtChunk(content=schema.TextContentBlock(text="thinking about it")))
+            await self.conn.session_update(session_id, schema.ToolCallStart(tool_call_id="t1", title="List the builds", status="pending"))
+            await self.conn.session_update(session_id, schema.ToolCallProgress(tool_call_id="t1", status="completed"))
+            await self.conn.session_update(session_id, schema.AgentPlanUpdate(entries=[schema.PlanEntry(content="Look", priority="medium", status="completed"),
+                                                                         schema.PlanEntry(content="Answer", priority="medium", status="pending")]))
+            await self.conn.session_update(session_id, schema.AgentMessageChunk(content=schema.TextContentBlock(text="lo")))
             return schema.PromptResponse(stop_reason="end_turn")
         if text == "ask":
             answer = await self.conn.request_permission(
@@ -120,7 +120,7 @@ class FakeAgent:
                  schema.PermissionOption(option_id="no", name="Reject", kind="reject_once")])
             chosen = getattr(answer.outcome, "option_id", "cancelled")
             report("permission", chosen)
-            await self.conn.session_update(session_id, acp.update_agent_message_text(f"answer={chosen}"))
+            await self.conn.session_update(session_id, schema.AgentMessageChunk(content=schema.TextContentBlock(text=f"answer={chosen}")))
             return schema.PromptResponse(stop_reason="end_turn")
         if text == "ask always":   # no "allow once": only "always" or reject
             answer = await self.conn.request_permission(
@@ -153,7 +153,7 @@ class FakeAgent:
                                                            type="object", properties=props)))
             report("form", answer.model_dump(mode="json"))
             return schema.PromptResponse(stop_reason="end_turn")
-        await self.conn.session_update(session_id, acp.update_agent_message_text("ok"))
+        await self.conn.session_update(session_id, schema.AgentMessageChunk(content=schema.TextContentBlock(text="ok")))
         return schema.PromptResponse(stop_reason="end_turn")
 
 

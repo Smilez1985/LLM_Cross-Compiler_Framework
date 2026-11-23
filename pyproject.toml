@@ -59,9 +59,9 @@ dependencies = [
     # each version through the cooldown, tests and pip-audit (as anthropic and openai).
     "mcp>=2.3.0,<3",
     # Agent Client Protocol (Zed/JetBrains, protocol version 1, Apache-2.0): Ditto as an ACP agent for editors and
-    # llmcf as an ACP client that runs agents the person picks (DESIGN round 54). 0.x: its minor releases change
-    # the protocol's types, so the range ends before the next minor.
-    "agent-client-protocol>=0.12.1,<0.13",
+    # llmcf as an ACP client that runs agents the person picks (DESIGN round 54). From 1.0 the usual rule holds:
+    # up to the next major.
+    "agent-client-protocol>=1.0.0,<2",
 
     # --- 6. Crawler & Ingestion ---
     "beautifulsoup4>=4.15.0,<5",

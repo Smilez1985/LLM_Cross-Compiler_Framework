@@ -93,7 +93,7 @@ def test_pyproject_is_pep621_and_poetry_is_gone():
 # The one exact pin (DESIGN round 65): pyrage encrypts and decrypts user data.
 EXACT_PINS = {"pyrage"}
 # 0.x packages whose minor release breaks (the range ends before the next minor), each with its reason in pyproject.
-MINOR_CAPPED = {"fastembed", "qdrant-edge-py", "agent-client-protocol", "ruff", "shellcheck-py", "uv"}
+MINOR_CAPPED = {"fastembed", "qdrant-edge-py", "ruff", "shellcheck-py", "uv"}
 
 
 def all_requirements(data: dict) -> list:

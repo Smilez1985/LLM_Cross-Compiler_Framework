@@ -3,7 +3,7 @@
 LLM Cross-Compiler Framework - the client side of ACP: one running agent the person started (Core/acp_hosts.py).
 
 AgentSession starts the agent's process from its LaunchSpec (the clean environment, the agent's working folder, only
-its own keys), speaks ACP version 1 over its stdio with the SDK's typed models (`acp`, agent-client-protocol 0.12.1)
+its own keys), speaks ACP version 1 over its stdio with the SDK's typed models (`acp`, agent-client-protocol 1.0.0)
 and owns that one process: closing the session ends it (its input closed, then terminate, then kill: only the PID it
 started, never a process found by name).
 
@@ -81,13 +81,12 @@ class FormQuestion:
 
 @dataclass(frozen=True)
 class AuthMethod:
-    """A sign-in method the agent offers: agent (its own browser login), terminal (its login command), env_var (keys
-    the person stores in the credential vault)."""
+    """A sign-in method the agent offers (ACP v1): agent (its own browser login, the default) or terminal (its login
+    command)."""
     id: str
     name: str
     type: str
     description: str = ""
-    variables: Tuple[str, ...] = ()
     args: Tuple[str, ...] = ()
     env: Tuple[Tuple[str, str], ...] = ()
 
@@ -362,7 +361,7 @@ class AgentSession:
                              "failed") from None
         if self.store is not None:
             self.store.record_event(self.actor, self.spec.entry, f"started (process {self.process.pid})")
-        # use_unstable_protocol: the SDK 0.12.1 still routes elicitation/create (form mode, stable in ACP since
+        # use_unstable_protocol: the SDK (0.12.1 and 1.0.0 alike) still routes elicitation/create (form mode, stable in ACP since
         # 2026-07-22) as unstable; nothing else of the unstable surface is offered (no capability says so).
         self.conn = acp.connect_to_agent(_Client(self), self.process.stdin, self.process.stdout,
                                          use_unstable_protocol=True)
@@ -394,23 +393,21 @@ class AgentSession:
 
     @staticmethod
     def _method(raw: Any) -> Optional[AuthMethod]:
-        kind = str(getattr(raw, "type", "") or "agent")
-        variables: Tuple[str, ...] = ()
+        """One sign-in method of the agent's answer, from the SDK's typed object. ACP v1 knows two: terminal (the
+        object's `type` was sent) and agent (the default, sent without `type`). The SDK's union reads a method without
+        `type` as the terminal class too, so `type` counts only when it was in the answer (`model_fields_set`)."""
+        sent = "type" in (getattr(raw, "model_fields_set", None) or ())
+        kind = "terminal" if sent and getattr(raw, "type", None) == "terminal" else "agent"
         args: Tuple[str, ...] = ()
         env: Tuple[Tuple[str, str], ...] = ()
-        if kind == "env_var":
-            variables = tuple(str(v.name) for v in (getattr(raw, "vars", None) or []))
-        elif kind == "terminal":
+        if kind == "terminal":
             args = tuple(str(a) for a in (getattr(raw, "args", None) or []) if isinstance(a, str))
             try:
                 env = tuple(clean_env(getattr(raw, "env", None) or {}).items())
             except AgentError:
                 return None
-        elif kind != "agent":
-            return None
         return AuthMethod(id=str(raw.id)[:100], name=_outside(raw.name, 100), type=kind,
-                          description=_outside(getattr(raw, "description", "") or "", 300), variables=variables,
-                          args=args, env=env)
+                          description=_outside(getattr(raw, "description", "") or "", 300), args=args, env=env)
 
     def authenticate(self, method_id: str, timeout: Optional[float] = 600.0) -> None:
         """Signs in with a method of type "agent": the agent opens its own login (its browser page with the
@@ -455,9 +452,9 @@ class AgentSession:
         return self._run(self._prompt(text), PROMPT_TIMEOUT)
 
     async def _prompt(self, text: str) -> str:
-        from acp import text_block
+        from acp.schema import TextContentBlock
         try:
-            answer = await self.conn.prompt(session_id=self.session_id, prompt=[text_block(text)])
+            answer = await self.conn.prompt(session_id=self.session_id, prompt=[TextContentBlock(text=text)])
         except Exception as e:  # noqa: BLE001
             if getattr(e, "code", None) == -32000:
                 raise AgentError(f"{self.spec.entry.name} wants you to sign in first.", "not_signed_in") from None

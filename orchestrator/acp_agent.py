@@ -52,13 +52,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from acp import RequestError, run_agent
-from acp.helpers import (plan_entry, start_tool_call, text_block, tool_content, update_agent_message_text,
-                         update_agent_thought_text, update_available_commands, update_plan, update_tool_call)
-from acp.schema import (AgentCapabilities, AuthenticateResponse, AvailableCommand, AvailableCommandInput,
-                        CloseSessionResponse, DeniedOutcome, Implementation, InitializeResponse, McpCapabilities,
-                        NewSessionResponse, PermissionOption, PromptCapabilities, PromptResponse,
-                        SessionCapabilities, SessionCloseCapabilities, SessionConfigOptionSelect,
-                        SessionConfigSelectOption, SetSessionConfigOptionResponse, TerminalAuthMethod, ToolCallUpdate,
+from acp.schema import (AgentCapabilities, AgentMessageChunk, AgentPlanUpdate, AgentThoughtChunk,
+                        AuthenticateResponse, AvailableCommand, AvailableCommandInput, AvailableCommandsUpdate,
+                        CloseSessionResponse, ContentToolCallContent, DeniedOutcome, Implementation,
+                        InitializeResponse, McpCapabilities, NewSessionResponse, PermissionOption, PlanEntry,
+                        PromptCapabilities, PromptResponse, SessionCapabilities, SessionCloseCapabilities,
+                        SessionConfigOptionSelect, SessionConfigSelectOption, SetSessionConfigOptionResponse,
+                        TerminalAuthMethod, TextContentBlock, ToolCallProgress, ToolCallStart, ToolCallUpdate,
                         UnstructuredCommandInput)
 
 from orchestrator import __version__
@@ -327,7 +327,7 @@ class DittoAcpAgent:
                                      input=AvailableCommandInput(UnstructuredCommandInput(hint=hint)) if hint
                                      else None)
                     for name, _tool, text, hint in SLASH_COMMANDS]
-        await self._send(session.id, update_available_commands(commands))
+        await self._send(session.id, AvailableCommandsUpdate(available_commands=commands))
 
     def _later(self, coroutine) -> None:
         task = asyncio.get_running_loop().create_task(coroutine)
@@ -393,21 +393,22 @@ class DittoAcpAgent:
         try:
             if not session.notice_sent:
                 session.notice_sent = True
-                await self._send(session.id, update_agent_message_text(self._notice() + "\n\n"))
+                await self._send(session.id, AgentMessageChunk(content=TextContentBlock(text=self._notice() + "\n\n")))
                 from orchestrator.Core.acp_editor_servers import session_notice
                 servers = session_notice(session.servers)
                 if servers:
-                    await self._send(session.id, update_agent_message_text(servers + "\n\n"))
+                    await self._send(session.id, AgentMessageChunk(content=TextContentBlock(text=servers + "\n\n")))
             question, skipped = self.prompt_text(prompt, session)
             if skipped:
-                await self._send(session.id, update_agent_message_text(
-                    f"({skipped} part(s) of the prompt were not read: Ditto takes text and links here.)\n\n"))
+                await self._send(session.id, AgentMessageChunk(
+                    content=TextContentBlock(
+                        text=f"({skipped} part(s) of the prompt were not read: Ditto takes text and links here.)\n\n")))
             if not question.strip():
-                await self._send(session.id, update_agent_message_text("(The prompt held no text.)"))
+                await self._send(session.id, AgentMessageChunk(content=TextContentBlock(text="(The prompt held no text.)")))
                 return PromptResponse(stop_reason="end_turn")
             stop, text = await asyncio.to_thread(self._turn, session, question)
             if text:
-                await self._send(session.id, update_agent_message_text(text))
+                await self._send(session.id, AgentMessageChunk(content=TextContentBlock(text=text)))
             return PromptResponse(stop_reason=stop)
         finally:
             session.running = False
@@ -471,7 +472,7 @@ class DittoAcpAgent:
             ditto = self._session_ditto(session)
             turn = ChatTurn(channel=CHANNEL, client=self.client_label[:400], pending_approvals=True,
                             cancel=session.cancel,
-                            on_text=lambda text: self._from_thread(session.id, update_agent_thought_text(text)),
+                            on_text=lambda text: self._from_thread(session.id, AgentThoughtChunk(content=TextContentBlock(text=text))),
                             on_tool_start=lambda name, title, args: self._tool_started(session, name, title, args))
             reply = ditto.chat(question, session.history, confirm=self._confirm_for(session),
                                on_tool=lambda use: self._tool_done(session, use), turn=turn)
@@ -511,15 +512,16 @@ class DittoAcpAgent:
         spec = None
         with contextlib.suppress(Exception):
             spec = self.registry.get(name)
-        self._from_thread(session.id, start_tool_call(session.current_call, title or name, kind=tool_kind(spec),
-                                                      status="in_progress", raw_input=arguments))
+        self._from_thread(session.id, ToolCallStart(tool_call_id=session.current_call, title=title or name,
+                                                         kind=tool_kind(spec), status="in_progress",
+                                                         raw_input=arguments))
 
     def _tool_done(self, session: AcpSession, use: Any) -> None:
         text = (use.output if use.ok else use.detail) or ("Done." if use.ok else "Not run.")
         text = text if len(text) <= MAX_TOOL_TEXT else text[:MAX_TOOL_TEXT] + " ..."
-        self._from_thread(session.id, update_tool_call(session.current_call or f"call_{session.calls}",
-                                                       status="completed" if use.ok else "failed",
-                                                       content=[tool_content(text_block(text))]))
+        self._from_thread(session.id, ToolCallProgress(
+            tool_call_id=session.current_call or f"call_{session.calls}", status="completed" if use.ok else "failed",
+            content=[ContentToolCallContent(content=TextContentBlock(text=text))]))
         with self._lock:
             started, session.started_builds = list(session.started_builds), []
         for request_id in started:
@@ -561,7 +563,7 @@ class DittoAcpAgent:
         call = ToolCallUpdate(tool_call_id=session.current_call or f"call_{session.calls}",
                               title=str(getattr(spec, "title", "") or getattr(spec, "name", "")),
                               kind=tool_kind(spec), status="pending",
-                              content=[tool_content(text_block(question))])
+                              content=[ContentToolCallContent(content=TextContentBlock(text=question))])
         options = [PermissionOption(option_id=ALLOW_ONCE, name="Allow once", kind="allow_once"),
                    PermissionOption(option_id=REJECT_ONCE, name="Reject", kind="reject_once")]
         future = asyncio.run_coroutine_threadsafe(self.conn.request_permission(session.id, call, options), loop)
@@ -624,20 +626,20 @@ class DittoAcpAgent:
                 status = "pending" if finished else "in_progress"
             else:
                 status = "pending"
-            entries.append(plan_entry(f"Build stage: {name}", priority="medium", status=status))
+            entries.append(PlanEntry(content=f"Build stage: {name}", priority="medium", status=status))
         return entries
 
     async def _follow_build(self, session: AcpSession, request_id: str) -> None:
         call_id = f"build_{_label_text(request_id, 40)}"
-        await self._send(session.id, start_tool_call(call_id, f"Build {_label_text(request_id, 40)}",
-                                                     kind="execute", status="in_progress"))
+        await self._send(session.id, ToolCallStart(tool_call_id=call_id, title=f"Build {_label_text(request_id, 40)}",
+                                                        kind="execute", status="in_progress"))
         last = None
         while session.id in self.sessions:
             try:
                 state = await asyncio.to_thread(self._status_of, request_id)
             except Exception as e:  # noqa: BLE001 - the build cannot be read (any more)
-                await self._send(session.id, update_tool_call(call_id, status="failed", content=[tool_content(
-                    text_block(f"The build's state cannot be read: {e.__class__.__name__}"))]))
+                await self._send(session.id, ToolCallProgress(tool_call_id=call_id, status="failed", content=[ContentToolCallContent(
+                    content=TextContentBlock(text=f"The build's state cannot be read: {e.__class__.__name__}"))]))
                 return
             finished = state["status"].lower() in _FINISHED or state["end_reason"] is not None
             ok = state["end_reason"] == "done" or (state["end_reason"] is None and state["status"] == "completed")
@@ -646,10 +648,10 @@ class DittoAcpAgent:
                 last = key
                 stage = next((n for n in BUILD_STAGES if n in state["stage"].lower()), "")
                 text = f"{state['status']}, {state['percent']}%" + (f" (stage {stage})" if stage else "")
-                await self._send(session.id, update_plan(self.build_plan(state["stage"], finished, ok)))
-                await self._send(session.id, update_tool_call(
-                    call_id, status=("completed" if ok else "failed") if finished else "in_progress",
-                    content=[tool_content(text_block(text))]))
+                await self._send(session.id, AgentPlanUpdate(entries=self.build_plan(state["stage"], finished, ok)))
+                await self._send(session.id, ToolCallProgress(
+                    tool_call_id=call_id, status=("completed" if ok else "failed") if finished else "in_progress",
+                    content=[ContentToolCallContent(content=TextContentBlock(text=text))]))
             if finished:
                 return
             await asyncio.sleep(self.poll_seconds)

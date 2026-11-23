@@ -24,7 +24,7 @@ pytest.importorskip("anthropic")
 pytest.importorskip("openai")
 
 import acp  # noqa: E402
-from acp import text_block  # noqa: E402
+from acp.schema import TextContentBlock  # noqa: E402
 from acp.schema import AllowedOutcome, DeniedOutcome, McpServerStdio, RequestPermissionResponse  # noqa: E402
 
 from conftest import REPO_ROOT  # noqa: E402
@@ -239,7 +239,8 @@ def test_a_tool_call_asks_the_editor_with_once_options_only(tmp_path, registry, 
         conn, task, writers = await connect(agent, editor)
         await conn.initialize(protocol_version=1, client_info=acp.schema.Implementation(name="Zed", version="1.0"))
         session = await conn.new_session(cwd=str(tmp_path / "proj"), mcp_servers=[])
-        reply = await conn.prompt(session_id=session.session_id, prompt=[text_block("Build Qwen for Rockchip")])
+        reply = await conn.prompt(session_id=session.session_id,
+            prompt=[TextContentBlock(text="Build Qwen for Rockchip")])
         await asyncio.sleep(0.5)
         await finish(task, writers)
         return reply
@@ -292,7 +293,7 @@ def test_a_build_ditto_started_is_followed_with_a_plan(tmp_path, registry, llm):
         conn, task, writers = await connect(agent, editor)
         await conn.initialize(protocol_version=1)
         session = await conn.new_session(cwd=str(tmp_path / "proj"), mcp_servers=[])
-        await conn.prompt(session_id=session.session_id, prompt=[text_block("Build it")])
+        await conn.prompt(session_id=session.session_id, prompt=[TextContentBlock(text="Build it")])
         for _ in range(50):
             await asyncio.sleep(0.1)
             if any(u.tool_call_id == "build_req_1a2b3c4d" and u.status == "completed"
@@ -320,7 +321,7 @@ def test_a_permission_the_editor_cannot_answer_is_not_a_no(tmp_path, registry, l
         conn, task, writers = await connect(agent, editor)
         await conn.initialize(protocol_version=1)
         session = await conn.new_session(cwd=str(tmp_path / "proj"), mcp_servers=[])
-        await conn.prompt(session_id=session.session_id, prompt=[text_block("Build it")])
+        await conn.prompt(session_id=session.session_id, prompt=[TextContentBlock(text="Build it")])
         await finish(task, writers)
 
     run(go())
@@ -343,7 +344,7 @@ def test_cancel_ends_the_turn_and_runs_nothing(tmp_path, registry, llm):
         conn, task, writers = await connect(agent, editor)
         await conn.initialize(protocol_version=1)
         session = await conn.new_session(cwd=str(tmp_path / "proj"), mcp_servers=[])
-        turn = asyncio.create_task(conn.prompt(session_id=session.session_id, prompt=[text_block("Build it")]))
+        turn = asyncio.create_task(conn.prompt(session_id=session.session_id, prompt=[TextContentBlock(text="Build it")]))
         while not editor.asked.is_set():
             await asyncio.sleep(0.05)
         await conn.cancel(session_id=session.session_id)
@@ -372,9 +373,9 @@ def test_no_host_path_of_the_editor_reaches_the_provider(tmp_path, registry, llm
         conn, task, writers = await connect(agent, editor)
         await conn.initialize(protocol_version=1)
         session = await conn.new_session(cwd=str(project), additional_directories=[str(extra)], mcp_servers=[])
-        link = acp.resource_link_block("a.py", (project / "src" / "a.py").as_uri())
+        link = acp.schema.ResourceContentBlock(type="resource_link", name="a.py", uri=(project / "src" / "a.py").as_uri())
         await conn.prompt(session_id=session.session_id, prompt=[
-            text_block(f"Why does {project / 'src' / 'a.py'} import {extra / 'util.py'}?"), link])
+            TextContentBlock(text=f"Why does {project / 'src' / 'a.py'} import {extra / 'util.py'}?"), link])
         await finish(task, writers)
 
     run(go())
@@ -396,9 +397,9 @@ def test_the_experimental_notice_and_the_editors_mcp_servers(tmp_path, registry,
         conn, task, writers = await connect(agent, editor)
         await conn.initialize(protocol_version=1, client_info=acp.schema.Implementation(name="Zed", version="1.0"))
         session = await conn.new_session(cwd=str(tmp_path / "proj"), mcp_servers=[server])
-        await conn.prompt(session_id=session.session_id, prompt=[text_block("first")])
+        await conn.prompt(session_id=session.session_id, prompt=[TextContentBlock(text="first")])
         first = editor.texts()
-        await conn.prompt(session_id=session.session_id, prompt=[text_block("second")])
+        await conn.prompt(session_id=session.session_id, prompt=[TextContentBlock(text="second")])
         await finish(task, writers)
         return first, editor.texts()[len(first):]
 
