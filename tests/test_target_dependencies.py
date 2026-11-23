@@ -234,8 +234,11 @@ def _cli(monkeypatch, tmp_path, *args, input=None):
 
 
 def test_the_command_lists_each_entry_with_its_state_and_exits_1_when_something_is_missing(monkeypatch, tmp_path):
+    # a check names a program of the Linux build image (a POSIX path, no backslash), so the host's own programs are
+    # replaced: on a Windows host there is no `test`
+    monkeypatch.setattr(deps, "HostRunner", lambda: (lambda argv: 0))
     folder = ModuleGenerator(tmp_path).generate_module({**DATA, "dependencies": [
-        entry(check=["test", "-e", str(tmp_path)]).model_dump(), entry(**VENDOR).model_dump()]})
+        entry(check=["test", "-e", "/tmp"]).model_dump(), entry(**VENDOR).model_dump()]})
     result = _cli(monkeypatch, tmp_path, "module", "deps", folder.name)
     assert result.exit_code == 1, result.output
     assert "libusb-1.0-0 2:1.0.26-1 (system package): there" in result.output
