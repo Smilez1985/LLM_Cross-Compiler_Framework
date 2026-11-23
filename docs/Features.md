@@ -1835,7 +1835,7 @@ The prebuilt opt-in (`--prebuilt`): `llm-cli ditto runtime status` shows which a
 4. An NVIDIA GPU gets the newest CUDA build that suits every NVIDIA GPU in the machine and its driver. GPUs for which
    the build only contains PTX code need the toolkit's own driver: for example an RTX 2080 Ti (compute capability
    7.5) needs driver 570.26 on Linux for the CUDA 12.8 build and branch R615 for CUDA 13.4 (on Windows 551.61 for
-   CUDA 12.4). With an older driver the next option is used, and the reason says that a newer driver enables CUDA.
+   CUDA 12.4). With an older driver the next option is used, and the reason names the driver's limit and says to update the NVIDIA driver to use the newer CUDA build (the self-built server's plan and the pre-flight check of a GPU build say the same, so an older CUDA is never used quietly).
 5. Vulkan, when a Vulkan driver is found and the GPU is worth it: every dedicated GPU, AMD Radeon GPUs and APUs
    (for example the Ryzen Z1 Extreme) and Intel Arc. Older Intel graphics are usually slower than the CPU and are
    only used with `--backend vulkan`.

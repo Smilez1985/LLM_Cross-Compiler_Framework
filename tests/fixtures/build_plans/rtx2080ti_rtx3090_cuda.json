@@ -16,7 +16,7 @@
     ]
   },
   "notes": [
-    "backend cuda: NVIDIA GPU(s), compute 7.5, 8.6: CUDA 13.0.2",
+    "backend cuda: NVIDIA GPU(s), compute 7.5, 8.6: CUDA 13.0.2; CUDA 13.4.2 is newer than the driver supports (CUDA 13.0): update the NVIDIA driver to use the newer CUDA build",
     "real code for compute 7.5, 8.6 only: another GPU needs a rebuild",
     "what -march/-mcpu=native expands to is recorded by the executor"
   ],

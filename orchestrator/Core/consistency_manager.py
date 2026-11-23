@@ -228,8 +228,9 @@ def _host_findings(result: Preflight, host: Any, image: GpuImage) -> None:
             f"the NVIDIA driver supports CUDA up to {driver_cuda}, and the target's GPU image uses CUDA {image.cuda} "
             f"(from {image.source}): CUDA {need[0]} refuses a driver of CUDA {have[0]}, so the build's GPU work "
             "cannot run.",
-            f"Update the NVIDIA driver to one that supports CUDA {need[0]}.{need[1]} or newer, or build without the "
-            "GPU option."))
+            f"Update the NVIDIA driver to one that supports CUDA {need[0]}.{need[1]} or newer, or build with an older "
+            "toolkit of the catalogue (the target's docker.build_args: CUDA_VERSION, CUDA_REDIST_MANIFEST_SHA256 and "
+            "CUDA_COMPONENTS), or build without the GPU option."))
     elif need > have:
         result.findings.append(Finding(
             "cuda_minor", False, THIS_COMPUTER,

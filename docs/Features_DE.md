@@ -2019,7 +2019,7 @@ warum:
    GPUs, für die der Build nur PTX-Code enthält, brauchen den Treiber des jeweiligen Toolkits: Eine RTX 2080 Ti
    (Compute Capability 7.5) braucht zum Beispiel unter Linux Treiber 570.26 für den CUDA-12.8-Build und den Zweig
    R615 für CUDA 13.4 (unter Windows 551.61 für CUDA 12.4). Mit einem älteren Treiber wird die nächste Möglichkeit
-   genommen, und der Grund sagt, dass ein neuerer Treiber CUDA ermöglicht.
+   genommen, und der Grund nennt die Grenze des Treibers und sagt, dass du den NVIDIA-Treiber aktualisieren sollst, um das neuere CUDA zu nutzen (der Plan des selbst gebauten Servers und die Vorab-Prüfung eines GPU-Builds sagen dasselbe, ein älteres CUDA wird also nie still genommen).
 5. Vulkan, wenn ein Vulkan-Treiber gefunden wird und sich die GPU lohnt: jede eigene GPU, AMD-Radeon-GPUs und -APUs
    (zum Beispiel der Ryzen Z1 Extreme) und Intel Arc. Ältere Intel-Grafik ist meist langsamer als die CPU und wird
    nur mit `--backend vulkan` genutzt.

@@ -14,7 +14,8 @@ import yaml
 from orchestrator.runtime.build import pins
 from orchestrator.runtime.build.recipe import (DOWNLOAD_OPTIONS_OFF, NEVER_SET, X86_FEATURES, PlanError,
                                                ToolchainInfo, arm_arch, check_download_options, choose_backend,
-                                               choose_build_base, choose_cuda_toolkit, plan_build, plan_variants)
+                                               choose_build_base, choose_cuda_toolkit, driver_update_note, plan_build,
+                                               plan_variants)
 from orchestrator.runtime.catalog import RuntimeCatalog, load_catalog
 from orchestrator.runtime.profile import HardwareProfile, load_schema, parse_profile, read_profile
 from orchestrator.utils import llama_pin
@@ -151,6 +152,20 @@ class TestDerivedOptions:
         assert p.toolchain["cuda"] == "13.0.2", "the driver supports CUDA 13.0: 13.4 is clamped away (D6)"
         assert p.verify["devices"] == ["CUDA0", "CUDA1"]
         assert "native" in p.toolchain, "a GGML_NATIVE build is keyed by the CPU it is built on"
+
+    def test_a_newer_toolkit_left_out_for_the_driver_tells_the_person_to_update_it(self):
+        p = plan("rtx2080ti_rtx3090_cuda")
+        said = [n for n in p.notes if "update the NVIDIA driver" in n]
+        assert p.toolchain["cuda"] == "13.0.2" and said, "the clamp to 13.0 is no quiet choice"
+        assert all("CUDA 13.4.2 is newer than the driver supports (CUDA 13.0)" in n for n in said)
+
+    def test_the_note_is_made_from_the_reasons_and_only_for_the_driver(self):
+        assert driver_update_note(["CUDA 13.4.2 has no linux/arm64 archives"]) is None
+        assert driver_update_note([]) is None
+        note = driver_update_note(["CUDA 13.4.2 is newer than the driver supports (CUDA 12.9); a newer driver allows it",
+                                   "CUDA 13.0.2 is newer than the driver supports (CUDA 12.9); a newer driver allows it"])
+        assert note == ("CUDA 13.4.2 is newer than the driver supports (CUDA 12.9): update the NVIDIA driver to use "
+                        "the newer CUDA build")
 
     @pytest.mark.parametrize("cuda_max, caps, compiler, expected", [
         ("13.4", ("8.6", "7.5"), "gcc-13.3.0", "13.4.2"),

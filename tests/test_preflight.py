@@ -106,6 +106,7 @@ class TestThisComputerForAGpuBuild:
             assert result.verdict() == "stopped" and result.stop_codes() == ["cuda_driver"]
             (stop,) = result.stops()
             assert stop.where == "this computer" and "Update the NVIDIA driver" in stop.next
+            assert "docker.build_args" in stop.next and "CUDA_COMPONENTS" in stop.next, "the other way is named too"
             assert result.lines()[0].endswith("nothing was started.")
 
     def test_no_nvidia_gpu_runs_on_the_cpu_with_a_warning(self):

@@ -272,6 +272,11 @@ def vulkan_worthy(gpu: GpuInfo) -> bool:
     return gpu.vendor == "intel" and "arc" in gpu.name.lower()
 
 
+# What the person is told, in these words everywhere a driver that is too old keeps a newer CUDA away (the pre-flight
+# check, the self-built server's plan and the prebuilt archives).
+DRIVER_UPDATE_HINT = "update the NVIDIA driver to use the newer CUDA build"
+
+
 def cuda_problem(asset: RuntimeAsset, gpu: GpuInfo) -> Optional[str]:
     """Why this CUDA build would not run on the GPU with its driver, or None if it does."""
     cap = gpu.compute_cap
@@ -346,10 +351,12 @@ def select_backend(hw: HardwareInfo, catalog: RuntimeCatalog, prefer: Optional[s
                 notes.append(problems[0])
                 continue
             skipped = f" ({'; '.join(notes)})" if notes else ""
+            # a newer archive was left out because of the driver: the person is told what unlocks it
+            update = f"; {DRIVER_UPDATE_HINT}" if any("driver" in n for n in notes) else ""
             return asset, (f"{_named(nvidia)} (driver {nvidia.driver_version}{cap}) -> CUDA {asset.cuda} "
-                           f"build{skipped}")
+                           f"build{skipped}{update}")
         why = "; ".join(notes) or refused.get("cuda") or f"no CUDA build for {hw.os}/{hw.arch}"
-        hint = "; a newer NVIDIA driver enables the CUDA build" if any("driver" in n for n in notes) else ""
+        hint = f"; {DRIVER_UPDATE_HINT}" if any("driver" in n for n in notes) else ""
         return None, f"{_named(nvidia)} (driver {nvidia.driver_version}{cap}): {why}{hint}"
 
     def rocm_asset() -> Tuple[Optional[RuntimeAsset], Optional[GpuInfo], str]:

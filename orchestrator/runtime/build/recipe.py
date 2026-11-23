@@ -843,7 +843,9 @@ def choose_backend(profile: HardwareProfile, *, purpose: str, placement: str, ca
             except PlanError as e:
                 toolkit, why = None, [str(e)]
             if toolkit is not None:
-                return "cuda", f"NVIDIA GPU(s), compute {', '.join(_nvidia_caps(profile))}: CUDA {toolkit.version}"
+                update = driver_update_note(why)
+                return "cuda", (f"NVIDIA GPU(s), compute {', '.join(_nvidia_caps(profile))}: CUDA {toolkit.version}"
+                                + (f"; {update}" if update else ""))
             notes.append("no pinned CUDA toolkit fits: " + "; ".join(why))
     if profile.flag("VULKAN") == "ON" and any(_vulkan_worthy(g) for g in profile.gpus()):
         return "vulkan", "; ".join(notes + ["a GPU on which the Vulkan build beats the CPU"])
@@ -864,6 +866,18 @@ def _in_range(version: str, bounds: Tuple[str, str], parts: int) -> bool:
     lo = (version_tuple(bounds[0]) or (0,))[:parts]
     hi = (version_tuple(bounds[1]) or (0,))[:parts]
     return lo <= v <= hi
+
+
+DRIVER_TOO_OLD = "is newer than the driver supports"
+
+
+def driver_update_note(skipped: Sequence[str]) -> Optional[str]:
+    """What the person is told when `choose_cuda_toolkit` left a newer toolkit out because of the NVIDIA driver (the
+    reasons it returns): the first such reason and that a driver update unlocks it; None when no toolkit was left out
+    for that. Without it an older toolkit would be used quietly."""
+    from orchestrator.runtime.hardware import DRIVER_UPDATE_HINT
+    reason = next((r for r in skipped if DRIVER_TOO_OLD in r), None)
+    return None if reason is None else f"{reason.split(';')[0]}: {DRIVER_UPDATE_HINT}"
 
 
 def cuda_toolkit_problems(toolkit: CudaToolkit, profile: HardwareProfile, catalog: RuntimeCatalog, *,
@@ -889,8 +903,7 @@ def cuda_toolkit_problems(toolkit: CudaToolkit, profile: HardwareProfile, catalo
     elif not _RE_CUDA_MAX.fullmatch(cuda_max):
         problems.append("NVIDIA_DRIVER_CUDA_MAX is not a version")
     elif version_tuple(toolkit.major_minor) > version_tuple(cuda_max):
-        problems.append(f"CUDA {toolkit.version} is newer than the driver supports (CUDA {cuda_max}); a newer "
-                        "driver allows it")
+        problems.append(f"CUDA {toolkit.version} {DRIVER_TOO_OLD} (CUDA {cuda_max}); a newer driver allows it")
     for cap in _nvidia_caps(profile):
         if not version_tuple(toolkit.compute_caps.min) <= version_tuple(cap) <= version_tuple(toolkit.compute_caps.max):
             problems.append(f"CUDA {toolkit.version} supports compute capability {toolkit.compute_caps.min} to "
@@ -1460,6 +1473,9 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
                                                 target_os=target.os, base=base)
         if cuda_toolkit is None:
             raise PlanError("no pinned CUDA toolkit fits: " + "; ".join(why))
+        update = driver_update_note(why)
+        if update and not any(update in n for n in notes):   # the automatic choice's reason already says it
+            notes.append(update)
         options["GGML_CUDA"] = "ON"
         options["CMAKE_CUDA_ARCHITECTURES"] = _cuda_architectures(caps)
         options["GGML_CUDA_NCCL"] = "OFF"  # found on some machines only; the build stays the same everywhere

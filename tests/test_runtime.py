@@ -349,7 +349,9 @@ class TestBackend:
         if expected:
             assert choice.backend == "cuda" and choice.asset.cuda == expected
         else:
-            assert choice.backend == "vulkan" and "newer NVIDIA driver" in choice.reason
+            assert choice.backend == "vulkan" and "update the NVIDIA driver" in choice.reason
+        if expected and note:   # a newer archive was left out for the driver: the person is told what unlocks it
+            assert "update the NVIDIA driver" in choice.reason
         assert note in choice.reason
         assert "NVIDIA NVIDIA" not in choice.reason
 
