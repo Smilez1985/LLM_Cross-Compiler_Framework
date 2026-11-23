@@ -15,14 +15,18 @@ A module's target.yml lists what its SDK and toolchain need under `template_vari
   vendor file, a base image and a driver never become a step. An apt or pip step that finds the package already there
   does nothing, which is the "if it is not there" of the design.
 
+`dockerfile_gaps` serves Mojo: the packages of the list that a module's Dockerfile does not name pinned (the steps
+themselves are written by Mojo Miracle's repair, Core/mojo/repairs/dependencies.py).
+
 Nothing here installs anything on the person's computer: the steps are lines of the build image's Dockerfile.
 """
 
+import hashlib
 import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from pydantic import ValidationError
 
@@ -181,6 +185,53 @@ def install_plan(entries: Iterable[Dependency]) -> InstallPlan:
     return plan
 
 
+# The comment line the module generator leaves in a Dockerfile above the place of the module's own pip packages (its
+# marker line is replaced by their steps, or by nothing): the place the steps of the list go to later.
+STEPS_ANCHOR = "# Vendor Python packages of the module"
+
+
+@dataclass(frozen=True)
+class DockerfileGap:
+    """The packages of the list one Dockerfile does not name pinned, and whether it has the place for them."""
+    file: Path
+    sha256: str                                   # of the file as it was read
+    apt: Tuple[str, ...] = ()                     # name=version
+    pip: Tuple[str, ...] = ()                     # name==version
+    hashes: Tuple[Tuple[str, str], ...] = ()      # pip name -> the wheel's sha256
+    has_place: bool = True
+
+    @property
+    def names(self) -> List[str]:
+        return [p.split("=", 1)[0] for p in (*self.apt, *self.pip)]
+
+
+def _code_lines(text: str) -> str:
+    """The Dockerfile's text without its comment lines (a mention in a comment installs nothing)."""
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+
+
+def dockerfile_gaps(folder: Path, entries: Iterable[Dependency]) -> List[DockerfileGap]:
+    """For each Dockerfile of a target folder (`Dockerfile*`), the system and pip packages of the list it does not name
+    pinned; only files that miss something are returned. A vendor file, a base image and a board driver never count."""
+    plan = install_plan(entries)
+    gaps: List[DockerfileGap] = []
+    for path in sorted(Path(folder).glob("Dockerfile*")):
+        try:
+            raw = path.read_bytes()
+            text = raw.decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        code = _code_lines(text).lower()
+        apt = tuple(p for p in plan.packages if p.lower() not in code)
+        pip = tuple(p for p in plan.pip_packages if p.lower() not in code)
+        if not apt and not pip:
+            continue
+        hashes = tuple((p.split("==", 1)[0], plan.pip_hashes.get(p.split("==", 1)[0], "")) for p in pip)
+        gaps.append(DockerfileGap(path, hashlib.sha256(raw).hexdigest(), apt, pip, hashes,
+                                  STEPS_ANCHOR in text))
+    return gaps
+
+
 def merge_into(data: Dict[str, Any], plan: InstallPlan) -> Dict[str, Any]:
     """`data` (a module's validated values) with the plan's packages added to its apt packages and its pip packages,
     each once; the pip hashes go along (`pip_hashes`), so the Dockerfile's pip step is hash-checked."""
@@ -220,5 +271,6 @@ def load(target_folder: Path) -> List[Dependency]:
     return entries_of(record) if isinstance(record, dict) else []
 
 
-__all__ = ["CHECK_PROGRAMS", "HostRunner", "ImageRunner", "InstallPlan", "STATES", "Status", "check_program",
-           "entries_of", "install_plan", "load", "merge_into", "statuses", "table"]
+__all__ = ["CHECK_PROGRAMS", "DockerfileGap", "HostRunner", "ImageRunner", "InstallPlan", "STATES", "STEPS_ANCHOR",
+           "Status", "check_program", "dockerfile_gaps", "entries_of", "install_plan", "load", "merge_into",
+           "statuses", "table"]

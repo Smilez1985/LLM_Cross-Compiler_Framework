@@ -633,7 +633,10 @@ an install command of a package manager) beside the excerpt that says them, and 
 excerpt; they are found by plain rules and derived by the framework (no pack can set them, an export never carries them).
 Mojo Oracle lists what a target's list still lacks: a vendor file that waits for your yes, a list that is not valid and an
 entry nobody read; it only reads and starts no program (whether a package is in a build image is what `module deps
---in-image` shows). **Not built yet:** a Miracle repair for a missing package, and the Orange Pi 6 as the first case.
+--in-image` shows). Mojo Oracle also finds a listed package your module's Dockerfile does not name pinned; Mojo Miracle then writes the
+missing steps into the Dockerfile of a module of your own targets folder, only after your own yes to the plan shown (the
+old file is kept first in the state folder; nothing is installed on your computer). **Not built yet:** the Orange Pi 6
+as the first case.
 
 ### 3.12 Deleting a module of your own
 

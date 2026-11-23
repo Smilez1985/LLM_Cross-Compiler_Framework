@@ -3873,8 +3873,11 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   Text nicht sagt, ist eine benannte Lücke, nie ein Eintrag. Deep Ingest hält die Aussagen über Anforderungen („requires“, „prerequisites“, ein Installationsbefehl) einer Seite neben dem
   Auszug fest, der sie sagt, und der Vorschlag zitiert sie zuerst. Mojo Oracle listet auf, was die Liste eines Targets noch braucht (eine Herstellerdatei, die auf
   dein Ja wartet, eine ungültige Liste, ein Eintrag, den niemand gelesen hat); er liest nur und startet kein Programm.
-  **Geplant, nicht gebaut:** eine Reparatur von Miracle für ein fehlendes Paket, und der Orange Pi 6 als erster Fall
-  (sein NPU-Toolchain braucht eine Bewerbung beim Hersteller; für ihn wird noch nichts gemacht).
+  Mojo Oracle findet außerdem ein gelistetes Paket, das das Dockerfile des Moduls nicht festgelegt nennt (ein Modul,
+  das vor seiner Liste gemacht wurde, oder ein von Hand geändertes Dockerfile); für ein Modul im eigenen Targets-Ordner
+  schreibt Mojo Miracle die fehlenden Schritte in das Dockerfile, erst nach deinem eigenen Ja zum gezeigten Plan: Die
+  alte Datei wird vorher aufgehoben, auf diesem Computer wird nichts installiert. **Geplant, nicht gebaut:** der Orange
+  Pi 6 als erster Fall (sein NPU-Toolchain braucht eine Bewerbung beim Hersteller; für ihn wird noch nichts gemacht).
 - **Ein eigenes Modul löschen:** `llm-cli module delete TARGET` und **Build > Targets... > Modul löschen...** zeigen
   zuerst die genaue Liste (der Ordner des Moduls und die Datei seiner privaten Werte, gezählt, nie gezeigt); „Nein“ ist
   die Vorgabe, und es geht in den Papierkorb oder endgültig, vorher im Audit festgehalten. Nur ein Modul des eigenen

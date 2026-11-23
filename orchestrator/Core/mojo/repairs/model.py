@@ -10,7 +10,8 @@ sha256 binds an answer to exactly these steps. Its class is computed from the st
   switch_ref, restore_file). Only these run without a terminal (round 6 Q11) and through run_mojo_miracle.
 - person: a step widens access or cannot be undone.
 - person_yes: every step rewrites what the person keeps and can be undone (`reimport`: an installed pack's excerpts
-  imported again, a snapshot first). Mojo Miracle applies it only after the person's own yes to the plan shown, at a
+  imported again, a snapshot first; `add_steps`: the missing steps of a module's dependency list written into its
+  Dockerfile, the old file kept first). Mojo Miracle applies it only after the person's own yes to the plan shown, at a
   terminal or in the framework's Mojo window; never for an AI.
 - person_deletion: a step deletes or overwrites (deleting goes only through the person's list, WP7).
 - person_here: a step touches the vault, the tool permissions, the audit log or oversight (hard rules: the person, in
@@ -27,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 RepairClass = Literal["delegable", "person_yes", "person", "person_deletion", "person_here", "manual"]
 StepKind = Literal["chmod", "acl_narrow", "switch_ref", "restore_file",   # narrowing or neutral
                    "delete", "overwrite",                                 # -> person_deletion
-                   "reimport",                                            # -> person_yes
+                   "reimport", "add_steps",                               # -> person_yes
                    "widen",                                               # -> person
                    "vault", "policy", "audit", "oversight",               # -> person_here
                    "system"]                                              # -> manual
@@ -85,7 +86,7 @@ def classify(plan: RepairPlan) -> RepairClass:
         return "person_deletion"
     if "widen" in kinds or any(not step.undoable for step in plan.steps):
         return "person"
-    if "reimport" in kinds:
+    if kinds & {"reimport", "add_steps"}:
         return "person_yes"
     return "delegable"
 

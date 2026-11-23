@@ -3496,9 +3496,11 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   probe and the crawled documentation: an entry whose source, name, version or wheel hash the cited text does not say
   is a named gap, never an entry. Deep Ingest keeps the statements of requirements ("requires", "prerequisites", an install command) of a page beside the
   excerpt that says them, and the proposal cites them first. Mojo Oracle lists what a target's list still lacks (a vendor file that waits for your yes, a list that is not valid,
-  an entry nobody read); it only reads and starts no program. **Planned, not built:** a Miracle repair for a missing
-  package, and the Orange Pi 6 as the first case (its NPU toolchain needs an application to the vendor; nothing for it
-  is made yet).
+  an entry nobody read); it only reads and starts no program. Mojo Oracle also finds a listed package that the module's Dockerfile does not name pinned (a module made before its
+  list, or a Dockerfile edited by hand); for a module of your own targets folder Mojo Miracle writes the missing steps
+  into the Dockerfile, only after your own yes to the plan shown: the old file is kept first, nothing is installed on
+  this computer. **Planned, not built:** the Orange Pi 6 as the first case (its NPU toolchain needs an application to
+  the vendor; nothing for it is made yet).
 - **Deleting a module of your own:** `llm-cli module delete TARGET` and **Build > Targets... > Delete Module...** show
   the exact list first (the module's folder and the file of its private values, counted, never shown); "No" is the
   default, and it goes to the trash or for good, audited first. Only a module of your own targets folder: a target the

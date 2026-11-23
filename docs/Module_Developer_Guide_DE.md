@@ -663,8 +663,10 @@ Dokumentation oder der Wert der Probe nicht sagt, wird als Lücke benannt und ni
 Vorschlag stellt sie an den Anfang jedes Auszugs; sie werden mit einfachen Regeln gefunden und vom Framework abgeleitet
 (kein Paket kann sie setzen, ein Export trägt sie nie). Mojo Oracle listet auf, was die Liste eines Targets noch braucht: eine Herstellerdatei, die auf dein Ja wartet, eine
 ungültige Liste und einen Eintrag, den niemand gelesen hat; er liest nur und startet kein Programm (ob ein Paket in
-einem Build-Image ist, zeigt `module deps --in-image`). **Noch nicht gebaut:** eine Reparatur von Miracle für ein
-fehlendes Paket, und der Orange Pi 6 als erster Fall.
+einem Build-Image ist, zeigt `module deps --in-image`). Mojo Oracle findet außerdem ein gelistetes Paket, das das Dockerfile deines Moduls nicht festgelegt nennt; Mojo Miracle
+schreibt dann die fehlenden Schritte in das Dockerfile eines Moduls in deinem eigenen Targets-Ordner, erst nach deinem
+eigenen Ja zum gezeigten Plan (die alte Datei wird vorher im Zustandsordner aufgehoben; auf deinem Computer wird nichts
+installiert). **Noch nicht gebaut:** der Orange Pi 6 als erster Fall.
 
 ### 3.12 Ein eigenes Modul löschen
 

@@ -834,8 +834,8 @@ Hardware-Module vor. Dabei nutzt es die Tools des Frameworks im Rahmen deiner To
   in deiner eigenen Datei gehalten, nie im Modul oder in einem Paket (`llm-cli module local`); `llm-cli module deps`
   listet, was das SDK braucht und ob es da ist; `llm-cli module delete` und **Build > Targets... > Modul löschen...**
   entfernen ein eigenes Modul nach der genauen Liste ([Features](docs/Features_DE.md#hardware-probe-und-neue-targets)). Deep Ingest hält fest, was eine
-  gecrawlte Seite als Anforderung eines SDK nennt, neben dem Auszug, der es sagt, für Dittos Vorschlag. Mojo Oracle listet auf, was die Liste eines Targets noch braucht. Noch nicht gebaut:
-  Miracles Reparatur für ein fehlendes Paket und der Orange Pi 6 als erstes Board dafür
+  gecrawlte Seite als Anforderung eines SDK nennt, neben dem Auszug, der es sagt, für Dittos Vorschlag. Mojo Oracle listet auf, was die Liste eines Targets noch braucht, und Mojo Miracle schreibt fehlende Paket-Schritte
+  nach deinem Ja in das Dockerfile eines Moduls. Noch nicht gebaut: der Orange Pi 6 als erstes Board dafür
   ([Roadmap](docs/ROADMAP_DE.md)).
 
 **Ditto einrichten** unter **Tools > Configure AI Agent (Ditto)...**: Anbieter, Modell (die Liste wird live beim

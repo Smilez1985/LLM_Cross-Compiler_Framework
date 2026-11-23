@@ -791,8 +791,8 @@ uses the framework's tools within your tool permissions:
   pack (`llm-cli module local`); `llm-cli module deps` lists what the SDK needs and whether it is there;
   `llm-cli module delete` and **Build > Targets... > Delete Module...** remove a module of your own after the exact
   list ([Features](docs/Features.md#hardware-probe-and-new-targets)). Deep Ingest keeps what a crawled page says an SDK requires
-  beside the excerpt that says it, for Ditto's proposal. Mojo Oracle lists what a target's list still lacks. Not built yet: Miracle's repair
-  for a missing package, and the Orange Pi 6 as the first board for it ([roadmap](docs/ROADMAP.md)).
+  beside the excerpt that says it, for Ditto's proposal. Mojo Oracle lists what a target's list still lacks, and Mojo Miracle writes missing package steps into a module's
+  Dockerfile after your yes. Not built yet: the Orange Pi 6 as the first board for it ([roadmap](docs/ROADMAP.md)).
 
 **Set up Ditto** under **Tools > Configure AI Agent (Ditto)...**: provider, model (the list is loaded live from
 the provider; you can also type a model name), API key, workspace ID (only for Claude API keys that are valid in
