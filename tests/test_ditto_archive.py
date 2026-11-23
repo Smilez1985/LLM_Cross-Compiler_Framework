@@ -4,8 +4,8 @@ storage (Qdrant Edge in tmp_path) with the fake embedders of test_rag; documenta
 import pytest
 
 from orchestrator.Core.ditto_archive import ArchiveError, Candidate, DittoArchive, entry_id, private_reason
-from orchestrator.schemas.archive import (ARCHIVE_ALIAS, DEFAULT_LEVEL, LEVEL_SOURCES, confirm_needed, normalize_level,
-                                          valid_evidence, valid_key)
+from orchestrator.schemas.archive import (ARCHIVE_ALIAS, DEFAULT_LEVEL, LEVEL_SOURCES, comparable_text, confirm_needed,
+                                          normalize_level, normalize_value, valid_evidence, valid_key)
 from orchestrator.utils import archive_sources
 from test_rag import FakeEmbedder, make_rag  # noqa: F401 - the fixture and the fake
 
@@ -293,3 +293,84 @@ class TestIdsAndLevel:
         with pytest.raises(ValueError, match="low, mid or high"):
             set_level(config, "extreme", save=False)
         assert archive.level() == "high"                                  # nothing changed
+
+
+# --- phase 2, part 1: claims compared by their key and a normalized, typed value ----------------------------------
+
+
+class TestComparableClaims:
+
+    @pytest.mark.parametrize("kind, a, b", [
+        ("number", "6 TOPS", "6.0 tops"), ("number", "006.50", "6.5"), ("number", "-0", "0"),
+        ("version", "v1.09.5", "1.9.5"), ("flag", "Yes", "true"), ("flag", "off", "0"),
+        ("text", "Use  the  NPU", "use the npu"),
+    ])
+    def test_the_same_value_in_other_spellings_is_one_value(self, kind, a, b):
+        assert normalize_value(kind, a) == normalize_value(kind, b) is not None
+
+    @pytest.mark.parametrize("kind, a, b", [
+        ("number", "6 TOPS", "6 GOPS"), ("number", "6", "6 tops"), ("version", "1.9", "1.9.0"), ("flag", "yes", "no"),
+        ("text", "Run `make BUILD=On`", "run `make build=on`"),
+    ])
+    def test_values_that_differ_stay_apart(self, kind, a, b):
+        assert normalize_value(kind, a) != normalize_value(kind, b)
+
+    @pytest.mark.parametrize("kind, raw", [("number", "six"), ("number", "6 TOPS!"), ("version", "1.x"),
+                                           ("flag", "maybe"), ("colour", "red"), ("text", " "), ("number", "1" * 201)])
+    def test_a_value_that_is_not_of_its_type_is_none(self, kind, raw):
+        assert normalize_value(kind, raw) is None
+
+    def test_case_counts_only_inside_code(self):
+        assert comparable_text("Set  `GGML_NATIVE=ON` FIRST") == "set `GGML_NATIVE=ON` first"
+        assert comparable_text("```\nMake ALL\n```  Then RUN") == "```\nMake ALL\n``` then run"
+
+    def test_the_same_claim_in_other_words_adds_its_sources(self, archive):
+        first = archive.record(Candidate(KEY, "The NPU of the RK3588 has 6 TOPS.", "sources", PAGES[:2],
+                                         "number", "6 TOPS"))
+        assert first.outcome == "created" and (first.entry.value_type, first.entry.value) == ("number", "6 tops")
+        again = archive.record(Candidate(KEY, "RK3588: NPU with 6.0 tops of INT8 compute.", "sources", PAGES[2:4],
+                                         "number", "6.0 tops"))
+        assert again.outcome == "merged" and again.entry.independent_sources == 4
+        entry, = archive.entries()
+        assert entry.text == "The NPU of the RK3588 has 6 TOPS." and len(entry.evidence) == 4   # the first wording stays
+
+    def test_enough_sources_of_one_claim_let_ditto_confirm_it(self, archive):
+        needed = archive.needed()
+        for i in range(0, needed, 2):
+            result = archive.record(Candidate(KEY, f"Wording {i}: the NPU has 6 TOPS.", "sources",
+                                              PAGES[i:i + 2], "number", "6 TOPS"))
+        assert result.entry.independent_sources >= needed
+        assert result.entry.status == "confirmed" and result.entry.confirmed_by == "ditto"
+
+    def test_another_value_is_another_claim(self, archive):
+        archive.record(Candidate(KEY, "The NPU of the RK3588 has 6 TOPS.", "sources", PAGES[:2], "number", "6 TOPS"))
+        other = archive.record(Candidate(KEY, "The NPU of the RK3588 has 6 TOPS.", "sources", PAGES[2:4],
+                                         "number", "8 TOPS"))
+        assert other.outcome == "replaced" and other.entry.value == "8 tops" and len(other.entry.evidence) == 2
+
+    def test_without_values_the_sentences_are_compared_case_ignored(self, archive):
+        offer(archive, text="The NPU of the RK3588 runs quantized models.", evidence=PAGES[:2])
+        merged = offer(archive, text="the NPU of the rk3588  runs quantized models.", evidence=PAGES[2:3])
+        assert merged.outcome == "merged" and merged.entry.text == "The NPU of the RK3588 runs quantized models."
+
+    def test_a_value_joins_an_entry_of_the_same_sentence_that_had_none(self, archive):
+        offer(archive, text="The NPU of the RK3588 has 6 TOPS.", evidence=PAGES[:2])
+        merged = archive.record(Candidate(KEY, "The NPU of the RK3588 has 6 TOPS.", "sources", PAGES[2:3],
+                                          "number", "6 TOPS"))
+        assert merged.outcome == "merged" and merged.entry.value == "6 tops"
+
+    @pytest.mark.parametrize("kind, value, reason", [
+        ("number", "six", "the value is not a number"), ("colour", "red", "the value's type is not"),
+        ("", "6", "the value's type is not"), ("text", "see /home/someone/sdk", "the value holds"), ("text", "under /opt/vendor/sdk/bin", "the value holds a path"),
+    ])
+    def test_a_bad_value_is_dropped_never_stored(self, archive, kind, value, reason):
+        result = archive.record(Candidate(KEY, "The NPU of the RK3588 has 6 TOPS.", "sources", PAGES[:2], kind, value))
+        assert result.outcome == "dropped" and result.reason.startswith(reason) and archive.entries() == []
+
+    def test_the_value_survives_storage_and_a_new_embedding_model(self, make_rag):
+        rag = make_rag()
+        first = DittoArchive(lambda: rag, rag.config, table=TABLE, clock=Clock())
+        first.record(Candidate(KEY, "The NPU of the RK3588 has 6 TOPS.", "sources", PAGES[:2], "version", "v2.0"))
+        again = DittoArchive(lambda: rag, rag.config, table=TABLE, clock=Clock())
+        entry, = again.entries()
+        assert (entry.value_type, entry.value) == ("version", "2.0")

@@ -13,6 +13,10 @@ knowledge base has. Everyone who uses the harness may read it; only the person c
   a path or a secret afterwards is dropped and counted, never stored cleaned.
 - A newer entry with the same key replaces the older one (a real upsert, the point's id is a hash of the key). An entry
   the person confirmed is replaced too, but its text is first kept as a copy, with a notice and Undo.
+- Phase 2, part 1: an offer is the same claim as the stored entry of its key when both carry a typed value
+  (`value_type`, `value`: text, number, version or flag) and the normalized values are equal, whatever the wording of the
+  sentence; without values the sentences are compared, case ignored except inside code. The same claim adds its
+  evidence to the entry (and so its independent sources) instead of replacing it.
 - Ditto confirms an entry only when enough independent sources (different registrable domains) say the same: 3, 5 or 7
   by the person's level `ditto_archive_security`. A manufacturer's page or a passed test lets an entry in and never
   confirms it alone.
@@ -30,8 +34,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from orchestrator.rag.embeddings import check_vectors
 from orchestrator.rag.errors import EmbeddingModelNotCached, KnowledgeBaseError
 from orchestrator.schemas.archive import (
-    ARCHIVE_ALIAS, DEFAULT_LEVEL, EVIDENCE_MAX, GROUNDS, LEVELS, SETTING, TEXT_MAX, ArchiveEntry, confirm_needed,
-    normalize_level, valid_evidence, valid_key)
+    ARCHIVE_ALIAS, DEFAULT_LEVEL, EVIDENCE_MAX, GROUNDS, LEVELS, SETTING, TEXT_MAX, VALUE_TYPES, ArchiveEntry,
+    comparable_text, confirm_needed, normalize_level, normalize_value, valid_evidence, valid_key)
 from orchestrator.security import personal_data, secret_patterns
 from orchestrator.security.paths import scrub_for_ai
 from orchestrator.utils import archive_sources
@@ -57,6 +61,16 @@ class Candidate:
     text: str
     ground: str
     evidence: List[str] = field(default_factory=list)
+    value_type: str = ""    # a typed claim (phase 2): text, number, version or flag, with its value; "" for none
+    value: str = ""
+
+
+def same_claim(old: ArchiveEntry, candidate: Candidate) -> bool:
+    """Whether `candidate` says what the stored entry `old` of its key says: equal normalized values of the same type
+    when both carry one, else equal sentences (case ignored except inside code)."""
+    if old.value is not None and candidate.value_type:
+        return old.value_type == candidate.value_type and old.value == candidate.value
+    return comparable_text(old.text) == comparable_text(candidate.text)
 
 
 @dataclass
@@ -181,14 +195,24 @@ class DittoArchive:
             confirmed_by=payload.get("confirmed_by") if payload.get("confirmed_by") in ("person", "ditto") else None,
             kind="copy" if payload.get("kind") == "copy" else "entry", created=str(payload.get("created") or ""),
             updated=str(payload.get("updated") or ""), copied_from=payload.get("copied_from") or None,
-            copied_at=payload.get("copied_at") or None, independent_sources=self.independent(evidence))
+            copied_at=payload.get("copied_at") or None, independent_sources=self.independent(evidence),
+            **self._stored_value(payload))
+
+    @staticmethod
+    def _stored_value(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """The claim's value of a stored point; none for an entry of phase 1 or a value that is not valid any more."""
+        kind, value = payload.get("value_type"), payload.get("value")
+        if kind in VALUE_TYPES and isinstance(value, str) and normalize_value(kind, value) == value:
+            return {"value_type": kind, "value": value}
+        return {}
 
     @staticmethod
     def _payload(entry: ArchiveEntry, model_id: str) -> Dict[str, Any]:
         return {"key": entry.key, "content": entry.text, "ground": entry.ground, "evidence": list(entry.evidence),
                 "status": entry.status, "confirmed_by": entry.confirmed_by, "kind": entry.kind,
                 "created": entry.created, "updated": entry.updated, "copied_from": entry.copied_from,
-                "copied_at": entry.copied_at, "embedding_model": model_id}
+                "copied_at": entry.copied_at, "value_type": entry.value_type, "value": entry.value,
+                "embedding_model": model_id}
 
     @staticmethod
     def _passage(key: str, text: str) -> str:
@@ -258,7 +282,16 @@ class DittoArchive:
             return None, "no evidence is a listed manufacturer's website"
         if candidate.ground == "tested" and not any(e.startswith(("build:", "test:")) for e in evidence):
             return None, "the ground 'tested' needs the label of the build or test"
-        return Candidate(candidate.key, text, candidate.ground, evidence), ""
+        value_type, value = str(candidate.value_type or ""), str(candidate.value or "")
+        if value_type or value:
+            if value_type not in VALUE_TYPES:
+                return None, "the value's type is not text, number, version or flag"
+            if value_type == "text" and private_reason(value):
+                return None, "the value " + private_reason(value)[3:]
+            value = normalize_value(value_type, value) or ""
+            if not value:
+                return None, f"the value is not a {value_type}"
+        return Candidate(candidate.key, text, candidate.ground, evidence, value_type, value), ""
 
     def record(self, candidate: Candidate) -> RecordResult:
         """Offers an entry: checked, then stored as a new entry, as more evidence for the same sentence, or as the
@@ -279,18 +312,23 @@ class DittoArchive:
             pid = entry_id(candidate.key)
             found = store.retrieve([pid], with_vectors=False)
             old = self._entry(found[0]) if found and (found[0].payload or {}).get("kind") != "copy" else None
-            if old is not None and normalized(old.text) == candidate.text:
+            if old is not None and same_claim(old, candidate):
+                # the same claim: its evidence joins the entry, whose sentence stays the first one's wording
                 evidence = list(dict.fromkeys(old.evidence + candidate.evidence))[:EVIDENCE_MAX]
                 ground = max(old.ground, candidate.ground, key=GROUND_RANK.get)
-                entry = old.model_copy(update={"evidence": evidence, "ground": ground})
-                outcome = "merged" if evidence != old.evidence or ground != old.ground else "unchanged"
+                update = {"evidence": evidence, "ground": ground}
+                if old.value is None and candidate.value_type:
+                    update.update(value_type=candidate.value_type, value=candidate.value)
+                entry = old.model_copy(update=update)
+                outcome = "merged" if entry != old else "unchanged"
             else:
                 if old is not None and old.status == "confirmed" and old.confirmed_by == "person":
                     copy = old.model_copy(update={"id": entry_id(old.key, now), "kind": "copy", "copied_from": old.id,
                                                   "copied_at": now})
                     self._put(rag, store, copy)
                 entry = ArchiveEntry(id=pid, key=candidate.key, text=candidate.text, ground=candidate.ground,
-                                     evidence=candidate.evidence, created=now)
+                                     evidence=candidate.evidence, created=now,
+                                     value_type=candidate.value_type or None, value=candidate.value or None)
                 outcome = "replaced" if old is not None else "created"
             sources = self.independent(entry.evidence)
             if entry.ground == "sources" and sources < 2:

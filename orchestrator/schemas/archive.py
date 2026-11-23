@@ -15,6 +15,7 @@ high 7). Only the shapes and the numbers live here; the rules that use them are 
 """
 
 import re
+from decimal import Decimal, InvalidOperation
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -42,6 +43,60 @@ _KEY = re.compile(KEY_PATTERN)
 # Evidence: a public https address, or the label of the build or test an entry rests on (never a local path).
 _LABEL = re.compile(r"^(?:build|test):[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _ADDRESS = re.compile(r"^https://[A-Za-z0-9.-]{1,253}(?::\d{1,5})?(?:/[^\s<>\"'`\\]*)?$")
+
+
+# A claim's value (phase 2, part 1): the same statement from several sources is found by its key and its normalized
+# value, whatever the wording of the sentence. The type says how a value is normalized.
+VALUE_TYPES = ("text", "number", "version", "flag")
+VALUE_MAX = 200
+_CODE = re.compile(r"(```.*?```|`[^`\n]*`)", re.DOTALL)
+_SPACES = re.compile(r"\s+")
+_NUMBER = re.compile(r"^([-+]?)(\d{1,30})(?:[.](\d{1,30}))?\s*([A-Za-z%][A-Za-z0-9%/]{0,15})?$")
+_VERSION = re.compile(r"^[vV]?(\d{1,9}(?:\.\d{1,9}){0,5})$")
+_FLAGS = {"true": "true", "yes": "true", "on": "true", "1": "true",
+          "false": "false", "no": "false", "off": "false", "0": "false"}
+
+
+def comparable_text(text: object) -> str:
+    """`text` as it is compared: white space collapsed and the letters' case ignored, except inside code (a fenced
+    ``` block or an inline `span`), which is kept exactly, since a command or a flag differs by its case."""
+    out = []
+    for part in _CODE.split(str(text or "")):
+        if not part:
+            continue
+        out.append(part if part.startswith("`") else _SPACES.sub(" ", part).casefold())
+    return "".join(out).strip()
+
+
+def normalize_value(value_type: object, raw: object) -> Optional[str]:
+    """The normalized value of a claim, or None when `raw` is not a value of `value_type`:
+    - text: comparable_text (case ignored outside code);
+    - number: a decimal without needless zeros and an optional unit in lower case ("6.0 TOPS" and "6 tops" -> "6 tops");
+    - version: dotted numbers without a leading v and without leading zeros ("v1.09.5" -> "1.9.5"; 1.9 is not 1.9.0);
+    - flag: true or false (yes/no, on/off, 1/0 as well)."""
+    text = str(raw if raw is not None else "").strip()
+    if not text or len(text) > VALUE_MAX:
+        return None
+    if value_type == "text":
+        return comparable_text(text) or None
+    if value_type == "number":
+        found = _NUMBER.match(text)
+        if not found:
+            return None
+        sign, whole, fraction, unit = found.groups()
+        try:
+            number = Decimal(f"{sign}{whole}.{fraction or '0'}")
+        except InvalidOperation:
+            return None
+        plain = format(number.normalize(), "f")
+        plain = "0" if Decimal(plain) == 0 else plain
+        return f"{plain} {unit.casefold()}" if unit else plain
+    if value_type == "version":
+        found = _VERSION.match(text)
+        return ".".join(str(int(p)) for p in found.group(1).split(".")) if found else None
+    if value_type == "flag":
+        return _FLAGS.get(text.casefold())
+    return None
 
 
 def normalize_level(level: object) -> str:
@@ -82,6 +137,8 @@ class ArchiveEntry(BaseModel):
     copied_from: Optional[str] = None     # a copy: the id of the entry whose text it kept
     copied_at: Optional[str] = None
     independent_sources: int = 0          # how many different registrable domains the evidence names
+    value_type: Optional[Literal["text", "number", "version", "flag"]] = None   # the claim's value (phase 2)
+    value: Optional[str] = Field(default=None, max_length=VALUE_MAX * 2)       # normalized (normalize_value)
 
     @field_validator("evidence")
     @classmethod
@@ -93,5 +150,5 @@ class ArchiveEntry(BaseModel):
 
 
 __all__ = ["ARCHIVE_ALIAS", "ArchiveEntry", "CONFIRMERS", "DEFAULT_LEVEL", "EVIDENCE_MAX", "GROUNDS", "KEY_PATTERN",
-           "KINDS", "LEVELS", "LEVEL_SOURCES", "SETTING", "STATUSES", "TEXT_MAX", "confirm_needed", "normalize_level",
-           "valid_evidence", "valid_key"]
+           "KINDS", "LEVELS", "LEVEL_SOURCES", "SETTING", "STATUSES", "TEXT_MAX", "VALUE_MAX", "VALUE_TYPES",
+           "comparable_text", "confirm_needed", "normalize_level", "normalize_value", "valid_evidence", "valid_key"]

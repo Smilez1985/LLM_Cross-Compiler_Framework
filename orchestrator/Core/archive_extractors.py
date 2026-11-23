@@ -71,7 +71,9 @@ def from_artifact(result: Any, ctx: ExtractContext) -> List[Candidate]:
     text = (f"A {fmt} build for target {target}, {where}quantization {quant} was built and passed its functional "
             "test.")
     key = f"build:{target}/{(board + '-') if board else ''}{fmt}-{quant}/works"
-    return [Candidate(key, text, "tested", [f"build:{artifact}"])]
+    # the claim's typed value (phase 2): the property "works" is true, so a second passed build of the same key is the
+    # same claim whatever its sentence says
+    return [Candidate(key, text, "tested", [f"build:{artifact}"], value_type="flag", value="true")]
 
 
 def _pages(result: Any) -> List[Any]:
