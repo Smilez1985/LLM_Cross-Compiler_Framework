@@ -3870,10 +3870,11 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   Kasten „Abhängigkeiten dieses Moduls“ im Bearbeiten-Schritt zeigen jeden Eintrag als da, fehlt oder wartet auf dein
   Ja. `llm-cli module propose-dependencies` und **Ditto: Abhängigkeiten vorschlagen** lassen Ditto Einträge aus der Probe
   und der gecrawlten Dokumentation vorschlagen: Ein Eintrag, dessen Quelle, Name, Version oder Wheel-Hash der genannte
-  Text nicht sagt, ist eine benannte Lücke, nie ein Eintrag. **Geplant, nicht gebaut:** Deep Ingest, das Aussagen über
-  Anforderungen als Fakten für den Vorschlag behält, ein Fund von Mojo und eine Reparatur von Miracle für eine fehlende
-  Abhängigkeit, und der Orange Pi 6 als erster Fall (sein NPU-Toolchain braucht eine Bewerbung beim Hersteller; für ihn
-  wird noch nichts gemacht).
+  Text nicht sagt, ist eine benannte Lücke, nie ein Eintrag. Deep Ingest hält die Aussagen über Anforderungen („requires“, „prerequisites“, ein Installationsbefehl) einer Seite neben dem
+  Auszug fest, der sie sagt, und der Vorschlag zitiert sie zuerst. Mojo Oracle listet auf, was die Liste eines Targets noch braucht (eine Herstellerdatei, die auf
+  dein Ja wartet, eine ungültige Liste, ein Eintrag, den niemand gelesen hat); er liest nur und startet kein Programm.
+  **Geplant, nicht gebaut:** eine Reparatur von Miracle für ein fehlendes Paket, und der Orange Pi 6 als erster Fall
+  (sein NPU-Toolchain braucht eine Bewerbung beim Hersteller; für ihn wird noch nichts gemacht).
 - **Ein eigenes Modul löschen:** `llm-cli module delete TARGET` und **Build > Targets... > Modul löschen...** zeigen
   zuerst die genaue Liste (der Ordner des Moduls und die Datei seiner privaten Werte, gezählt, nie gezeigt); „Nein“ ist
   die Vorgabe, und es geht in den Papierkorb oder endgültig, vorher im Audit festgehalten. Nur ein Modul des eigenen

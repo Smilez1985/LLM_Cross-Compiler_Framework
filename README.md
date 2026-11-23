@@ -790,9 +790,9 @@ uses the framework's tools within your tool permissions:
   key file, a password) are taken out of a module the wizard makes and kept in your own file, never in the module or a
   pack (`llm-cli module local`); `llm-cli module deps` lists what the SDK needs and whether it is there;
   `llm-cli module delete` and **Build > Targets... > Delete Module...** remove a module of your own after the exact
-  list ([Features](docs/Features.md#hardware-probe-and-new-targets)). Not built yet: Ditto's reading of requirements while crawling
-  (Deep Ingest), Mojo's repairs for a missing dependency, and the Orange Pi 6 as the first board for it
-  ([roadmap](docs/ROADMAP.md)).
+  list ([Features](docs/Features.md#hardware-probe-and-new-targets)). Deep Ingest keeps what a crawled page says an SDK requires
+  beside the excerpt that says it, for Ditto's proposal. Mojo Oracle lists what a target's list still lacks. Not built yet: Miracle's repair
+  for a missing package, and the Orange Pi 6 as the first board for it ([roadmap](docs/ROADMAP.md)).
 
 **Set up Ditto** under **Tools > Configure AI Agent (Ditto)...**: provider, model (the list is loaded live from
 the provider; you can also type a model name), API key, workspace ID (only for Claude API keys that are valid in

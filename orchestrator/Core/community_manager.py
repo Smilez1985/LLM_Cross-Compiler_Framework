@@ -443,8 +443,11 @@ def _repo_copyrights(groups: Mapping[str, Sequence[dict]],
 
 
 def _scrubbed(source: str, content: str, metadata: Dict[str, Any]) -> dict:
+    # the statements of requirements are derived from the excerpt's own text (rag/requirements.py): a pack carries the
+    # text, scrubbed, and the install derives them again, so the derived list never travels
     return {"source": scrub(source), "content": scrub(content),
-            "metadata": {k: scrub(v) if isinstance(v, str) else v for k, v in metadata.items()}}
+            "metadata": {k: scrub(v) if isinstance(v, str) else v for k, v in metadata.items()
+                         if k != "requirements"}}
 
 
 def share_pages(records: Iterable[dict]) -> Tuple[List[dict], List[PageShare]]:

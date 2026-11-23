@@ -658,9 +658,13 @@ Feld). Gib die Liste mit `llm-cli module create --dependencies DATEI` oder dem F
 `llm-cli module deps TARGET` (`--in-image IMAGE` fragt im Build-Image) oder dem Kasten „Abhängigkeiten dieses Moduls“
 im Bearbeiten-Schritt, und lass Ditto Einträge mit `llm-cli module propose-dependencies PROBE_FILE` oder **Ditto:
 Abhängigkeiten vorschlagen** vorschlagen: Ein Eintrag, dessen Quelle, Name, Version oder Wheel-Hash die genannte
-Dokumentation oder der Wert der Probe nicht sagt, wird als Lücke benannt und nie ein Eintrag. **Noch nicht gebaut:**
-Deep Ingest, das Aussagen über Anforderungen als Fakten für den Vorschlag behält, ein Fund von Mojo und eine Reparatur
-von Miracle für eine fehlende Abhängigkeit, und der Orange Pi 6 als erster Fall.
+Dokumentation oder der Wert der Probe nicht sagt, wird als Lücke benannt und nie ein Eintrag. Deep Ingest hält die Aussagen über Anforderungen einer gecrawlten Seite
+(„requires“, „prerequisites“, ein Installationsbefehl eines Paketmanagers) neben dem Auszug fest, der sie sagt, und der
+Vorschlag stellt sie an den Anfang jedes Auszugs; sie werden mit einfachen Regeln gefunden und vom Framework abgeleitet
+(kein Paket kann sie setzen, ein Export trägt sie nie). Mojo Oracle listet auf, was die Liste eines Targets noch braucht: eine Herstellerdatei, die auf dein Ja wartet, eine
+ungültige Liste und einen Eintrag, den niemand gelesen hat; er liest nur und startet kein Programm (ob ein Paket in
+einem Build-Image ist, zeigt `module deps --in-image`). **Noch nicht gebaut:** eine Reparatur von Miracle für ein
+fehlendes Paket, und der Orange Pi 6 als erster Fall.
 
 ### 3.12 Ein eigenes Modul löschen
 

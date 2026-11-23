@@ -30,7 +30,7 @@ from urllib.parse import urlparse
 
 from orchestrator.Core.knowledge_snapshots import (SUFFIX, SnapshotNoRoom, delete_snapshots,
                                                    require_room, snapshot_files, snapshot_plan, snapshot_room)
-from orchestrator.rag import licences
+from orchestrator.rag import licences, requirements
 from orchestrator.rag.chunking import PREAMBLE_RESERVE_TOKENS, chunk_document, passage_text, point_id
 from orchestrator.rag.embeddings import (DenseEmbedder, EmbeddingModelSpec, FastEmbedDenseEmbedder,
                                          FastEmbedSparseEmbedder, SparseEmbedder, check_vectors, recommend_model,
@@ -113,8 +113,11 @@ HOLDER_INFO = "holder_info"
 OWN_HOLDER = "own"
 CRAWL_HOLDER = "crawl:"
 OWNER_FIELDS = ("origin_pack", "origin_sha256", "topic", "target", "root_url")
+# The statements of requirements Deep Ingest keeps beside an excerpt (rag/requirements.py): derived by the framework
+# from the excerpt's own text, so no pack's metadata can set them and an export never carries them.
+REQUIREMENTS_FIELD = "requirements"
 _RESERVED_PAYLOAD = {"content", "source", "section", "chunk_index", "chunk_hash", "embedding_model", "ingested_at",
-                     "fused_score", "reranker", REMOVED_FIELD, HOLDERS, HOLDER_INFO, PRIVATE_FIELD}
+                     "fused_score", "reranker", REMOVED_FIELD, HOLDERS, HOLDER_INFO, PRIVATE_FIELD, REQUIREMENTS_FIELD}
 
 
 def site_topic(url: str) -> str:
@@ -1104,6 +1107,9 @@ class RAGManager:
                            chunk_hash=chunk.hash, embedding_model=embedder.model_id, ingested_at=now)
             if private:
                 payload[PRIVATE_FIELD] = True
+            stated = requirements.find(chunk.text)   # what this excerpt says an SDK needs, in the page's own words
+            if stated:
+                payload[REQUIREMENTS_FIELD] = stated
             payloads.append(payload)
 
         me = holder_of(meta)

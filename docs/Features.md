@@ -3494,9 +3494,11 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   and the box "Dependencies of this module" in the edit step show each entry as there, missing or waiting for your
   yes. `llm-cli module propose-dependencies` and **Ditto: Propose Dependencies** let Ditto propose entries from the
   probe and the crawled documentation: an entry whose source, name, version or wheel hash the cited text does not say
-  is a named gap, never an entry. **Planned, not built:** Deep Ingest keeping statements of requirements as facts for
-  the proposal, a Mojo finding and a Miracle repair for a missing dependency, and the Orange Pi 6 as the first case
-  (its NPU toolchain needs an application to the vendor; nothing for it is made yet).
+  is a named gap, never an entry. Deep Ingest keeps the statements of requirements ("requires", "prerequisites", an install command) of a page beside the
+  excerpt that says them, and the proposal cites them first. Mojo Oracle lists what a target's list still lacks (a vendor file that waits for your yes, a list that is not valid,
+  an entry nobody read); it only reads and starts no program. **Planned, not built:** a Miracle repair for a missing
+  package, and the Orange Pi 6 as the first case (its NPU toolchain needs an application to the vendor; nothing for it
+  is made yet).
 - **Deleting a module of your own:** `llm-cli module delete TARGET` and **Build > Targets... > Delete Module...** show
   the exact list first (the module's folder and the file of its private values, counted, never shown); "No" is the
   default, and it goes to the trash or for good, audited first. Only a module of your own targets folder: a target the

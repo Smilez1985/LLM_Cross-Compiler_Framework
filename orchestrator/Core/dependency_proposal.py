@@ -265,9 +265,28 @@ def retrieve(rag: Any, probe: str, board: str = "", limit: int = 8, logger: Any 
     for hit in hits or []:
         source = str(getattr(hit, "source", "") or "")
         content = str(getattr(hit, "content", "") or "")
-        if content.strip():
-            out.append((source or "the knowledge base", content))
+        if not content.strip():
+            continue
+        stated = stated_requirements(hit, content)
+        head = ("Statements of requirements on this page:\n" + "\n".join(f"- {s}" for s in stated) + "\n\n") \
+            if stated else ""
+        out.append((source or "the knowledge base", head + content))
     return out
+
+
+def stated_requirements(hit: Any, content: str) -> List[str]:
+    """What the excerpt says an SDK needs: the statements Deep Ingest kept beside it, else (a page stored before, a
+    pack's page: a pack cannot set the field) derived again from the excerpt's own text, so the statements are always
+    pieces of that text and an entry that cites them is checked against it."""
+    from orchestrator.rag import requirements
+    meta = getattr(hit, "metadata", None)
+    stored = meta.get("requirements") if isinstance(meta, dict) else None
+    if isinstance(stored, list):
+        flat = re.sub(r"\s+", " ", content)
+        kept = [s for s in stored if isinstance(s, str) and s and (s in content or s in flat)]
+        if kept:
+            return kept[:requirements.MAX_PER_EXCERPT]
+    return requirements.find(content)
 
 
 def shown(excerpts: Sequence[Tuple[str, str]]) -> List[Tuple[str, str]]:

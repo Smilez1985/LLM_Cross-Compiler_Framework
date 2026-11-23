@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""
+LLM Cross-Compiler Framework - Mojo check: what the targets' dependency lists still lack
+
+Mojo Oracle reads each target's list (`template_variables.dependencies` of its target.yml, Core/target_dependencies.py)
+and reports what is left to the person:
+
+- a list that is not valid (a warning: no build can use it);
+- a vendor file that waits for the person's yes, because its licence was not accepted or it is not in the person's
+  vendor store (a warning: the guided fetch is the person's);
+- an entry nobody read, a named gap (information).
+
+It only reads. It starts no program and no container: whether a package is in a build image is what
+`llm-cli module deps TARGET --in-image IMAGE` shows, and a package of the system or of pip is installed by the build
+image's own steps, never on this computer.
+"""
+
+from pathlib import Path
+from typing import List
+
+from orchestrator.Core.mojo.findings import Finding, Severity, _ok
+from orchestrator.utils.next_steps import NextStep
+
+
+def _state_dir(framework):
+    state = getattr(getattr(framework, "config", None), "user_state_dir", None)
+    if state is not None:
+        return Path(state)
+    from orchestrator.runtime.profile import default_state_dir
+    return Path(default_state_dir())
+
+
+def check_dependencies(framework) -> List[Finding]:
+    from orchestrator.Core import target_dependencies as deps
+    tm = getattr(framework, "target_manager", None)
+    if tm is None:
+        return []   # the target registry's own finding says so (check_targets)
+    listed = 0
+    findings: List[Finding] = []
+    for meta in tm.list_targets():
+        tid = str(meta.get("id") or "")
+        folder = tm.folder_of(tid) if tid else None
+        if folder is None:
+            continue
+        try:
+            entries = deps.load(folder)
+        except ValueError as e:
+            listed += 1
+            findings.append(Finding("dependencies", f"dependencies.{tid}.invalid", Severity.WARN,
+                                    f"The dependency list of target {tid} is not valid: {e}",
+                                    "Correct template_variables.dependencies in its target.yml; the target's check "
+                                    "shows the same problem.", where=str(folder),
+                                    why="A build of it cannot use the list, so what it needs is not installed.",
+                                    cannot="person", steps=(NextStep("targets.check", {"target": tid}),)))
+            continue
+        if not entries:
+            continue
+        listed += 1
+        rows = deps.statuses(entries, run=lambda _argv: 0,
+                             have_vendor_file=deps.vendor_checker(_state_dir(framework), folder))
+        waiting = [r.entry.name for r in rows if r.state == "waiting"]
+        gaps = [r.entry.name for r in rows if r.gap]
+        if waiting:
+            findings.append(Finding("dependencies", f"dependencies.{tid}.vendor", Severity.WARN,
+                                    f"Target {tid} needs vendor file(s) that wait for your yes: {', '.join(waiting)}.",
+                                    "Fetch each one under your own licence acceptance (the guided fetch).",
+                                    where=str(folder),
+                                    why="The module's build cannot use a licence-bound file before you accepted its "
+                                        "licence and it is in your vendor store.", cannot="person",
+                                    steps=tuple(NextStep("build.vendor_fetch", {"target": tid, "name": name})
+                                                for name in waiting)))
+        if gaps:
+            findings.append(Finding("dependencies", f"dependencies.{tid}.gaps", Severity.INFO,
+                                    f"Target {tid} lists entries nobody read (no source): {', '.join(gaps)}."))
+        if not waiting and not gaps:
+            findings.append(_ok("dependencies", f"dependencies.{tid}", f"Dependencies of {tid}: {len(entries)} listed"))
+    if not listed:
+        return [_ok("dependencies", "dependencies", "No target lists dependencies")]
+    return findings

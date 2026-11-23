@@ -628,8 +628,12 @@ pre-flight check; a `base_image` is only recorded (the module's base image is it
 (`--in-image IMAGE` asks inside the build image) or the box "Dependencies of this module" in the edit step, and let
 Ditto propose entries with `llm-cli module propose-dependencies PROBE_FILE` or **Ditto: Propose Dependencies**: an
 entry whose source, name, version or wheel hash the cited documentation or probe value does not say is named as a gap
-and never made an entry. **Not built yet:** Deep Ingest keeping statements of requirements as facts for the proposal,
-a Mojo finding and a Miracle repair for a missing dependency, and the Orange Pi 6 as the first case.
+and never made an entry. Deep Ingest keeps the statements of requirements of a crawled page ("requires", "prerequisites",
+an install command of a package manager) beside the excerpt that says them, and the proposal puts them first in each
+excerpt; they are found by plain rules and derived by the framework (no pack can set them, an export never carries them).
+Mojo Oracle lists what a target's list still lacks: a vendor file that waits for your yes, a list that is not valid and an
+entry nobody read; it only reads and starts no program (whether a package is in a build image is what `module deps
+--in-image` shows). **Not built yet:** a Miracle repair for a missing package, and the Orange Pi 6 as the first case.
 
 ### 3.12 Deleting a module of your own
 
