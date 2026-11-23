@@ -3527,8 +3527,9 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   `build deps` and Build > Build Dependencies... list, fetch and delete them.
 - **llama.cpp in new targets:** the template Dockerfile builds the conversion tools like the Rockchip image
   ([Conversion tools tuned to the build host](#conversion-tools-tuned-to-the-build-host)). The GPU template takes
-  CUDA 12.9.1 from NVIDIA's redist archives (manifest pinned by sha256, every archive checked) on Ubuntu 22.04 pinned
-  by digest; NVIDIA's prebuilt development image is only an explicit opt-in (a base image you choose yourself; Ditto's
+  CUDA 13.4.2 from NVIDIA's redist archives (manifest pinned by sha256, every archive checked) on Ubuntu 26.04 pinned
+  by digest (GPUs below compute capability 7.5, such as a GTX 10 series, need an older toolkit: set it in the module's
+  `docker.build_args`; an RTX 3090 needs a driver of branch 580 or newer); NVIDIA's prebuilt development image is only an explicit opt-in (a base image you choose yourself; Ditto's
   proposals never carry one), pinned by digest and labelled "not self-built".
 - **Checks before anything is written:** names, images, packages and flags are validated strictly; shell code is
   checked against a deny-list and with `bash -n`; files are written only inside `targets/`; an existing target is

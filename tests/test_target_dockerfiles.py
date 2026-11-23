@@ -160,7 +160,7 @@ class TestTheRecipeInTheDockerfiles:
         assert values["CUDA_REDIST_BASE_URL"] == CATALOG.cuda.redist_base_url
         assert values["CUDA_COMPONENTS"].split() == list(toolkit.components)
         assert values["CUDA_SOURCE"] == "redist"
-        base = next(b for b in CATALOG.build_bases if b.id == "ubuntu-22.04")
+        base = next(b for b in CATALOG.build_bases if b.id == "ubuntu-26.04")
         froms = [rest.split()[0] for word, rest in instructions(gpu) if word == "FROM"]
         assert froms == [base.image, base.image], "both stages on the pinned Ubuntu base, no nvidia/cuda image"
         opt_in = re.search(r"#\s+FROM (nvidia/cuda:\S+) AS builder", gpu).group(1)
@@ -617,9 +617,11 @@ def redist(tmp_path):
     root = tmp_path / "redist"
     root.mkdir()
     contents = {"cuda_nvcc": {"bin/nvcc": "#!/bin/sh\necho nvcc\n"},
-                "cuda_cudart": {"lib/libcudart.so.12": "cudart"},
-                "cuda_cccl": {"include/cuda/std/version": "cccl"},
-                "libcublas": {"lib/libcublas.so.12": "cublas", "lib/libcublasLt.so.12": "cublaslt"}}
+                "cuda_crt": {"include/crt/host_defines.h": "crt"},
+                "libnvvm": {"nvvm/bin/cicc": "cicc"},
+                "cuda_cudart": {"lib/libcudart.so.13": "cudart"},
+                "cccl": {"include/cuda/std/version": "cccl"},
+                "libcublas": {"lib/libcublas.so.13": "cublas", "lib/libcublasLt.so.13": "cublaslt"}}
     manifest = {"release_label": "fake"}
     for component, files in contents.items():
         rel = f"{component}/{platform}/{component}-{platform}-1.0-archive.tar.xz"
@@ -657,9 +659,9 @@ class TestCudaStep:
         result = run(self.step(), cuda_env(tmp_path, redist))
         assert result.returncode == 0, result.stderr
         cuda = tmp_path / "cuda"
-        assert (cuda / "bin" / "nvcc").is_file() and (cuda / "lib64" / "libcudart.so.12").is_file()
+        assert (cuda / "bin" / "nvcc").is_file() and (cuda / "lib64" / "libcudart.so.13").is_file()
         assert sorted(p.name for p in (tmp_path / "cuda-runtime" / "lib").iterdir()) == [
-            "libcublas.so.12", "libcublasLt.so.12", "libcudart.so.12"]
+            "libcublas.so.13", "libcublasLt.so.13", "libcudart.so.13"]
         assert "checked against the pinned manifest" in result.stdout
 
     def test_a_manifest_that_is_not_the_pinned_one_is_refused(self, tmp_path, redist):
@@ -668,9 +670,9 @@ class TestCudaStep:
 
     def test_a_changed_archive_is_refused(self, tmp_path, redist):
         rel = redist["manifest"]["libcublas"][redist["platform"]]["relative_path"]
-        (redist["root"] / rel).write_bytes(_xz_archive("x", {"lib/libcublas.so.12": "tampered"}))
+        (redist["root"] / rel).write_bytes(_xz_archive("x", {"lib/libcublas.so.13": "tampered"}))
         result = run(self.step(), cuda_env(tmp_path, redist))
-        assert result.returncode != 0 and not (tmp_path / "cuda" / "lib" / "libcublas.so.12").exists()
+        assert result.returncode != 0 and not (tmp_path / "cuda" / "lib" / "libcublas.so.13").exists()
 
     @pytest.mark.parametrize("path", ["../outside.tar.xz", "/etc/x.tar.xz", "cuda_nvcc/x.zip"])
     def test_an_unexpected_archive_path_is_refused(self, tmp_path, redist, path):

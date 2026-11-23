@@ -261,6 +261,7 @@ build_bases:
   - {id: debian-12, libc: glibc, libc_version: "2.36", gcc: "12.2", image: "debian:12-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587"}
   - {id: ubuntu-24.04, libc: glibc, libc_version: "2.39", gcc: "13.3", image: "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55"}
   - {id: debian-13, libc: glibc, libc_version: "2.41", gcc: "14.2", image: "debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f"}
+  - {id: ubuntu-26.04, libc: glibc, libc_version: "2.43", gcc: "15.2", image: "ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db"}
   - {id: alpine-3.22, libc: musl, libc_version: "1.2.5", gcc: "14.2", image: "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"}
 
 # The one whisper.cpp pin: the speech recognition of the board bundle (block stt-whisper-cpp) is built from exactly

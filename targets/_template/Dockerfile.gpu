@@ -11,15 +11,16 @@
 #
 # Opt-in, not provisioned from the manifest: NVIDIA's prebuilt development image, pinned by digest. To use it,
 # replace the FROM line of the builder stage with
-#   FROM nvidia/cuda:12.9.1-devel-ubuntu22.04@sha256:bd4e2680a261c212f1e2fea241606f71497dc67a417f73175d794ec8212b5ba8 AS builder
-# and set CUDA_SOURCE=prebuilt-image; the image is then labelled as built with a prebuilt CUDA image, not self-built.
-# The module generator does this when you choose a digest-pinned nvidia/cuda:*-devel-ubuntu22.04 image as base image
-# yourself (an AI proposal never does).
+#   FROM nvidia/cuda:13.4.2-devel-ubuntu24.04@sha256:7005688f5eaa5a9aaa9e555f546107c4454446a543347fd48b0bdb63ea027ad2 AS builder
+# set CUDA_SOURCE=prebuilt-image and CUDA_VERSION to the image's version, and put the runtime stage on the same Ubuntu
+# release as that image (the Python environment is copied over and must match); the image is then labelled as built
+# with a prebuilt CUDA image, not self-built. The module generator does all of this when you choose a digest-pinned
+# nvidia/cuda:*-devel-ubuntu22.04 or -ubuntu24.04 image as base image yourself (an AI proposal never does).
 
 # ============================================================================
 # STAGE 1: Build Environment (CUDA toolkit)
 # ============================================================================
-FROM ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11 AS builder
+FROM ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db AS builder
 
 LABEL maintainer="Community Contributor"
 LABEL description="[Hardware-Familie] GPU Cross-Compilation Container"
@@ -29,7 +30,7 @@ ARG USER_ID=1000
 ARG GROUP_ID=1000
 # Parallel compile jobs; empty = all cores (the framework lowers it after an out-of-memory build).
 ARG BUILD_JOBS=
-# Ubuntu 22.04 ships Python 3.10; the runtime stage uses the same base, so the venv copied over keeps working.
+# Ubuntu 26.04 ships Python 3.14; the runtime stage uses the same base, so the venv copied over keeps working.
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LLAMA_CPP_PATH=/usr/src/llama.cpp
@@ -89,10 +90,10 @@ RUN if [ -n "${APT_PRELOAD:-}" ]; then sh /tmp/llmcf-apt/llmcf-apt.sh restore; f
 # CUDA toolkit: redist (default) or prebuilt-image (opt-in, see the top of this file). CUDA_HOME gets the toolkit,
 # CUDA_RUNTIME_DIR the runtime libraries the runtime stage takes over (cudart, cuBLAS).
 ARG CUDA_SOURCE=redist
-ARG CUDA_VERSION=12.9.1
+ARG CUDA_VERSION=13.4.2
 ARG CUDA_REDIST_BASE_URL=https://developer.download.nvidia.com/compute/cuda/redist/
-ARG CUDA_REDIST_MANIFEST_SHA256=8335301010b0023ee1ff61eb11e2600ca62002d76780de4089011ad77e0c7630
-ARG CUDA_COMPONENTS="cuda_nvcc cuda_cudart cuda_cccl libcublas"
+ARG CUDA_REDIST_MANIFEST_SHA256=a6a1dbdfbecb190a55712da723c2a69b4fb55a37cc2da2a5dd65f614c6384a51
+ARG CUDA_COMPONENTS="cuda_nvcc cuda_crt libnvvm cuda_cudart cccl libcublas"
 LABEL org.llm-framework.cuda-source="${CUDA_SOURCE}" org.llm-framework.cuda-version="${CUDA_VERSION}"
 # hadolint ignore=SC2086
 RUN set -euf; \
@@ -245,7 +246,7 @@ RUN set -euf; \
 # ============================================================================
 # STAGE 2: Runtime Environment (CUDA runtime libraries from the builder)
 # ============================================================================
-FROM ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11 AS runtime
+FROM ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db AS runtime
 
 LABEL stage="runtime"
 

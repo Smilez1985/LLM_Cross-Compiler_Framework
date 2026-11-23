@@ -3907,8 +3907,10 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   `build deps` und Build > Build-Abhängigkeiten… listen, holen und löschen sie.
 - **llama.cpp in neuen Targets:** Das Vorlagen-Dockerfile baut die Konvertierungswerkzeuge wie das Rockchip-Image
   ([Konvertierungswerkzeuge abgestimmt auf den Build-Rechner](#konvertierungswerkzeuge-abgestimmt-auf-den-build-rechner)).
-  Die GPU-Vorlage nimmt CUDA 12.9.1 aus den Redist-Archiven von NVIDIA (Manifest per sha256 festgelegt, jedes Archiv
-  geprüft) auf Ubuntu 22.04, per Digest festgelegt; das vorgebaute Entwicklungs-Image von NVIDIA ist nur ein
+  Die GPU-Vorlage nimmt CUDA 13.4.2 aus den Redist-Archiven von NVIDIA (Manifest per sha256 festgelegt, jedes Archiv
+  geprüft) auf Ubuntu 26.04, per Digest festgelegt (GPUs unter Compute Capability 7.5, etwa eine GTX 10er-Serie,
+  brauchen ein älteres Toolkit: Du stellst es in den `docker.build_args` des Moduls ein; eine RTX 3090 braucht einen
+  Treiber ab Zweig 580); das vorgebaute Entwicklungs-Image von NVIDIA ist nur ein
   ausdrücklicher Opt-in (ein Basis-Image, das du selbst wählst; Dittos Vorschläge enthalten nie eines), per Digest
   festgelegt und als „not self-built“ gekennzeichnet.
 - **Prüfungen, bevor etwas geschrieben wird:** Namen, Images, Pakete und Flags werden streng geprüft; Shell-Code wird

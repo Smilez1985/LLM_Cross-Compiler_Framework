@@ -933,23 +933,29 @@ llama.cpp-Programme, die aus einem anderen Image kopiert werden, Downloads von l
 
 ### 5.2 CUDA in der GPU-Vorlage
 
-`targets/_template/Dockerfile.gpu` baut in beiden Stufen auf `ubuntu:22.04`, per Digest festgelegt, und nimmt CUDA
-12.9.1 aus den Redist-Archiven von NVIDIA: `redistrib_12.9.1.json` ist über seine sha256 festgelegt (die Werte von
-`cuda.toolkits` in `configs/llama_runtime.yml`), und jede Komponente (`cuda_nvcc`, `cuda_cudart`, `cuda_cccl`,
-`libcublas`) wird gegen die sha256 aus dem Manifest geprüft, bevor sie nach `/usr/local/cuda` entpackt wird. Die
+`targets/_template/Dockerfile.gpu` baut in beiden Stufen auf `ubuntu:26.04`, per Digest festgelegt, und nimmt CUDA
+13.4.2 aus den Redist-Archiven von NVIDIA: `redistrib_13.4.2.json` ist über seine sha256 festgelegt (die Werte von
+`cuda.toolkits` in `configs/llama_runtime.yml`), und jede Komponente (`cuda_nvcc`, `cuda_crt`, `libnvvm`,
+`cuda_cudart`, `cccl`, `libcublas`) wird gegen die sha256 aus dem Manifest geprüft, bevor sie nach `/usr/local/cuda` entpackt wird. Die
 Laufzeitstufe bekommt die CUDA-Laufzeitbibliotheken (cudart, cuBLAS). Die Komponenten stehen unter der Lizenz des
 CUDA Toolkit von NVIDIA (LICENSE in jedem Archiv); der Bau des Images lädt sie für deinen eigenen Gebrauch herunter.
 Die llama.cpp-Konvertierungswerkzeuge bleiben CPU-Builds; GPU-Werkzeuge sind ein späterer Schritt des Rezepts.
 
 Das vorgebaute Entwicklungs-Image von NVIDIA ist ein ausdrücklicher Opt-in: Wähle
-`nvidia/cuda:12.9.1-devel-ubuntu22.04@sha256:bd4e2680a261c212f1e2fea241606f71497dc67a417f73175d794ec8212b5ba8` (oder
-ein anderes per Digest festgelegtes `-devel-ubuntu22.04`-Image) selbst als Basis-Image im Assistenten oder bei
+`nvidia/cuda:13.4.2-devel-ubuntu24.04@sha256:7005688f5eaa5a9aaa9e555f546107c4454446a543347fd48b0bdb63ea027ad2` (oder
+ein anderes per Digest festgelegtes `-devel-ubuntu22.04`- oder `-devel-ubuntu24.04`-Image) selbst als Basis-Image im Assistenten oder bei
 `module create`. Dittos Vorschläge enthalten nie ein `nvidia/cuda`-Image: Ein Vorschlag mit einem solchen geht einmal
 an Ditto zurück und wird sonst abgelehnt, weil eine Probe-Datei den Vorschlag lenken könnte. Der Generator nutzt das
 Image dann für die Builder-Stufe und setzt `CUDA_SOURCE=prebuilt-image`, das das Image als Label
 `org.llm-framework.cuda-source` trägt; das Toolkit wird dann nicht aus dem festgelegten Manifest bereitgestellt, und
-das Log des Generators und das Log des Image-Builds sagen „not self-built“. Die Laufzeitstufe bleibt auf dem
-festgelegten Ubuntu 22.04, weil die Python-Umgebung von einer Stufe in die andere kopiert wird.
+das Log des Generators und das Log des Image-Builds sagen „not self-built“. Das Label `CUDA_VERSION` trägt die
+CUDA-Version aus dem Tag des Images, und die Laufzeitstufe geht auf dieselbe Ubuntu-Version wie das Image (22.04 oder
+24.04, per Digest aus dem Laufzeit-Katalog festgelegt), weil die Python-Umgebung von einer Stufe in die andere kopiert
+wird.
+
+Eine GPU unter Compute Capability 7.5 (eine GTX-10er-Serie, Pascal, Volta) bedient CUDA 13 nicht: Setze `CUDA_VERSION`,
+`CUDA_REDIST_MANIFEST_SHA256` und `CUDA_COMPONENTS` eines älteren Toolkits aus `cuda.toolkits` in der `target.yml` des
+Moduls unter `docker.build_args`; die Vorab-Prüfung liest die CUDA-Version von dort.
 
 ### 5.3 Basis-Images und Hersteller-Software KI-erstellter Module
 

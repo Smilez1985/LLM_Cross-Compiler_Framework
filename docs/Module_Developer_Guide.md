@@ -894,23 +894,29 @@ indexes, and distribution packages of llama.cpp (`apt-get install llama.cpp` and
 
 ### 5.2 CUDA in the GPU template
 
-`targets/_template/Dockerfile.gpu` builds on `ubuntu:22.04`, pinned by digest, in both stages and takes CUDA
-12.9.1 from NVIDIA's redist archives: `redistrib_12.9.1.json` is pinned by its sha256 (the values of `cuda.toolkits`
-in `configs/llama_runtime.yml`), and each component (`cuda_nvcc`, `cuda_cudart`, `cuda_cccl`, `libcublas`) is checked
+`targets/_template/Dockerfile.gpu` builds on `ubuntu:26.04`, pinned by digest, in both stages and takes CUDA
+13.4.2 from NVIDIA's redist archives: `redistrib_13.4.2.json` is pinned by its sha256 (the values of `cuda.toolkits`
+in `configs/llama_runtime.yml`), and each component (`cuda_nvcc`, `cuda_crt`, `libnvvm`, `cuda_cudart`, `cccl`,
+`libcublas`) is checked
 against the sha256 the manifest lists before it is unpacked into `/usr/local/cuda`. The runtime stage gets the CUDA
 runtime libraries (cudart, cuBLAS). The components come under NVIDIA's CUDA Toolkit licence (LICENSE in each
 archive); building the image downloads them for your own use. The llama.cpp conversion tools stay CPU builds; GPU
 tools are a later step of the recipe.
 
 NVIDIA's prebuilt development image is an explicit opt-in: choose
-`nvidia/cuda:12.9.1-devel-ubuntu22.04@sha256:bd4e2680a261c212f1e2fea241606f71497dc67a417f73175d794ec8212b5ba8` (or
-another `-devel-ubuntu22.04` image pinned by digest) as the base image yourself, in the wizard or `module create`.
+`nvidia/cuda:13.4.2-devel-ubuntu24.04@sha256:7005688f5eaa5a9aaa9e555f546107c4454446a543347fd48b0bdb63ea027ad2` (or
+another `-devel-ubuntu22.04` or `-devel-ubuntu24.04` image pinned by digest) as the base image yourself, in the wizard or `module create`.
 Ditto's proposals never carry an `nvidia/cuda` image: one that does is sent back to Ditto once and otherwise refused,
 because a probe file could steer the proposal. The generator then uses the image for the builder stage and sets
 `CUDA_SOURCE=prebuilt-image`, which the image carries as the label `org.llm-framework.cuda-source`; the toolkit is
 then not provisioned from the pinned manifest, and the generator's log and the image build's log say "not
-self-built". The runtime stage stays on the pinned Ubuntu 22.04, because the Python environment is copied from one
-stage to the other.
+self-built". The label `CUDA_VERSION` carries the CUDA version of the image's tag, and the runtime stage goes on the
+same Ubuntu release as the image (22.04 or 24.04, pinned by digest from the runtime catalogue), because the Python
+environment is copied from one stage to the other.
+
+A GPU below compute capability 7.5 (a GTX 10 series, Pascal, Volta) is not served by CUDA 13: set `CUDA_VERSION`,
+`CUDA_REDIST_MANIFEST_SHA256` and `CUDA_COMPONENTS` of an older toolkit of `cuda.toolkits` in the module's
+`target.yml` under `docker.build_args`; the pre-flight check reads the CUDA version from there.
 
 ### 5.3 Base images and vendor software of AI-created modules
 

@@ -364,17 +364,28 @@ def test_the_prebuilt_cuda_image_is_an_explicit_opt_in_pinned_by_digest(tmp_path
     target = generate(tmp_path, module_name="GPU Opt", architecture="x86_64", sdk="cuda", base_os=CUDA_OPT_IN)
     dockerfile = (target / "Dockerfile").read_text()
     assert f"FROM {CUDA_OPT_IN} AS builder" in dockerfile and "ARG CUDA_SOURCE=prebuilt-image" in dockerfile
-    assert re.search(r"^FROM ubuntu:22\.04@sha256:[0-9a-f]{64} AS runtime$", dockerfile, re.M)
+    assert re.search(r"^FROM ubuntu:22\.04@sha256:[0-9a-f]{64} AS runtime$", dockerfile, re.M), "the runtime follows the image"
+    assert re.search(r"^ARG CUDA_VERSION=12\.9\.1$", dockerfile, re.M), "the label carries the image's CUDA version"
     assert validate_target_folder(target) == []
     # Labelled for what it is: in the generator's log and in the image build's log (review of WP9).
     assert any(level == "warning" and "not self-built" in message for level, message in log.lines)
     assert "(explicit opt-in, not self-built)" in dockerfile.split("prebuilt-image)", 1)[1].split(";;", 1)[0]
 
 
+def test_a_prebuilt_image_of_ubuntu_24_04_puts_the_runtime_stage_on_the_same_release(tmp_path):
+    image = "nvidia/cuda:13.4.2-devel-ubuntu24.04@sha256:" + "7" * 64
+    target = generate(tmp_path, module_name="GPU Opt 24", architecture="x86_64", sdk="cuda", base_os=image)
+    dockerfile = (target / "Dockerfile").read_text()
+    assert f"FROM {image} AS builder" in dockerfile
+    assert re.search(r"^FROM ubuntu:24\.04@sha256:[0-9a-f]{64} AS runtime$", dockerfile, re.M)
+    assert re.search(r"^ARG CUDA_VERSION=13\.4\.2$", dockerfile, re.M) and "ARG CUDA_SOURCE=prebuilt-image" in dockerfile
+    assert validate_target_folder(target) == []
+
+
 @pytest.mark.parametrize("base_os, message", [
     ("nvidia/cuda:12.2.2-devel-ubuntu22.04", "must be pinned by digest"),
-    ("nvidia/cuda:13.0.2-devel-ubuntu24.04@sha256:" + "5" * 64, "devel-ubuntu22.04 image pinned by digest"),
-    ("nvidia/cuda:12.9.1-runtime-ubuntu22.04@sha256:" + "6" * 64, "devel-ubuntu22.04 image pinned by digest"),
+    ("nvidia/cuda:13.0.2-devel-ubuntu20.04@sha256:" + "5" * 64, "devel-ubuntu22.04 or -ubuntu24.04 image pinned by digest"),
+    ("nvidia/cuda:12.9.1-runtime-ubuntu22.04@sha256:" + "6" * 64, "devel-ubuntu22.04 or -ubuntu24.04 image pinned by digest"),
     ("ghcr.io/ggml-org/llama.cpp:full@sha256:" + "7" * 64, "prebuilt llama.cpp image"),
 ])
 def test_unpinned_or_prebuilt_bases_are_refused(tmp_path, base_os, message):
