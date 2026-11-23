@@ -377,7 +377,14 @@ class Dependency(BaseModel):
     url: Optional[str] = Field(default=None, pattern=HTTPS_RE, max_length=500,
                                description="The vendor's download page (required for a vendor page)")
     sha256: Optional[str] = Field(default=None, pattern=SHA256_HEX_RE,
-                                  description="The wheel's sha256 (required for a pip package)")
+                                  description="The wheel's sha256 (required for a pip package), or the vendor file's "
+                                              "own when the vendor publishes it")
+    licence_url: Optional[str] = Field(default=None, pattern=HTTPS_RE, max_length=500,
+                                       description="Where the vendor's licence of a vendor file is (required for it: "
+                                                   "the person reads it before the guided fetch)")
+    dest: Optional[str] = Field(default=None, pattern=ABS_PATH_RE, max_length=300,
+                                description="Where the build image gets a vendor file, e.g. /opt/vendor/sdk.whl "
+                                            "(a toolchain the build needs); empty: only for the board")
     check: List[str] = Field(default_factory=list, max_length=12,
                              description="'Is it there?' as a program and its arguments, no shell: exit code 0 is yes")
     redistributable: bool = Field(default=False, description="Whether the licence lets it be passed on")
@@ -409,9 +416,18 @@ class Dependency(BaseModel):
                 problems.append("a pip package carries the sha256 of its wheel: it is installed hash-checked")
         if self.origin == "vendor_page" and not self.url:
             problems.append("a vendor page needs url, the address of the vendor's download page")
-        if self.kind == "vendor_file" and self.redistributable:
-            problems.append("a vendor file is licence-bound: it may not be passed on (use a runtime library with "
-                            "redistributable for what may)")
+        if self.kind == "vendor_file":
+            if self.redistributable:
+                problems.append("a vendor file is licence-bound: it may not be passed on (use a runtime library with "
+                                "redistributable for what may)")
+            if not self.licence_url:
+                problems.append("a vendor file needs licence_url: the person reads the licence before the guided fetch")
+            if not re.fullmatch(FILE_NAME_RE, self.name):
+                problems.append("a vendor file is named as the vendor publishes the file (letters, digits, . _ + -)")
+        elif self.licence_url or self.dest:
+            problems.append("licence_url and dest belong to a vendor file")
+        if self.dest and ".." in self.dest.split("/"):
+            problems.append("dest: no '..' in a path")
         if problems:
             raise ValueError("; ".join(problems))
         return self

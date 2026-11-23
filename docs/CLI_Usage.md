@@ -2840,7 +2840,7 @@ terminal the notice on Ditto goes to stderr once ([ditto](#ditto)).
 |---|---|
 | `--provider TEXT` | Provider for this run, e.g. `anthropic`, `openai`, `ollama`. Default: AI settings. |
 | `--model TEXT` | Model for this run. Default: AI settings. |
-| `--dependencies FILE` | What the module's SDK and toolchain need, as data (see [module deps](#module-deps)): a YAML or JSON list of entries with a name, a pinned version, a kind (`system_package`, `pip_package`, `vendor_file`, `base_image`, `board_driver`), an origin, the source of the statement (`excerpt:N`, `probe:KEY` or `template`; none is a named gap), a download address, the wheel's sha256 for a pip package, a check (a program and its arguments) and whether the licence lets it be passed on. A system package becomes a pinned apt package and a pip package a hash-checked wheel of the module's build image; a vendor file waits for your own licence acceptance; a driver of the board is only listed. |
+| `--dependencies FILE` | What the module's SDK and toolchain need, as data (see [module deps](#module-deps)): a YAML or JSON list of entries with a name, a pinned version, a kind (`system_package`, `pip_package`, `vendor_file`, `base_image`, `board_driver`), an origin, the source of the statement (`excerpt:N`, `probe:KEY` or `template`; none is a named gap), a download address, the wheel's sha256 for a pip package (or a vendor file's own), for a vendor file its licence address and optionally where the build image gets it, a check (a program and its arguments) and whether the licence lets it be passed on. A system package becomes a pinned apt package and a pip package a hash-checked wheel of the module's build image; a vendor file waits for your own licence acceptance; a driver of the board is only listed. |
 | `--formats-out FILE` | Write Ditto's proposal of the output formats' values to this YAML file, for review and `module create --formats FILE --ask-values`. |
 
 When the probe names an accelerator of its own (an NPU or a GPU), Ditto also proposes the values of its output format(s), one value at a time, from the probe and the crawled vendor documentation (as [`module propose-values`](#module-propose-values)); the proposal is printed per value with its source and confidence. The module is made with it only when it is complete (no gap, every check passed) and you say yes; otherwise the module builds GGUF and the draft is yours to fill.
@@ -2968,7 +2968,7 @@ llm-cli module deps TARGET [--in-image IMAGE]
 
 What a module's SDK and toolchain need, and whether it is there: the entries of the module's `target.yml`
 (`template_variables.dependencies`), each one **there**, **missing**, **waiting for your yes** (a vendor file under its
-own licence: fetch it with `llm-cli vendor fetch`), **on the board** (a driver or firmware, left to the pre-flight
+own licence: fetch it with `llm-cli vendor fetch`; it is **there** once the file is in your vendor store, which keeps it only after your own yes to its licence), **on the board** (a driver or firmware, left to the pre-flight
 check, never installed) or **no check given**; an entry without a source is marked as a gap. Each check is a program
 and its arguments, started without a shell, and the program is one that only looks (`dpkg`, `dpkg-query`, `pkg-config`,
 `test`, `ls`, `stat`, `which`, `ldconfig`, `modinfo`, `lsmod`, `pip`, `pip3`). Nothing is installed here: a system

@@ -40,14 +40,14 @@ class _DependencyCheck(QThread):
     """Asks the checks of a target's dependencies off the GUI thread (a check may run for seconds)."""
     done = Signal(object)
 
-    def __init__(self, entries: List[Any], runner: Any, parent: Optional[QWidget] = None):
+    def __init__(self, entries: List[Any], runner: Any, parent: Optional[QWidget] = None, have: Any = None):
         super().__init__(parent)
-        self.entries, self.runner = entries, runner
+        self.entries, self.runner, self.have = entries, runner, have
 
     def run(self) -> None:
         from orchestrator.Core import target_dependencies as deps
         try:
-            self.done.emit(deps.statuses(self.entries, self.runner))
+            self.done.emit(deps.statuses(self.entries, self.runner, self.have))
         except Exception as e:  # noqa: BLE001 - said in the list, never a crash of the thread
             self.done.emit(e)
 
@@ -251,12 +251,13 @@ class ModuleEditPanel(QWidget):
         except ValueError:
             return
         runner = self.deps_runner or deps.HostRunner()
+        have = deps.vendor_checker(self._local_state(), self.edit.folder) if self.edit is not None else None
         if wait:
-            self._dependencies_checked(deps.statuses(entries, runner))
+            self._dependencies_checked(deps.statuses(entries, runner, have))
             return
         self.btn_deps_check.setEnabled(False)
         self.lbl_deps.setText(self._t("bld.deps.checking"))
-        self._deps_thread = _DependencyCheck(entries, runner, self)
+        self._deps_thread = _DependencyCheck(entries, runner, self, have)
         self._deps_thread.done.connect(self._dependencies_checked)
         self._deps_thread.start()
 

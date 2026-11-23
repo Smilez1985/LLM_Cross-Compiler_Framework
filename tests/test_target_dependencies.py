@@ -35,7 +35,7 @@ def entry(**fields):
 PIP = dict(name="numpy", version="2.1.0", kind="pip_package", origin="package_index", sha256=sha("numpy"),
            source="excerpt:12", check=["pip", "show", "numpy"])
 VENDOR = dict(name="noe-sdk.tar.gz", version="1.2", kind="vendor_file", origin="vendor_page", source="excerpt:3",
-              url="https://vendor.example.com/noe")
+              url="https://vendor.example.com/noe", licence_url="https://vendor.example.com/licence")
 DRIVER = dict(name="npu-driver", version="5.0", kind="board_driver", origin="vendor_page", source="probe:NPU",
               url="https://vendor.example.com/driver", note="install it with the vendor package")
 
@@ -307,3 +307,97 @@ def test_a_module_without_dependencies_has_no_box(qapp, tmp_path):
     folder = ModuleGenerator(tmp_path).generate_module(DATA)
     panel.load(ModuleEdit(folder))
     assert not panel.deps_box.isVisibleTo(panel)
+
+
+# --- the vendor store ------------------------------------------------------------------------------------------------
+
+SDK_BYTES = b"vendor toolkit bytes, not to be passed on\n"
+LICENCE_TEXT = "VENDOR LICENCE\nYou may use this file. You may not pass it on.\n"
+VENDOR_SHA = __import__("hashlib").sha256(SDK_BYTES).hexdigest()
+
+
+def vendor_entry(**fields):
+    return entry(**{**VENDOR, **fields})
+
+
+@pytest.mark.parametrize("fields,why", [
+    ({"licence_url": None}, "needs licence_url"),
+    ({"name": "no good!"}, "named as the vendor publishes"),
+    ({"dest": "/opt/../etc/x"}, "no '..'"),
+])
+def test_a_vendor_file_needs_its_licence_a_plain_name_and_a_path_without_dots(fields, why):
+    with pytest.raises(ValidationError, match=why):
+        vendor_entry(**fields)
+
+
+def test_licence_and_dest_belong_to_a_vendor_file():
+    with pytest.raises(ValidationError, match="belong to a vendor file"):
+        entry(licence_url="https://vendor.example.com/licence")
+    assert vendor_entry(dest="/opt/vendor/noe.tar.gz").dest == "/opt/vendor/noe.tar.gz"
+
+
+def made_with_vendor_file(tmp_path, targets=None, **fields):
+    return ModuleGenerator(targets or tmp_path / "targets").generate_module(
+        {**DATA, "dependencies": [vendor_entry(sha256=VENDOR_SHA, **fields).model_dump(), entry().model_dump()]})
+
+
+def test_the_vendor_file_of_the_list_goes_through_the_guided_fetch(tmp_path):
+    from orchestrator.Core import vendor_files as vf
+    folder = made_with_vendor_file(tmp_path)
+    [named] = vf.entries(folder)
+    assert named.file.name == "noe-sdk.tar.gz" and named.format_id == "dependencies"
+    assert named.file.licence_url == "https://vendor.example.com/licence" and named.file.sha256 == VENDOR_SHA
+    assert [row["name"] for row in vf.status(tmp_path / "state", folder)] == ["noe-sdk.tar.gz"]
+
+
+def test_a_vendor_file_in_the_store_is_there_and_one_without_it_waits(tmp_path):
+    from orchestrator.Core import vendor_files as vf
+    state = tmp_path / "state"
+    folder = made_with_vendor_file(tmp_path)
+    entries = deps.load(folder)
+    rows = deps.statuses(entries, lambda argv: 0, deps.vendor_checker(state, folder))
+    assert [r.state for r in rows] == ["waiting", "present"]
+    asked = vf.question(folder, "noe-sdk.tar.gz", lambda url: LICENCE_TEXT)
+    vf.accept(state, asked, actor="gui", accepted=True)
+    download = tmp_path / "noe.tar.gz"
+    download.write_bytes(SDK_BYTES)
+    vf.add_file(state, folder, "noe-sdk.tar.gz", download, actor="gui")
+    rows = deps.statuses(entries, lambda argv: 0, deps.vendor_checker(state, folder))
+    assert [r.state for r in rows] == ["present", "present"] and rows[0].why == "in your vendor store"
+    other = deps.statuses(entries, lambda argv: 0, deps.vendor_checker(tmp_path / "another-state", folder))
+    assert other[0].state == "waiting", "another person's store does not count"
+
+
+def _store(state, folder, tmp_path, actor):
+    from orchestrator.Core import vendor_files as vf
+    vf.accept(state, vf.question(folder, "noe-sdk.tar.gz", lambda url: LICENCE_TEXT), actor=actor, accepted=True)
+    download = tmp_path / "noe.tar.gz"
+    download.write_bytes(SDK_BYTES)
+    vf.add_file(state, folder, "noe-sdk.tar.gz", download, actor=actor)
+
+
+def test_the_command_shows_the_stored_vendor_file_as_there(monkeypatch, tmp_path):
+    state = tmp_path / "home"
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(state))
+    folder = made_with_vendor_file(tmp_path, targets=tmp_path)   # the command reads the targets of tmp_path
+    monkeypatch.setattr(deps, "HostRunner", lambda: (lambda argv: 0))
+    waiting = _cli(monkeypatch, tmp_path, "module", "deps", folder.name)
+    assert waiting.exit_code == 1 and "noe-sdk.tar.gz 1.2 (vendor file): waits for your yes" in waiting.output
+    _store(state, folder, tmp_path, "cli")
+    there = _cli(monkeypatch, tmp_path, "module", "deps", folder.name)
+    assert there.exit_code == 0 and "noe-sdk.tar.gz 1.2 (vendor file): there; in your vendor store" in there.output
+
+
+def test_the_box_shows_the_stored_vendor_file_as_there(monkeypatch, tmp_path, qapp):
+    pytest.importorskip("PySide6")
+    from orchestrator.Core.module_edit import ModuleEdit
+    from orchestrator.gui.module_edit import ModuleEditPanel
+    state = tmp_path / "home"
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(state))
+    folder = made_with_vendor_file(tmp_path)
+    _store(state, folder, tmp_path, "gui")
+    panel = ModuleEditPanel(None)
+    panel.load(ModuleEdit(folder))
+    panel.deps_runner = lambda argv: 0
+    panel.check_dependencies(wait=True)
+    assert "there; in your vendor store" in panel.deps_list.item(0).text()

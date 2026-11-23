@@ -1288,7 +1288,8 @@ def module_deps(ctx: FrameworkContext, target: str, image: Optional[str]):
     if not entries:
         click.echo(f"{target} lists no dependencies.")
         return
-    rows = deps.statuses(entries, deps.ImageRunner(image) if image else deps.HostRunner())
+    rows = deps.statuses(entries, deps.ImageRunner(image) if image else deps.HostRunner(),
+                         have_vendor_file=deps.vendor_checker(_vendor_state(ctx), folder))
     for line in deps.table(rows):
         click.echo(_printable(line))
     sys.exit(1 if any(r.state in ("missing", "waiting") for r in rows) else 0)

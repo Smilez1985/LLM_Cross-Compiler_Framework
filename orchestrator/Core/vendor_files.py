@@ -39,6 +39,7 @@ from orchestrator.utils.next_steps import NextStep, WithSteps
 STORE = "vendor-files"
 ACCEPTANCES = "acceptances.json"
 INDEX = "index.json"
+DEPENDENCY_FORMAT = "dependencies"   # the format id of a vendor file that the dependency list names
 ACTORS = ("gui", "cli")   # the person's own windows; an AI never accepts a licence
 LICENCE_MAX = 512 * 1024  # the most of a licence text read from its address
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -116,6 +117,19 @@ def entries(folder: Path) -> List[VendorEntry]:
                 continue
             seen.add(vf.name)
             out.append(VendorEntry(tid, str(fmt.get("id") or ""), vf))
+    # the vendor files of the dependency list (Core/target_dependencies.py) go through the same guided fetch
+    for item in (record.get("dependencies") if isinstance(record, dict) else None) or []:
+        if not isinstance(item, dict) or item.get("kind") != "vendor_file":
+            continue
+        try:
+            vf = VendorFile.model_validate({"name": item.get("name"), "url": item.get("url"),
+                                            "licence_url": item.get("licence_url"), "purpose": item.get("note") or "",
+                                            "sha256": item.get("sha256"), "dest": item.get("dest")})
+        except ValueError:
+            continue   # the folder check names it (module_generator.template_variable_problems)
+        if vf.name not in seen:
+            seen.add(vf.name)
+            out.append(VendorEntry(tid, DEPENDENCY_FORMAT, vf))
     return out
 
 

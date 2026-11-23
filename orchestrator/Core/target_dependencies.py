@@ -132,8 +132,11 @@ def statuses(entries: Iterable[Dependency], run: Optional[Callable[[Sequence[str
         gap = e.is_gap
         if e.kind == "board_driver":
             out.append(Status(e, "board", e.note, gap))
-        elif e.kind == "vendor_file" and not (have_vendor_file and have_vendor_file(e)):
-            out.append(Status(e, "waiting", f"fetch it under your own licence acceptance from {e.url}", gap))
+        elif e.kind == "vendor_file":
+            if have_vendor_file and have_vendor_file(e):
+                out.append(Status(e, "present", "in your vendor store", gap))
+            else:
+                out.append(Status(e, "waiting", f"fetch it under your own licence acceptance from {e.url}", gap))
         elif not e.check:
             out.append(Status(e, "unchecked", "", gap))
         elif not _allowed(e):
@@ -143,6 +146,19 @@ def statuses(entries: Iterable[Dependency], run: Optional[Callable[[Sequence[str
             out.append(Status(e, "present" if code == 0 else "missing", "" if code == 0 else f"the check exited {code}",
                               gap))
     return out
+
+
+def vendor_checker(state_dir: Any, folder: Path) -> Callable[[Dependency], bool]:
+    """`have_vendor_file` for `statuses`: whether the person's vendor store (Core/vendor_files.py) holds the file that
+    a vendor_file entry names. The store keeps a file only after the person accepted its licence (the guided fetch), so
+    its presence is the person's yes."""
+    from orchestrator.Core import vendor_files
+    known = {e.file.name: e for e in vendor_files.entries(Path(folder))}
+
+    def have(entry: Dependency) -> bool:
+        found = known.get(entry.name)
+        return found is not None and vendor_files.stored(state_dir, found) is not None
+    return have
 
 
 def install_plan(entries: Iterable[Dependency]) -> InstallPlan:
