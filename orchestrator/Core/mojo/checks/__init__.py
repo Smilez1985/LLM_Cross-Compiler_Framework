@@ -22,8 +22,9 @@ from orchestrator.Core.mojo.checks.secrets import check_secrets
 from orchestrator.Core.mojo.checks.state import check_user_state
 from orchestrator.Core.mojo.checks.targets import check_targets
 from orchestrator.Core.mojo.checks.tools import check_tool_policy
+from orchestrator.Core.mojo.checks.versions import check_versions
 
 __all__ = ["FREE_SPACE_HINT", "_storage_findings", "check_calibration", "check_chat_feed", "check_community",
            "check_dependencies", "check_devices", "check_disk", "check_docker", "check_doorbell", "check_knowledge",
            "check_python", "check_runtime", "check_runtime_layer",
-           "check_secrets", "check_targets", "check_tool_policy", "check_user_state"]
+           "check_secrets", "check_targets", "check_tool_policy", "check_user_state", "check_versions"]
