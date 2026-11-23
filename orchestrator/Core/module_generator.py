@@ -60,9 +60,13 @@ IMAGE_RE = re.compile(r"^(?:[a-z0-9][a-z0-9.-]*(?::\d{1,5})?/)?[a-z0-9][a-z0-9._
 # are an explicit opt-in pinned by digest (decision D6): the GPU template provisions CUDA from the pinned redist
 # archives instead.
 TRUSTED_IMAGE_PREFIXES = ("debian:", "ubuntu:", "rocm/dev-ubuntu-", "rocm/rocm-terminal:", "python:")
-# The prebuilt CUDA base the GPU template accepts as opt-in: a development image on the Ubuntu release of its runtime
-# stage (the Python environment is copied from one stage to the other), pinned by digest.
-CUDA_OPT_IN_RE = re.compile(r"^nvidia/cuda:[\w.-]+-devel-ubuntu(?:22|24)\.04@sha256:[a-f0-9]{64}$")
+# The prebuilt CUDA base the GPU template accepts as opt-in: a development image of any CUDA version X.Y.Z (NVIDIA's
+# cuDNN variant included) on any Ubuntu release YY.MM, pinned by digest. It is valid only when the runtime catalogue
+# pins a base of that release (build_bases, id ubuntu-YY.MM): the runtime stage goes on it, because the Python
+# environment is copied from one stage to the other. A new CUDA or Ubuntu release needs no change here, only its base
+# in the catalogue. Groups: the CUDA version, the Ubuntu release.
+CUDA_OPT_IN_RE = re.compile(r"^nvidia/cuda:(\d{1,2}\.\d{1,2}\.\d{1,3})(?:-cudnn\d*)?-devel-ubuntu(\d{2}\.\d{2})"
+                            r"@sha256:[a-f0-9]{64}$")
 DETECTION_RE = re.compile(r"^[\w ./=-]{0,200}$")
 SHELL_DENY_PATTERNS = [
     # Generated build code must not fetch anything: downloads belong in a reviewed Dockerfile, and build
@@ -403,6 +407,34 @@ def _catalog_base(base_id: str) -> Optional[str]:
         return None
 
 
+def _catalog_ubuntu_releases() -> List[str]:
+    """The Ubuntu releases the runtime catalogue pins a build base of (ids ubuntu-YY.MM), oldest first; empty when the
+    catalogue cannot be read. The prebuilt CUDA opt-in accepts exactly these."""
+    try:
+        from orchestrator.runtime.catalog import load_catalog
+        releases = {m.group(1) for b in load_catalog().build_bases if (m := re.fullmatch(r"ubuntu-(\d{2}\.\d{2})", b.id))}
+    except Exception:  # noqa: BLE001 - an unreadable catalogue: no release is known, the caller refuses
+        return []
+    return sorted(releases, key=lambda r: tuple(int(x) for x in r.split(".")))
+
+
+def cuda_opt_in_problem(base_os: str) -> Optional[str]:
+    """Why a prebuilt NVIDIA image cannot be the GPU template's opt-in (None when it can): a digest-pinned
+    nvidia/cuda:X.Y.Z-devel-ubuntuYY.MM image on an Ubuntu release the runtime catalogue pins. The releases named in
+    the refusal come from the catalogue, so a new one is offered as soon as its base is pinned there."""
+    match = CUDA_OPT_IN_RE.fullmatch(base_os)
+    releases = _catalog_ubuntu_releases()
+    if match and match.group(2) in releases:
+        return None
+    known = ", ".join(releases) if releases else "none: the runtime catalogue cannot be read"
+    if match:
+        return (f"base_os: the runtime catalogue pins no Ubuntu {match.group(2)} base for the runtime stage of this "
+                f"NVIDIA image (Ubuntu releases it pins: {known})")
+    return ("base_os: a prebuilt NVIDIA image is an opt-in for the GPU template and must be an "
+            "nvidia/cuda:<X.Y.Z>-devel-ubuntu<YY.MM> image pinned by digest, on an Ubuntu release the runtime "
+            f"catalogue pins ({known}); without it CUDA comes from NVIDIA's pinned redist archives")
+
+
 def vendor_blocks(data: Dict[str, Any]) -> Dict[str, str]:
     """The Dockerfile blocks for a validated module's vendor sources, pip packages and downloads ("" for none)."""
     blocks = {"# [VENDOR_SOURCES]": "", "# [PIP_PACKAGES]": "", "# [PINNED_DOWNLOADS]": "",
@@ -546,10 +578,8 @@ def validate_module_data(data: Dict[str, Any]) -> Dict[str, Any]:
         problems.append("base_os: not a valid image reference")
     elif "@sha256:" not in base_os and not base_os.startswith(TRUSTED_IMAGE_PREFIXES):
         problems.append(f"base_os: '{base_os}' must be pinned by digest (image@sha256:...) unless it is an official base image")
-    elif base_os.startswith("nvidia/cuda:") and not CUDA_OPT_IN_RE.fullmatch(base_os):
-        problems.append("base_os: a prebuilt NVIDIA image is an opt-in for the GPU template and must be an "
-                        "nvidia/cuda:<version>-devel-ubuntu22.04 or -ubuntu24.04 image pinned by digest; without it CUDA comes from "
-                        "NVIDIA's pinned redist archives")
+    elif base_os.startswith("nvidia/cuda:") and (opt_in_problem := cuda_opt_in_problem(base_os)):
+        problems.append(opt_in_problem)
     elif is_prebuilt_llama_image(base_os):
         problems.append(f"base_os: '{base_os}' is a prebuilt llama.cpp image; targets build llama.cpp from source "
                         "with the shared recipe")
@@ -1440,15 +1470,15 @@ class ModuleGenerator:
     @staticmethod
     def _cuda_opt_in(content: str, base_os: str) -> str:
         """The GPU template with a prebuilt NVIDIA development image as the builder's base: the explicit opt-in of
-        decision D6 (validate_module_data accepts only a digest-pinned *-devel-ubuntu22.04 or -ubuntu24.04 image),
-        labelled through CUDA_SOURCE=prebuilt-image. The label carries the CUDA version of the image's tag, and the
-        runtime stage goes on the same Ubuntu release as the image (from the runtime catalogue's pinned bases): the
-        Python environment is copied from the builder and must match. Every other base keeps the template: CUDA from
-        the pinned redist archives."""
+        decision D6 (validate_module_data accepts only a digest-pinned nvidia/cuda:X.Y.Z-devel-ubuntuYY.MM image on
+        an Ubuntu release the runtime catalogue pins, cuda_opt_in_problem), labelled through CUDA_SOURCE=prebuilt-image.
+        The label carries the CUDA version of the image's tag, and the runtime stage goes on the same Ubuntu release as
+        the image (from the runtime catalogue's pinned bases): the Python environment is copied from the builder and
+        must match. Every other base keeps the template: CUDA from the pinned redist archives."""
         if not base_os.startswith("nvidia/cuda:"):
             return content
-        release = re.search(r"-devel-ubuntu(\d\d\.04)@", base_os)
-        runtime = _catalog_base(f"ubuntu-{release.group(1)}") if release else None
+        match = CUDA_OPT_IN_RE.fullmatch(base_os)
+        runtime = _catalog_base(f"ubuntu-{match.group(2)}") if match else None
         if runtime is None:
             raise ValueError("the runtime catalogue has no pinned base of the Ubuntu release of this NVIDIA image")
         content, stages = re.subn(r"^FROM \S+ AS builder$", f"FROM {base_os} AS builder", content, count=1,
@@ -1457,9 +1487,8 @@ class ModuleGenerator:
                                     flags=re.MULTILINE)
         content, sources = re.subn(r"^ARG CUDA_SOURCE=redist$", "ARG CUDA_SOURCE=prebuilt-image", content, count=1,
                                    flags=re.MULTILINE)
-        version = re.match(r"nvidia/cuda:(\d+\.\d+\.\d+)-devel-", base_os)
-        content, versions = re.subn(r"^ARG CUDA_VERSION=\S+$", f"ARG CUDA_VERSION={version.group(1)}" if version
-                                    else "ARG CUDA_VERSION=prebuilt", content, count=1, flags=re.MULTILINE)
+        content, versions = re.subn(r"^ARG CUDA_VERSION=\S+$", f"ARG CUDA_VERSION={match.group(1)}", content, count=1,
+                                    flags=re.MULTILINE)
         if (stages, runtimes, sources, versions) != (1, 1, 1, 1):
             raise ValueError("the GPU template has no builder and runtime stage, CUDA_SOURCE or CUDA_VERSION to switch "
                              "to the prebuilt image")

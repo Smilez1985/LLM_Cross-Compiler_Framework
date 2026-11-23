@@ -885,3 +885,85 @@ class TestPin:
         for image in CATALOG.cuda.prebuilt_images:
             assert "@sha256:" in image.image and image.opt_in is True
         assert all("@sha256:" in b.image for b in CATALOG.build_bases)
+
+
+class TestTheGpuTemplateFollowsTheCatalogue:
+    """The GPU template's base, CUDA and opt-in example follow the newest values of configs/llama_runtime.yml that fit
+    (orchestrator/runtime/build/pins.py, gpu_template_places): a newer Ubuntu base or CUDA toolkit there turns this red
+    until the template is moved on, so the next update starts from a failing test, not from scratch."""
+
+    WHATS = ("FROM ... AS builder", "FROM ... AS runtime", "ARG CUDA_VERSION", "ARG CUDA_REDIST_MANIFEST_SHA256",
+             "ARG CUDA_COMPONENTS", "ARG CUDA_REDIST_BASE_URL", "the example of the prebuilt opt-in")
+
+    @staticmethod
+    def root_with_template(tmp_path: Path) -> Path:
+        root = tmp_path / "repo"
+        (root / "targets" / "_template").mkdir(parents=True)
+        (root / pins.GPU_TEMPLATE).write_text((ROOT / pins.GPU_TEMPLATE).read_text(encoding="utf-8"), encoding="utf-8")
+        return root
+
+    @staticmethod
+    def catalog_with(bases=(), toolkits=(), images=()) -> RuntimeCatalog:
+        data = CATALOG.model_dump(mode="json")
+        data["build_bases"] += list(bases)
+        data["cuda"]["toolkits"] += list(toolkits)
+        data["cuda"]["prebuilt_images"] += list(images)
+        return RuntimeCatalog.model_validate(data)
+
+    @staticmethod
+    def toolkit(version: str, gcc=("6", "17"), platforms=("linux-x86_64", "linux-sbsa"), components=None) -> dict:
+        return {"version": version, "manifest": {"name": f"redistrib_{version}.json", "size": 50000, "sha256": "e" * 64},
+                "components": components or ["cuda_nvcc", "cuda_crt", "libnvvm", "cuda_cudart", "cccl", "libcublas"],
+                "platforms": list(platforms), "compute_caps": {"min": "7.5", "max": "12.1"},
+                "host_compilers": {"gcc": list(gcc)}}
+
+    UBUNTU_28 = {"id": "ubuntu-28.04", "libc": "glibc", "libc_version": "2.47", "gcc": "16.1", "opt_in": True,
+                 "image": "ubuntu:28.04@sha256:" + "a" * 64}
+
+    def test_every_place_of_the_template_is_the_newest_that_fits(self):
+        places = pins.gpu_template_places(CATALOG)
+        assert [p.what.split(" (")[0] for p in places] == list(self.WHATS)
+        assert not pins.mismatches(places), [(p.what, p.found, p.expected) for p in pins.mismatches(places)]
+        assert {p.path for p in places} == {pins.GPU_TEMPLATE}
+        # The pin-place list of the repository carries them, so the pin-bump check shows them too.
+        assert set(places) <= set(pins.pin_places(PIN))
+
+    def test_the_newest_base_and_toolkit_are_chosen_from_the_catalogue(self):
+        base = pins.newest_ubuntu_base(CATALOG)
+        assert base.id == max((b.id for b in CATALOG.build_bases if b.id.startswith("ubuntu-")),
+                              key=lambda i: tuple(int(x) for x in i.split("-")[1].split(".")))
+        toolkit = pins.newest_fitting_toolkit(CATALOG, base)
+        gcc = int(base.gcc.split(".")[0])
+        assert int(toolkit.host_compilers.gcc[0]) <= gcc <= int(toolkit.host_compilers.gcc[1])
+        assert "linux-x86_64" in toolkit.platforms
+
+    def test_a_newer_ubuntu_and_cuda_in_the_catalogue_turn_the_template_red(self, tmp_path):
+        root = self.root_with_template(tmp_path)
+        catalog = self.catalog_with(
+            bases=[self.UBUNTU_28], toolkits=[self.toolkit("14.0.1", components=["cuda_nvcc", "cuda_cudart", "libcublas"])],
+            images=[{"id": "cuda-14.0.1-devel-ubuntu26.04", "cuda": "14.0.1", "opt_in": True,
+                     "image": "nvidia/cuda:14.0.1-devel-ubuntu26.04@sha256:" + "b" * 64}])
+        bad = {p.what.split(" (")[0]: p.expected for p in pins.mismatches(pins.gpu_template_places(catalog, root))}
+        assert bad == {"FROM ... AS builder": self.UBUNTU_28["image"], "FROM ... AS runtime": self.UBUNTU_28["image"],
+                       "ARG CUDA_VERSION": "14.0.1", "ARG CUDA_REDIST_MANIFEST_SHA256": "e" * 64,
+                       "ARG CUDA_COMPONENTS": "cuda_nvcc cuda_cudart libcublas",
+                       "the example of the prebuilt opt-in": "nvidia/cuda:14.0.1-devel-ubuntu26.04@sha256:" + "b" * 64}
+
+    def test_a_toolkit_that_cannot_build_on_the_base_is_not_the_newest_that_fits(self, tmp_path):
+        # nvcc of the new toolkit does not take the base's gcc, or it has no redist archives for x86-64 Linux: the
+        # template stays on the toolkit it has.
+        root = self.root_with_template(tmp_path)
+        catalog = self.catalog_with(toolkits=[self.toolkit("14.0.1", gcc=("6", "14")),
+                                              self.toolkit("14.1.0", platforms=("windows-x86_64",))])
+        assert pins.mismatches(pins.gpu_template_places(catalog, root)) == []
+
+    def test_a_catalogue_without_a_fitting_toolkit_is_a_mismatch_not_a_crash(self, tmp_path):
+        root = self.root_with_template(tmp_path)
+        data = CATALOG.model_dump(mode="json")
+        data["build_bases"].append(self.UBUNTU_28 | {"gcc": "30.1"})
+        bad = {p.what.split(" (")[0]: p.expected
+               for p in pins.mismatches(pins.gpu_template_places(RuntimeCatalog.model_validate(data), root))}
+        assert bad["ARG CUDA_VERSION"] == pins.NO_FITTING and bad["ARG CUDA_COMPONENTS"] == pins.NO_FITTING
+
+    def test_without_the_template_there_is_nothing_to_compare(self, tmp_path):
+        assert pins.gpu_template_places(CATALOG, tmp_path) == []

@@ -943,15 +943,23 @@ Die llama.cpp-Konvertierungswerkzeuge bleiben CPU-Builds; GPU-Werkzeuge sind ein
 
 Das vorgebaute Entwicklungs-Image von NVIDIA ist ein ausdrücklicher Opt-in: Wähle
 `nvidia/cuda:13.4.2-devel-ubuntu24.04@sha256:7005688f5eaa5a9aaa9e555f546107c4454446a543347fd48b0bdb63ea027ad2` (oder
-ein anderes per Digest festgelegtes `-devel-ubuntu22.04`- oder `-devel-ubuntu24.04`-Image) selbst als Basis-Image im Assistenten oder bei
+ein anderes per Digest festgelegtes `nvidia/cuda:<X.Y.Z>-devel-ubuntu<YY.MM>`-Image auf einer Ubuntu-Version, deren
+Basis der Laufzeit-Katalog festlegt; eine Ablehnung nennt diese Versionen) selbst als Basis-Image im Assistenten oder bei
 `module create`. Dittos Vorschläge enthalten nie ein `nvidia/cuda`-Image: Ein Vorschlag mit einem solchen geht einmal
 an Ditto zurück und wird sonst abgelehnt, weil eine Probe-Datei den Vorschlag lenken könnte. Der Generator nutzt das
 Image dann für die Builder-Stufe und setzt `CUDA_SOURCE=prebuilt-image`, das das Image als Label
 `org.llm-framework.cuda-source` trägt; das Toolkit wird dann nicht aus dem festgelegten Manifest bereitgestellt, und
 das Log des Generators und das Log des Image-Builds sagen „not self-built“. Das Label `CUDA_VERSION` trägt die
-CUDA-Version aus dem Tag des Images, und die Laufzeitstufe geht auf dieselbe Ubuntu-Version wie das Image (22.04 oder
-24.04, per Digest aus dem Laufzeit-Katalog festgelegt), weil die Python-Umgebung von einer Stufe in die andere kopiert
-wird.
+CUDA-Version aus dem Tag des Images, und die Laufzeitstufe geht auf dieselbe Ubuntu-Version wie das Image (per Digest
+aus dem Laufzeit-Katalog festgelegt: heute 22.04, 24.04 und 26.04), weil die Python-Umgebung von einer Stufe in die
+andere kopiert wird. Eine neue CUDA- oder Ubuntu-Version braucht keine Änderung am Generator, nur ihre Basis in
+`build_bases` von `configs/llama_runtime.yml`.
+
+Die Vorlage folgt dem Katalog: Beide Stufen stehen auf seiner neuesten Ubuntu-Basis, und `CUDA_VERSION`,
+`CUDA_REDIST_MANIFEST_SHA256` und `CUDA_COMPONENTS` sind die seines neuesten Toolkits, das nvcc mit dem gcc dieser Basis
+nutzen kann. Bekommt der Katalog eine neuere Basis oder ein neueres Toolkit, scheitert `tests/test_build_recipe.py`, bis
+die Vorlage nachzieht; `python scripts/llama_cpp_pin.py check --local` listet jede dieser Stellen neben der
+llama.cpp-Festlegung.
 
 Eine GPU unter Compute Capability 7.5 (eine GTX-10er-Serie, Pascal, Volta) bedient CUDA 13 nicht: Setze `CUDA_VERSION`,
 `CUDA_REDIST_MANIFEST_SHA256` und `CUDA_COMPONENTS` eines älteren Toolkits aus `cuda.toolkits` in der `target.yml` des

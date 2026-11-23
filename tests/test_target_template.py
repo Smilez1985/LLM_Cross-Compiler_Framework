@@ -382,10 +382,47 @@ def test_a_prebuilt_image_of_ubuntu_24_04_puts_the_runtime_stage_on_the_same_rel
     assert validate_target_folder(target) == []
 
 
+def test_a_prebuilt_image_of_ubuntu_26_04_puts_the_runtime_stage_on_the_same_release(tmp_path):
+    # Any Ubuntu release the runtime catalogue pins a base of, the opt-in base of the GPU template included.
+    from orchestrator.runtime.catalog import load_catalog
+    ubuntu_26 = next(b.image for b in load_catalog().build_bases if b.id == "ubuntu-26.04")
+    image = "nvidia/cuda:13.4.2-cudnn-devel-ubuntu26.04@sha256:" + "8" * 64
+    target = generate(tmp_path, module_name="GPU Opt 26", architecture="x86_64", sdk="cuda", base_os=image)
+    dockerfile = (target / "Dockerfile").read_text()
+    assert f"FROM {image} AS builder" in dockerfile and f"FROM {ubuntu_26} AS runtime" in dockerfile
+    assert re.search(r"^ARG CUDA_VERSION=13\.4\.2$", dockerfile, re.M)
+    assert validate_target_folder(target) == []
+
+
+def test_a_new_ubuntu_and_cuda_release_is_taken_once_the_catalogue_pins_its_base(tmp_path, monkeypatch):
+    # CUDA 14 on Ubuntu 28.04 needs no change in the generator: refused while the catalogue has no ubuntu-28.04 base
+    # (the refusal names the releases it has), taken as soon as it has one.
+    from orchestrator.runtime import catalog as runtime_catalog
+    image = "nvidia/cuda:14.0.1-devel-ubuntu28.04@sha256:" + "9" * 64
+    (tmp_path / "before").mkdir()
+    (tmp_path / "after").mkdir()
+    with pytest.raises(ValueError, match=r"pins no Ubuntu 28\.04 base .*22\.04, 24\.04, 26\.04\)"):
+        generate(tmp_path / "before", module_name="GPU Next", architecture="x86_64", sdk="cuda", base_os=image)
+    real = runtime_catalog.load_catalog()
+    data = real.model_dump(mode="json")
+    ubuntu_28 = "ubuntu:28.04@sha256:" + "a" * 64
+    data["build_bases"].append({"id": "ubuntu-28.04", "libc": "glibc", "libc_version": "2.47", "gcc": "16.1",
+                                "opt_in": True, "image": ubuntu_28})
+    newer = runtime_catalog.RuntimeCatalog.model_validate(data)
+    monkeypatch.setattr(runtime_catalog, "load_catalog", lambda path=None: newer)
+    target = generate(tmp_path / "after", module_name="GPU Next", architecture="x86_64", sdk="cuda", base_os=image)
+    dockerfile = (target / "Dockerfile").read_text()
+    assert f"FROM {image} AS builder" in dockerfile and f"FROM {ubuntu_28} AS runtime" in dockerfile
+    assert re.search(r"^ARG CUDA_VERSION=14\.0\.1$", dockerfile, re.M)
+
+
 @pytest.mark.parametrize("base_os, message", [
     ("nvidia/cuda:12.2.2-devel-ubuntu22.04", "must be pinned by digest"),
-    ("nvidia/cuda:13.0.2-devel-ubuntu20.04@sha256:" + "5" * 64, "devel-ubuntu22.04 or -ubuntu24.04 image pinned by digest"),
-    ("nvidia/cuda:12.9.1-runtime-ubuntu22.04@sha256:" + "6" * 64, "devel-ubuntu22.04 or -ubuntu24.04 image pinned by digest"),
+    ("nvidia/cuda:13.0.2-devel-ubuntu20.04@sha256:" + "5" * 64,
+     r"pins no Ubuntu 20\.04 base .*\(Ubuntu releases it pins: 22\.04, 24\.04, 26\.04\)"),
+    ("nvidia/cuda:12.9.1-runtime-ubuntu22.04@sha256:" + "6" * 64,
+     r"nvidia/cuda:<X\.Y\.Z>-devel-ubuntu<YY\.MM> image pinned by digest, .*\(22\.04, 24\.04, 26\.04\)"),
+    ("nvidia/cuda:latest-devel-ubuntu24.04@sha256:" + "6" * 64, r"nvidia/cuda:<X\.Y\.Z>-devel-ubuntu<YY\.MM>"),
     ("ghcr.io/ggml-org/llama.cpp:full@sha256:" + "7" * 64, "prebuilt llama.cpp image"),
 ])
 def test_unpinned_or_prebuilt_bases_are_refused(tmp_path, base_os, message):

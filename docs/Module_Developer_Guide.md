@@ -905,14 +905,21 @@ tools are a later step of the recipe.
 
 NVIDIA's prebuilt development image is an explicit opt-in: choose
 `nvidia/cuda:13.4.2-devel-ubuntu24.04@sha256:7005688f5eaa5a9aaa9e555f546107c4454446a543347fd48b0bdb63ea027ad2` (or
-another `-devel-ubuntu22.04` or `-devel-ubuntu24.04` image pinned by digest) as the base image yourself, in the wizard or `module create`.
+another `nvidia/cuda:<X.Y.Z>-devel-ubuntu<YY.MM>` image pinned by digest, on an Ubuntu release the runtime catalogue
+pins a base of; a refusal names those releases) as the base image yourself, in the wizard or `module create`.
 Ditto's proposals never carry an `nvidia/cuda` image: one that does is sent back to Ditto once and otherwise refused,
 because a probe file could steer the proposal. The generator then uses the image for the builder stage and sets
 `CUDA_SOURCE=prebuilt-image`, which the image carries as the label `org.llm-framework.cuda-source`; the toolkit is
 then not provisioned from the pinned manifest, and the generator's log and the image build's log say "not
 self-built". The label `CUDA_VERSION` carries the CUDA version of the image's tag, and the runtime stage goes on the
-same Ubuntu release as the image (22.04 or 24.04, pinned by digest from the runtime catalogue), because the Python
-environment is copied from one stage to the other.
+same Ubuntu release as the image (pinned by digest from the runtime catalogue: today 22.04, 24.04 and 26.04),
+because the Python environment is copied from one stage to the other. A new CUDA or Ubuntu release needs no change in
+the generator, only its base in `build_bases` of `configs/llama_runtime.yml`.
+
+The template follows the catalogue: both stages are on its newest Ubuntu base, and `CUDA_VERSION`,
+`CUDA_REDIST_MANIFEST_SHA256` and `CUDA_COMPONENTS` are those of its newest toolkit that nvcc can use with that base's
+gcc. When the catalogue gets a newer base or toolkit, `tests/test_build_recipe.py` fails until the template is moved
+on; `python scripts/llama_cpp_pin.py check --local` lists each of these places beside the llama.cpp pin.
 
 A GPU below compute capability 7.5 (a GTX 10 series, Pascal, Volta) is not served by CUDA 13: set `CUDA_VERSION`,
 `CUDA_REDIST_MANIFEST_SHA256` and `CUDA_COMPONENTS` of an older toolkit of `cuda.toolkits` in the module's

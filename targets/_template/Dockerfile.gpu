@@ -15,7 +15,13 @@
 # set CUDA_SOURCE=prebuilt-image and CUDA_VERSION to the image's version, and put the runtime stage on the same Ubuntu
 # release as that image (the Python environment is copied over and must match); the image is then labelled as built
 # with a prebuilt CUDA image, not self-built. The module generator does all of this when you choose a digest-pinned
-# nvidia/cuda:*-devel-ubuntu22.04 or -ubuntu24.04 image as base image yourself (an AI proposal never does).
+# nvidia/cuda:<X.Y.Z>-devel-ubuntu<YY.MM> image as base image yourself, on an Ubuntu release configs/llama_runtime.yml
+# pins a base of (an AI proposal never does).
+#
+# This template follows the newest versions of configs/llama_runtime.yml that fit (orchestrator/runtime/build/pins.py,
+# tests/test_build_recipe.py): both stages on the newest pinned Ubuntu base, CUDA_VERSION, the manifest's sha256 and the
+# components of the newest toolkit whose host compilers take that base's gcc, and the example above the newest
+# prebuilt image. A newer one in the catalogue turns the test red until this file is moved on.
 
 # ============================================================================
 # STAGE 1: Build Environment (CUDA toolkit)

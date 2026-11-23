@@ -8,8 +8,9 @@ Checks the llama.cpp pin (configs/llama_runtime.yml, llama_cpp.source) for a pin
 
 `check` runs `git ls-remote <repo> refs/tags/<tag>`: GitHub serves commits pushed to any fork through the upstream
 URL, so the commit alone fixes the content but not its origin; the tag on upstream does. It then lists every place
-that names the llama.cpp version (orchestrator/runtime/build/pins.py): derived and reference places must agree,
-legacy places are only reported. Exit code: 0 all good, 1 a mismatch, 2 usage or network error. In offline mode (the
+that names the llama.cpp version (orchestrator/runtime/build/pins.py) and the GPU template's places that follow the
+newest fitting base and CUDA toolkit of the catalogue: derived and reference places must agree, legacy places are only
+reported. Exit code: 0 all good, 1 a mismatch, 2 usage or network error. In offline mode (the
 framework's settings) the repository is reached only in the own network, as a mirror is (upstream_tag_commit), so the
 upstream check stops with the plain refusal; `check --local` needs no network.
 The procedure around it is in CONTRIBUTING.md ("Bumping the llama.cpp pin").

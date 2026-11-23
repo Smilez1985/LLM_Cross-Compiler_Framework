@@ -12,6 +12,14 @@ Every place in the repository that names the llama.cpp version, checked against 
   image (DESIGN U9); their LLAMA_CPP_PIN_TAG and LLAMA_CPP_PIN_COMMIT, the default of
   `source_module.sh --clone-llama-cpp`, are derived places.
 
+The GPU template (targets/_template/Dockerfile.gpu) follows the newest versions of the same catalogue that fit, so a
+newer Ubuntu base or CUDA toolkit there is a mismatch until the template is moved on (derived places, gpu_template_places):
+- both FROM lines: the newest pinned Ubuntu base of build_bases (opt_in included: only what pins a base names it);
+- ARG CUDA_VERSION, CUDA_REDIST_MANIFEST_SHA256, CUDA_COMPONENTS: the newest toolkit of cuda.toolkits for linux-x86_64
+  whose host_compilers.gcc takes the major version of that base's gcc (the toolkit nvcc accepts on the base);
+- ARG CUDA_REDIST_BASE_URL: cuda.redist_base_url;
+- the commented example of the prebuilt opt-in: the newest image of cuda.prebuilt_images.
+
 tests/test_build_recipe.py fails on any derived or reference mismatch; scripts/llama_cpp_pin.py prints the table.
 """
 
@@ -22,7 +30,7 @@ from typing import List, Optional
 
 import yaml
 
-from orchestrator.runtime.catalog import LlamaCppSource
+from orchestrator.runtime.catalog import BuildBase, CudaToolkit, LlamaCppSource, RuntimeCatalog, load_catalog, version_tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -33,6 +41,13 @@ _LEGACY_DEFAULT =re.compile(r'LLAMA_CPP_COMMIT="\$\{LLAMA_CPP_COMMIT:-([^}"]*)\}
 # The default of source_module.sh --clone-llama-cpp in the shipped stage modules (the pin, written out)
 _SOURCE_PIN_TAG = re.compile(r'^LLAMA_CPP_PIN_TAG="([^"]*)"$', re.MULTILINE)
 _SOURCE_PIN_COMMIT = re.compile(r'^LLAMA_CPP_PIN_COMMIT="([^"]*)"$', re.MULTILINE)
+# The GPU template's places that follow the catalogue
+GPU_TEMPLATE = "targets/_template/Dockerfile.gpu"
+_STAGE_FROM = r"^FROM\s+(\S+)\s+AS\s+{stage}\s*$"
+_GPU_ARG = r"^ARG\s+{name}=(.*?)\s*$"
+_OPT_IN_EXAMPLE = re.compile(r"^#\s+FROM\s+(nvidia/cuda:\S+)\s+AS\s+builder\s*$", re.MULTILINE)
+_UBUNTU_BASE = re.compile(r"^ubuntu-(\d{2}\.\d{2})$")
+NO_FITTING = "none fits"   # what a place expects when the catalogue has nothing that fits
 
 
 @dataclass(frozen=True)
@@ -115,7 +130,63 @@ def pin_places(source: LlamaCppSource, root: Path = REPO_ROOT) -> List[PinPlace]
             entry = ((_yaml(path) or {}).get("inference_backends") or {}).get("llama_cpp") or {}
             places.append(PinPlace(rel(path), "inference_backends.llama_cpp.commit", "reference",
                                    str(entry.get("commit")) if entry.get("commit") is not None else None, tag))
+    places.extend(gpu_template_places(load_catalog(root / "configs" / "llama_runtime.yml"), root))
     return places
+
+
+def newest_ubuntu_base(catalog: RuntimeCatalog) -> Optional[BuildBase]:
+    """The newest Ubuntu base of the catalogue's build_bases (id ubuntu-YY.MM), None when it pins none."""
+    bases = [b for b in catalog.build_bases if _UBUNTU_BASE.fullmatch(b.id)]
+    return max(bases, key=lambda b: version_tuple(_UBUNTU_BASE.fullmatch(b.id).group(1)), default=None)
+
+
+def newest_fitting_toolkit(catalog: RuntimeCatalog, base: Optional[BuildBase]) -> Optional[CudaToolkit]:
+    """The newest CUDA toolkit of the catalogue that builds on `base` for x86-64: redist archives for linux-x86_64,
+    and the major version of the base's gcc within the toolkit's host_compilers.gcc (nvcc checks the major version)."""
+    if base is None or catalog.cuda is None:
+        return None
+    gcc = version_tuple(base.gcc)[:1]
+    fitting = [t for t in catalog.cuda.toolkits
+               if "linux-x86_64" in t.platforms and t.host_compilers.gcc is not None
+               and version_tuple(t.host_compilers.gcc[0])[:1] <= gcc <= version_tuple(t.host_compilers.gcc[1])[:1]]
+    return max(fitting, key=lambda t: version_tuple(t.version), default=None)
+
+
+def gpu_template_places(catalog: RuntimeCatalog, root: Path = REPO_ROOT) -> List[PinPlace]:
+    """The GPU template's places, each against the newest value of the catalogue that fits ([] without the template)."""
+    path = root / GPU_TEMPLATE
+    if not path.is_file():
+        return []
+    text = path.read_text(encoding="utf-8")
+
+    def one(pattern: str) -> Optional[str]:
+        found = re.findall(pattern, text, re.MULTILINE)
+        return found[0].strip('"') if len(found) == 1 else None
+
+    base = newest_ubuntu_base(catalog)
+    toolkit = newest_fitting_toolkit(catalog, base)
+    image = base.image if base else NO_FITTING
+    cuda = catalog.cuda
+    newest_image = max(cuda.prebuilt_images, key=lambda i: version_tuple(i.cuda), default=None) if cuda else None
+    example = _OPT_IN_EXAMPLE.findall(text)
+    return [
+        PinPlace(GPU_TEMPLATE, "FROM ... AS builder (the newest Ubuntu base of build_bases)", "derived",
+                 one(_STAGE_FROM.format(stage="builder")), image),
+        PinPlace(GPU_TEMPLATE, "FROM ... AS runtime (the newest Ubuntu base of build_bases)", "derived",
+                 one(_STAGE_FROM.format(stage="runtime")), image),
+        PinPlace(GPU_TEMPLATE, "ARG CUDA_VERSION (the newest toolkit whose host compilers take the base's gcc)",
+                 "derived", one(_GPU_ARG.format(name="CUDA_VERSION")), toolkit.version if toolkit else NO_FITTING),
+        PinPlace(GPU_TEMPLATE, "ARG CUDA_REDIST_MANIFEST_SHA256 (that toolkit's manifest)", "derived",
+                 one(_GPU_ARG.format(name="CUDA_REDIST_MANIFEST_SHA256")),
+                 toolkit.manifest.sha256 if toolkit else NO_FITTING),
+        PinPlace(GPU_TEMPLATE, "ARG CUDA_COMPONENTS (that toolkit's components)", "derived",
+                 one(_GPU_ARG.format(name="CUDA_COMPONENTS")), " ".join(toolkit.components) if toolkit else NO_FITTING),
+        PinPlace(GPU_TEMPLATE, "ARG CUDA_REDIST_BASE_URL (cuda.redist_base_url)", "derived",
+                 one(_GPU_ARG.format(name="CUDA_REDIST_BASE_URL")), cuda.redist_base_url if cuda else NO_FITTING),
+        PinPlace(GPU_TEMPLATE, "the example of the prebuilt opt-in (the newest image of cuda.prebuilt_images)",
+                 "derived", example[0] if len(example) == 1 else None,
+                 newest_image.image if newest_image else NO_FITTING),
+    ]
 
 
 def mismatches(places: List[PinPlace]) -> List[PinPlace]:

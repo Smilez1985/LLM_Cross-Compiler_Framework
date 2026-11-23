@@ -160,8 +160,11 @@ class TestTheRecipeInTheDockerfiles:
         assert values["CUDA_REDIST_BASE_URL"] == CATALOG.cuda.redist_base_url
         assert values["CUDA_COMPONENTS"].split() == list(toolkit.components)
         assert values["CUDA_SOURCE"] == "redist"
-        base = next(b for b in CATALOG.build_bases if b.id == "ubuntu-26.04")
+        # Which base it is comes from the template itself (that it is the newest that fits is
+        # tests/test_build_recipe.py's pin-place check): a pinned Ubuntu base of the catalogue, in both stages.
         froms = [rest.split()[0] for word, rest in instructions(gpu) if word == "FROM"]
+        base = next(b for b in CATALOG.build_bases if b.image == froms[0])
+        assert base.id.startswith("ubuntu-")
         assert froms == [base.image, base.image], "both stages on the pinned Ubuntu base, no nvidia/cuda image"
         opt_in = re.search(r"#\s+FROM (nvidia/cuda:\S+) AS builder", gpu).group(1)
         assert opt_in in {i.image for i in CATALOG.cuda.prebuilt_images if i.cuda == toolkit.version}
