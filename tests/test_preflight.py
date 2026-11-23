@@ -13,6 +13,7 @@
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -68,7 +69,8 @@ def codes(result):
 class TestTheTargetsGpuImage:
 
     def test_the_template_names_its_cuda_version(self):
-        assert preflight.gpu_image(TEMPLATE) == CUDA_12_9
+        named = re.search(r"^ARG CUDA_VERSION=(\S+)$", (TEMPLATE / "Dockerfile.gpu").read_text(encoding="utf-8"), re.M)
+        assert preflight.gpu_image(TEMPLATE) == preflight.GpuImage(True, named.group(1), "Dockerfile.gpu")
 
     def test_the_targets_build_args_win(self):
         image = preflight.gpu_image(TEMPLATE, {"CUDA_VERSION": "13.0.2"})

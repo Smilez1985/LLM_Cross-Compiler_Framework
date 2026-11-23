@@ -265,12 +265,15 @@ class CudaCatalog(_Strict):
 
 
 class BuildBase(_Strict):
-    """A builder container base for container and cross builds, chosen by the C library of the target machine."""
+    """A builder container base for container and cross builds, chosen by the C library of the target machine.
+    `opt_in`: never chosen by a machine's C library (the self-built server, Ditto's image), only named by what pins it
+    (the GPU template): a base is opened for the machines' builds once a build on it has run (ROADMAP "Step 7")."""
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
     libc: Literal["glibc", "musl"]
     libc_version: str = Field(pattern=r"^\d{1,3}(\.\d{1,5}){1,3}$")
     gcc: str = Field(pattern=_VERSION)
     image: str = Field(pattern=_IMAGE_BY_DIGEST, max_length=300)
+    opt_in: bool = False
 
 
 class BuildJobs(_Strict):

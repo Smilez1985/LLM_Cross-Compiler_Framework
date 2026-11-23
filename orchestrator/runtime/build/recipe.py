@@ -952,7 +952,7 @@ def choose_build_base(catalog: RuntimeCatalog, libc: Optional[str], libc_version
     target's. A target without LIBC_VERSION, or with an older C library than every base, is refused."""
     if libc is None:
         raise PlanError("the profile has no LIBC: probe the machine again before a build for it")
-    bases = [b for b in catalog.build_bases if b.libc == libc]
+    bases = [b for b in catalog.build_bases if b.libc == libc and not b.opt_in]
     if not bases:
         raise PlanError(f"the catalog has no builder base for {libc}")
     bases.sort(key=lambda b: version_tuple(b.libc_version), reverse=True)

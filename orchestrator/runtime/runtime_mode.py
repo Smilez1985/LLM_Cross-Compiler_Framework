@@ -511,7 +511,7 @@ def base_for_build(catalog: Any, build: Any, profile: Any) -> Tuple[Optional[Any
         return None, "this computer's C library is not known (probe it again: llm-cli scan)"
     try:
         fitting = sorted((b for b in catalog.build_bases
-                          if b.libc == libc and version_tuple(b.libc_version) >= version_tuple(version)),
+                          if b.libc == libc and not b.opt_in and version_tuple(b.libc_version) >= version_tuple(version)),
                          key=lambda b: version_tuple(b.libc_version))
     except (TypeError, ValueError):
         fitting = []
@@ -532,7 +532,7 @@ def image_base(catalog: Any, profile: Any) -> Tuple[Any, str]:
         return base, (f"{base.id}, the newest base whose C library is not newer than this computer's: the build also "
                       "runs bare metal")
     except PlanError as e:
-        glibc = sorted((b for b in catalog.build_bases if b.libc == "glibc"),
+        glibc = sorted((b for b in catalog.build_bases if b.libc == "glibc" and not b.opt_in),
                        key=lambda b: version_tuple(b.libc_version))
         if not glibc:
             raise RuntimeModeError("the catalog has no glibc builder base for Ditto's image") from None
