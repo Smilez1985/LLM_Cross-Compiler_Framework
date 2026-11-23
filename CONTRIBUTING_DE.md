@@ -1092,7 +1092,7 @@ Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
 ## 9. Commits und Pull-Requests
 
 - Branches: `development` ist der Arbeitszweig: Jeder Push, der das Repository direkt betrifft, geht zuerst dorthin.
-  `gate` ist die Sicherung (unten). `main` hält die echten Meilensteine, die, die die Version anheben, und übernimmt
+  `main` hält die echten Meilensteine, die, die die Version anheben, und übernimmt
   `development` per Pull-Request, sobald es stabil ist (CI grün unter Linux und Windows, geprüft). Zweige von
   `development` ab und richte deinen Pull-Request darauf; ein Thema je Pull-Request. Die CI läuft bei jedem Push
   auf `main` und `development` und bei jedem Pull-Request.
@@ -1105,14 +1105,16 @@ Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
   lassen, dünn besetzte Dateien, die echten Platz brauchen). Ein roter Lauf sperrt das Zusammenführen; lies sein Log,
   behebe den Fehler und starte neu. Bündle zusammengehörige Arbeit auf einem Zweig und lass die CI einmal dafür
   laufen, nicht für jeden Commit: Die Actions-Minuten werden geteilt.
-- **`development` ist der normale Kanal, `gate` nur das Backup:** Fertige Arbeit, die die lokalen Prüfungen bestanden
-  hat (Tests, ruff, Secret-Scan), geht gleich nach `development`, und ihre CI läuft bei diesem Push; `main` übernimmt nur
-  die Meilensteine, die die Version anheben, von `development` nach erfolgreicher CI. Behalte fertige Commits nicht in
-  der Arbeitsumgebung und halte sie nicht auf `gate` an: Eine Arbeitsumgebung kann flüchtig sein (sie war einmal
-  leer, und alles, was nicht in Git war, ging verloren), und `gate` ist das Backup dessen, was für `development` nicht
-  fertig ist, keine Station auf dem Weg dorthin. Fasse zusammengehörige lokale Commits vor dem Push zu einem zusammen,
-  damit eine Korrektur an schon gepushter Arbeit kein eigener Commit wird. Pushe nie auf einen neuen Zweig für das
-  Stück Arbeit: Das Remote hält nur `main`, `development`, `gate` und `deps/update`.
+- **`development` ist der eine Kanal:** Fertige Arbeit, die die lokalen Prüfungen bestanden hat (Tests, ruff,
+  Secret-Scan), geht gleich nach `development`, nie über einen anderen Zweig, und ihre CI läuft bei diesem Push; `main`
+  übernimmt nur die Meilensteine, die die Version anheben, von `development` nach erfolgreicher CI. Pushe nur, wenn
+  kein Workflow-Lauf des Repositorys läuft oder wartet: Auf `development` und `main` bricht ein Push keinen laufenden
+  Lauf mehr ab (`cancel-in-progress` steht in der `concurrency` der Workflows dort auf false; Pull-Requests und
+  andere Zweige brechen den älteren Lauf weiter ab), aber GitHub hält je Gruppe einen laufenden und einen wartenden
+  Lauf, und ein weiterer Push ersetzt den wartenden, sodass dessen Commit nie für sich geprüft wird. Fasse
+  zusammengehörige lokale Commits vor dem Push zu einem zusammen, damit eine Korrektur an schon gepushter Arbeit kein
+  eigener Commit wird. Pushe nie auf einen neuen Zweig für das Stück Arbeit: Das Remote hält nur `main`,
+  `development` und `deps/update`.
 - Commit-Nachrichten: eine Zusammenfassungszeile auf Englisch, im Imperativ, nur der erste Buchstabe groß, ohne
   Typ-Präfix, möglichst nicht länger als etwa 72 Zeichen. Beispiele aus der Historie: `Add a secret scan:
   pre-commit and pre-push hooks and a CI job` und `Pin the provider SDKs and local embeddings, drop LiteLLM and

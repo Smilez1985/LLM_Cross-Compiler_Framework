@@ -1017,7 +1017,7 @@ text:
 ## 9. Commits and pull requests
 
 - Branches: `development` is the working branch: every push that concerns the repository directly goes there first.
-  `gate` is the backup (below). `main` holds the real milestones, the ones that raise the version, and takes
+  `main` holds the real milestones, the ones that raise the version, and takes
   `development` in by a pull request once that is stable (CI green on Linux and Windows, reviewed). Branch from `development` and aim
   your pull request at it; one topic per pull request. CI runs on every push to `main` and `development` and on
   every pull request.
@@ -1029,14 +1029,15 @@ text:
   (files that cannot be deleted while read-only, sparse files that take real room). A red run blocks the merge;
   read its log, fix and run again. Bundle related work on one branch and run the CI once for it, not once per
   commit: the Actions minutes are shared.
-- **`development` is the normal channel, `gate` only the backup:** finished work that passed the local checks (tests,
-  ruff, secret scan) goes straight to `development`, and its CI runs on that push; `main` takes only the milestones that
-  raise the version, from `development` after a successful CI. Do not keep finished commits in the working
-  environment and do not stop them on `gate`: a working environment can be temporary (it was empty once, and
-  everything that was not in git was lost), and `gate` is the backup of what is not ready for `development`, not a
-  step on the way to it. Combine related local commits into one before the push, so that a fix for work that was
-  already pushed does not become a commit of its own. Never push to a new branch for the piece of work: the remote
-  holds only `main`, `development`, `gate` and `deps/update`.
+- **`development` is the one channel:** finished work that passed the local checks (tests, ruff, secret scan) goes
+  straight to `development`, never by way of another branch, and its CI runs on that push; `main` takes only the
+  milestones that raise the version, from `development` after a successful CI. Push only when no workflow run of the
+  repository is running or waiting: on `development` and `main` a push no longer cancels a running run (the
+  workflows' `concurrency` has `cancel-in-progress` false there; pull requests and other branches still cancel the
+  older run), but GitHub keeps one running and one pending run per group, and a further push replaces the pending
+  one, so its commit is never checked on its own. Combine related local commits into one before the push, so that a
+  fix for work that was already pushed does not become a commit of its own. Never push to a new branch for the piece
+  of work: the remote holds only `main`, `development` and `deps/update`.
 - Commit messages: a summary line in English, in the imperative, sentence case, no type prefix, ideally no longer
   than about 72 characters. Examples from the history: `Add a secret scan: pre-commit and pre-push hooks and a CI
   job` and `Pin the provider SDKs and local embeddings, drop LiteLLM and tiktoken`. The body explains why.

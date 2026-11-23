@@ -11,7 +11,10 @@ permissions:
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # development and main never cancel a running run (maintainer, 2026-11-23: a push had cancelled a run minutes
+  # before its end); pull requests and other branches still cancel the older run. GitHub keeps one running and
+  # one pending run per group: a further push replaces the pending one (CONTRIBUTING.md section 9).
+  cancel-in-progress: ${{ github.ref != 'refs/heads/development' && github.ref != 'refs/heads/main' }}
 
 jobs:
   lint:
