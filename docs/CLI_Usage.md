@@ -3005,7 +3005,7 @@ them. The framework's AI tools see the names only.
 | `set TARGET NAME` | Sets or changes one value. `NAME` is `LOCAL_` and capital letters, digits or `_` (exit code 2 otherwise). The value is asked hidden. There is no option that takes it as an argument: the shell would keep it in its history. |
 | `set --stdin` | Reads the value from one line of standard input, for scripts. |
 | `remove TARGET NAME` | Removes one value (exit code 1 when the target has none of that name). |
-| `remove TARGET` | Removes all values of the target after asking (No is the default; without a terminal and without `--yes` nothing is removed, exit code 1). A module that still holds `${LOCAL_NAME}` of a removed value gets an empty variable in its next build. |
+| `remove TARGET` | Removes all values of the target after asking (No is the default; without a terminal and without `--yes` nothing is removed, exit code 1). A module that still holds `${LOCAL_NAME}` of a removed value stops at it in its next build (the stage modules run with `set -u`: "unbound variable"). |
 | `remove --yes` | Without a `NAME`: removes all values without asking, for scripts. |
 
 In the GUI the same is the box "Private values of this module" in the edit step (the wizard's last page and Build >

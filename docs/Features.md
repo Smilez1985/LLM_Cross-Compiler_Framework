@@ -1138,13 +1138,31 @@ Before text goes to a cloud provider, personal data is replaced (setting `ai_sec
 
 | Level | Replaced |
 |---|---|
-| `OFF` | only secrets (API keys, tokens); they are always removed, and never restored |
+| `OFF` | only secrets (API keys, tokens, passwords that only their place gives away); they are always replaced, see below |
 | `BALANCED` | also IPv4/IPv6 and MAC addresses, e-mail addresses, `user@host` logins, user names in home paths |
 | `STRICT` (default) | also host names announced in probe files, serial numbers, UUIDs and the directories of absolute paths (system paths such as `/usr/` stay readable) |
 
 The placeholders look like `<IP_1a2b3c4d>`. They are derived from the value with a key that is created once per
 installation, so the same value always gets the same placeholder. Placeholders in the answer are turned back into
 the real values on your computer. Local providers are never filtered.
+
+**Secrets** get a placeholder of their own, `<SECRET_1a2b3c4d>`, built the same way (a key format, and a password or
+token that only its place gives away, such as `--password X`, `password: X` or `sshpass -p X`). The value comes back
+only in the text of the answer you read. The history, the arguments of a tool and a structured result keep the
+placeholder, so a secret never travels on through them; credential headers and query parameters are hidden for good,
+a web search query never carries a secret or its placeholder, and a pack's scrub still redacts for good. No tool of
+the framework takes a secret from the model's arguments today (a board is reached with the framework's own paired
+key), so a tool that needs a secret by a credential name is **planned**, not built.
+
+**The filter notice:** for a cloud provider, a small symbol at the edge of the chat panel tells you quietly what the
+filter replaces. While you type, the stretches of your field that the filter will replace are underlined with a wavy
+line, and the symbol's mouse-over lists them by place (your input, history, system prompt, tool results, knowledge
+excerpts, tool arguments) and kind with a count, so you see it before anything is sent. After the answer it lists the
+whole request and what was put back in the answer, and your sent question and the answer carry the same underline (a
+value that the chat already shows as `REDACTED` in your own message has nothing to underline there). A
+secret is named by a short label (`SECRET_1`), never by its value. A click, an empty field or the next question hides
+it; nothing is shown for a local model or when nothing is replaced. `llm-cli ditto ask` prints one dim line with the
+same list on standard error. The marks in a tool's confirmation are **planned**.
 
 ### Structured answers and the dangerous-command filter
 
@@ -3441,6 +3459,33 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   AI, never a run without a terminal), recorded with the text's sha256. You download the file on the vendor's page and
   give it (checked by its sha256, kept in your own vendor store), or the framework downloads a file the target pins as
   public and direct. A build copies it from there into its image and stops, naming the fetch, while one is missing.
+- **Values private to this computer stay out of the module:** the wizard's setup commands and quantization logic are
+  searched for what is private (a path on a network drive, a Windows path, an internal domain, the key file of
+  `ssh -i`, a password or token that only its place gives away); each value is replaced by `${LOCAL_NAME}` in the
+  module and written to your own file `modules_env/<target>.env` (mode 0600, never in a module folder or a pack, in
+  `.gitignore`). A build hands the file to the stages read-only and never bakes it into an image layer; the framework's
+  AI tools see the names only. `llm-cli module local list|set|remove` and the box "Private values of this module" in
+  the edit step show and change them (`--reveal` and **Show the Value** show a value on your own screen). The CPU and
+  CMake flags are not private (they describe the hardware) and take no `${...}`; a path a CMake option needs goes
+  through the setup commands.
+- **What the SDK and toolchain need, as a list:** `target.yml` can list dependencies (`template_variables.dependencies`):
+  a name, a pinned version, a kind (system package, pip package, vendor file, base image, board driver), where it comes
+  from, the source of the statement (an entry without one is a named gap), a check that only looks and whether the
+  licence lets it be passed on. A system package becomes a pinned apt package and a pip package a hash-checked wheel
+  in the Dockerfile of the build image, so the build installs it and your computer never does; a vendor file goes
+  through the guided fetch above and counts as there once it is in your vendor store; a driver or firmware of the board
+  is only listed. `llm-cli module create --dependencies FILE` and the wizard's field make the list, `llm-cli module deps`
+  and the box "Dependencies of this module" in the edit step show each entry as there, missing or waiting for your
+  yes. `llm-cli module propose-dependencies` and **Ditto: Propose Dependencies** let Ditto propose entries from the
+  probe and the crawled documentation: an entry whose source, name, version or wheel hash the cited text does not say
+  is a named gap, never an entry. **Planned, not built:** Deep Ingest keeping statements of requirements as facts for
+  the proposal, a Mojo finding and a Miracle repair for a missing dependency, and the Orange Pi 6 as the first case
+  (its NPU toolchain needs an application to the vendor; nothing for it is made yet).
+- **Deleting a module of your own:** `llm-cli module delete TARGET` and **Build > Targets... > Delete Module...** show
+  the exact list first (the module's folder and the file of its private values, counted, never shown); "No" is the
+  default, and it goes to the trash or for good, audited first. Only a module of your own targets folder: a target the
+  framework ships, a module installed from a pack (it leaves by uninstalling the pack) and a module that a running build
+  of this program uses are refused. No AI tool deletes a module.
 - **The device runtime in the module:** every new `target.yml` gets a `runtime:` block, the build recipe's plan for
   the board's llama.cpp runtime from the target's probe (the wizard's imported probe file, the probe file of
   `module generate-ai`, or `llm-cli module create --probe <file>`): architecture, OS, the C library the cross build
@@ -3805,7 +3850,9 @@ trash, the pack's pages are imported again at the next knowledge import.
   and `<mac>`, e-mail addresses `<email>`, JWTs `<jwt>`, the host name `<host>`, the user name `<user>`, and API
   keys are redacted. Loopback addresses, image digests, `git@` remotes and default accounts such as `root` or
   `runner` stay, so a scrubbed target still builds. The changes are shown as a diff before you share anything.
-  Binary files are refused. In a target, recipe or block, a probe's serial number, machine id, UUID and host name line and a
+  In the files of a target, recipe or block (scripts and YAML, where `<` and `>` are redirections of a shell) the marks
+  are words instead: `ip-removed`, `mac-removed`, `email-removed`, `jwt-removed`, `host-removed`, `user-removed`; a
+  knowledge page, which is prose, keeps `<ip>` and the others. Binary files are refused. In a target, recipe or block, a probe's serial number, machine id, UUID and host name line and a
   known_hosts entry are replaced too; and what is private to this computer but sits in a script or a file (a path on a
   network drive or an external volume, a Windows drive or share path, an internal domain, a line of an SSH configuration,
   the key file of `ssh -i`) stops the export with the place and a proposed replacement, an example such as

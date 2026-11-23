@@ -1354,7 +1354,7 @@ def module_local_set(target: str, name: str, from_stdin: bool):
 @click.option('--yes', is_flag=True, help='Without a NAME: remove all values of the target without asking')
 def module_local_remove(target: str, name: Optional[str], yes: bool):
     """Remove one private value of a target, or, without NAME, all of them (asked first, No is the default). A module
-    that still holds ${LOCAL_NAME} of a removed value gets an empty variable in its next build."""
+    that still holds ${LOCAL_NAME} of a removed value stops at it in its next build (unbound variable)."""
     from orchestrator.Core import modules_env
     state = _local_state()
     values = _local_values_or_exit(target)

@@ -603,6 +603,75 @@ und die heruntergeladene Datei wird nach ihrem sha256 geprüft und in ihrem eige
 Build kopiert jede Datei mit einem `dest` von dort in sein Image und hält an, mit dem Holen als nächstem Schritt,
 solange eine fehlt. Ein Pack, ein Paket, ein Preload und ein Bundle tragen eine solche Datei nie.
 
+### 3.10 Werte, die für diesen Computer privat sind, bleiben aus dem Modul
+
+Ein Modul wird gemacht, um geteilt zu werden; was für einen Computer privat ist, darf also nicht in seinen Dateien
+stehen. Wenn ein Modul gemacht wird (der Assistent, `llm-cli module create`, Ditto, ein KI-Client), werden die beiden
+Shell-Felder, die Setup-Befehle und die Quantisierungslogik, nach Privatem durchsucht: ein Pfad auf einem Netzlaufwerk
+oder einem externen Datenträger, ein Windows-Laufwerks- oder Freigabepfad, eine interne Domain, die Schlüsseldatei von
+`ssh -i`, und ein Passwort, Token oder Schlüssel, das nur seine Stelle verrät (`--password X`, `password: X`,
+`sshpass -p X`). Jeder wird durch `${LOCAL_<ART>_<n>}` ersetzt (ein Wert in einfachen Anführungszeichen wird als
+`'"${LOCAL_NAME}"'` geschrieben, expandiert also weiter) und in deine eigene Datei `modules_env/<Targetordner>.env` in
+deinem Zustandsordner geschrieben: ein `LOCAL_NAME=Wert` je Zeile, der Wert so genommen, wie er steht (keine
+Anführungszeichen, keine Escapes, kein Zeilenumbruch), Modus 0600, nie in einem Modulordner, einem Paket oder dem
+Repository. Der Assistent meldet die Variablen und was jede ist, nie einen Wert.
+
+Ein Build kopiert die Datei in seinen eigenen temporären Ordner und hängt sie schreibgeschützt in den Stufen-Container
+ein (`LOCAL_ENV_FILE`, `/build-cache/local/local.env`); der Stufen-Runner liest sie Zeile für Zeile, ohne `eval`, und
+exportiert die Variablen an die Stufen. Nichts wird in den Text des Moduls gemischt und nichts in eine Image-Schicht
+gebacken (das Modul wird ins Image kopiert, und seine Schichten werden zwischengespeichert und lassen sich
+exportieren). Ein Name ohne Wert hält die Stufe an dieser Stelle an (die
+Stufenmodule laufen mit `set -u`: „Variable nicht gesetzt“), ein Modul baut also nie mit einem stillen leeren Wert. Du kannst `${LOCAL_NAME}` selbst in einen Setup-Befehl
+schreiben und den Wert mit `llm-cli module local set TARGET NAME` setzen (verdeckt abgefragt oder eine Zeile der
+Standardeingabe; nie ein Argument), die Namen mit `module local list` ansehen (`--reveal` zeigt die Werte auf deinem
+eigenen Terminal) und im Kasten „Private Werte dieses Moduls“ des Bearbeiten-Schritts ändern. Die KI-Werkzeuge des
+Frameworks sehen nur die Namen. Die CPU- und CMake-Flags, die Paketliste und die Werte der Formate gehören nicht in
+diese Ebene: Sie beschreiben die Hardware und das Target, bleiben also schlicht und öffentlich, und ein Pfad, den eine
+CMake-Option braucht, geht über die Setup-Befehle.
+
+### 3.11 Was SDK und Toolchain brauchen, als Liste
+
+Die `target.yml` kann die Abhängigkeiten von SDK und Toolchain unter `template_variables.dependencies` auflisten:
+
+```yaml
+template_variables:
+  dependencies:
+    - name: libusb-1.0-0          # ein Debian-Paket, ein pip-Paket, eine Datei, ein Image oder ein Treiber, wie die Quelle es nennt
+      version: 2:1.0.26-1         # gepinnt
+      kind: system_package        # system_package | pip_package | vendor_file | base_image | board_driver
+      origin: distribution        # distribution | package_index | vendor_page
+      source: excerpt:12          # excerpt:N, probe:KEY oder template; keine: eine benannte Lücke
+      check: [dpkg, -s, libusb-1.0-0]
+```
+
+Ein pip-Paket trägt den `sha256` seines Wheels; eine Herstellerdatei trägt `url` (die Download-Seite des Herstellers)
+und `licence_url`, optional ihren `sha256` und ein `dest` im Build-Image, und ist nie weitergebbar. Ein `check` ist ein
+Programm mit Argumenten, ohne Shell gestartet, Exit-Code 0 heißt „da“; das Programm ist eines von `dpkg`,
+`dpkg-query`, `pkg-config`, `test`, `ls`, `stat`, `which`, `ldconfig`, `modinfo`, `lsmod`, `pip`, `pip3` (es schaut nur).
+
+Was die Liste tut: Ein `system_package` wird ein gepinntes apt-Paket und ein `pip_package` ein per Hash geprüftes Wheel
+(`pip install --no-deps --require-hashes`, jedes Paket eines Baums ist also ein eigener Eintrag) im Dockerfile des
+Build-Images, der Build installiert es also und dein Computer nie; eine `vendor_file` geht durch den geführten Abruf von
+Abschnitt 3.9 und zählt als da, sobald sie in deinem Herstellerspeicher liegt; ein `board_driver` wird nur aufgelistet
+und der Vorabprüfung überlassen; ein `base_image` wird nur festgehalten (das Basis-Image des Moduls ist sein eigenes
+Feld). Gib die Liste mit `llm-cli module create --dependencies DATEI` oder dem Feld des Assistenten, frage sie mit
+`llm-cli module deps TARGET` (`--in-image IMAGE` fragt im Build-Image) oder dem Kasten „Abhängigkeiten dieses Moduls“
+im Bearbeiten-Schritt, und lass Ditto Einträge mit `llm-cli module propose-dependencies PROBE_FILE` oder **Ditto:
+Abhängigkeiten vorschlagen** vorschlagen: Ein Eintrag, dessen Quelle, Name, Version oder Wheel-Hash die genannte
+Dokumentation oder der Wert der Probe nicht sagt, wird als Lücke benannt und nie ein Eintrag. **Noch nicht gebaut:**
+Deep Ingest, das Aussagen über Anforderungen als Fakten für den Vorschlag behält, ein Fund von Mojo und eine Reparatur
+von Miracle für eine fehlende Abhängigkeit, und der Orange Pi 6 als erster Fall.
+
+### 3.12 Ein eigenes Modul löschen
+
+`llm-cli module delete TARGET` und **Build > Targets... > Modul löschen...** löschen ein Modul des eigenen
+Targets-Ordners: zuerst die genaue Liste (sein Ordner mit seiner Größe und die Datei seiner privaten Werte mit deren
+Anzahl, nie ein Name oder Wert), „Nein“ als Vorgabe, in den Papierkorb (`llm-cli trash restore` holt Ordner und Werte
+zurück) oder endgültig, vorher im Audit festgehalten. Ein Target, das das Framework mitliefert, ein Modul aus einem
+Paket (es geht durch das Deinstallieren des Pakets) und ein Modul, das ein laufender Build dieses Programms benutzt,
+werden abgelehnt; kein KI-Werkzeug löscht ein Modul. Die Protokolle und Dateien von Builds und dein Herstellerspeicher
+bleiben.
+
 ## 4. target.yml und der Capabilities-Block
 
 ### 4.1 metadata

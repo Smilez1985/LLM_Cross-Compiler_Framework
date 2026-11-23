@@ -3139,7 +3139,7 @@ Namen.
 | `set TARGET NAME` | Setzt oder ändert einen Wert. `NAME` ist `LOCAL_` und Großbuchstaben, Ziffern oder `_` (sonst Exit-Code 2). Der Wert wird verdeckt abgefragt. Es gibt keine Option, die ihn als Argument nimmt: Die Shell würde ihn in ihrem Verlauf behalten. |
 | `set --stdin` | Liest den Wert aus einer Zeile der Standardeingabe, für Skripte. |
 | `remove TARGET NAME` | Entfernt einen Wert (Exit-Code 1, wenn das Target keinen dieses Namens hat). |
-| `remove TARGET` | Entfernt alle Werte des Targets nach einer Frage (Nein ist die Vorgabe; ohne Terminal und ohne `--yes` wird nichts entfernt, Exit-Code 1). Ein Modul, das `${LOCAL_NAME}` eines entfernten Werts noch enthält, bekommt im nächsten Build eine leere Variable. |
+| `remove TARGET` | Entfernt alle Werte des Targets nach einer Frage (Nein ist die Vorgabe; ohne Terminal und ohne `--yes` wird nichts entfernt, Exit-Code 1). Ein Modul, das `${LOCAL_NAME}` eines entfernten Werts noch enthält, bricht im nächsten Build an dieser Stelle ab (die Stufenmodule laufen mit `set -u`: „Variable nicht gesetzt“). |
 | `remove --yes` | Ohne `NAME`: entfernt alle Werte ohne Frage, für Skripte. |
 
 In der GUI ist dasselbe der Kasten „Private Werte dieses Moduls“ im Bearbeiten-Schritt (die letzte Seite des Wizards und

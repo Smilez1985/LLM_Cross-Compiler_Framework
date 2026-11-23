@@ -819,7 +819,17 @@ Hardware-Module vor. Dabei nutzt es die Tools des Frameworks im Rahmen deiner To
   Verlauf). Bestätigungen werden im Terminal abgefragt und ohne Terminal abgelehnt. `--no-tools` antwortet ohne
   Tools.
 - **Modulvorschläge:** `llm-cli module generate-ai target_hardware_config.txt` oder der Assistent unter **Tools >
-  Create Hardware Module...**. Du siehst den ganzen Vorschlag, bevor etwas geschrieben wird.
+  Create Hardware Module...**. Du siehst den ganzen Vorschlag, bevor etwas geschrieben wird. Auch was SDK und Toolchain
+  eines Moduls brauchen, lässt sich vorschlagen (`llm-cli module propose-dependencies`, **Ditto: Abhängigkeiten
+  vorschlagen**): Ein Eintrag, dessen Quelle, Name, Version oder Hash die genannte Dokumentation nicht sagt, wird als
+  Lücke benannt und nie zu einem Eintrag.
+- **Dein Modul, privat gehalten und löschbar:** Werte, die für deinen Computer privat sind (ein Netzwerkpfad, eine
+  interne Domain, eine Schlüsseldatei, ein Passwort), werden aus einem Modul, das der Assistent macht, herausgenommen und
+  in deiner eigenen Datei gehalten, nie im Modul oder in einem Paket (`llm-cli module local`); `llm-cli module deps`
+  listet, was das SDK braucht und ob es da ist; `llm-cli module delete` und **Build > Targets... > Modul löschen...**
+  entfernen ein eigenes Modul nach der genauen Liste ([Features](docs/Features_DE.md#hardware-probe-und-neue-targets)). Noch nicht
+  gebaut: Dittos Lesen von Anforderungen beim Crawlen (Deep Ingest), Mojos Reparaturen für eine fehlende Abhängigkeit
+  und der Orange Pi 6 als erstes Board dafür ([Roadmap](docs/ROADMAP_DE.md)).
 
 **Ditto einrichten** unter **Tools > Configure AI Agent (Ditto)...**: Anbieter, Modell (die Liste wird live beim
 Anbieter abgefragt; du kannst auch einen Modellnamen eintippen), API-Schlüssel, Workspace-ID (nur für

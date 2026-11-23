@@ -481,8 +481,8 @@ TEXTS = {
         "bld.local.hidden": "(hidden)",
         "bld.local.shown": "{name} = {value}",
         "bld.local.refused": "The value was not taken:\n{reason}",
-        "bld.local.confirm_remove": "Remove the value {name}? A module that still holds it gets an empty variable "
-                                    "in its next build.",
+        "bld.local.confirm_remove": "Remove the value {name}? A module that still holds it stops at it in its next "
+                                    "build (unbound variable).",
         "bld.targets.edit": "Edit Files...",
         "bld.targets.col.test": "Build test",
         "bld.test.shipped": "- (shipped)",
@@ -1066,8 +1066,8 @@ TEXTS = {
         "bld.local.hidden": "(verborgen)",
         "bld.local.shown": "{name} = {value}",
         "bld.local.refused": "Der Wert wurde nicht übernommen:\n{reason}",
-        "bld.local.confirm_remove": "Den Wert {name} entfernen? Ein Modul, das ihn noch enthält, bekommt im nächsten "
-                                    "Build eine leere Variable.",
+        "bld.local.confirm_remove": "Den Wert {name} entfernen? Ein Modul, das ihn noch enthält, bricht im nächsten "
+                                    "Build an dieser Stelle ab (Variable nicht gesetzt).",
         "bld.targets.edit": "Dateien bearbeiten...",
         "bld.targets.col.test": "Build-Test",
         "bld.test.shipped": "- (mitgeliefert)",

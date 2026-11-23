@@ -1248,13 +1248,33 @@ Bevor Text an einen Cloud-Anbieter geht, werden persönliche Daten ersetzt (Eins
 
 | Stufe | Ersetzt |
 |---|---|
-| `OFF` | nur Geheimnisse (API-Schlüssel, Tokens); sie werden immer entfernt und nie wiederhergestellt |
+| `OFF` | nur Geheimnisse (API-Schlüssel, Tokens, Passwörter, die nur ihre Stelle verrät); sie werden immer ersetzt, siehe unten |
 | `BALANCED` | zusätzlich IPv4-/IPv6- und MAC-Adressen, E-Mail-Adressen, Logins der Form `user@host`, Benutzernamen in Home-Pfaden |
 | `STRICT` (Standard) | zusätzlich in Probe-Dateien angegebene Hostnamen, Seriennummern, UUIDs und die Verzeichnisse absoluter Pfade (Systempfade wie `/usr/` bleiben lesbar) |
 
 Die Platzhalter sehen aus wie `<IP_1a2b3c4d>`. Sie werden aus dem Wert mit einem Schlüssel abgeleitet, der einmal
 pro Installation angelegt wird; derselbe Wert bekommt also immer denselben Platzhalter. Platzhalter in der Antwort
 werden auf deinem Rechner wieder in die echten Werte verwandelt. Lokale Anbieter werden nie gefiltert.
+
+**Geheimnisse** bekommen einen eigenen Platzhalter, `<SECRET_1a2b3c4d>`, auf dieselbe Weise gebaut (ein Schlüsselformat
+und ein Passwort oder Token, das nur seine Stelle verrät, etwa `--password X`, `password: X` oder `sshpass -p X`). Der
+Wert kommt nur im Text der Antwort zurück, den du liest. Der Verlauf, die Argumente eines Werkzeugs und ein
+strukturiertes Ergebnis behalten den Platzhalter, sodass ein Geheimnis nie durch sie weiterwandert; Anmelde-Header
+und Query-Parameter werden endgültig verborgen, eine Websuche trägt nie ein Geheimnis oder seinen Platzhalter, und der
+Scrub eines Pakets schwärzt weiter endgültig. Kein Werkzeug des Frameworks nimmt heute ein Geheimnis aus den Argumenten
+des Modells (ein Board wird mit dem eigenen gepaarten Schlüssel des Frameworks erreicht); ein Werkzeug, das ein
+Geheimnis über einen Zugangsdaten-Namen braucht, ist also **geplant**, nicht gebaut.
+
+**Der Filterhinweis:** Bei einem Cloud-Anbieter sagt dir ein kleines Symbol am Rand des Chat-Panels dezent, was der
+Filter ersetzt. Während du tippst, werden die Stellen deines Felds, die der Filter ersetzen wird, mit einer Wellenlinie
+unterstrichen, und der Mouse-over des Symbols listet sie nach Ort (deine Eingabe, Verlauf, Systemprompt,
+Werkzeug-Ergebnisse, Wissens-Auszüge, Werkzeug-Argumente) und Art mit Anzahl, du siehst es also, bevor etwas gesendet
+wird. Nach der Antwort listet es die ganze Anfrage und was in der Antwort wieder eingesetzt wurde, und deine gesendete
+Frage und die Antwort tragen dieselbe Unterstreichung (ein Wert, den der Chat in deiner eigenen Nachricht schon als
+`REDACTED` zeigt, hat dort nichts zu unterstreichen). Ein Geheimnis heißt mit einem kurzen Etikett (`SECRET_1`), nie mit
+seinem Wert. Ein Klick, ein leeres Feld oder die nächste Frage blendet es aus; bei einem lokalen Modell oder wenn nichts
+ersetzt wird, erscheint nichts. `llm-cli ditto ask` gibt eine gedämpfte Zeile mit derselben Liste auf der
+Standardfehlerausgabe aus. Die Markierungen in der Bestätigung eines Werkzeugs sind **geplant**.
 
 ### Strukturierte Antworten und der Filter für gefährliche Befehle
 
@@ -3813,6 +3833,37 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   ihrem sha256 geprüft, in deinem eigenen Herstellerspeicher aufbewahrt), oder das Framework lädt eine Datei, die das
   Target als öffentlich und direkt pinnt. Ein Build kopiert sie von dort in sein Image und hält an, mit dem Holen als
   nächstem Schritt, solange eine fehlt.
+- **Werte, die privat für diesen Computer sind, bleiben aus dem Modul:** Die Setup-Befehle und die Quantisierungslogik
+  des Assistenten werden nach Privatem durchsucht (ein Pfad auf einem Netzlaufwerk, ein Windows-Pfad, eine interne
+  Domain, die Schlüsseldatei von `ssh -i`, ein Passwort oder Token, das nur seine Stelle verrät); jeder Wert wird im
+  Modul durch `${LOCAL_NAME}` ersetzt und in deine eigene Datei `modules_env/<target>.env` geschrieben (Modus 0600, nie
+  in einem Modulordner oder einem Paket, in der `.gitignore`). Ein Build gibt die Datei schreibgeschützt an die Stufen
+  und backt sie nie in eine Image-Schicht; die KI-Werkzeuge des Frameworks sehen nur die Namen. `llm-cli module local
+  list|set|remove` und der Kasten „Private Werte dieses Moduls“ im Bearbeiten-Schritt zeigen und ändern sie (`--reveal`
+  und **Wert zeigen** zeigen einen Wert auf deinem eigenen Bildschirm). Die CPU- und CMake-Flags sind nicht privat (sie
+  beschreiben die Hardware) und nehmen kein `${...}`; ein Pfad, den eine CMake-Option braucht, geht über die
+  Setup-Befehle.
+- **Was SDK und Toolchain brauchen, als Liste:** Die `target.yml` kann Abhängigkeiten auflisten
+  (`template_variables.dependencies`): ein Name, eine gepinnte Version, eine Art (Systempaket, pip-Paket,
+  Herstellerdatei, Basis-Image, Board-Treiber), woher es kommt, die Quelle der Aussage (ein Eintrag ohne sie ist eine
+  benannte Lücke), eine Prüfung, die nur schaut, und ob die Lizenz die Weitergabe erlaubt. Ein Systempaket wird ein
+  gepinntes apt-Paket und ein pip-Paket ein per Hash geprüftes Wheel im Dockerfile des Build-Images, der Build
+  installiert es also und dein Computer nie; eine Herstellerdatei geht durch den geführten Abruf oben und zählt als da,
+  sobald sie in deinem Herstellerspeicher liegt; ein Treiber oder Firmware des Boards wird nur aufgelistet. `llm-cli
+  module create --dependencies DATEI` und das Feld des Assistenten machen die Liste, `llm-cli module deps` und der
+  Kasten „Abhängigkeiten dieses Moduls“ im Bearbeiten-Schritt zeigen jeden Eintrag als da, fehlt oder wartet auf dein
+  Ja. `llm-cli module propose-dependencies` und **Ditto: Abhängigkeiten vorschlagen** lassen Ditto Einträge aus der Probe
+  und der gecrawlten Dokumentation vorschlagen: Ein Eintrag, dessen Quelle, Name, Version oder Wheel-Hash der genannte
+  Text nicht sagt, ist eine benannte Lücke, nie ein Eintrag. **Geplant, nicht gebaut:** Deep Ingest, das Aussagen über
+  Anforderungen als Fakten für den Vorschlag behält, ein Fund von Mojo und eine Reparatur von Miracle für eine fehlende
+  Abhängigkeit, und der Orange Pi 6 als erster Fall (sein NPU-Toolchain braucht eine Bewerbung beim Hersteller; für ihn
+  wird noch nichts gemacht).
+- **Ein eigenes Modul löschen:** `llm-cli module delete TARGET` und **Build > Targets... > Modul löschen...** zeigen
+  zuerst die genaue Liste (der Ordner des Moduls und die Datei seiner privaten Werte, gezählt, nie gezeigt); „Nein“ ist
+  die Vorgabe, und es geht in den Papierkorb oder endgültig, vorher im Audit festgehalten. Nur ein Modul des eigenen
+  Targets-Ordners: Ein Target, das das Framework mitliefert, ein Modul aus einem Paket (es geht durch das Deinstallieren
+  des Pakets) und ein Modul, das ein laufender Build dieses Programms benutzt, werden abgelehnt. Kein KI-Werkzeug löscht
+  ein Modul.
 - **Die Geräte-Laufzeit im Modul:** Jede neue `target.yml` bekommt einen Block `runtime:`, den Plan des Build-Rezepts
   für die llama.cpp-Laufzeit des Boards aus der Probe des Targets (die im Assistenten eingelesene Probe-Datei, die
   Probe-Datei von `module generate-ai` oder `llm-cli module create --probe <Datei>`): Architektur, Betriebssystem, die
@@ -4216,7 +4267,10 @@ beim nächsten Wissensimport erneut importiert.
   MAC-Adressen zu `<ip>` und `<mac>`, E-Mail-Adressen zu `<email>`, JWTs zu `<jwt>`, der Hostname zu `<host>`, der
   Benutzername zu `<user>`, und API-Schlüssel werden geschwärzt. Loopback-Adressen, Image-Digests, `git@`-Remotes und
   Standardkonten wie `root` oder `runner` bleiben, damit ein bereinigtes Target weiter baut. Die Änderungen werden als
-  Diff gezeigt, bevor du etwas teilst. Binärdateien werden abgelehnt. In einem Target, Rezept oder Block werden außerdem
+  Diff gezeigt, bevor du etwas teilst. In den Dateien eines Targets, Rezepts oder Blocks (Skripte und YAML, in denen `<`
+  und `>` Umleitungen einer Shell sind) stehen stattdessen Wörter: `ip-removed`, `mac-removed`, `email-removed`,
+  `jwt-removed`, `host-removed`, `user-removed`; eine Wissensseite, die Prosa ist, behält `<ip>` und die anderen.
+  Binärdateien werden abgelehnt. In einem Target, Rezept oder Block werden außerdem
   Seriennummer, Machine-ID, UUID und Hostname-Zeile einer Probe und ein known_hosts-Eintrag ersetzt; und was nur zu
   diesem Computer gehört, aber in einem Skript oder einer Datei steht (ein Pfad auf einem Netzlaufwerk oder einem externen
   Datenträger, ein Windows-Laufwerks- oder Freigabepfad, eine interne Domain, eine Zeile einer SSH-Konfiguration, die

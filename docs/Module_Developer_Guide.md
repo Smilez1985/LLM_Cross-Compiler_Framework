@@ -576,6 +576,70 @@ is checked by its sha256 and kept in their own vendor store. A build copies each
 its image and stops, naming the fetch, while one is missing. A pack, a package, a preload and a bundle never carry
 such a file.
 
+### 3.10 Values private to this computer stay out of the module
+
+A module is made to be shared, so what is private to one computer must not stand in its files. When a module is made
+(the wizard, `llm-cli module create`, Ditto, an AI client), the two shell fields, the setup commands and the
+quantization logic, are searched for private values: a path on a network drive or an external volume, a Windows drive
+or share path, an internal domain, the key file of `ssh -i`, and a password, token or key that only its place gives
+away (`--password X`, `password: X`, `sshpass -p X`). Each one is replaced by `${LOCAL_<KIND>_<n>}` (a value inside
+single quotes is written as `'"${LOCAL_NAME}"'`, so it still expands) and written to your own file
+`modules_env/<target folder>.env` in your state folder: one `LOCAL_NAME=value` per line, the value taken as it stands
+(no quotes, no escapes, no line break), mode 0600, never in a module folder, a pack or the repository. The wizard
+reports the variables and what each one is, never a value.
+
+A build copies the file into its own temporary folder and mounts it read-only into the stage container
+(`LOCAL_ENV_FILE`, `/build-cache/local/local.env`); the stage runner reads it line by line, without `eval`, and exports
+the variables to the stages. Nothing is merged into the module's text and nothing is baked into an image layer (the
+module is copied into the image, and its layers are cached and can be exported). A name with no value stops the stage at it (the stage
+modules run with `set -u`: "unbound variable"), so a module never builds with a silent empty value. You can write `${LOCAL_NAME}` into a setup command yourself and set the value with `llm-cli module local set
+TARGET NAME` (asked hidden, or one line of standard input; never an argument), look at the names with `module local
+list` (`--reveal` shows the values on your own terminal), and change them in the box "Private values of this module"
+of the edit step. The framework's AI tools see the names only. The CPU and CMake flags, the package list and the
+formats' values are not in this layer: they describe the hardware and the target, so they stay plain and public, and a
+path that a CMake option needs goes through the setup commands.
+
+### 3.11 What the SDK and toolchain need, as a list
+
+`target.yml` can list the dependencies of the SDK and toolchain under `template_variables.dependencies`:
+
+```yaml
+template_variables:
+  dependencies:
+    - name: libusb-1.0-0          # a Debian package, a pip package, a file, an image or a driver, as its source names it
+      version: 2:1.0.26-1         # pinned
+      kind: system_package        # system_package | pip_package | vendor_file | base_image | board_driver
+      origin: distribution        # distribution | package_index | vendor_page
+      source: excerpt:12          # excerpt:N, probe:KEY or template; none: a named gap
+      check: [dpkg, -s, libusb-1.0-0]
+```
+
+A pip package carries the `sha256` of its wheel; a vendor file carries `url` (the vendor's download page) and
+`licence_url`, optionally its `sha256` and a `dest` in the build image, and is never passable. A `check` is a program and
+its arguments, started without a shell, exit code 0 means "there"; the program is one of `dpkg`, `dpkg-query`,
+`pkg-config`, `test`, `ls`, `stat`, `which`, `ldconfig`, `modinfo`, `lsmod`, `pip`, `pip3` (it only looks).
+
+What the list does: a `system_package` becomes a pinned apt package and a `pip_package` a hash-checked wheel
+(`pip install --no-deps --require-hashes`, so each package of a tree is an entry of its own) in the Dockerfile of the
+build image, so the build installs it and your computer never does; a `vendor_file` goes through the guided fetch of
+section 3.9 and counts as there once it is in your vendor store; a `board_driver` is only listed and left to the
+pre-flight check; a `base_image` is only recorded (the module's base image is its own field). Give the list with
+`llm-cli module create --dependencies FILE` or the wizard's field, ask it with `llm-cli module deps TARGET`
+(`--in-image IMAGE` asks inside the build image) or the box "Dependencies of this module" in the edit step, and let
+Ditto propose entries with `llm-cli module propose-dependencies PROBE_FILE` or **Ditto: Propose Dependencies**: an
+entry whose source, name, version or wheel hash the cited documentation or probe value does not say is named as a gap
+and never made an entry. **Not built yet:** Deep Ingest keeping statements of requirements as facts for the proposal,
+a Mojo finding and a Miracle repair for a missing dependency, and the Orange Pi 6 as the first case.
+
+### 3.12 Deleting a module of your own
+
+`llm-cli module delete TARGET` and **Build > Targets... > Delete Module...** delete a module of your own targets folder:
+the exact list first (its folder with its size and the file of its private values with their number, never a name or a
+value), "No" as the default, to the trash (`llm-cli trash restore` brings the folder and the values back) or for good,
+audited first. A target the framework ships, a module installed from a pack (it leaves by uninstalling the pack) and a
+module that a running build of this program uses are refused; no AI tool deletes a module. The records and files of
+builds and your vendor store stay.
+
 ## 4. target.yml and the capabilities block
 
 ### 4.1 metadata
