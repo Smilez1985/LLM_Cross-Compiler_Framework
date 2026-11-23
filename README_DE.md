@@ -136,6 +136,11 @@ die Hardware-Probe des Boards meldet, also findet ein geprobtes Board sein Board
 - Orange-Pi- und Banana-Pi-Boards mit einem Rockchip-SoC sind Boards des Rockchip-Targets (siehe oben). Noch nicht
   bedient: der Orange Pi 4A (der Kernel seines Herstellers nennt keinen SoC, den die Probe unterscheiden kann), Boards
   mit RK3399, Allwinner H6, A64 oder H5 oder Amlogic G12B und RISC-V-Boards.
+- **Stand:** Das Target und die Profile sind aus den Daten jedes Chips und dem Build-Rezept gebaut und in den eigenen
+  Tests des Frameworks getestet; keines dieser Boards ist bisher mit einem Build dieses Targets gelaufen (ein Raspberry
+  Pi 4 oder 5, der Zero 2 W, die Allwinner- und Amlogic-Boards). Die gemessenen Token pro Sekunde, die die Reihenfolge
+  der empfohlenen Typen bestätigen, sind **geplant** ([Roadmap](docs/ROADMAP_DE.md)); bis dahin ist ein Profil eine
+  begründete Empfehlung, keine Messung.
 - Jeder Build macht auch das Board-Paket mit `llama-cli` und `llama-server`, für das Board cross-gebaut: aus der
   gespeicherten Probe des Boards, wenn es eine gibt, sonst aus den CPU-Features, die jeder Chip des Boards hat.
   Installiere das 64-Bit-System des Boards (auf einem Raspberry Pi das 64-Bit-Raspberry-Pi-OS): Ein 32-Bit-System
@@ -611,7 +616,8 @@ Plan an (jede Datei mit Quelle und Größe, die Prüfungen gegen die Untersuchun
 aus. Sein Installer auf dem Board installiert die Schritte ohne Sonderrechte einmal, zeigt ihren Status, rollt sie
 zurück und deinstalliert sie; Root-Schritte wie eine Autostart-Unit laufen nur über den signierten Root-Helfer
 llmcf-install des Frameworks, nach einem zweiten Ja dafür, mit einem Journal für ihr Zurückrollen und Deinstallieren.
-Jedes Ausrollen fragt dich vorher. Details:
+Jedes Ausrollen fragt dich vorher. **Noch auf keinem echten Board gelaufen:** Es ist gebaut und gegen simulierte Boards
+und eine simulierte NPU getestet, und sein erster Lauf auf Hardware ist geplant ([Roadmap](docs/ROADMAP_DE.md)). Details:
 [Funktionen](docs/Features_DE.md#das-board-bündel).
 
 ### Das Board

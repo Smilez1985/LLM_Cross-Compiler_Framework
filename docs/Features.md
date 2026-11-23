@@ -804,12 +804,21 @@ board...**).
 
 ### The board bundle
 
+**Status: not yet run on a real board.** The bundle, its installer, the root helper `llmcf-install`, the gateway and the
+engines are built and tested against fake SSH channels, simulated boards and a simulated NPU, in containers and with
+test builds in the framework's own tests. The first run on a real board (a deploy, the pairing, the engine switch with
+its two rights paths, the vision engine on a Rockchip NPU, a harness's installer) is **planned**, as are the camera and
+video paths and the further kinds of vision models ([roadmap](ROADMAP.md): "The maintainer's test on real hardware and
+with a real agent", "Vision on the NPU"). Treat what follows as what the framework is built to do, not as proven on a
+board.
+
 Deploy way 3 beside the golden ZIP and the runtime package: one bundle for the whole board, made from building blocks
 (the framework's `llm-llama-server` with the board's self-built llama.cpp runtime and a GGUF model, and
 `stt-whisper-cpp` with the framework's own whisper.cpp server build for the board and a ggml model, and
 `vision-mmproj` with the llama.cpp runtime started with `--mmproj` for a vision model and its projector, and
 `vision-rknn-detect` with the framework's vision engine `llmcf-detect` for an RKNN detection model and its model card
-on a Rockchip NPU; a
+on a Rockchip NPU (so far only against a simulated NPU: its first run on a real board, cameras and video and the other
+kinds of vision models are planned); a
 `whisper-server` you pick yourself stays possible with `stt-whisper-cpp-program`, with a warning; speech output with
 sherpa-onnx is a documented template; `gateway-llmcf` is the framework's own gateway in front of the model, which
 lets a request that finds the model busy wait its turn in a fair queue instead of refusing it, holds new requests
@@ -856,7 +865,9 @@ pipeline task, library, files and licence (one lookup; a local model folder with
 its kind, its files by role and how the gateway reaches it (`reach`: an OpenAI adapter for chats, vision chats,
 embeddings, transcription and speech; an image or video form with a JSON answer and a camera event stream for
 detection, classification, segmentation, keypoints and video; a generic JSON route that needs you for any other
-task), with conservative limits and the reason of every field. For a detection-type model it notes what the engine
+task), with conservative limits and the reason of every field. The routes for a camera event stream, for video and for the
+kinds beyond detection are what a block may declare; the engines behind them are planned (roadmap: vision on the NPU,
+steps 2 to 4), today only `llmcf-detect` for detection models exists. For a detection-type model it notes what the engine
 needs to know (input size, classes, pre- and post-processing) and where it should come from. You review the draft
 with its reasons, may change it, and save it as your own block (unsigned, a template until its program is filled in);
 nothing is written before. An AI may read the same draft through the optional read-only tool `propose_bundle_block`
@@ -2587,6 +2598,11 @@ registry, or a program you name yourself) that speak the Agent Client Protocol. 
 send it your first message and gives it the framework's own tools: every action it takes goes through your tool
 permissions, the approvals and the audit log, as for any AI app over MCP. Ditto stays the default of the chat.
 
+**Status:** the agents' chat is tested with a stand-in agent; a run with a real third-party agent from the registry (added,
+signed in with its own sign-in, a turn that calls the framework's tools) is **planned**, as are continuing an agent's
+session later and a read-only MCP tool that lists your agents ([roadmap](ROADMAP.md)). Treat each agent as experimental
+until you have tried it yourself.
+
 - **Ditto > Agents...** lists your agents (distribution, version, where it came from, whether it needs the internet,
   the variables of its keys). **Fetch the registry** reads the ACP registry, only on that click; pick an agent and
   **Add the selected agent...**: you see its name, description, distribution, licence, the exact command, the
@@ -3365,7 +3381,7 @@ decides a deletion: not through its own form, a standing approval or a delegatio
 
 ## Hardware probe and new targets
 
-- **Pairing during the probe (the probe kit):** `llm-cli scan --kit FOLDER` or Builder tab > Scan / Import... > Make a Probe Kit for a Board... writes the folder you carry to a board (a USB stick, a card): the three probes, a README and, unless you switch pairing off (`--no-pair` or the unticked box), the folder `llmcf-pairing` with the framework's public key, its signer file and a one-time number (valid 24 hours, one board). Run the probe there once with sudo: it puts the framework's root-owned key line and signer files in place for your account (the same step as the pairing over a password login; it needs OpenSSH's sshd) and writes the board's SSH host key fingerprints with the one-time number into `target_hardware_config.txt`. Without sudo it says that pairing was skipped; the hardware data is complete either way. Importing the file pins the board's host key: its first scan or deploy asks no fingerprint question, and it logs in with the framework's key. A file of another framework, an expired or a used one is refused with the reason (in your language), the hardware data is imported anyway; the same file imported again counts as paired, and if a pairing worked but the hardware data could not be stored, the import says the board IS paired and the same file imports again. The module wizard's Import Probe pairs the same way. Run with sudo or doas, the probe records your account's own sudo fact, not root's. Nothing secret travels: the kit holds public data only, the file only fingerprints and the one-time number. A Windows board is not paired yet (its probe says so).
+- **Pairing during the probe (the probe kit):** `llm-cli scan --kit FOLDER` or Builder tab > Scan / Import... > Make a Probe Kit for a Board... writes the folder you carry to a board (a USB stick, a card): the three probes, a README and, unless you switch pairing off (`--no-pair` or the unticked box), the folder `llmcf-pairing` with the framework's public key, its signer file and a one-time number (valid 24 hours, one board). Run the probe there once with sudo: it puts the framework's root-owned key line and signer files in place for your account (the same step as the pairing over a password login; it needs OpenSSH's sshd) and writes the board's SSH host key fingerprints with the one-time number into `target_hardware_config.txt`. Without sudo it says that pairing was skipped; the hardware data is complete either way. Importing the file pins the board's host key: its first scan or deploy asks no fingerprint question, and it logs in with the framework's key. A file of another framework, an expired or a used one is refused with the reason (in your language), the hardware data is imported anyway; the same file imported again counts as paired, and if a pairing worked but the hardware data could not be stored, the import says the board IS paired and the same file imports again. The module wizard's Import Probe pairs the same way. Run with sudo or doas, the probe records your account's own sudo fact, not root's. Nothing secret travels: the kit holds public data only, the file only fingerprints and the one-time number. A Windows board is not paired yet (its probe says so). Pairing has run only against simulated boards so far; a pairing on a real board, both ways, is **planned** ([roadmap](ROADMAP.md)).
 - **Probe:** one hardware probe in three implementations writes the same file, `target_hardware_config.txt`
   (schema 2): `scripts/hardware_probe.py` (the main path: standard library only, Python 3.8 or newer, Linux, Windows
   and macOS) and the fallbacks `scripts/hardware_probe.sh` (any POSIX shell on Linux, for boards without Python) and

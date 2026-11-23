@@ -874,12 +874,21 @@ entfernen...**, **Ältere Builds auf dem Board entfernen...**).
 
 ### Das Board-Bündel
 
+**Stand: noch auf keinem echten Board gelaufen.** Das Bündel, sein Installer, der Root-Helfer `llmcf-install`, das
+Gateway und die Engines sind gebaut und gegen unechte SSH-Kanäle, simulierte Boards und eine simulierte NPU getestet, in
+Containern und mit Test-Builds in den eigenen Tests des Frameworks. Der erste Lauf auf einem echten Board (ein Ausrollen,
+das Koppeln, der Engine-Wechsel mit seinen zwei Rechtewegen, die Vision-Engine auf einer Rockchip-NPU, der Installer eines
+Harness) ist **geplant**, ebenso die Kamera- und Videowege und die weiteren Arten von Vision-Modellen
+([Roadmap](ROADMAP_DE.md): „Der Test des Maintainers auf echter Hardware und mit einem echten Agenten“, „Vision auf der
+NPU“). Nimm das Folgende als das, was das Framework tun soll, nicht als auf einem Board bewiesen.
+
 Deploy-Weg 3 neben dem Golden-ZIP und dem Laufzeitpaket: ein Bündel für das ganze Board, gebaut aus Bausteinen (die
 des Frameworks: `llm-llama-server` mit der selbst gebauten llama.cpp-Laufzeit des Boards und einem GGUF-Modell, und
 `stt-whisper-cpp` mit dem eigenen Build des whisper.cpp-Servers des Frameworks für das Board und einem ggml-Modell,
 und `vision-mmproj` mit der llama.cpp-Laufzeit, gestartet mit `--mmproj` für ein Vision-Modell und seinen Projektor,
 und `vision-rknn-detect` mit der Vision-Engine `llmcf-detect` des Frameworks für ein RKNN-Erkennungsmodell und seine
-Modellkarte auf einer Rockchip-NPU;
+Modellkarte auf einer Rockchip-NPU (bisher nur gegen eine simulierte NPU: ihr erster Lauf auf einem echten Board, Kameras und Video
+und die anderen Arten von Vision-Modellen sind geplant);
 ein selbst gewähltes `whisper-server` bleibt mit `stt-whisper-cpp-program` möglich, mit einer Warnung; Sprachausgabe
 mit sherpa-onnx ist eine dokumentierte Vorlage; `gateway-llmcf` ist das eigene Gateway des Frameworks vor dem
 Modell, das eine Anfrage bei beschäftigtem Modell in einer fairen Warteschlange warten lässt, statt sie abzulehnen,
@@ -933,7 +942,9 @@ Modellordner ohne Netz) und schlägt einen Baustein vor: seine Art, seine Dateie
 erreicht (`reach`: ein OpenAI-Adapter für Chats, Vision-Chats, Embeddings, Transkription und Sprache; ein Bild- oder
 Videoformular mit JSON-Antwort und ein Kamera-Event-Stream für Erkennung, Klassifikation, Segmentierung, Keypoints und
 Video; eine allgemeine JSON-Route, die dich braucht, für jede andere Aufgabe), mit vorsichtigen Grenzen und dem Grund
-jedes Felds. Für ein Erkennungsmodell notiert er, was die Engine wissen muss (Eingabegröße, Klassen, Vor- und
+jedes Felds. Die Routen für einen Kamera-Event-Stream, für Video und für die Arten jenseits der Erkennung sind das, was
+ein Baustein erklären darf; die Engines dahinter sind geplant (Roadmap: Vision auf der NPU, Schritte 2 bis 4), heute gibt
+es nur `llmcf-detect` für Erkennungsmodelle. Für ein Erkennungsmodell notiert er, was die Engine wissen muss (Eingabegröße, Klassen, Vor- und
 Nachverarbeitung) und woher es kommen soll. Du prüfst den Entwurf mit seinen Gründen, darfst ihn ändern und
 speicherst ihn als deinen eigenen Baustein (nicht signiert, eine Vorlage, bis sein Programm ausgefüllt ist); vorher
 wird nichts geschrieben. Eine KI darf denselben Entwurf über das optionale, nur lesende Werkzeug
@@ -2852,6 +2863,11 @@ den Agenten, wenn du ihm deine erste Nachricht schickst, und gibt ihm die eigene
 läuft über deine Werkzeug-Berechtigungen, die Freigaben und das Audit-Log, wie bei jeder KI-App über MCP. Ditto bleibt
 die Vorgabe im Chat.
 
+**Stand:** Der Chat mit den Agenten ist mit einem Ersatz-Agenten getestet; ein Lauf mit einem echten Agenten eines Dritten
+aus der Registry (hinzugefügt, mit seiner eigenen Anmeldung angemeldet, ein Zug, der die Werkzeuge des Frameworks aufruft)
+ist **geplant**, ebenso das spätere Fortsetzen einer Agenten-Sitzung und ein schreibgeschütztes MCP-Werkzeug, das deine
+Agenten auflistet ([Roadmap](ROADMAP_DE.md)). Behandle jeden Agenten als experimentell, bis du ihn selbst ausprobiert hast.
+
 - **Ditto > Agenten...** listet deine Agenten (Verteilung, Version, Herkunft, ob er das Internet braucht, die
   Variablen seiner Schlüssel). **Registry abrufen** liest die ACP-Registry, nur bei diesem Klick; wähle einen Agenten
   und **Gewählten Agenten hinzufügen...**: Du siehst Name, Beschreibung, Verteilung, Lizenz, den genauen Befehl, den
@@ -3727,7 +3743,7 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
 
 ## Hardware-Probe und neue Targets
 
-- **Kopplung während der Probe (das Probe-Kit):** `llm-cli scan --kit ORDNER` oder Builder-Tab > Scan / Import... > Make a Probe Kit for a Board... schreibt den Ordner, den du zum Board trägst (USB-Stick, Karte): die drei Probes, eine README und, wenn du die Kopplung nicht abschaltest (`--no-pair` oder das abgehakte Kästchen), den Ordner `llmcf-pairing` mit dem öffentlichen Schlüssel des Frameworks, seiner Signer-Datei und einer Einmal-Zahl (24 Stunden gültig, ein Board). Starte die Probe dort einmal mit sudo: Sie legt die root-eigene Schlüsselzeile und die Signer-Dateien des Frameworks für dein Konto ab (derselbe Schritt wie bei der Kopplung über eine Passwort-Anmeldung; er braucht den sshd von OpenSSH) und schreibt die Fingerabdrücke der SSH-Host-Keys des Boards mit der Einmal-Zahl in `target_hardware_config.txt`. Ohne sudo sagt sie, dass die Kopplung übersprungen wurde; die Hardware-Daten sind so oder so vollständig. Der Import der Datei pinnt den Host-Key des Boards: Sein erster Scan oder Deploy stellt keine Fingerabdruck-Frage, und es meldet sich mit dem Schlüssel des Frameworks an. Eine Datei eines anderen Frameworks, eine abgelaufene oder eine benutzte wird mit Grund abgelehnt (in deiner Sprache), die Hardware-Daten werden trotzdem importiert; dieselbe Datei noch einmal importiert gilt als gekoppelt, und hat eine Kopplung geklappt, die Hardware-Daten aber nicht gespeichert werden konnten, sagt der Import, dass das Board gekoppelt IST, und dieselbe Datei lässt sich erneut importieren. Der Probe-Import des Modul-Assistenten koppelt genauso. Mit sudo oder doas gestartet, hält die Probe die sudo-Angabe deines Kontos fest, nicht die von root. Nichts Geheimes reist mit: Das Kit enthält nur öffentliche Daten, die Datei nur Fingerabdrücke und die Einmal-Zahl. Ein Windows-Board wird noch nicht gekoppelt (seine Probe sagt das).
+- **Kopplung während der Probe (das Probe-Kit):** `llm-cli scan --kit ORDNER` oder Builder-Tab > Scan / Import... > Make a Probe Kit for a Board... schreibt den Ordner, den du zum Board trägst (USB-Stick, Karte): die drei Probes, eine README und, wenn du die Kopplung nicht abschaltest (`--no-pair` oder das abgehakte Kästchen), den Ordner `llmcf-pairing` mit dem öffentlichen Schlüssel des Frameworks, seiner Signer-Datei und einer Einmal-Zahl (24 Stunden gültig, ein Board). Starte die Probe dort einmal mit sudo: Sie legt die root-eigene Schlüsselzeile und die Signer-Dateien des Frameworks für dein Konto ab (derselbe Schritt wie bei der Kopplung über eine Passwort-Anmeldung; er braucht den sshd von OpenSSH) und schreibt die Fingerabdrücke der SSH-Host-Keys des Boards mit der Einmal-Zahl in `target_hardware_config.txt`. Ohne sudo sagt sie, dass die Kopplung übersprungen wurde; die Hardware-Daten sind so oder so vollständig. Der Import der Datei pinnt den Host-Key des Boards: Sein erster Scan oder Deploy stellt keine Fingerabdruck-Frage, und es meldet sich mit dem Schlüssel des Frameworks an. Eine Datei eines anderen Frameworks, eine abgelaufene oder eine benutzte wird mit Grund abgelehnt (in deiner Sprache), die Hardware-Daten werden trotzdem importiert; dieselbe Datei noch einmal importiert gilt als gekoppelt, und hat eine Kopplung geklappt, die Hardware-Daten aber nicht gespeichert werden konnten, sagt der Import, dass das Board gekoppelt IST, und dieselbe Datei lässt sich erneut importieren. Der Probe-Import des Modul-Assistenten koppelt genauso. Mit sudo oder doas gestartet, hält die Probe die sudo-Angabe deines Kontos fest, nicht die von root. Nichts Geheimes reist mit: Das Kit enthält nur öffentliche Daten, die Datei nur Fingerabdrücke und die Einmal-Zahl. Ein Windows-Board wird noch nicht gekoppelt (seine Probe sagt das). Das Koppeln ist bisher nur gegen simulierte Boards gelaufen; ein Koppeln auf einem echten Board, in beide Richtungen, ist **geplant** ([Roadmap](ROADMAP_DE.md)).
 - **Probe:** Eine Hardware-Probe in drei Umsetzungen schreibt dieselbe Datei, `target_hardware_config.txt`
   (Schema 2): `scripts/hardware_probe.py` (der Hauptweg: nur Standardbibliothek, Python 3.8 oder neuer, Linux, Windows
   und macOS) und die Ersatzwege `scripts/hardware_probe.sh` (jede POSIX-Shell unter Linux, für Boards ohne Python)

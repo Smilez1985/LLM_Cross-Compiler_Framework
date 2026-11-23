@@ -130,6 +130,11 @@ hardware probe reports, so a probed board finds its board by itself.
 - Orange Pi and Banana Pi boards with a Rockchip SoC are boards of the Rockchip target (see above). Not served yet:
   the Orange Pi 4A (its maker's kernel names no SoC the probe can tell apart), boards with an RK3399, Allwinner H6,
   A64 or H5 or Amlogic G12B, and RISC-V boards.
+- **Status:** the target and the profiles are built from each chip's data and the build recipe and are tested in the
+  framework's own tests; none of these boards has been run with a build of this target yet (a Raspberry Pi 4 or 5, the
+  Zero 2 W, the Allwinner and Amlogic boards). The measured tokens per second that confirm the order of recommended
+  types are **planned** ([roadmap](docs/ROADMAP.md)); until then a profile is a well-founded recommendation, not a
+  measurement.
 - Every build also makes the board package with `llama-cli` and `llama-server` cross-built for the board: from the
   board's stored probe when there is one, else from the CPU features every chip of the board has. Install the
   board's 64-bit system (the 64-bit Raspberry Pi OS on a Raspberry Pi): a 32-bit system is refused.
@@ -580,7 +585,9 @@ bundle: you pick a preset or the building blocks, their variables and files, loo
 its source and size, the checks against the board's probe), build it and deploy it. Its installer on the board
 installs the unprivileged steps once, can show its status, roll back and uninstall them; root steps such as an
 autostart unit run only through the framework's signed root helper llmcf-install, after a second yes for them, with
-a journal for their rollback and uninstall. Every deploy asks you first. Details: [Features](docs/Features.md#the-board-bundle).
+a journal for their rollback and uninstall. Every deploy asks you first. **Not yet run on a real board:** it is built and
+tested against simulated boards and a simulated NPU, and its first run on hardware is planned
+([roadmap](docs/ROADMAP.md)). Details: [Features](docs/Features.md#the-board-bundle).
 
 ### The board
 
