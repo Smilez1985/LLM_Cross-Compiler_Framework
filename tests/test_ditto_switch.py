@@ -6,8 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from orchestrator.gui import ditto_switch
-from orchestrator.gui.ditto_switch import DittoSwitch, SwitchBox, off_reason, switch_of
+pytest.importorskip("PySide6")   # a GUI module: skipped by the install without the 'gui' extra
+# (its settings, which need no Qt, are tested in test_ditto_switch_settings.py)
+
+from orchestrator.gui import ditto_switch  # noqa: E402
+from orchestrator.gui.ditto_switch import DittoSwitch, SwitchBox, off_reason, switch_of  # noqa: E402
 
 
 class Config:
@@ -71,11 +74,6 @@ class TestTheSwitch:
     def test_without_ditto_set_up_the_switch_decides_nothing(self):
         fw = framework(set_up=False, ditto_enabled=False)
         assert off_reason(fw, "builder") == "", "the window's Ditto buttons offer the setup as before"
-
-    def test_only_the_person_sets_it(self):
-        from orchestrator.llm.settings_change import PERSON_ONLY_SETTINGS, person_only_text
-        assert {"ditto_enabled", "ditto_off_in"} <= set(PERSON_ONLY_SETTINGS)
-        assert "Only the person switches it" in person_only_text("ditto_enabled")
 
     def test_the_settings_are_known_and_kept(self, tmp_path):
         from orchestrator.Core.config_manager import ConfigManager
