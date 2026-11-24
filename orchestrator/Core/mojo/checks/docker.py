@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Mojo check: the Docker daemon, buildx, the rights the engine gives your account
-(rootless, or a group with root effect) and where Docker keeps its images
+LLM Cross-Compiler Framework - Mojo check: the Docker daemon, its version against the framework's minimum, buildx,
+the rights the engine gives your account (rootless, or a group with root effect) and where Docker keeps its images
 """
 
 from typing import List
@@ -29,7 +29,7 @@ def check_docker(framework) -> List[Finding]:
                           "and BuildKit "
                           "features are refused.", cannot="person")]
              if stale_podman_host() else [])
-    privilege = _privilege_findings(client)
+    privilege = _privilege_findings(client) + _version_findings(client)
     if docker.engine == "podman":
         # Rootless Podman is the default engine install.sh sets up: it builds, with limits named here.
         from orchestrator.utils.docker_engine import DOCKER_CE_WAY, PODMAN_LIMITS
@@ -55,6 +55,31 @@ def check_docker(framework) -> List[Finding]:
                                 cannot="admin"))
     findings.extend(_storage_findings(framework))
     return findings
+
+
+def _version_findings(client) -> List[Finding]:
+    """The engine's version (utils/validation.validate_docker_version, asked of the framework's Docker client): an
+    older Docker Engine than the framework's minimum is a warning with the way to a newer one, never a refusal; under
+    Podman the version is named without a minimum; an unknown version is information."""
+    from orchestrator.utils.validation import DOCKER_MIN_VERSION, ValidationSeverity, validate_docker_version
+    result = validate_docker_version(client)
+    found = result.details.get("version")
+    if result.severity is ValidationSeverity.SUCCESS:
+        name = "Podman" if result.details.get("engine") == "podman" else "Docker Engine"
+        tail = "" if name == "Podman" else f" (the framework's minimum: {DOCKER_MIN_VERSION})"
+        return [_ok("docker", "docker.version", f"{name} {found}{tail}")]
+    if found:
+        return [Finding("docker", "docker.version", Severity.WARN,
+                        f"Docker Engine {found} is older than the framework's minimum {DOCKER_MIN_VERSION}.",
+                        f"Update Docker Engine to {DOCKER_MIN_VERSION} or newer (your system's packages or Docker's "
+                        "own, see docs/Container_Setup.md), or use rootless Podman, which 'sudo ./install.sh' sets "
+                        "up by default.",
+                        where="the container engine", cannot="admin",
+                        why=f"Before {DOCKER_MIN_VERSION} rootless mode, which the framework prefers, was not a stable "
+                            "feature and cgroup v2, which current Linux systems use, was not supported.")]
+    return [Finding("docker", "docker.version", Severity.INFO,
+                    "The framework could not read the container engine's version, so it is not compared with the "
+                    f"minimum {DOCKER_MIN_VERSION}.", "Run 'docker version' to see it.")]
 
 
 # Mojo's lines about the rights the container engine gives the person's account (no standing rights that can do more

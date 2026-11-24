@@ -369,7 +369,8 @@ class TestTheDockerCheck:
     def test_the_doctor_names_docker(self, monkeypatch):
         findings = self._mojo(FakeClient(DOCKER_VERSION), monkeypatch)
         # docker.rootless: whether the engine runs rootless (Linux; its own tests in test_rootless_default)
-        assert [f.code for f in findings if f.code != "docker.rootless"] == ["docker.daemon", "docker.buildx"]
+        assert [f.code for f in findings if f.code != "docker.rootless"] == ["docker.daemon", "docker.version",
+                                                                              "docker.buildx"]
         assert "container engine: Docker" in findings[0].message
 
 

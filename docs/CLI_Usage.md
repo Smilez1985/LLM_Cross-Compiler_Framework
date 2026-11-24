@@ -201,7 +201,8 @@ llm-cli mojo [--oracle | --miracle] [--json] [--board NAME]
 ```
 
 The health check (it was called `doctor`). **Mojo Oracle** (the default) only looks: it checks Python, the
-Docker daemon and buildx, free disk space for the cache, output and build folders, the targets and their capabilities,
+Docker daemon, its version (Docker Engine 20.10 or newer) and buildx, how busy this computer's CPU and memory are
+right now, free disk space for the cache, output and build folders, the targets and their capabilities,
 the privacy of the personal folder, the secrets store and the keyring, the tool permissions, the MCP tokens, the audit
 log, the chat feed (it can be written, its newest entries verify), the shipped calibration data, the installed community
 packs (revoked, changed or imported from a file), the knowledge snapshots (how many, their size against the free space

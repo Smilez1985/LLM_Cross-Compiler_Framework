@@ -3994,7 +3994,8 @@ feste Prüfungen aus; nichts fragt ein Modell, was falsch ist. Die ganze Anleitu
 | Bereich | Prüfungen |
 |---|---|
 | Python | unterstützte Version (3.11 bis 3.14) |
-| Docker | Daemon erreichbar, buildx vorhanden; wo Docker seine Images ablegt (`DockerRootDir`, mit dem freien Platz dieser Platte) und wie viel die Build-Images des Frameworks belegen (Information) |
+| Docker | Daemon erreichbar, seine Version (Docker Engine 20.10 oder neuer: älter ist eine Warnung; Podman mit seiner Version genannt), buildx vorhanden; wo Docker seine Images ablegt (`DockerRootDir`, mit dem freien Platz dieser Platte) und wie viel die Build-Images des Frameworks belegen (Information) |
+| Last | wie ausgelastet dieser Computer gerade ist: CPU (eine halbe Sekunde gemessen) über 80 % und Speicher über 85 % belegt sind eine Information (ein Build, der jetzt startet, dauert länger), nie eine Ablehnung |
 | Speicherplatz | freier Platz für den Cache-, den Ausgabe- und den Build-Ordner nach der einen Speicherplatz-Regel: ein Fehler, wenn weniger als die Reserve (2 GiB oder 2 % der Festplatte) frei bleibt, nach dem, was laufende Builds und Downloads reserviert haben, eine Warnung unter der doppelten Reserve |
 | Targets | Targets gefunden, Capabilities lesbar |
 | Sicherheit | persönlicher Ordner privat, Secrets-Speicher nutzbar, Schlüsselbund schützt Geheimnisse |

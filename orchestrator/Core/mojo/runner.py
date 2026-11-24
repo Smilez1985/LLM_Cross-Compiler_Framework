@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Sequence, Tupl
 
 from orchestrator.Core.mojo.checks import (check_calibration, check_chat_feed, check_community, check_dependencies,
                                            check_devices, check_disk, check_docker, check_doorbell, check_knowledge,
+                                           check_load,
                                            check_python, check_runtime, check_runtime_layer, check_secrets,
                                            check_targets, check_tool_policy, check_user_state, check_versions)
 from orchestrator.Core.mojo.findings import Check, Finding, MojoReport, Severity
@@ -21,7 +22,7 @@ from orchestrator.Core.mojo.findings import Check, Finding, MojoReport, Severity
 if TYPE_CHECKING:
     from orchestrator.Core.mojo.offers import Offer
 
-DEFAULT_CHECKS: List[Check] = [check_python, check_docker, check_disk, check_targets, check_user_state,
+DEFAULT_CHECKS: List[Check] = [check_python, check_docker, check_load, check_disk, check_targets, check_user_state,
                                check_secrets, check_tool_policy, check_chat_feed, check_calibration, check_community,
                                check_dependencies, check_versions,
                                check_knowledge, check_runtime, check_runtime_layer, check_doorbell,

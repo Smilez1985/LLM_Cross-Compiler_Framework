@@ -107,6 +107,8 @@ def _mojo_docker(monkeypatch, client):
     monkeypatch.setattr(docker_check, "_stage_user_findings", lambda framework, client: [])   # own tests
     # rootless and the group with root effect: own tests (tests/test_rootless_default.py)
     monkeypatch.setattr(docker_check, "_privilege_findings", lambda client, platform=None: [])
+    # the engine's version: own tests (tests/test_mojo_load_and_version.py)
+    monkeypatch.setattr(docker_check, "_version_findings", lambda client: [])
     return [(f.code, f.severity.value) for f in docker_check.check_docker(_Framework(client))]
 
 

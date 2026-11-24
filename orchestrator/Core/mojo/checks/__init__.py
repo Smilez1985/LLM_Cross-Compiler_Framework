@@ -15,6 +15,7 @@ from orchestrator.Core.mojo.checks.disk import FREE_SPACE_HINT, check_disk
 from orchestrator.Core.mojo.checks.docker import _storage_findings, check_docker
 from orchestrator.Core.mojo.checks.doorbell import check_doorbell
 from orchestrator.Core.mojo.checks.knowledge import check_knowledge
+from orchestrator.Core.mojo.checks.load import check_load
 from orchestrator.Core.mojo.checks.python import check_python
 from orchestrator.Core.mojo.checks.runtime import check_runtime
 from orchestrator.Core.mojo.checks.runtime_layer import check_runtime_layer
@@ -26,5 +27,6 @@ from orchestrator.Core.mojo.checks.versions import check_versions
 
 __all__ = ["FREE_SPACE_HINT", "_storage_findings", "check_calibration", "check_chat_feed", "check_community",
            "check_dependencies", "check_devices", "check_disk", "check_docker", "check_doorbell", "check_knowledge",
+           "check_load",
            "check_python", "check_runtime", "check_runtime_layer",
            "check_secrets", "check_targets", "check_tool_policy", "check_user_state", "check_versions"]

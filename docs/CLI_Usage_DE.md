@@ -202,7 +202,8 @@ llm-cli mojo [--oracle | --miracle] [--json] [--board NAME]
 ```
 
 Der Gesundheitscheck (er hieß `doctor`). **Mojo Oracle** (Standard) schaut nur: Es prüft Python, den
-Docker-Daemon und buildx, den freien Speicherplatz für den Cache-, den Ausgabe- und den Build-Ordner, die Targets und
+Docker-Daemon, seine Version (Docker Engine 20.10 oder neuer) und buildx, wie ausgelastet CPU und Speicher dieses
+Computers gerade sind, den freien Speicherplatz für den Cache-, den Ausgabe- und den Build-Ordner, die Targets und
 ihre Capabilities, ob der persönliche Ordner privat ist, den Secrets-Speicher und den Schlüsselbund, die
 Tool-Berechtigungen, die MCP-Token, das Audit-Log, den Chat-Verlauf (er lässt sich schreiben, seine neuesten Einträge
 stimmen), die mitgelieferten Kalibrierungsdaten, die installierten Community-Pakete (zurückgezogen, verändert oder aus

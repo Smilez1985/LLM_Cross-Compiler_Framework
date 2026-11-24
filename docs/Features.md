@@ -3605,7 +3605,8 @@ deterministic checks; nothing asks a model what is wrong. The whole guide: [Mojo
 | Area | Checks |
 |---|---|
 | Python | supported version (3.11 to 3.14) |
-| Docker | daemon reachable, buildx available; where Docker keeps its images (`DockerRootDir`, with the free space of that disk) and how much the framework's build images use (information) |
+| Docker | daemon reachable, its version (Docker Engine 20.10 or newer: older is a warning; Podman named with its version), buildx available; where Docker keeps its images (`DockerRootDir`, with the free space of that disk) and how much the framework's build images use (information) |
+| Load | how busy this computer is right now: CPU (sampled for half a second) above 80 % and memory above 85 % in use are information (a build started now takes longer), never a refusal |
 | Disk | free space for the cache, output and build folders by the one disk rule: an error when less than the reserve (2 GiB or 2 % of the disk) stays free after what running builds and downloads reserved, a warning below twice the reserve |
 | Targets | targets found, capabilities readable |
 | Security | personal folder private, secrets store usable, keyring protects secrets |

@@ -468,11 +468,12 @@ def _validate_port_availability(port: int) -> ValidationResult:
         )
 
 
-def _validate_cpu_usage(max_cpu_percent: float) -> ValidationResult:
-    """Validate current CPU usage"""
+def validate_cpu_usage(max_cpu_percent: float, interval: float = 1.0) -> ValidationResult:
+    """The computer's CPU load, sampled over `interval` seconds, against `max_cpu_percent` (Mojo's load check,
+    Core/mojo/checks/load.py). Never raises: a failure is a result of severity ERROR."""
     try:
         import psutil
-        cpu_percent = psutil.cpu_percent(interval=1)
+        cpu_percent = psutil.cpu_percent(interval=interval)
         
         if cpu_percent <= max_cpu_percent:
             return ValidationResult(
@@ -501,8 +502,8 @@ def _validate_cpu_usage(max_cpu_percent: float) -> ValidationResult:
         )
 
 
-def _validate_memory_usage(max_memory_percent: float) -> ValidationResult:
-    """Validate current memory usage"""
+def validate_memory_usage(max_memory_percent: float) -> ValidationResult:
+    """The share of the computer's memory in use against `max_memory_percent` (Mojo's load check). Never raises."""
     try:
         import psutil
         memory_info = psutil.virtual_memory()
@@ -514,7 +515,8 @@ def _validate_memory_usage(max_memory_percent: float) -> ValidationResult:
                 severity=ValidationSeverity.SUCCESS,
                 message=f"Memory usage OK: {memory_percent}% <= {max_memory_percent}%",
                 validation_type=ValidationType.PERFORMANCE,
-                details={"memory_percent": memory_percent, "max_percent": max_memory_percent}
+                details={"memory_percent": memory_percent, "max_percent": max_memory_percent,
+                         "available_bytes": int(memory_info.available)}
             )
         else:
             return ValidationResult(
@@ -522,7 +524,8 @@ def _validate_memory_usage(max_memory_percent: float) -> ValidationResult:
                 severity=ValidationSeverity.WARNING,
                 message=f"High memory usage: {memory_percent}% > {max_memory_percent}%",
                 validation_type=ValidationType.PERFORMANCE,
-                details={"memory_percent": memory_percent, "max_percent": max_memory_percent}
+                details={"memory_percent": memory_percent, "max_percent": max_memory_percent,
+                         "available_bytes": int(memory_info.available)}
             )
             
     except Exception as e:
@@ -580,59 +583,88 @@ def check_docker_environment(client: Any) -> DockerEnvironment:
     return DockerEnvironment(True, docker_cli=True, buildx=code == 0, engine=engine)
 
 
-def _validate_docker_version() -> ValidationResult:
-    """Validate Docker version"""
+# The oldest Docker Engine the framework counts as current: 20.10 made rootless mode a stable feature (the framework
+# prefers a rootless engine) and added cgroup v2, which current Linux systems use. Podman has no such minimum here.
+DOCKER_MIN_VERSION = "20.10.0"
+
+
+def _engine_version(client: Any) -> str:
+    """The version the engine behind the framework's Docker client names (GET /version), '' without an answer."""
+    if client is None:
+        return ""
     try:
-        result = subprocess.run(
-            ["docker", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        
-        if result.returncode == 0:
-            version_output = result.stdout.strip()
-            
-            # Extract version number (basic parsing)
-            version_match = re.search(r'(\d+\.\d+\.\d+)', version_output)
-            if version_match:
-                docker_version = version_match.group(1)
-                
-                # Check minimum version (example: 20.10.0)
-                min_version = "20.10.0"
-                if version.parse(docker_version) >= version.parse(min_version):
-                    return ValidationResult(
-                        valid=True,
-                        severity=ValidationSeverity.SUCCESS,
-                        message=f"Docker version OK: {docker_version}",
-                        validation_type=ValidationType.DEPENDENCY,
-                        details={"version": docker_version}
-                    )
-                else:
-                    return ValidationResult(
-                        valid=False,
-                        severity=ValidationSeverity.WARNING,
-                        message=f"Docker version may be outdated: {docker_version} < {min_version}",
-                        validation_type=ValidationType.DEPENDENCY,
-                        details={"version": docker_version, "minimum": min_version}
-                    )
-            else:
+        answer = client.version() or {}
+    except Exception:  # noqa: BLE001 - no answer: the docker command is asked instead
+        return ""
+    return str(answer.get("Version") or "") if isinstance(answer, dict) else ""
+
+
+def validate_docker_version(client: Any = None, minimum: str = DOCKER_MIN_VERSION) -> ValidationResult:
+    """The container engine's version against `minimum`: the engine behind the framework's Docker `client` (the one
+    builds use; a docker context can point the docker command elsewhere), else `docker --version`. Under Podman the
+    version is reported without a minimum (details engine 'podman'). Never raises."""
+    try:
+        from orchestrator.utils.docker_engine import engine_name
+        engine = engine_name(client) if client is not None else ""
+        version_output = _engine_version(client)
+        source = "engine"
+        if not version_output:
+            source = "docker command"
+            if not shutil.which("docker"):
                 return ValidationResult(
-                    valid=True,
-                    severity=ValidationSeverity.WARNING,
-                    message=f"Could not parse Docker version: {version_output}",
+                    valid=False,
+                    severity=ValidationSeverity.ERROR,
+                    message="Docker version unknown: the engine gave no version and the docker command is not on PATH",
                     validation_type=ValidationType.DEPENDENCY,
-                    details={"output": version_output}
+                    details={"engine": engine}
                 )
-        else:
+            from orchestrator.utils.helpers import execute_command   # the one runner of a short command
+            code, out, err = execute_command(["docker", "--version"], timeout=5)
+            if code != 0:
+                return ValidationResult(
+                    valid=False,
+                    severity=ValidationSeverity.ERROR,
+                    message=f"Docker version check failed: {(err or '').strip() or 'no answer'}",
+                    validation_type=ValidationType.DEPENDENCY,
+                    details={"stderr": (err or "").strip(), "engine": engine}
+                )
+            version_output = (out or "").strip()
+
+        version_match = re.search(r'(\d+\.\d+(?:\.\d+)?)', version_output)
+        if not version_match:
             return ValidationResult(
-                valid=False,
-                severity=ValidationSeverity.ERROR,
-                message=f"Docker version check failed: {result.stderr}",
+                valid=True,
+                severity=ValidationSeverity.WARNING,
+                message=f"Could not parse Docker version: {version_output}",
                 validation_type=ValidationType.DEPENDENCY,
-                details={"stderr": result.stderr}
+                details={"output": version_output, "engine": engine, "source": source}
             )
-            
+        docker_version = version_match.group(1)
+        details = {"version": docker_version, "engine": engine, "source": source}
+        if engine == "podman":
+            return ValidationResult(
+                valid=True,
+                severity=ValidationSeverity.SUCCESS,
+                message=f"Podman version: {docker_version}",
+                validation_type=ValidationType.DEPENDENCY,
+                details=details
+            )
+        if version.parse(docker_version) >= version.parse(minimum):
+            return ValidationResult(
+                valid=True,
+                severity=ValidationSeverity.SUCCESS,
+                message=f"Docker version OK: {docker_version}",
+                validation_type=ValidationType.DEPENDENCY,
+                details=details
+            )
+        return ValidationResult(
+            valid=False,
+            severity=ValidationSeverity.WARNING,
+            message=f"Docker version may be outdated: {docker_version} < {minimum}",
+            validation_type=ValidationType.DEPENDENCY,
+            details={**details, "minimum": minimum}
+        )
+
     except Exception as e:
         return ValidationResult(
             valid=False,
