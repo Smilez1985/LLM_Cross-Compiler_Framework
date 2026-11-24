@@ -70,7 +70,9 @@ class ConfigScope(Enum):
     RUNTIME = "runtime"
 
 class AdvancedFeature(Enum):
-    """Optional advanced features"""
+    """The advanced mode's features: the enterprise mode's groundwork from before it was renamed (ROADMAP "The
+    enterprise mode on its groundwork"). `framework_mode: enterprise` switches the advanced mode on
+    (advanced_mode_for); each feature joins ENTERPRISE_FEATURES when the enterprise mode wires it."""
     SECRETS_MANAGEMENT = "secrets_management"
     DYNAMIC_UPDATES = "dynamic_updates"
     TEMPLATES = "templates"
@@ -205,6 +207,23 @@ class AdvancedModeConfig:
         if self.enabled:
             self.enabled_features.add(feature)
 
+# The advanced features the enterprise mode switches on: none is wired yet (secrets management with HashiCorp Vault
+# and CyberArk Conjur, compliance, audit join when the enterprise mode needs them; ROADMAP "The enterprise mode on its
+# groundwork"). The advanced mode itself (settings only enterprise may set, the change history, the private folders
+# secrets, compliance and audit) comes with the mode.
+ENTERPRISE_FEATURES: frozenset = frozenset()
+
+
+def advanced_mode_for(mode: str, features: Iterable[AdvancedFeature] = ()) -> AdvancedModeConfig:
+    """The one place that maps the framework mode to the advanced mode: on for "enterprise" (with
+    ENTERPRISE_FEATURES and `features`, the ones a caller of ConfigManager asks for), off for "private" (no feature,
+    whatever is asked)."""
+    config = AdvancedModeConfig(enabled=mode == "enterprise")
+    for feature in (*ENTERPRISE_FEATURES, *features):
+        config.enable_feature(feature)
+    return config
+
+
 # ============================================================================
 # CONFIGURATION MANAGER CLASS
 # ============================================================================
@@ -246,11 +265,48 @@ class ConfigManager:
         self._disk_seen: Dict[str, Any] = {}
         self._explicit_file: Optional[str] = str(config_file) if config_file and config_file.exists() else None
 
+        # what the caller asked for besides the mode (an advanced mode without enterprise, and its features)
+        self._asked_advanced = advanced_mode
+        self._asked_features = tuple(self.advanced_mode.enabled_features)
+
         self._initialize_core_schemas()
         self._ensure_directories()
         self.load_configuration(config_file if config_file and config_file.exists() else None)
+        if self._apply_framework_mode():
+            # enterprise switched the advanced mode on: the settings only enterprise may set are read now
+            self.load_configuration(config_file if config_file and config_file.exists() else None)
 
-        self.logger.info(f"Configuration Manager initialized (advanced_mode: {advanced_mode})")
+        self.logger.info(f"Configuration Manager initialized (advanced_mode: {self.advanced_mode.enabled})")
+
+    def _apply_framework_mode(self) -> bool:
+        """Puts the advanced mode in step with the framework mode (advanced_mode_for): enterprise switches it on,
+        private off unless the caller asked for it. Returns True when it was switched on now. Switched off, the
+        settings only enterprise may set go back to their defaults."""
+        mode = framework_mode(self)
+        wanted = advanced_mode_for("enterprise" if mode == "enterprise" or self._asked_advanced else "private",
+                                   self._asked_features)
+        was = self.advanced_mode.enabled
+        if was == wanted.enabled and self.advanced_mode.enabled_features == wanted.enabled_features:
+            return False
+        self.advanced_mode = wanted
+        if wanted.enabled and not was:
+            try:
+                self._ensure_directories()
+            except OSError as e:
+                self.logger.warning(f"The enterprise folders could not be created in {self.config_dir}: {e}")
+            return True
+        if was and not wanted.enabled:
+            with self._lock:
+                for key, schema in self.config_schemas.items():
+                    if schema.enterprise_only and key in self.config_values:
+                        if schema.default_value is None:
+                            del self.config_values[key]
+                        else:
+                            self.config_values[key] = ConfigValue(
+                                key=key, value=schema.default_value,
+                                source=ConfigSource("default", loaded_at=datetime.now(), priority=0), schema=schema,
+                                last_modified=datetime.now())
+        return False
     
     @staticmethod
     def installation_config_dir() -> Path:
@@ -336,14 +392,11 @@ class ConfigManager:
             self.config_dir / "templates",
             self.config_dir / "backups"
         ]
-        if self.advanced_mode.enabled:
-            directories.extend([
-                self.config_dir / "secrets",
-                self.config_dir / "compliance",
-                self.config_dir / "audit"
-            ])
         for directory in directories:
             ensure_directory(directory)
+        if self.advanced_mode.enabled:   # the enterprise mode's own folders, private to the person
+            for name in ("secrets", "compliance", "audit"):
+                ensure_directory(self.config_dir / name, mode=0o700)
 
     def _initialize_core_schemas(self):
         # Data folders: relative to the installation, or in the per-user folder if the installation is read-only.
@@ -814,6 +867,8 @@ class ConfigManager:
                 self._track_config_change(key, old.value if old else None, value, source_type)
             if self.advanced_mode.is_feature_enabled(AdvancedFeature.DYNAMIC_UPDATES):
                 self._notify_change_listeners(key, value)
+        if key == "framework_mode":
+            self._apply_framework_mode()   # the advanced mode follows the mode at once
         return True
     
     def save_user_config(self):
