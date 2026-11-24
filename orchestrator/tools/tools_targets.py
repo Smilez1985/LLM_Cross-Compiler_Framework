@@ -207,6 +207,10 @@ class HardwareProbeOut(ToolOutput):
     access: Optional[AccessOut] = Field(default=None, description="How the board is reached and installed on (SSH "
                                                                   "server, sudo, ssh-keygen, init, package manager); "
                                                                   "None for a probe older than 3.3.0")
+    research_questions: List[UntrustedText] = Field(
+        default_factory=list, description="Search questions from this probe's SoC, NPU, board and GPU for web_search "
+                                          "(fixed templates, never a private value); each search still asks the "
+                                          "person")
 
 
 class NoInput(BaseModel):
@@ -531,8 +535,10 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
         access = None
         if facts is not None:
             access = AccessOut(**facts.as_dict(), summary=access_line(profile, "en") or "")
+        from orchestrator.Core.research_questions import research_questions
         return HardwareProbeOut(probe=summary_of(info, found.target if found else None),
                                 values=dict(profile.values), access=access,
+                                research_questions=research_questions(profile.values),
                                 matched_target=MatchOut(target=found.target, board=found.board, reason=found.reason)
                                 if found else None)
 

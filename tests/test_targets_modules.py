@@ -190,6 +190,7 @@ class TestProbeTools:
             [(probe_id, "Zero 3W", "imported", "Rockchip")]
         out = call(fw, "get_hardware_probe", {"probe_id": probe_id})
         assert out.values["SOC_MODEL"] == "rk3566" and out.matched_target.board == "rk3566"
+        assert "rockchip rk3566 datasheet" in out.research_questions   # the search questions of the probe (round 117)
         schema = fw.tool_registry.get("get_hardware_probe").output_model.model_json_schema()
         assert schema["properties"]["values"]["additionalProperties"]["untrusted"] is True
 
