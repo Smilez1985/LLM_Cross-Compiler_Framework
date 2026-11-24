@@ -93,6 +93,10 @@ class MojoMiracleOut(ToolOutput):
     repaired: bool = Field(description="True only when it was changed and Mojo Oracle no longer finds the problem")
     what: str = Field(description="What Mojo Miracle did or planned, by labels")
     reason: UntrustedText = Field(default="", description="Why it was not repaired")
+    steps_done: int = Field(default=0, description="The plan's steps that are done, an earlier run's included")
+    steps_total: int = Field(default=0, description="The plan's steps")
+    continued_after: int = Field(default=0, description="The steps an earlier run of the same plan had done: this run "
+                                                        "started after them and did not do them again")
 
 
 def _channel(value: str) -> str:

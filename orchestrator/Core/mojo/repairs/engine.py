@@ -8,12 +8,20 @@ the plan the caller was shown (sha256) nothing is changed (`plan_changed`); (3) 
 delegable) is applied here, whoever asks; (4) the audit log records the start first, or nothing is changed; (5) the
 steps run in order, each a compare-and-swap, stopping at the first that fails; (6) the end is recorded; (7) the check
 runs again: `repaired` when the finding is gone, else honestly `still_present`.
+
+A run that stops part-way remembers how far it came (`steps_done` of `steps_total`, with the plan's sha256, in the
+state folder's mojo/progress.json, private and written atomically): the next run whose new plan has the same sha256
+continues after those steps and says so (`continued_after`), so it never does again what the earlier run did; a plan
+made from a changed state has another sha256 and already leaves out what was done, so the record goes. The record of a
+finding goes too when it is repaired or no longer found.
 """
 
 import contextlib
+import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from orchestrator.Core.mojo.findings import Finding, Severity
 from orchestrator.Core.mojo.repairs import repair_for
@@ -30,8 +38,10 @@ class RepairResult:
     finding_code: str
     summary: str = ""
     reason: str = ""
-    steps_done: int = 0
+    steps_done: int = 0         # the steps of the plan that are done (those of an earlier run included)
     plan_sha256: str = ""
+    steps_total: int = 0        # the plan's steps
+    continued_after: int = 0    # the steps an earlier run of the same plan had done; this run started after them
 
     @property
     def repaired(self) -> bool:
@@ -68,10 +78,58 @@ def apply_repair(framework, code: str, *, actor: str, decision: str = "allow", a
             return RepairResult("failed", code, reason=f"the check could not run again: {e}")
 
 
+def progress_path(framework) -> Path:
+    """Where a run that stopped part-way records how far it came (one record per finding code)."""
+    return state_dir(framework) / "mojo" / "progress.json"
+
+
+def read_progress(framework) -> Dict[str, Dict[str, Any]]:
+    """{finding code: {plan_sha256, steps_done, steps_total, at}}; {} when there is none or it cannot be read."""
+    try:
+        data = json.loads(progress_path(framework).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): v for k, v in data.items() if isinstance(v, dict) and isinstance(v.get("plan_sha256"), str)
+            and isinstance(v.get("steps_done"), int) and not isinstance(v.get("steps_done"), bool)}
+
+
+def _write_progress(framework, code: str, record: Optional[Dict[str, Any]]) -> None:
+    """Records (or, with None, forgets) how far the repair of `code` came; never raises (a record that cannot be
+    written only means the next run starts at the first step, which is always safe: every step is a compare-and-swap)."""
+    from orchestrator.utils.atomic import write_private
+    try:
+        data = read_progress(framework)
+        if record is None:
+            if code not in data:
+                return
+            data.pop(code)
+        else:
+            data[code] = record
+        write_private(progress_path(framework), json.dumps(data, indent=1, sort_keys=True))
+    except OSError:
+        pass
+
+
+def _continue_after(framework, code: str, sha: str, total: int) -> int:
+    """The steps an earlier run of exactly this plan did (0 when there is no such run); a record of another plan
+    is dropped: that plan was made from another state."""
+    record = read_progress(framework).get(code)
+    if record is None:
+        return 0
+    done = record["steps_done"]
+    if record["plan_sha256"] == sha and 0 < done < total:
+        return done
+    _write_progress(framework, code, None)
+    return 0
+
+
 def _apply(framework, repair, code: str, *, actor: str, decision: str, answered_by: str, confirm_channel: str,
            expect_sha256: str, links: Sequence[int]) -> RepairResult:
     found = _problems(framework, repair.check, code)
     if not found:
+        _write_progress(framework, code, None)
         return RepairResult("already_fixed", code, reason="Mojo Oracle no longer finds this problem, so nothing was "
                                                           "changed")
     plan = repair.plan(framework, found[0])
@@ -90,22 +148,26 @@ def _apply(framework, repair, code: str, *, actor: str, decision: str, answered_
         return RepairResult("refused", code, plan.summary, plan_sha256=sha,
                             reason=f"this repair is not harmless (class {plan.repair_class()}): it needs you in the "
                                    "framework")
+    total = len(plan.steps)
+    skip = _continue_after(framework, code, sha, total)
     audit = getattr(getattr(framework, "tool_registry", None), "audit", None)
     extra = {"finding_code": code, "repair_id": plan.repair_id, "plan_sha256": sha,
              "repair_class": plan.repair_class(), "answered_by": answered_by or None,
-             "confirm_channel": confirm_channel or None, "links": list(links) or None}
+             "confirm_channel": confirm_channel or None, "links": list(links) or None,
+             "continued_after": skip or None}
     arguments = {"code": code}
     if audit is None or not callable(getattr(audit, "record", None)):
         return RepairResult("failed", code, plan.summary, plan_sha256=sha,
                             reason="the audit log is not available, so nothing was changed")
     try:
         audit.record(actor, "mojo", "local_write", decision, "started", approved=True, arguments=arguments,
-                     detail=f"Mojo Miracle: {plan.summary}", extra=extra)
+                     detail=f"Mojo Miracle: {plan.summary}" + (f" (continues after {skip} of {total} steps an "
+                                                              f"earlier run did)" if skip else ""), extra=extra)
     except Exception:  # noqa: BLE001 - its words could name the log's path; the person sees the cause in Mojo Oracle
         return RepairResult("failed", code, plan.summary, plan_sha256=sha,
                             reason="the audit log cannot record the repair, so nothing was changed")
-    done, failure = 0, ""
-    for step in plan.steps:
+    done, failure = skip, ""
+    for step in plan.steps[skip:]:
         try:
             repair.apply_step(framework, step)
         except StepChanged as e:
@@ -124,19 +186,23 @@ def _apply(framework, repair, code: str, *, actor: str, decision: str, answered_
                                                   f"Mojo Miracle applied {done} step(s)")[:1000], extra=extra)
     except Exception:  # noqa: BLE001 - what happened is reported below; its start is recorded
         pass
+    steps = {"steps_done": done, "plan_sha256": sha, "steps_total": total, "continued_after": skip}
     if failure:
-        return RepairResult("failed", code, plan.summary, failure + (f" ({done} of {len(plan.steps)} steps were done)"
-                                                                      if done else "; nothing was changed"),
-                            done, sha)
+        # the next run of the same plan continues after the steps done here
+        _write_progress(framework, code, {"plan_sha256": sha, "steps_done": done, "steps_total": total,
+                                          "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+        return RepairResult("failed", code, plan.summary, failure + (f" ({done} of {total} steps were done)"
+                                                                      if done else "; nothing was changed"), **steps)
+    _write_progress(framework, code, None)   # every step is done
     try:
         still = _problems(framework, repair.check, code)
     except Exception as e:  # noqa: BLE001
         return RepairResult("failed", code, plan.summary, f"the change was made, but the check could not run again "
-                                                          f"to confirm it: {e}", done, sha)
+                                                          f"to confirm it: {e}", **steps)
     if still:
         return RepairResult("still_present", code, plan.summary,
-                            f"it was changed, but Mojo Oracle still finds the problem: {still[0].message}", done, sha)
-    return RepairResult("repaired", code, plan.summary, steps_done=done, plan_sha256=sha)
+                            f"it was changed, but Mojo Oracle still finds the problem: {still[0].message}", **steps)
+    return RepairResult("repaired", code, plan.summary, **steps)
 
 
 def lock_path(framework) -> Path:

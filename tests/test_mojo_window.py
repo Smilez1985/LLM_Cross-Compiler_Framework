@@ -353,6 +353,31 @@ def test_mojo_miracle_deletes_exactly_what_the_person_ticked_and_shows_what_beca
         window.close()
 
 
+@pytest.mark.parametrize("lang, continued, done", [
+    ("en", "Continued after 1 of 3 steps an earlier run did.",
+     "2 of 3 steps are done; the next run of the same plan continues after them."),
+    ("de", "Nach 1 von 3 Schritten fortgesetzt, die ein früherer Lauf erledigt hat.",
+     "2 von 3 Schritten sind erledigt; der nächste Lauf desselben Plans setzt danach fort.")])
+def test_the_window_says_how_far_a_repair_came(qapp, tmp_path, engine, lang, continued, done):
+    """A repair that continued after an earlier run's steps, and one that stopped part-way, each say so in a row of
+    their own, in the window's language (the CLI says it in its line)."""
+    engine.report, engine.offered = problems()
+    finding = engine.offered[0].finding
+    window = opened(qapp, gui_framework(tmp_path), lang=lang)
+    try:
+        result = MiracleReport([MiracleEntry(finding, "miracle", "repaired", "three steps", steps_done=3,
+                                             steps_total=3, continued_after=1),
+                                MiracleEntry(finding, "miracle", "failed", "three steps", "it changed meanwhile",
+                                             steps_done=2, steps_total=3)], MojoReport([]))
+        window._show_miracle(result, [], [], None)
+        rows = tree_rows(window.results)
+        steps = "Steps" if lang == "en" else "Schritte"
+        assert rows[0][1] == [["", steps, continued]]
+        assert rows[1][0][2] == "it changed meanwhile" and rows[1][1][0] == ["", steps, done]
+    finally:
+        window.close()
+
+
 def test_a_closed_window_answers_the_waiting_list_with_nothing(qapp, tmp_path, engine, answers, monkeypatch):
     """The worker waits for the person's list; when the window closes first, nothing is deleted."""
     from PySide6.QtWidgets import QMessageBox

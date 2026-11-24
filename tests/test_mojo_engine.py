@@ -453,3 +453,106 @@ def test_the_mojo_guide_names_every_list_mojo_points_to_and_the_knowledge_storag
     for name, row in (("docs/Features.md", "| Knowledge |"), ("docs/Features_DE.md", "| Wissen |")):
         (line,) = [ln for ln in (REPO / name).read_text(encoding="utf-8").splitlines() if ln.startswith(row)]
         assert "Qdrant Edge" in line, f"{name}: Mojo's row for the knowledge base does not name its storage check"
+
+
+# --- a run that stops part-way: the next run of the same plan continues after what it did ---------------------------
+class _ThreeSteps:
+    """A harmless repair of `test.code` with three steps; `fail_at` makes one step fail once; `label` changes the plan."""
+
+    def __init__(self):
+        self.applied, self.fail_at, self.label = [], None, "a"
+
+    def check(self, _fw):
+        return [] if len(self.applied) >= 3 else [Finding("test", "test.code", Severity.WARN, "m", why="w",
+                                                          repair_id="test.repair")]
+
+    def plan(self, _fw, _finding):
+        return RepairPlan(repair_id="test.repair", finding_code="test.code", summary="three steps",
+                          steps=tuple(RepairStep(kind="chmod", target_label=f"{self.label}{i}", undoable=True)
+                                      for i in range(3)))
+
+    def apply_step(self, _fw, step):
+        if step.target_label == self.fail_at:
+            self.fail_at = None
+            raise StepChanged("it changed meanwhile")
+        self.applied.append(step.target_label)
+
+
+@pytest.fixture
+def three_steps(monkeypatch):
+    from orchestrator.Core.mojo.repairs import Repair
+    fake = _ThreeSteps()
+    monkeypatch.setitem(REPAIRS, "test.repair", Repair("test.repair", ("test.code",), fake.check, fake.plan,
+                                                       fake.apply_step, "nothing to do"))
+    return fake
+
+
+def test_a_run_that_stopped_records_how_far_it_came_and_the_next_run_continues_after_it(open_state, three_steps):
+    from orchestrator.Core.mojo.repairs.engine import progress_path, read_progress
+    framework = framework_with(open_state)
+    three_steps.fail_at = "a1"
+    first = apply_repair(framework, "test.code", actor="cli")
+    assert first.outcome == "failed" and (first.steps_done, first.steps_total, first.continued_after) == (1, 3, 0)
+    assert "1 of 3 steps were done" in first.reason
+    record = read_progress(framework)["test.code"]
+    assert record["plan_sha256"] == first.plan_sha256 and record["steps_done"] == 1 and record["steps_total"] == 3
+    if os.name == "posix":
+        assert stat.S_IMODE(progress_path(framework).stat().st_mode) == 0o600, "the record is private"
+
+    second = apply_repair(framework, "test.code", actor="cli")
+    assert second.outcome == "repaired" and (second.steps_done, second.continued_after) == (3, 1)
+    assert three_steps.applied == ["a0", "a1", "a2"], "the step the first run did is not done again"
+    started = [e for e in framework.tool_registry.audit.entries if e["outcome"] == "started"]
+    assert started[0]["extra"]["continued_after"] is None and started[1]["extra"]["continued_after"] == 1
+    assert "continues after 1 of 3 steps" in started[1]["detail"]
+    assert read_progress(framework) == {}, "a repaired finding has no record any more"
+
+
+def test_a_changed_plan_starts_at_its_first_step_and_drops_the_record(open_state, three_steps):
+    from orchestrator.Core.mojo.repairs.engine import read_progress
+    framework = framework_with(open_state)
+    three_steps.fail_at = "a2"
+    assert apply_repair(framework, "test.code", actor="cli").steps_done == 2
+    three_steps.label = "b"   # the state changed: another plan, another sha256
+    result = apply_repair(framework, "test.code", actor="cli")
+    assert result.continued_after == 0 and three_steps.applied == ["a0", "a1", "b0", "b1", "b2"]
+    assert result.outcome == "repaired" and read_progress(framework) == {}
+
+
+def test_a_finding_that_is_gone_drops_its_record(open_state, three_steps):
+    from orchestrator.Core.mojo.repairs.engine import read_progress
+    framework = framework_with(open_state)
+    three_steps.fail_at = "a1"
+    apply_repair(framework, "test.code", actor="cli")
+    three_steps.applied += ["x", "y"]   # repaired elsewhere
+    assert apply_repair(framework, "test.code", actor="cli").outcome == "already_fixed"
+    assert read_progress(framework) == {}
+
+
+def test_an_unreadable_record_means_the_first_step(open_state, three_steps):
+    from orchestrator.Core.mojo.repairs.engine import progress_path
+    framework = framework_with(open_state)
+    progress_path(framework).parent.mkdir(parents=True, exist_ok=True)
+    progress_path(framework).write_text("{not json", encoding="utf-8")
+    result = apply_repair(framework, "test.code", actor="cli")
+    assert result.outcome == "repaired" and result.continued_after == 0 and three_steps.applied == ["a0", "a1", "a2"]
+
+
+def test_the_audit_log_takes_continued_after_only_as_a_number_of_steps():
+    from orchestrator.tools.audit import AuditLog
+    AuditLog._extra("started", {"continued_after": 2})
+    for bad in (-1, True, "2", 1000):
+        with pytest.raises(ValueError):
+            AuditLog._extra("started", {"continued_after": bad})
+
+
+def test_the_views_say_how_far_a_repair_came():
+    from orchestrator.Core.mojo.views import entry_text, miracle_row
+    from orchestrator.Core.mojo.repairs.engine import RepairResult
+    result = RepairResult("repaired", "test.code", "three steps", steps_done=3, plan_sha256="0" * 64, steps_total=3,
+                          continued_after=1)
+    row = miracle_row(SimpleNamespace(config=SimpleNamespace()), result)
+    assert (row["steps_done"], row["steps_total"], row["continued_after"]) == (3, 3, 1)
+    assert "continued after 1 of 3 steps an earlier run did" in entry_text(result)
+    stopped = RepairResult("failed", "test.code", "three steps", "it changed", steps_done=1, steps_total=3)
+    assert "1 of 3 steps are done; the next run of the same plan continues after them" in entry_text(stopped)

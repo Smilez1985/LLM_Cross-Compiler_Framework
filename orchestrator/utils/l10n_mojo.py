@@ -83,6 +83,9 @@ TEXTS = {
         "mojo.result.repaired": "{summary}. Checked again: the problem is gone.",
         "mojo.result.again": "Click 'Check again': it shows the new plan.",
         "mojo.result.images": "Your list of the framework's build images",
+        "mojo.steps": "Steps",
+        "mojo.steps.continued": "Continued after {n} of {total} steps an earlier run did.",
+        "mojo.steps.done": "{n} of {total} steps are done; the next run of the same plan continues after them.",
         # boards (W1: only on request, or when a recorded fact points to a problem)
         "mojo.boards.title": "Boards",
         "mojo.boards.none": "No recorded fact points to a problem with a board, so Mojo contacted none.",
@@ -179,6 +182,9 @@ TEXTS = {
         "mojo.result.repaired": "{summary}. Erneut geprüft: das Problem ist weg.",
         "mojo.result.again": "Klicke auf 'Erneut prüfen': es zeigt den neuen Plan.",
         "mojo.result.images": "Deine Liste der Build-Images des Frameworks",
+        "mojo.steps": "Schritte",
+        "mojo.steps.continued": "Nach {n} von {total} Schritten fortgesetzt, die ein früherer Lauf erledigt hat.",
+        "mojo.steps.done": "{n} von {total} Schritten sind erledigt; der nächste Lauf desselben Plans setzt danach fort.",
         # Boards (W1: nur auf Wunsch oder wenn ein aufgezeichneter Fakt auf ein Problem zeigt)
         "mojo.boards.title": "Boards",
         "mojo.boards.none": "Kein aufgezeichneter Fakt zeigt auf ein Problem mit einem Board, also hat Mojo keines "

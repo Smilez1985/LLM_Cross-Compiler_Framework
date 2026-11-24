@@ -39,6 +39,9 @@ class MiracleEntry:
     outcome: str
     summary: str = ""
     reason: str = ""
+    steps_done: int = 0         # how far the repair came (RepairResult), for the person's text (views.steps_text)
+    steps_total: int = 0
+    continued_after: int = 0
 
 
 @dataclass
@@ -144,7 +147,8 @@ class Mojo:
                                       expect_sha256=offer.plan.sha256())
                 outcome = "not_done" if result.outcome == "refused" else result.outcome
                 entries.append(MiracleEntry(finding, offer.verdict, outcome, result.summary or offer.summary,
-                                            result.reason))
+                                            result.reason, result.steps_done, result.steps_total,
+                                            result.continued_after))
             elif offer.verdict == "miracle_yes":
                 if not (at_terminal and confirm is not None and decision == "person"):
                     entries.append(MiracleEntry(finding, offer.verdict, "not_done", "", offer.reason))
@@ -157,7 +161,8 @@ class Mojo:
                                           expect_sha256=offer.plan.sha256())
                     outcome = "not_done" if result.outcome == "refused" else result.outcome
                     entries.append(MiracleEntry(finding, offer.verdict, outcome, result.summary or offer.summary,
-                                                result.reason))
+                                                result.reason, result.steps_done, result.steps_total,
+                                                result.continued_after))
             elif offer.verdict == "deletion_list" and finding.code in DELETION_LISTS and at_terminal \
                     and free_space is not None:
                 listing = DELETION_LISTS[finding.code]

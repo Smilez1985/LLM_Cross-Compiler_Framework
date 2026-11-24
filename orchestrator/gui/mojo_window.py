@@ -483,11 +483,18 @@ class MojoWindow(QDialog):
             kind = outcome_kind(entry)
             mark, severity = OUTCOME_MARKS[kind]
             text = (self._t("mojo.result.repaired", summary=entry.summary) if entry.outcome == "repaired"
-                    else entry_text(entry))
+                    else entry_text(entry, with_steps=False))
             item = QTreeWidgetItem([f"{mark} {self._t('mojo.outcome.' + kind)}",
                                     f"{one_line(entry.finding.subsystem)} ({one_line(entry.finding.code)})",
                                     display_text(text)])
             item.setIcon(0, self._icon(severity))
+            total, done, earlier = entry.steps_total, entry.steps_done, entry.continued_after
+            if earlier:
+                item.addChild(QTreeWidgetItem(["", self._t("mojo.steps"),
+                                               self._t("mojo.steps.continued", n=earlier, total=total)]))
+            if total and done < total:
+                item.addChild(QTreeWidgetItem(["", self._t("mojo.steps"),
+                                               self._t("mojo.steps.done", n=done, total=total)]))
             step, hint = entry_next(entry)
             if step == "again":
                 item.addChild(QTreeWidgetItem(["", self._t("mojo.hint"), self._t("mojo.result.again")]))

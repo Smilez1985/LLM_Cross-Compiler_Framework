@@ -6946,15 +6946,21 @@ def _mojo_dict(report, offered) -> dict:
     return data
 
 
+def _steps_of(entry) -> dict:
+    """How far one repair came (Core/mojo/runner.MiracleEntry): the plan's steps done, its steps, and the steps an
+    earlier run of the same plan had done (this run continued after them)."""
+    return {"steps_done": entry.steps_done, "steps_total": entry.steps_total, "continued_after": entry.continued_after}
+
+
 def _mojo_miracle_dict(result) -> dict:
     """Mojo Miracle for --json: what was repaired, and what was not and why. `fixed` and `still_present` mean what they
     mean for `doctor --fix --json`: the repairs Mojo Miracle made, and those it tried that are still there."""
     fixed, still_present, _ = _miracle_fixed(result)
     return {"exit_code": result.exit_code, "fixed": fixed, "still_present": still_present,
-            "repaired": [{"code": e.finding.code, "summary": e.summary} for e in result.repaired],
+            "repaired": [{"code": e.finding.code, "summary": e.summary, **_steps_of(e)} for e in result.repaired],
             "already_gone": [{"code": e.finding.code, "reason": e.reason} for e in result.already_gone],
-            "not_repaired": [{"code": e.finding.code, "outcome": e.outcome, "can": e.verdict, "reason": e.reason}
-                             for e in result.not_repaired],
+            "not_repaired": [{"code": e.finding.code, "outcome": e.outcome, "can": e.verdict, "reason": e.reason,
+                              **_steps_of(e)} for e in result.not_repaired],
             "new_problems": [f.code for f in result.new_problems]}
 
 

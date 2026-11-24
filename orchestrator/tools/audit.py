@@ -96,7 +96,9 @@ EXTRA_FIELDS = frozenset({"client", "session", "confirm_channel", "question_sha2
                           "answered_by", "delegation", "reason_sha256", "facts_sha256", "warnings", "version",
                           "feed_entry", "deletion_sha256",
                           # Mojo Miracle's repairs (round 6 design 7.9): the finding, the repair and its plan's hash
-                          "finding_code", "repair_id", "plan_sha256", "repair_class"})
+                          "finding_code", "repair_id", "plan_sha256", "repair_class",
+                          # a repair that continues after the steps an earlier run of the same plan did
+                          "continued_after"})
 # Who answered a question: the person, or an AI under a delegation.
 ANSWERED_BY = frozenset({"person", "ai"})
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -104,7 +106,7 @@ _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 # and deletion plan.
 _KEEP = ("reason_code", "answer", "confirm_channel", "question_sha256", "duration_ms", "links", "answered_by",
          "delegation", "reason_sha256", "facts_sha256", "feed_entry", "deletion_sha256", "plan_sha256",
-         "repair_class", "finding_code")
+         "repair_class", "finding_code", "continued_after")
 # The only forms of Mojo Miracle's repair fields (a finding code, a repair id, a class); never a plan's text or a path.
 _FINDING_CODE = re.compile(r"^[A-Za-z0-9_.+-]{1,120}$")
 _REPAIR_ID = re.compile(r"^[a-z][a-z0-9_.]{1,63}$")
@@ -457,6 +459,10 @@ class AuditLog:
             raise ValueError("plan_sha256 must be a sha256 in hex")
         if "repair_class" in fields and fields["repair_class"] not in REPAIR_CLASSES:
             raise ValueError(f"unknown repair class {fields['repair_class']!r}")
+        if "continued_after" in fields and (isinstance(fields["continued_after"], bool)
+                                            or not isinstance(fields["continued_after"], int)
+                                            or not 0 <= fields["continued_after"] <= 999):
+            raise ValueError("continued_after must be a whole number of steps from 0 to 999")
 
     @staticmethod
     def _extra(outcome: str, extra: Optional[Dict[str, Any]]) -> Optional[str]:

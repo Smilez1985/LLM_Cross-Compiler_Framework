@@ -126,7 +126,8 @@ def miracle_row(framework, result) -> Dict[str, Any]:
     """run_mojo_miracle's result (repairs.engine.RepairResult) as an AI may read it."""
     label = labeller(framework)
     return {"code": result.finding_code, "outcome": result.outcome, "repaired": result.repaired,
-            "what": label(result.summary), "reason": label(result.reason)}
+            "what": label(result.summary), "reason": label(result.reason), "steps_done": result.steps_done,
+            "steps_total": result.steps_total, "continued_after": result.continued_after}
 
 
 # --- the person's view (the CLI and the GUI's Mojo window; full paths, nothing of it goes to an AI) ------------------
@@ -203,11 +204,27 @@ def outcome_kind(entry) -> str:
     return entry.outcome if entry.outcome in OUTCOME_KINDS[:-1] else "not_repaired"
 
 
-def entry_text(entry) -> str:
-    """What became of one problem, in the CLI's words: the repair and the check afterwards, or why not."""
+def steps_text(entry) -> str:
+    """How far the repair came, in the CLI's words ("" when it has no steps to count): an earlier run's steps that this
+    run continued after, and the steps done of the plan when it is not complete."""
+    total, done, earlier = (getattr(entry, k, 0) or 0 for k in ("steps_total", "steps_done", "continued_after"))
+    parts = []
+    if earlier:
+        parts.append(f"continued after {earlier} of {total} steps an earlier run did")
+    if total and done < total:
+        parts.append(f"{done} of {total} steps are done; the next run of the same plan continues after them")
+    return "; ".join(parts)
+
+
+def entry_text(entry, with_steps: bool = True) -> str:
+    """What became of one problem, in the CLI's words: the repair and the check afterwards, or why not, and how far it
+    came (steps_text; the Mojo window says that in a row of its own and passes with_steps=False)."""
     if entry.outcome == "repaired":
-        return f"{entry.summary}. Checked again: the problem is gone."
-    return entry.reason or entry.summary
+        text = f"{entry.summary}. Checked again: the problem is gone."
+    else:
+        text = entry.reason or entry.summary
+    steps = steps_text(entry) if with_steps else ""
+    return f"{text} ({steps})" if steps else text
 
 
 def entry_next(entry) -> Tuple[str, str]:
