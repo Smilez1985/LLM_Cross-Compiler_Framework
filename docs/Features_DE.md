@@ -1545,7 +1545,9 @@ Die Regeln sind in jedem Formular gleich (`orchestrator/tools/gui_surface.py`):
   Builder-Log nennt jeden Wert, den es nicht eingetragen hat, und warum. Mit gewähltem Board bekommt Ditto zuerst die
   Speicherschätzung des Frameworks für jeden Typ, den das Board anbietet: Ein Typ, der nicht in den Speicher des Boards
   passt, wird ihm nicht angeboten, das Log zeigt die Schätzung des gewählten Typs, und passt keiner, bekommst du den
-  kleinsten mit einer Warnung statt einer Vermutung (das Modell ist zu groß für das Board). Ein Feld, das du gerade bearbeitest (es hat
+  kleinsten mit einer Warnung statt einer Vermutung (das Modell ist zu groß für das Board), mit kleineren Modellen
+  derselben Familie, die passen (auf Hugging Face gefunden, jedes mit derselben Schätzung geprüft; keine im
+  Offline-Modus); Ditto wechselt das Modell nie selbst. Ein Feld, das du gerade bearbeitest (es hat
   den Tastaturfokus), wird nie beschrieben. Würde ein Ausfüllen über die Logik des Formulars ein Feld ändern, das du
   gewählt hast (ein anderes Target setzt das Board zurück), wird es ganz zurückgenommen und abgelehnt. Was nie
   ausgefüllt werden kann, wird abgelehnt, bevor du gefragt wirst; beim Ausfüllen wird alles noch einmal geprüft.

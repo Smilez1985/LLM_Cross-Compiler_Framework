@@ -396,3 +396,30 @@ def test_ditto_as_the_pilot_gets_the_same_estimate_per_type(env, config_of):  # 
         assert (got.state, got.need_mib, got.ram_mib) == (expected.state, expected.need_mib, expected.ram_mib)
     assert memory("Q4_K_M").state == "does_not_fit"
     assert env.service.memory_for("example/llama-8b", "ARM64", None) is None   # no board, no estimate
+
+
+def test_ditto_as_the_pilot_finds_smaller_models_of_the_family_that_fit(env, monkeypatch):  # noqa: F811
+    """BuildService.family_alternatives: the same publisher and name around a smaller size, each with its own estimate,
+    only those that fit, largest first; nothing offline (DESIGN "Ditto as the pilot")."""
+    hits = ["Qwen/Qwen3.5-27B-Instruct", "Qwen/Qwen3.5-4B-Instruct", "Qwen/Qwen3.5-2B-Instruct",
+            "Qwen/Qwen3.5-0.8B-Instruct", "Qwen/Qwen3.5-4B", "Other/Qwen3.5-2B-Instruct", "Qwen/Qwen3-1.7B-Instruct"]
+    monkeypatch.setattr(env.service, "hub_search", lambda query, limit: [{"id": h} for h in hits])
+    needs = {"Qwen/Qwen3.5-4B-Instruct": {"Q4_K_M": 5000, "Q8_0": 9000},
+             "Qwen/Qwen3.5-2B-Instruct": {"Q4_K_M": 1500, "Q8_0": 2800},
+             "Qwen/Qwen3.5-0.8B-Instruct": {"Q4_K_M": 700, "Q8_0": 1100}}
+
+    def memory_for(repo, target, board, **_):
+        def estimate(quant):
+            need = needs[repo][quant]
+            return me.MemoryEstimate(board=board, quantization=quant, state=me.memory_state(need, 4000),
+                                     need_mib=need, ram_mib=4000)
+        return estimate
+    monkeypatch.setattr(env.service, "memory_for", memory_for)
+    found = env.service.family_alternatives("Qwen/Qwen3.5-9B-Instruct", "ARM64", "bcm2837", ["Q4_K_M", "Q8_0"])
+    assert [(a["model"], a["quantization"]) for a in found] == [
+        ("Qwen/Qwen3.5-2B-Instruct", "Q8_0"), ("Qwen/Qwen3.5-0.8B-Instruct", "Q8_0")]   # the 4B fits at no type
+    assert env.service.family_alternatives("Qwen/Qwen3.5-9B-Instruct", "ARM64", None, ["Q4_K_M"]) == []
+    assert env.service.family_alternatives("/models/local-9B", "ARM64", "bcm2837", ["Q4_K_M"]) == []
+    from orchestrator.utils import locality
+    monkeypatch.setattr(locality, "offline_mode", lambda config=None: True)
+    assert env.service.family_alternatives("Qwen/Qwen3.5-9B-Instruct", "ARM64", "bcm2837", ["Q4_K_M"]) == []

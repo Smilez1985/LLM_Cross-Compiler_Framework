@@ -93,6 +93,24 @@ def proposal_fingerprint(proposal: Any) -> str:
     return hashlib.sha256(json.dumps(data, ensure_ascii=False).encode("utf-8", "surrogatepass")).hexdigest()
 
 
+
+_SIZE = re.compile(r"(?<![A-Za-z0-9.])(\d{1,4}(?:\.\d{1,3})?)([BbMm])(?![A-Za-z0-9])")
+
+
+def model_family(repo: str) -> Optional[Tuple[str, str, float, str]]:
+    """(owner, the name before the size, the size in billions, the name after it) of a Hugging Face model id whose
+    name holds one size ("Qwen/Qwen3.5-9B-Instruct" -> ("Qwen", "Qwen3.5-", 9.0, "-Instruct"); "135M" is 0.135), or
+    None (not owner/name, no size, or more than one)."""
+    if not HF_REPO_ID.match(str(repo or "")):
+        return None
+    owner, name = str(repo).split("/", 1)
+    sizes = list(_SIZE.finditer(name))
+    if len(sizes) != 1:
+        return None
+    m = sizes[0]
+    value = float(m.group(1)) / (1000.0 if m.group(2) in "Mm" else 1.0)
+    return owner, name[:m.start()], value, name[m.end():]
+
 class BuildServiceError(WithSteps, ValueError):
     """A request the service refuses, with a message meant for the user (or the calling model), a reason code
     (the tool registry's codes, e.g. unknown_id, not_supported), the next step and, for an input refusal, the
@@ -1507,6 +1525,52 @@ class BuildService:
         except Exception:  # noqa: BLE001 - a model that cannot be read: unknown, said as such
             shape = None
         return lambda quantization: me.estimate(shape, quantization, board=board, ram_mib=ram, ram_source=source)
+
+    def hub_search(self, query: str, limit: int) -> List[Dict[str, Any]]:
+        """Models on the Hub matching `query`, most downloaded first (hf_hub.HubClient.search: public, never with the
+        token, only models that download without accepting conditions)."""
+        from orchestrator.Core.hf_hub import HubClient
+        return HubClient(self.framework, api_factory=getattr(self.framework, "hf_api_factory", None)).search(
+            query, limit, "free")
+
+    def family_alternatives(self, model: str, target: str, board: Optional[str], quantizations: List[str],
+                            *, limit: int = 3) -> List[Dict[str, Any]]:
+        """Smaller models of the same family that fit the board (Ditto as the pilot, when the chosen model fits at no
+        offered type): the same publisher and the same name around a smaller size ("Qwen/Qwen3.5-9B-Instruct" ->
+        "Qwen/Qwen3.5-4B-Instruct"), found with the Hub's search, each checked with its own config.json and the same
+        memory estimate, and only those for which one of `quantizations` fits, with that type (the one that needs most
+        and still fits), its need and the board's memory; largest first, at most `limit`. [] without a board, in
+        offline mode, for a local model, or when the Hub cannot be asked: Ditto then only warns."""
+        from orchestrator.utils.locality import offline_mode
+        family = model_family(model)
+        if not board or family is None or offline_mode(getattr(self.framework, "config", None)):
+            return []
+        owner, before, size, after = family
+        try:
+            found = self.hub_search(f"{owner}/{before}", 50)
+        except Exception:  # noqa: BLE001 - no search: no alternatives, the warning stays
+            return []
+        candidates = []
+        for hit in found:
+            other = model_family(str(hit.get("id") or ""))
+            if other is None or other[:2] != (owner, before) or other[3] != after or not 0 < other[2] < size:
+                continue
+            candidates.append((other[2], str(hit["id"])))
+        alternatives: List[Dict[str, Any]] = []
+        for _size, repo in sorted(set(candidates), reverse=True):
+            memory = self.memory_for(repo, target, board)
+            fitting = []
+            for quant in quantizations:
+                est = memory(quant) if memory else None
+                if est is not None and est.state in ("fits", "tight") and est.need_mib is not None:
+                    fitting.append((est.need_mib, quant, est))
+            if fitting:
+                need, quant, est = max(fitting, key=lambda f: f[0])
+                alternatives.append({"model": repo, "quantization": quant, "need_mib": need, "ram_mib": est.ram_mib,
+                                     "state": est.state})
+            if len(alternatives) >= limit:
+                break
+        return alternatives
 
     def resource_check(self, request: BuildRequestIn, *, look_up_hub: bool = True, facts: Any = None):
         """The check of this computer's disk and memory before a validated build (Core/build_resources.py): the disk

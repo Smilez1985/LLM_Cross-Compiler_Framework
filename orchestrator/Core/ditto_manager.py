@@ -490,6 +490,9 @@ class BuildAdvice(OptimizerRecommendation):
     memory: Optional[str] = Field(default=None, description="The memory estimate's line for the chosen quantization")
     warning: Optional[str] = Field(default=None, description="Set when no offered quantization fits the board")
     fits: Optional[bool] = Field(default=None, description="Whether the chosen quantization fits; None when unknown")
+    alternatives: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Smaller models of the same family that fit, when this one fits at no type "
+                                          "(model, quantization, need_mib, ram_mib); Ditto never switches by itself")
 
 
 # --- chat history -----------------------------------------------------------------------------------------------
@@ -1077,7 +1080,9 @@ class DittoCoder:
     def recommend_build_settings(self, model: str, target: str, options: Dict[str, Sequence[str]],
                                  board: Optional[str] = None, use_knowledge: bool = False,
                                  notes: Optional[Dict[str, str]] = None,
-                                 memory: Optional[Callable[[str], Any]] = None) -> BuildAdvice:
+                                 memory: Optional[Callable[[str], Any]] = None,
+                                 alternatives: Optional[Callable[[List[str]], List[Dict[str, Any]]]] = None
+                                 ) -> BuildAdvice:
         """Format, quantization and optimization level for `model` on `target`. `options` maps each format the
         target can build to its quantization types; the answer is checked against them. `notes` describes each
         format (label, accepted inputs); by default it comes from the target's capabilities. `memory` (Ditto as the
@@ -1090,13 +1095,20 @@ class DittoCoder:
         estimates, smallest = self._memory_choices(options, memory)
         if estimates and smallest is not None:   # none of the offered quantizations fits: no model call, the warning
             fmt, quant, est = smallest
-            return BuildAdvice(format=fmt, quantization=quant, optimization="SIZE",
+            try:
+                others = list(alternatives(options[fmt])) if alternatives else []
+            except Exception:  # noqa: BLE001 - no alternatives found: the warning alone
+                others = []
+            return BuildAdvice(format=fmt, quantization=quant, optimization="SIZE", alternatives=others,
                                explanation="None of the quantizations this target offers fits the board's memory; "
                                            "this is the smallest one.",
                                memory=est.text("en"), fits=False,
                                warning=f"The model is too large for {board}: even {quant}, the smallest offered "
                                        f"type, needs about {est.need_mib} MB of the {est.ram_mib} MB the board has. "
-                                       "Choose a smaller model; the measurement on the board says the real need.")
+                                       + ("Smaller models of the same family that fit: " + "; ".join(
+                                           f"{a['model']} at {a['quantization']} (about {a['need_mib']} MB)"
+                                           for a in others) + ". " if others else "Choose a smaller model. ")
+                                       + "The measurement on the board says the real need.")
         if estimates:
             options = {fmt: [q for q in qs if estimates[(fmt, q)].state != "does_not_fit"]
                        for fmt, qs in options.items()}

@@ -1407,7 +1407,9 @@ The rules are the same in every form (`orchestrator/tools/gui_surface.py`):
   in the Builder fills the form by the same rules, and the Builder log names each value it did not fill and why.
   With a board chosen, Ditto first gets the framework's memory estimate for every type the board offers: a type that
   does not fit the board's memory is not offered to it, the log shows the estimate of the chosen type, and when none
-  fits you get the smallest one with a warning instead of a guess (the model is too large for the board). A
+  fits you get the smallest one with a warning instead of a guess (the model is too large for the board), with smaller
+  models of the same family that do fit (found on Hugging Face, each checked with the same estimate; none in offline
+  mode); Ditto never switches the model by itself. A
   field you are editing (it has the keyboard focus) is never written. A fill that would change a field you chose
   through the form's own logic (another target resets the board) is undone completely and refused. What can never be
   filled is refused before you are asked; everything is checked again when filling.

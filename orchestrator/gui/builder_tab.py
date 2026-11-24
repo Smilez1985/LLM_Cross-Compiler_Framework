@@ -360,9 +360,12 @@ class AIOptimizerWorker(QThread):
         try:
             memory_for = getattr(self.service, "memory_for", None)
             memory = memory_for(self.model, self.target, self.board) if callable(memory_for) and self.board else None
+            family = getattr(self.service, "family_alternatives", None)
+            alternatives = ((lambda quants: family(self.model, self.target, self.board, quants))
+                            if callable(family) and self.board else None)
             recommendation = self.ditto.recommend_build_settings(self.model, self.target, self.options,
                                                                  board=self.board, use_knowledge=self.use_rag,
-                                                                 memory=memory)
+                                                                 memory=memory, alternatives=alternatives)
             self.finished.emit(True, recommendation.model_dump(), recommendation.explanation)
         except DittoError as e:
             self.finished.emit(False, {}, str(e))

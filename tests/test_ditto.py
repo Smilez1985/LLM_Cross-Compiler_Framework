@@ -1233,3 +1233,50 @@ def test_reload_drops_only_a_client_it_created(tmp_path):
     first = own.client
     own.reload()
     assert own.client is not first
+
+
+class TestThePilotsAlternatives:
+    """Ditto as the pilot, step 2: when the model fits at no offered type, smaller models of its family that fit come
+    with the warning; Ditto never switches by itself (DESIGN "Ditto as the pilot")."""
+
+    def test_the_family_s_smaller_models_that_fit_come_with_the_warning(self, tmp_path, llm):
+        from orchestrator.Core.memory_estimate import MemoryEstimate
+        asked = []
+
+        def alternatives(quants):
+            asked.append(quants)
+            return [{"model": "Qwen/Qwen3.5-4B-Instruct", "quantization": "Q4_K_M", "need_mib": 3000, "ram_mib": 4000,
+                     "state": "fits"}]
+        memory = lambda q: MemoryEstimate(board="rk3588", quantization=q, state="does_not_fit", need_mib=6000,  # noqa: E731
+                                          ram_mib=4000)
+        rec = make_ditto(tmp_path).recommend_build_settings("Qwen/Qwen3.5-9B-Instruct", "Rockchip",
+                                                            {"gguf": ["Q4_K_M", "Q8_0"]}, board="rk3588",
+                                                            memory=memory, alternatives=alternatives)
+        assert llm.requests == [] and asked == [["Q4_K_M", "Q8_0"]]
+        assert rec.alternatives[0]["model"] == "Qwen/Qwen3.5-4B-Instruct"
+        assert "Qwen/Qwen3.5-4B-Instruct at Q4_K_M (about 3000 MB)" in rec.warning
+        assert rec.format == "gguf" and rec.fits is False          # the form gets the chosen model's smallest type only
+
+    def test_no_alternative_or_a_failing_search_leaves_the_warning_alone(self, tmp_path, llm):
+        from orchestrator.Core.memory_estimate import MemoryEstimate
+        memory = lambda q: MemoryEstimate(board="rk3588", quantization=q, state="does_not_fit", need_mib=6000,  # noqa: E731
+                                          ram_mib=4000)
+
+        def broken(_quants):
+            raise RuntimeError("the Hub cannot be reached")
+        for alternatives in (None, lambda _q: [], broken):
+            rec = make_ditto(tmp_path).recommend_build_settings("m", "Rockchip", {"gguf": ["Q4_K_M"]}, board="rk3588",
+                                                                memory=memory, alternatives=alternatives)
+            assert rec.alternatives == [] and "Choose a smaller model" in rec.warning
+
+
+@pytest.mark.parametrize("repo, family", [
+    ("Qwen/Qwen3.5-9B-Instruct", ("Qwen", "Qwen3.5-", 9.0, "-Instruct")),
+    ("HuggingFaceTB/SmolLM2-135M-Instruct", ("HuggingFaceTB", "SmolLM2-", 0.135, "-Instruct")),
+    ("meta-llama/Llama-3.2-1B", ("meta-llama", "Llama-3.2-", 1.0, "")),
+    ("Qwen/Qwen3.5-0.8B", ("Qwen", "Qwen3.5-", 0.8, "")),
+    ("org/model-without-size", None), ("org/two-7B-and-13B", None), ("not a repo", None), ("/abs/path-7B", None),
+])
+def test_a_model_s_family_is_read_from_its_name(repo, family):
+    from orchestrator.Core.build_service import model_family
+    assert model_family(repo) == family
