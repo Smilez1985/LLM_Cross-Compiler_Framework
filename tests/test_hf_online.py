@@ -8,7 +8,6 @@ over a stand-in for the Hub's API (httpx.MockTransport): every request is record
 token it carries, and answered with the Hub's JSON. No test reaches the network or the real home folder."""
 
 import re
-import threading
 from pathlib import Path
 from types import SimpleNamespace
 

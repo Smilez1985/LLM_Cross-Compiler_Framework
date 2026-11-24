@@ -354,7 +354,7 @@ def test_mojo_watches_the_build_folder_and_labels_it_for_an_ai(tmp_path, monkeyp
     engine = SimpleNamespace(cache_dir=None, output_dir=None, build_dir=builds)
     framework = SimpleNamespace(orchestrator=SimpleNamespace(build_engine=engine),
                                 config={"build_dir": str(builds)}, resolve_path=lambda v: Path(v))
-    monkeypatch.setattr(disk_check.shutil, "disk_usage", lambda path: shutil._ntuple_diskusage(TOTAL, TOTAL - GB, GB))
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: shutil._ntuple_diskusage(TOTAL, TOTAL - GB, GB))
     (finding,) = disk_check.check_disk(framework)
     assert finding.code == "disk.builds" and finding.severity == Severity.ERROR and finding.where == str(builds)
     assert DELETION_LISTS["disk.builds"] == "framework_images"

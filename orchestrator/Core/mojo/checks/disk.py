@@ -7,8 +7,6 @@ or 2 % of the disk, whichever is larger) after what running builds and downloads
 and a warning while less than twice the reserve stays free; the same verdict a build, a download or a snapshot gets.
 """
 
-import os  # noqa: F401 - tests tell the disks apart through os.stat here (disk_plan.device_of reads it)
-import shutil  # noqa: F401 - tests replace shutil.disk_usage through this module (disk_plan.free_space reads it)
 from pathlib import Path
 from typing import List
 

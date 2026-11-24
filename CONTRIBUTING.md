@@ -402,12 +402,13 @@ and OpenMP fetches are off today), and the server's options against `WHISPER_FOR
 These are the checks from `.github/workflows/`. Except for hadolint, all tools come with
 `requirements-dev.txt`.
 
-**Ruff** (`ci.yml`): syntax errors and undefined names only. Rules: `E9` (syntax and I/O errors), `F63` (invalid
-comparisons and asserts), `F7` (statements in the wrong place, such as `return` outside a function), `F82`
-(undefined names).
+**Ruff** (`ci.yml`): syntax errors, undefined names and unused imports. Rules: `E9` (syntax and I/O errors), `F63`
+(invalid comparisons and asserts), `F7` (statements in the wrong place, such as `return` outside a function), `F82`
+(undefined names), `F401` (an import nothing uses; a name kept on purpose for others to import is listed in the
+module's `__all__` or marked `# noqa: F401` with the reason).
 
 ```bash
-ruff check --select E9,F63,F7,F82 orchestrator scripts tests targets
+ruff check --select E9,F63,F7,F82,F401 orchestrator scripts tests targets
 ```
 
 **ShellCheck** (`ci.yml`): errors in all tracked shell scripts. `targets/_template` is skipped because it contains

@@ -18,7 +18,6 @@ Status, settings and honest limits (MCP design 2.9, work package T2; DESIGN roun
 import json
 import math
 import re
-import shutil  # noqa: F401 - tests replace shutil.disk_usage through this module (the disk rule reads it)
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 from urllib.parse import urlparse

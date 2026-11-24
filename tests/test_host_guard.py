@@ -8,7 +8,6 @@ import sys
 
 import pytest
 
-import host_guard
 from host_guard import HostChangeWarning, changes_host, guarded_init
 
 # The folders are resolved the way the guard resolves them (`stub_roots`): on Windows "/tmp/run" is "D:\\tmp\\run".

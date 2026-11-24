@@ -93,6 +93,7 @@ class ResourceCheck:
     (disk_plan.Fit), with notes (a GGUF input, a reused F16)."""
     disk: List[Any] = field(default_factory=list)
     host: Any = None
+    gpu: Any = None        # disk_plan.Fit of this computer's GPU, for a format that quantizes on the GPU; else None
     notes: List[str] = field(default_factory=list)
     size_known: bool = True
     f16_reused: bool = False
@@ -110,13 +111,19 @@ class ResourceCheck:
         return getattr(self.host, "state", "unknown") or "unknown"
 
     @property
+    def gpu_state(self) -> Optional[str]:
+        """The GPU's state for a format that quantizes on the GPU; None for a format that does not."""
+        return None if self.gpu is None else (getattr(self.gpu, "state", "unknown") or "unknown")
+
+    @property
     def state(self) -> str:
-        return max((self.disk_state, self.memory_state), key=lambda v: ORDER.get(v, 1))
+        parts = [self.disk_state, self.memory_state] + ([self.gpu_state] if self.gpu is not None else [])
+        return max(parts, key=lambda v: ORDER.get(v, 1))
 
     @property
     def risky(self) -> bool:
         """A part does not fit: the person decides before the build starts."""
-        return "does_not_fit" in (self.disk_state, self.memory_state)
+        return "does_not_fit" in (self.disk_state, self.memory_state, self.gpu_state)
 
     def lines(self) -> List[str]:
         """The person's lines (the CLI, the Builder): the disk per file system, this computer's memory, the notes."""
@@ -127,6 +134,8 @@ class ResourceCheck:
             out.append("Disk: unknown (the model's size is not known before the build)")
         if self.host is not None:
             out.append(self.host.sentence("Memory of this computer for the conversion"))
+        if self.gpu is not None:
+            out.append(self.gpu.sentence("Graphics memory of this computer for the quantization"))
         if self.f16_kept_bytes and self.disk_state == "does_not_fit":
             from orchestrator.Core.disk_plan import gb
             from orchestrator.utils.next_steps import command_line, get, mouse_path
@@ -142,15 +151,20 @@ class ResourceCheck:
                                  "reserve": c.reserve, "verdict": c.verdict} for c in self.disk],
                 "memory_needed": getattr(self.host, "needed", None),
                 "memory_usable": getattr(self.host, "usable", None),
+                "gpu": self.gpu_state, "gpu_needed": getattr(self.gpu, "needed", None),
+                "gpu_usable": getattr(self.gpu, "usable", None),
                 "f16_reused": self.f16_reused, "notes": list(self.notes)}
 
 
 def check(*, size: int, cached: int, fmt: str, quantization: Optional[str], use_imatrix: bool, cache_dir: Path,
           output_dir: Path, parameters: Optional[int], hardware: Any = None, vram: Optional[int] = None,
           use_gpu: bool = False, basis: str = "", gguf: Optional[GgufInput] = None, f16_cached: bool = False,
-          f16_kept_bytes: int = 0, ledger: Any = None, disk_usage: Any = None) -> ResourceCheck:
+          f16_kept_bytes: int = 0, ledger: Any = None, disk_usage: Any = None, quantize_on: str = "cpu",
+          gpu_memory: Optional[str] = None, shape: Any = None) -> ResourceCheck:
     """The check of one build: `size` the model's bytes (the download or the local file or folder; 0 when unknown),
-    `cached` what of it is already staged, `parameters` the parameter count (None: guessed from the size)."""
+    `cached` what of it is already staged, `parameters` the parameter count (None: guessed from the size).
+    `quantize_on` and `gpu_memory` are the format's (FormatCapability): for gpu, this computer's graphics memory is
+    checked too (disk_plan.gpu_fit, with the model's `shape` for a layer-by-layer calibration)."""
     from orchestrator.Core import disk_plan
     out = ResourceCheck(f16_reused=f16_cached, f16_kept_bytes=f16_kept_bytes)
     if size:
@@ -163,6 +177,8 @@ def check(*, size: int, cached: int, fmt: str, quantization: Optional[str], use_
     params, why = disk_plan.parameters_from(size, parameters)
     out.host = disk_plan.host_fit(fmt, use_imatrix, params, getattr(hardware, "ram_total", None), vram, use_gpu,
                                   basis or why)
+    if quantize_on == "gpu":
+        out.gpu = disk_plan.gpu_fit(gpu_memory, params, shape, vram, hardware is not None, basis or why)
     if gguf is not None:
         out.notes.append(gguf.note())
     if f16_cached:

@@ -26,7 +26,7 @@ text the person sees in the review dialog (ProposalNotes); it never writes or si
 import json
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple

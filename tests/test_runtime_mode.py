@@ -1621,7 +1621,6 @@ class TestInstaller:
     def _ask(self, tmp_path, answer):
         """setup_ditto on a terminal (a pseudo terminal) that answers the question with `answer`."""
         import pty
-        import select
         tmp = Path(tempfile.mkdtemp(dir=tmp_path))
         stubs = tmp / "bin"
         _recorder(stubs, "sudo")

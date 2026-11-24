@@ -13,6 +13,7 @@ import io
 import json
 import os
 import signal
+import shutil
 import stat
 import subprocess
 import sys
@@ -857,7 +858,7 @@ class TestDownloads:
             self.fetch(tmp_path, FakeSession({self.URL: data}), data)
 
     def test_not_enough_disk_space(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(ls.shutil, "disk_usage", lambda p: type("U", (), {"free": 100 * MIB})())
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: type("U", (), {"free": 100 * MIB})())
         with pytest.raises(LocalRuntimeError, match="Not enough disk space for the download: "):
             self.fetch(tmp_path, FakeSession(), b"x", size=GIB)
 
@@ -1036,7 +1037,7 @@ class TestInstall:
         def usage(path):
             full = any(rt.root.glob(".staging-*"))
             return SimpleNamespace(total=2 * 1024 * GIB, used=GIB, free=0 if full else 1024 * GIB)
-        monkeypatch.setattr(ls.shutil, "disk_usage", usage)
+        monkeypatch.setattr(shutil, "disk_usage", usage)
         inst = rt.install_prebuilt()
         assert inst == rt.installed() and not leftover.exists()
 

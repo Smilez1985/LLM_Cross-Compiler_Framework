@@ -15,6 +15,7 @@
 import ast
 import hashlib
 import os
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -605,7 +606,7 @@ class TestSandboxModelFile:
     def test_no_room_for_a_copy_is_insufficient_resources(self, sandbox_bench, monkeypatch):
         env = sandbox_bench
         monkeypatch.setattr(env.bench.BenchRunner, "_pinned_link", staticmethod(lambda fd, folder, model=None: None))
-        monkeypatch.setattr(env.bench.shutil, "disk_usage", lambda p: SimpleNamespace(total=10, used=10, free=0))
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: SimpleNamespace(total=10, used=10, free=0))
         engine = FakeEngine()
         with pytest.raises(env.bench.BenchError) as e:
             self.run(env, env.make(engine))

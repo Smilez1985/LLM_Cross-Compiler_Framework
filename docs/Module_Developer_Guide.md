@@ -447,6 +447,7 @@ packages and downloads), the flags, the setup commands, and for each **output fo
 | `board_paths` | `install_dir`, `model_dir`, `lib_dir` on the board. |
 | `sdk` | The format's needs for the pre-flight check (as in [4.2](#42-capabilities)). |
 | `vendor_files` | Vendor files that may not be passed on (`name`, `url`, `licence_url`, and optionally `sha256`, `size`, `dest`, `executable`, `direct`, `licence_file`): only referenced, never copied; the person fetches them under their own licence acceptance ([section 3.9](#39-values-proposed-by-ditto-a-form-per-value-vendor-files-under-their-licence)). |
+| `quantize_on`, `gpu_memory` | Where the converter quantizes on the building computer: `cpu` (the default; in RAM, as llama.cpp, RKNN and RKLLM) or `gpu` (in graphics memory, as AWQ, GPTQ and EXL3), and for `gpu` whether the whole model goes into graphics memory (`model`, the default) or it is calibrated layer by layer (`layer`). With `gpu`, the check before a build compares this computer's graphics memory from its hardware probe: the whole model at 16 bit, or one layer at 16 bit twice, the statistics of its matrices and the calibration's activations (128 samples of 2048 tokens), plus 1 GB for the GPU itself; without a GPU of its own memory it does not fit. The llama.cpp converter quantizes on the CPU. |
 
 The generator keeps them in `target.yml` under `template_variables:` and writes them into `config_module.sh` as data
 (single-quoted words between `# >>> template variables` and `# <<< template variables`); the capabilities come from

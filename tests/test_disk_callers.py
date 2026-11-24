@@ -50,7 +50,7 @@ class TestHubDiskCheck:
 
     def test_the_numbers_and_the_reserve(self, tmp_path, monkeypatch):
         from orchestrator.Core import disk_plan, hf_hub
-        monkeypatch.setattr(hf_hub.shutil, "disk_usage", fixed(50 * GB))
+        monkeypatch.setattr(shutil, "disk_usage", fixed(50 * GB))
         disk = hf_hub.disk_check(tmp_path, 10 * GB)
         reserve = disk_plan.reserve_for(1000 * GB)
         assert reserve == 20 * GB, "2 % of 1000 GB is more than 2 GiB"
@@ -63,13 +63,13 @@ class TestHubDiskCheck:
     def test_the_verdict_at_the_edges(self, tmp_path, monkeypatch, free, fits, tight):
         """fits: at least the reserve (20 GB of 1000 GB) stays free; tight: it fits with less than twice that."""
         from orchestrator.Core import hf_hub
-        monkeypatch.setattr(hf_hub.shutil, "disk_usage", fixed(free))
+        monkeypatch.setattr(shutil, "disk_usage", fixed(free))
         disk = hf_hub.disk_check(tmp_path, 0)
         assert (disk["fits"], disk["tight"]) == (fits, tight)
 
     def test_a_small_disk_keeps_two_gib_and_a_standing_approval_twenty(self, tmp_path, monkeypatch):
         from orchestrator.Core import hf_hub
-        monkeypatch.setattr(hf_hub.shutil, "disk_usage", fixed(25 * GIB, total=50 * GB))
+        monkeypatch.setattr(shutil, "disk_usage", fixed(25 * GIB, total=50 * GB))
         disk = hf_hub.disk_check(tmp_path, 5 * GIB)
         assert disk["reserve"] == 2 * GIB and disk["fits"]
         assert disk["fits_standing"] is True, "20 GiB stay free: exactly the standing reserve"
@@ -78,7 +78,7 @@ class TestHubDiskCheck:
 
     def test_without_a_ledger_only_this_process_downloads_count(self, tmp_path, monkeypatch):
         from orchestrator.Core import hf_hub
-        monkeypatch.setattr(hf_hub.shutil, "disk_usage", fixed(50 * GB))
+        monkeypatch.setattr(shutil, "disk_usage", fixed(50 * GB))
         held = hf_hub.Reservation("test/one", 25 * GB)
         try:
             disk = hf_hub.disk_check(tmp_path, 10 * GB)
@@ -89,7 +89,7 @@ class TestHubDiskCheck:
 
     def test_with_the_ledger_every_process_counts_on_that_disk(self, tmp_path, monkeypatch):
         from orchestrator.Core import disk_plan, hf_hub
-        monkeypatch.setattr(hf_hub.shutil, "disk_usage", fixed(50 * GB))
+        monkeypatch.setattr(shutil, "disk_usage", fixed(50 * GB))
         ledger = disk_plan.ReservationLedger(tmp_path / "state")
         rid, _ = ledger.reserve([disk_plan.DiskNeed("cache", tmp_path, 12 * GB, "a build")], "gui", "a build",
                                 disk_usage=fixed(500 * GB))
@@ -104,7 +104,7 @@ class TestHubDiskCheck:
     def test_a_folder_not_made_yet_is_measured_on_its_parent(self, tmp_path, monkeypatch):
         from orchestrator.Core import hf_hub
         seen = []
-        monkeypatch.setattr(hf_hub.shutil, "disk_usage", fixed(50 * GB, seen=seen))
+        monkeypatch.setattr(shutil, "disk_usage", fixed(50 * GB, seen=seen))
         hf_hub.disk_check(tmp_path / "not" / "yet", 1)
         assert seen == [str(tmp_path)]
 
@@ -113,7 +113,7 @@ class TestHubDiskCheck:
 
         def broken(path):
             raise PermissionError(13, "denied")
-        monkeypatch.setattr(hf_hub.shutil, "disk_usage", broken)
+        monkeypatch.setattr(shutil, "disk_usage", broken)
         with pytest.raises(OSError):
             hf_hub.disk_check(tmp_path, 1)
 
@@ -169,7 +169,7 @@ class TestBenchCopyRoom:
     def run(env, free, monkeypatch):
         from test_closing_leftovers import FakeEngine
         monkeypatch.setattr(env.bench.BenchRunner, "_pinned_link", staticmethod(lambda fd, folder, model=None: None))
-        monkeypatch.setattr(env.bench.shutil, "disk_usage", fixed(free))
+        monkeypatch.setattr(shutil, "disk_usage", fixed(free))
         engine = FakeEngine()
         result = env.make(engine).run(env.model, kind="artifact_speed", label="output:Rk/m", trusted=False,
                                       sha256=env.digest, sandbox=True)
@@ -280,7 +280,7 @@ class TestMojoDisk:
         and 20 binary GB)."""
         from orchestrator.Core.mojo.checks import disk as mojo_disk
         framework, cache, _out = self.framework(tmp_path)
-        monkeypatch.setattr(mojo_disk.shutil, "disk_usage", fixed(free))
+        monkeypatch.setattr(shutil, "disk_usage", fixed(free))
         (finding,) = mojo_disk.check_disk(framework)   # cache and output (not made yet) share a disk: one line
         assert finding.severity.value == severity and finding.code == "disk.cache"
 
@@ -288,24 +288,24 @@ class TestMojoDisk:
         from orchestrator.Core.mojo.checks import disk as mojo_disk
         framework, cache, _out = self.framework(tmp_path)
         for free, severity in ((2 * GIB - 1, "error"), (2 * GIB, "warn"), (4 * GIB, "ok")):
-            monkeypatch.setattr(mojo_disk.shutil, "disk_usage", fixed(free, total=64 * GB))
+            monkeypatch.setattr(shutil, "disk_usage", fixed(free, total=64 * GB))
             (finding,) = mojo_disk.check_disk(framework)
             assert finding.severity.value == severity, free
 
     def test_the_texts(self, tmp_path, monkeypatch):
         from orchestrator.Core.mojo.checks import disk as mojo_disk
         framework, cache, _out = self.framework(tmp_path)
-        monkeypatch.setattr(mojo_disk.shutil, "disk_usage", fixed(int(4.25 * GB)))
+        monkeypatch.setattr(shutil, "disk_usage", fixed(int(4.25 * GB)))
         (error,) = mojo_disk.check_disk(framework)
         assert error.message == f"The disk of the cache folder ({cache}) has only 4.2 GB free; 20.0 GB must stay free."
         assert error.fix_hint.startswith("Free disk space; large models need 2-3x their size during conversion. ")
         assert error.where == str(cache) and error.fix_tier == 2 and error.cannot == "deletion_list"
-        monkeypatch.setattr(mojo_disk.shutil, "disk_usage", fixed(int(32.25 * GB)))
+        monkeypatch.setattr(shutil, "disk_usage", fixed(int(32.25 * GB)))
         (warn,) = mojo_disk.check_disk(framework)
         assert warn.message == ("The disk of the cache folder has 32.2 GB free: less than twice the 20.0 GB that must "
                                 "stay free; large models need more.")
         assert warn.fix_hint.startswith("Free disk space before converting models larger than a few GB. ")
-        monkeypatch.setattr(mojo_disk.shutil, "disk_usage", fixed(int(40.4 * GB)))
+        monkeypatch.setattr(shutil, "disk_usage", fixed(int(40.4 * GB)))
         (ok,) = mojo_disk.check_disk(framework)
         assert ok.message == "40.4 GB free for cache"
 
@@ -313,14 +313,14 @@ class TestMojoDisk:
         from orchestrator.Core.mojo.checks import disk as mojo_disk
         framework, cache, out = self.framework(tmp_path)
         out.mkdir()
-        monkeypatch.setattr(mojo_disk.os, "stat", lambda p, *a, **k: SimpleNamespace(
+        monkeypatch.setattr(os, "stat", lambda p, *a, **k: SimpleNamespace(
             st_dev=1 if Path(p) == cache else 2))
-        monkeypatch.setattr(mojo_disk.shutil, "disk_usage", fixed(50 * GIB))
+        monkeypatch.setattr(shutil, "disk_usage", fixed(50 * GIB))
         assert [f.code for f in mojo_disk.check_disk(framework)] == ["disk.cache", "disk.output"]
 
         def broken(path):
             raise OSError("unreadable")
-        monkeypatch.setattr(mojo_disk.shutil, "disk_usage", broken)
+        monkeypatch.setattr(shutil, "disk_usage", broken)
         assert mojo_disk.check_disk(framework) == []
 
 
@@ -329,7 +329,6 @@ class TestMojoDisk:
 class TestFullDiskVerdicts:
 
     def test_self_healing_names_the_folders_below_the_reserve_by_label(self, tmp_path, monkeypatch):
-        from orchestrator.Core import self_healing_manager
         from orchestrator.Core.self_healing_manager import SelfHealingManager
         cache, models = tmp_path / "cache", tmp_path / "models"
         cache.mkdir()
@@ -338,7 +337,7 @@ class TestFullDiskVerdicts:
         healer.framework = SimpleNamespace(get_component=lambda name: None)
         healer._config = lambda key, default=None: values.get(key, default)
         free = {str(cache): 20 * GB - 1, str(tmp_path): 20 * GB}   # the models folder is not made: its parent
-        monkeypatch.setattr(self_healing_manager.shutil, "disk_usage", lambda p: usage(free[str(p)]))
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: usage(free[str(p)]))
         proposal = healer._disk_full_proposal()
         assert proposal.root_cause == ("A disk the build writes to is full. model cache: 0 MB (its disk has 20.0 GB "
                                        "free).")
@@ -350,10 +349,10 @@ class TestFullDiskVerdicts:
         cache.mkdir()
         values = {"cache_dir": str(cache), "output_dir": str(tmp_path / "out" / "deep")}
         framework = SimpleNamespace(config=SimpleNamespace(get=lambda key, default=None: values.get(key, default)))
-        monkeypatch.setattr(tools_status.shutil, "disk_usage", fixed(20 * GB))
+        monkeypatch.setattr(shutil, "disk_usage", fixed(20 * GB))
         assert tools_status.disk_fact(framework) == ("contradicted", ["The cache and output disk has 20.0 GB free."],
                                                      ["check_build_request"])
-        monkeypatch.setattr(tools_status.shutil, "disk_usage", fixed(20 * GB - 1))
+        monkeypatch.setattr(shutil, "disk_usage", fixed(20 * GB - 1))
         checked, facts, tries = tools_status.disk_fact(framework)
         assert (checked, tries) == ("confirmed", []) and facts == ["The cache and output disk has 20.0 GB free."]
 
@@ -364,7 +363,7 @@ class TestFullDiskVerdicts:
             raise OSError("unreadable")
         values = {"cache_dir": str(tmp_path)}
         framework = SimpleNamespace(config=SimpleNamespace(get=lambda key, default=None: values.get(key, default)))
-        monkeypatch.setattr(tools_status.shutil, "disk_usage", broken)
+        monkeypatch.setattr(shutil, "disk_usage", broken)
         assert tools_status.disk_fact(framework) == ("unchecked", ["The framework could not read the free disk space."],
                                                      [])
 
@@ -393,9 +392,8 @@ def hf_env(tmp_path, monkeypatch):
 
 def test_the_ai_download_refusal_names_no_path(hf_env, monkeypatch, tmp_path):
     """download_hf_file's refusal before the question: sizes and the reserve, no folder of this computer."""
-    from orchestrator.Core import hf_hub
     from orchestrator.tools.registry import ToolError
-    monkeypatch.setattr(hf_hub.shutil, "disk_usage", lambda p: SimpleNamespace(total=10 ** 9, used=0, free=10))
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: SimpleNamespace(total=10 ** 9, used=0, free=10))
     with pytest.raises(ToolError) as refused:
         hf_call(hf_env, "download_hf_file", {"model": HF_REPO, "filename": "tiny-q4_k_m.gguf"})
     assert refused.value.code == "insufficient_resources"

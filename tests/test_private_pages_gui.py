@@ -7,7 +7,6 @@ in English and German. Documentation addresses only.
 
 import re
 import time
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest

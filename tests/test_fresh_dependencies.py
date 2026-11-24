@@ -6,7 +6,6 @@ import importlib.util
 import os
 import re
 import stat
-import sys
 import textwrap
 
 import pytest

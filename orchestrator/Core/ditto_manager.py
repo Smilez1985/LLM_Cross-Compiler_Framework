@@ -1210,9 +1210,12 @@ class DittoCoder:
                     and getattr(plain.host, "needed", None) != getattr(check.host, "needed", None):
                 instead.append(f"without the importance matrix, {fmt} {quant} fits this computer's memory "
                                f"({plain.host.sentence('memory').split(': ', 1)[1]})")
-        instead += [f"{other} can be built on this computer ({c.state})" for other, c in per_format.items()
-                    if other != fmt and not c.risky and c.state != "unknown"]
-        what = [p for p, state in (("the disk", check.disk_state), ("the memory", check.memory_state))
+        gpu_short = getattr(check, "gpu_state", None) == "does_not_fit"   # then say that the other one needs no GPU
+        instead += [f"{other} can be built on this computer ({c.state}"
+                    + (", it quantizes on the CPU)" if gpu_short and getattr(c, "gpu", None) is None else ")")
+                    for other, c in per_format.items() if other != fmt and not c.risky and c.state != "unknown"]
+        what = [p for p, state in (("the disk", check.disk_state), ("the memory", check.memory_state),
+                                   ("the graphics memory", getattr(check, "gpu_state", None)))
                 if state == "does_not_fit"]
         out["host_warning"] = (f"This computer may not manage the build of {fmt} {quant}: {' and '.join(what)} "
                                f"{'does' if len(what) == 1 else 'do'} not fit. "

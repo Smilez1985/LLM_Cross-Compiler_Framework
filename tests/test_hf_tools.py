@@ -7,6 +7,7 @@ import io
 import json
 import os
 import sqlite3
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -133,7 +134,7 @@ class FakeSession:
 def env(tmp_path, monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "hf_" + "Implicit" * 5)   # never to be used
     # The disk rule reads the file system; the tests never depend on how full this machine's disk is.
-    monkeypatch.setattr(hf_hub.shutil, "disk_usage", lambda p: SimpleNamespace(total=10 ** 12, used=0, free=10 ** 12))
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: SimpleNamespace(total=10 ** 12, used=0, free=10 ** 12))
     hub = Hub()
     settings = {"models_dir": str(tmp_path / "models"), "offline_mode": False}
     (tmp_path / "models").mkdir()
@@ -552,7 +553,7 @@ class TestDownload:
         big = 145 * 10 ** 9
         env.hub.models[REPO] = info(files=[Sibling(rfilename="big.gguf", size=big, lfs=SimpleNamespace(sha256=SHA))])
         usage = SimpleNamespace(total=2 * 10 ** 12, used=0, free=610 * 10 ** 9)
-        monkeypatch.setattr(hf_hub.shutil, "disk_usage", lambda p: usage)
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: usage)
         spec = env.registry.get("download_hf_file")
         facts = env.registry.look_up(spec, spec.input_model(model=REPO, filename="big.gguf"), ToolContext("mcp"))
         assert facts.bound["size"] == big, "a 145 GB file is allowed when the disk holds it"
@@ -565,7 +566,7 @@ class TestDownload:
         """Design 6.5: a call under a standing approval must leave 20 GiB or 10 % free, or it asks instead."""
         gib = 1024 ** 3
         usage = SimpleNamespace(total=100 * gib, used=0, free=15 * gib)  # normal reserve 2 GiB: fits; 20 GiB: no
-        monkeypatch.setattr(hf_hub.shutil, "disk_usage", lambda p: usage)
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: usage)
         spec = env.registry.get("download_hf_file")
         ctx = ToolContext("mcp")
         ctx.facts = env.registry.look_up(spec, spec.input_model(model=REPO, filename="tiny-q4_k_m.gguf"), ctx)
@@ -628,7 +629,7 @@ class TestTheFileNameRepairIsNamed:
     WRITTEN = {"model": REPO, "filename": "TINY-Q4_K_M.gguf"}
 
     def full_disk(self, monkeypatch):
-        monkeypatch.setattr(hf_hub.shutil, "disk_usage", lambda p: SimpleNamespace(total=10 ** 9, used=0, free=10))
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: SimpleNamespace(total=10 ** 9, used=0, free=10))
 
     def test_a_successful_call_names_it_on_both_paths(self, env):
         started = call(env, "download_hf_file", self.WRITTEN)

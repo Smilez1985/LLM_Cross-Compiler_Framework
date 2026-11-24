@@ -44,7 +44,6 @@ import json
 import os
 import re
 import secrets
-import shutil
 import signal
 import socket
 import subprocess

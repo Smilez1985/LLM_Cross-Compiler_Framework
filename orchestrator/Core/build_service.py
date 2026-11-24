@@ -1643,13 +1643,28 @@ class BuildService:
         f16_cached = wants_f16 and HF_REPO_ID.match(model) is not None and \
             kept.entry(f16_cache.key(model, commit or "", build_large._pin())) is not None
         hw = self.host_hardware()
+        # where the format quantizes (its capabilities): a format that quantizes on the GPU checks the graphics memory
+        try:
+            caps = self.capabilities(request.target)
+        except Exception:  # noqa: BLE001 - a target without capabilities: on the CPU, as before
+            caps = None
+        cap = caps.formats.get(str(request.format)) if caps is not None else None
+        quantize_on = getattr(cap, "quantize_on", "cpu") or "cpu"
+        gpu_memory = getattr(cap, "gpu_memory", None)
+        shape = None
+        if quantize_on == "gpu" and gpu_memory == "layer":
+            try:
+                shape = self.model_shape(model, request.revision, facts=facts,
+                                         look_up_hub=look_up_hub and facts is None)
+            except Exception:  # noqa: BLE001 - the shape unknown: the GPU's need is unknown, said as such
+                shape = None
         return build_resources.check(
             size=size, cached=cached, fmt=str(request.format), quantization=request.quantization,
             use_imatrix=bool(request.use_imatrix) and not request.imatrix_file,
             cache_dir=cache_dir, output_dir=folder(self.framework, "output_dir", "output"), parameters=parameters,
             hardware=hw, vram=_best_vram(hw) if hw is not None else None, use_gpu=bool(request.use_gpu), gguf=gguf,
             f16_cached=f16_cached, f16_kept_bytes=kept.total_bytes(), ledger=self.disk_ledger(),
-            disk_usage=self.disk_usage)
+            disk_usage=self.disk_usage, quantize_on=quantize_on, gpu_memory=gpu_memory, shape=shape)
 
     def _estimate_record(self, req: BuildRequestIn, inputs: Optional[LocalInputs]) -> Optional[Dict[str, Any]]:
         """The estimate a build records when its caller passed none: from the local model or the copy on this

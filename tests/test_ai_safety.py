@@ -106,7 +106,7 @@ class TestSelfHealing:
     def full_disks(monkeypatch, tmp_path, healer, full):
         """Docker's data root and the framework's folders on separate fake disks; `full` names the full ones."""
         import shutil
-        from orchestrator.Core import disk_plan, self_healing_manager
+        from orchestrator.Core import disk_plan
         disks = {}
         for name in ("docker", "cache", "models", "output"):
             (tmp_path / name).mkdir()
@@ -121,7 +121,7 @@ class TestSelfHealing:
             name = disks.get(str(path), "other")
             free = 10 ** 6 if name in full else 500 * 10 ** 9
             return shutil._ntuple_diskusage(1000 * 10 ** 9, 1000 * 10 ** 9 - free, free)
-        monkeypatch.setattr(self_healing_manager.shutil, "disk_usage", usage)
+        monkeypatch.setattr(shutil, "disk_usage", usage)
         monkeypatch.setattr(disk_plan, "device_of", lambda path: disks.get(str(path), "other"))
 
     def test_a_full_docker_disk_is_a_manual_step_that_deletes_nothing(self, healer, monkeypatch, tmp_path):

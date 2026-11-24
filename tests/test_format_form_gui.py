@@ -7,7 +7,6 @@ only by the person's own tick and click, and the file is kept only when its sha2
 import hashlib
 import threading
 import time
-from pathlib import Path
 
 import pytest
 import yaml

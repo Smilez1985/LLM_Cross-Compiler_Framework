@@ -6,7 +6,6 @@ sha256, the earlier build left where it is, and a question with the full list ("
 under that name is replaced."""
 
 import hashlib
-import json
 import shutil
 from pathlib import Path
 from types import SimpleNamespace

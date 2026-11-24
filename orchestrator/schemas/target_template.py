@@ -202,6 +202,12 @@ class FormatVariables(BaseModel):
                                                        "them under their own licence acceptance")
     notes: str = Field(default="", max_length=300, pattern=TEXT_RE, description="A note the Builder shows with the "
                                                                                  "format")
+    quantize_on: Literal["cpu", "gpu"] = Field(
+        default="cpu", description="Where the converter quantizes on the building computer: cpu (in RAM, as llama.cpp, "
+                                   "RKNN and RKLLM) or gpu (in graphics memory, as AWQ, GPTQ and EXL3)")
+    gpu_memory: Optional[Literal["model", "layer"]] = Field(
+        default=None, description="With gpu: the whole model in graphics memory (model) or calibrated layer by layer "
+                                  "(layer, as AWQ, GPTQ and EXL3); empty with gpu means model")
 
     @field_validator("quantizations")
     @classmethod
@@ -229,6 +235,10 @@ class FormatVariables(BaseModel):
             problems.append("the llama.cpp converter takes no arguments here (the GGUF stages call it)")
         if builtin and self.output_extension != "gguf":
             problems.append("the gguf format's extension is gguf")
+        if self.gpu_memory is not None and self.quantize_on != "gpu":
+            problems.append("gpu_memory is set but quantize_on is not gpu")
+        if builtin and self.quantize_on == "gpu":
+            problems.append("the llama.cpp converter quantizes on the CPU")
         names = [lib.name for lib in self.runtime_libraries]
         if len(set(names)) != len(names):
             problems.append("runtime_libraries: each name once")
@@ -246,6 +256,8 @@ class FormatVariables(BaseModel):
             cap["notes"] = self.notes
         if self.sdk is not None:
             cap["sdk"] = self.sdk.model_dump(exclude_none=True)
+        if self.quantize_on == "gpu":
+            cap.update({"quantize_on": "gpu", "gpu_memory": self.gpu_memory or "model"})
         return cap
 
     def helper_files(self) -> List[str]:

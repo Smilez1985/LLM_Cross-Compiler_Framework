@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import shutil
 
 pytest.importorskip("mcp")
 
@@ -36,9 +37,8 @@ class TestDownloadLedger:
         return disk_plan.ReservationLedger(Path(hf_env.framework.config.user_state_dir))
 
     def test_space_another_process_reserved_is_counted_before_the_question(self, hf_env, monkeypatch):
-        from orchestrator.Core import hf_hub
         usage = SimpleNamespace(total=100 * GB, used=0, free=4 * GB)  # reserve 2 GiB: 1.8 GB left for the file
-        monkeypatch.setattr(hf_hub.shutil, "disk_usage", lambda p: usage)
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: usage)
         spec = hf_env.registry.get("download_hf_file")
         inp = spec.input_model(model=REPO, filename="tiny-q4_k_m.gguf")
         assert hf_env.registry.look_up(spec, inp, ToolContext("mcp"))  # fits

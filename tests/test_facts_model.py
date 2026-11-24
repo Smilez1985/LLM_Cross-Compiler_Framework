@@ -177,7 +177,6 @@ def test_digest_stable_under_cache_and_disk_churn(env):  # noqa: F811
 
 
 def test_digest_of_a_download_is_stable_under_free_space(tmp_path, monkeypatch):
-    from orchestrator.Core import hf_hub
     from test_hf_tools import REPO, Hub
     from types import SimpleNamespace
     from pathlib import Path
@@ -187,7 +186,7 @@ def test_digest_of_a_download_is_stable_under_free_space(tmp_path, monkeypatch):
     from orchestrator.tools.policy import PolicyStore
     from orchestrator.tools.registry import ToolContext, ToolRegistry
     hub, free = Hub(), {"bytes": 900 * GB}
-    monkeypatch.setattr(hf_hub.shutil, "disk_usage", lambda p: shutil._ntuple_diskusage(10 ** 12, 0, free["bytes"]))
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: shutil._ntuple_diskusage(10 ** 12, 0, free["bytes"]))
     settings = {"models_dir": str(tmp_path / "models"), "offline_mode": False}
     (tmp_path / "models").mkdir()
     framework = SimpleNamespace(config=SimpleNamespace(get=lambda k, d=None: settings.get(k, d),

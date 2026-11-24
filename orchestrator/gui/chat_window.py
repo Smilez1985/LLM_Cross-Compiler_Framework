@@ -17,7 +17,6 @@ signed chat feed. "Clear chat" asks with the full list of what it deletes (full 
 with "No" as the default.
 """
 
-import threading  # noqa: F401 - the panel's access check starts its worker through this module's name (tests)
 
 from PySide6.QtCore import QThread, Signal
 

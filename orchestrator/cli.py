@@ -490,7 +490,8 @@ def _target_profile(probe_file, strict: bool):
               help="YAML or JSON file with the output formats of the module, the general template's variables: a "
                    "list whose entries are a format's values (id, label, converter with its args, input, "
                    "output_extension, quantizations, default_quantization, runtime_libraries, board_paths, sdk, "
-                   "vendor_files) or a preset name (gguf, rknn, rkllm). Without it the module builds GGUF")
+                   "vendor_files, quantize_on, gpu_memory) or a preset name (gguf, rknn, rkllm). Without it the "
+                   "module builds GGUF")
 @click.option('--set', 'set_values', multiple=True, metavar='FORMAT.PATH=VALUE',
               help="Set one value of an output format (the general template's variables), e.g. "
                    "hef.converter.command=/opt/vendor/bin/conv or hef.quantizations=int8,int16; a new FORMAT id adds "

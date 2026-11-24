@@ -31,7 +31,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from orchestrator.utils.file_lock import file_lock
 
@@ -691,6 +691,66 @@ def host_fit(fmt: str, use_imatrix: bool, parameters: Optional[int], ram_total: 
     usable = int(ram_total * 0.85) + (int(vram * 0.95) if use_gpu and vram else 0)
     memory = gb(ram_total) + " RAM" + (f" and {gb(vram)} GPU memory" if use_gpu and vram else "")
     return Fit(_verdict(needed, usable), needed, usable, f"{what}; {memory} from the hardware probe; {basis}".strip("; "))
+
+
+# The calibration a GPU quantizer runs: 128 samples of 2048 tokens (the common default of GPTQ tools; AWQ's default of
+# 512 tokens needs less, so this is the larger of the two).
+CALIBRATION_SAMPLES = 128
+CALIBRATION_TOKENS = 2048
+GPU_CONTEXT = GIB          # the GPU runtime's own memory (CUDA context, kernels, allocator)
+
+
+def layer_bytes(shape: Any) -> Optional[int]:
+    """The 16-bit weights of one transformer layer: from the shape when it is detailed (attention q, k, v, o and the
+    feed-forward's three matrices), else the parameters without the embeddings over the layers; None when unknown."""
+    hidden, layers = getattr(shape, "hidden", None), getattr(shape, "layers", None)
+    if not hidden or not layers:
+        return None
+    if getattr(shape, "detailed", False):
+        attention = hidden * shape.heads * shape.head_dim * 2 + hidden * shape.kv_heads * shape.head_dim * 2
+        return 2 * (attention + 3 * hidden * shape.intermediate)
+    parameters = getattr(shape, "parameters", None)
+    if not parameters:
+        return None
+    vocab = getattr(shape, "vocab", None) or 0
+    return int(2 * max(parameters - vocab * hidden * (1 if getattr(shape, "tied", True) else 2), 0) / layers)
+
+
+def gpu_fit(gpu_memory: Optional[str], parameters: Optional[int], shape: Any, vram: Optional[int],
+            hardware_known: bool, basis: str = "") -> Fit:
+    """Can this computer's GPU quantize a format that quantizes on the GPU (FormatCapability.quantize_on gpu)?
+    - model: the whole model at 16 bit plus a tenth, plus the GPU's own memory;
+    - layer (AWQ, GPTQ, EXL3: calibrated layer by layer): one layer's 16-bit weights twice (the layer and its
+      quantized copy being made), the second-order statistics of its matrices in 32 bit (hidden x hidden for the
+      inputs of attention and of the feed-forward, intermediate x intermediate for its last matrix), the
+      calibration's activations into and out of the layer (CALIBRATION_SAMPLES x CALIBRATION_TOKENS x hidden at 16
+      bit, twice), plus the GPU's own memory.
+    Usable is 95 % of the largest GPU of the hardware probe that does not share its memory (unified memory is not
+    counted: it is the RAM). Without a GPU in the probe it does not fit; without a probe or a shape it is unknown."""
+    if not hardware_known:
+        return Fit("unknown", source="this computer's hardware probe is not known")
+    if not vram:
+        return Fit("does_not_fit", 1, 0, "this format quantizes on the GPU; the hardware probe found no GPU with "
+                                         "memory of its own")
+    usable = int(vram * 0.95)
+    if (gpu_memory or "model") == "model":
+        if not parameters:
+            return Fit("unknown", source="the model size is unknown")
+        needed = int(parameters * 2 * 1.1) + GPU_CONTEXT
+        what = "the whole model in graphics memory"
+    else:
+        layer = layer_bytes(shape)
+        hidden = getattr(shape, "hidden", None)
+        if layer is None or not hidden:
+            return Fit("unknown", source="the model's shape (hidden size, layers) is unknown, so its largest layer is "
+                                         "not known")
+        intermediate = getattr(shape, "intermediate", None) or 4 * hidden
+        statistics = 4 * (2 * hidden * hidden + intermediate * intermediate)
+        activations = 2 * CALIBRATION_SAMPLES * CALIBRATION_TOKENS * hidden * 2
+        needed = 2 * layer + statistics + activations + GPU_CONTEXT
+        what = (f"calibrated layer by layer ({CALIBRATION_SAMPLES} samples x {CALIBRATION_TOKENS} tokens)")
+    return Fit(_verdict(needed, usable), needed, usable,
+               f"{what}; {gb(vram)} GPU memory from the hardware probe; {basis}".strip("; "))
 
 
 def target_fit(output: int, board_ram: Optional[int], board: Optional[str], board_max_gb: Optional[float] = None) -> Fit:

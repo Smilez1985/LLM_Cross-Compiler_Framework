@@ -399,7 +399,8 @@ TEXTS = {
                                    "absolute path; args: words with {input} {output} {quant} {model_name}), input "
                                    "(hf, onnx, gguf), output_extension, quantizations, default_quantization, "
                                    "runtime_libraries (name, version, image_path, redistributable, source_url), "
-                                   "board_paths, sdk, vendor_files. Empty: GGUF. No stage code: the template's "
+                                   "board_paths, sdk, vendor_files, quantize_on (cpu or gpu), gpu_memory (model or "
+                                   "layer). Empty: GGUF. No stage code: the template's "
                                    "stages call the declared converter.",
         "bld.wizard.summary_formats": "Output formats: {formats}",
         "bld.wizard.attach": "Attach the knowledge crawled for this target (Deep Ingest, privacy scrub applied)",
@@ -978,7 +979,8 @@ TEXTS = {
                                    "Image mit absolutem Pfad; args: Wörter mit {input} {output} {quant} "
                                    "{model_name}), input (hf, onnx, gguf), output_extension, quantizations, "
                                    "default_quantization, runtime_libraries (name, version, image_path, "
-                                   "redistributable, source_url), board_paths, sdk, vendor_files. Leer: GGUF. Kein "
+                                   "redistributable, source_url), board_paths, sdk, vendor_files, quantize_on (cpu "
+                                   "oder gpu), gpu_memory (model oder layer). Leer: GGUF. Kein "
                                    "Code der Stufen: Die Stufen der Vorlage rufen den angegebenen Konverter auf.",
         "bld.wizard.summary_formats": "Ausgabeformate: {formats}",
         "bld.wizard.attach": "Das für dieses Target gecrawlte Wissen anhängen (Deep Ingest, Datenschutz-Bereinigung "

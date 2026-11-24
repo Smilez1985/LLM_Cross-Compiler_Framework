@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import shutil
 
 from conftest import REPO_ROOT
 from orchestrator.Core.hf_lookup import HubLookupError
@@ -175,13 +176,12 @@ def test_numbers_closed_types(env, tmp_path):  # noqa: F811
 @pytest.fixture
 def hf(tmp_path, monkeypatch):
     import test_hf_tools as th
-    from orchestrator.Core import hf_hub
     from orchestrator.Core.job_service import JobService
     from orchestrator.tools.audit import AuditLog
     from orchestrator.tools.framework_tools import register_framework_tools
     from orchestrator.tools.policy import PolicyStore
     from orchestrator.tools.registry import ToolRegistry
-    monkeypatch.setattr(hf_hub.shutil, "disk_usage", lambda p: SimpleNamespace(total=10 ** 12, used=0, free=10 ** 12))
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: SimpleNamespace(total=10 ** 12, used=0, free=10 ** 12))
     hub = th.Hub()
     settings = {"models_dir": str(tmp_path / "models"), "offline_mode": False}
     (tmp_path / "models").mkdir()

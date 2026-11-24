@@ -33,7 +33,6 @@ from orchestrator.utils.logging import get_logger
 from orchestrator.Core.builder import BUILD_MANIFEST, MODEL_FILE_SUFFIXES, is_staging_folder
 from orchestrator.remote.address import USER_PATTERN, valid_host, valid_user
 from orchestrator.remote.text import LINE_CHARS, OUTPUT_LINES, keep_tail
-from orchestrator.utils import ssh_trust
 from orchestrator.utils.helpers import sha256_fileobj, write_sha256sums
 from orchestrator.utils.helpers import sha256_file  # deployment_manager.sha256_file, a public name
 from orchestrator.utils.next_steps import WithSteps

@@ -6,7 +6,6 @@ placeholder.
 Every value is made at run time from random characters, so this file holds no secret and no secret-shaped literal.
 """
 
-import json
 
 import pytest
 from test_secret_by_place import BY_PLACE, value

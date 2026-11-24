@@ -32,7 +32,6 @@ import contextlib
 import json
 import os
 import secrets
-import shutil  # noqa: F401 - tests reach shutil.disk_usage through this module
 import subprocess
 import tempfile
 import threading

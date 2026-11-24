@@ -1617,7 +1617,6 @@ def test_gui_ssh_probe_refuses_a_bad_host(qapp, tmp_path, monkeypatch, host):
 
 def test_a_cli_consent_is_written_to_the_real_audit_log(tmp_path, monkeypatch):
     # The consent record must use the audit log's fixed outcomes and answers; a fake would hide a refused entry.
-    from types import SimpleNamespace
     from orchestrator import cli as cli_module
     from orchestrator.tools.audit import AuditLog
     audit = AuditLog(tmp_path / "audit.db")

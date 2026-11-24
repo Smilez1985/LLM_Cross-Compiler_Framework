@@ -13,12 +13,10 @@ huggingface_hub runs over its own client with a stand-in transport (httpx.MockTr
 a stand-in session. No test reaches the network or the real home folder."""
 
 import hashlib
-import json
 import os
 import re
 import subprocess
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest

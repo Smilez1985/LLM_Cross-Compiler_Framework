@@ -197,7 +197,7 @@ def _copy_one(models_dir: Path, file: OldFile, sha256: Optional[str], git_id: Op
     stopped. The file is read once from the real path its link leads to (inside the models folder, opened without
     following a link), and the copy holds exactly the bytes that were checked."""
     from orchestrator.utils.download import FileLock
-    from orchestrator.utils.helpers import HashStopped, copy_hashed, digest_matches, git_blob_id
+    from orchestrator.utils.helpers import copy_hashed, digest_matches, git_blob_id
     real = _real_inside(file.path, models_dir)
     if real is None:
         return "link"

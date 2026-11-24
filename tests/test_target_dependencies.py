@@ -9,7 +9,6 @@ Every hash is made at run time from random characters, so this file holds no sec
 import random
 import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 import yaml

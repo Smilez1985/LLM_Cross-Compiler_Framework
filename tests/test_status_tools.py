@@ -12,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import shutil
 
 pytest.importorskip("mcp")
 
@@ -254,7 +255,7 @@ class TestReportCannotDo:
         framework = SimpleNamespace(config=SimpleNamespace(get=lambda key, default=None: values.get(key, default)))
         disks = {str(cache): (1, 900), str(out): (1, 900), str(builds): (2, 1)}   # device, free GB
         monkeypatch.setattr(tools_status, "_disk_of", lambda p: disks[str(p)][0])
-        monkeypatch.setattr(tools_status.shutil, "disk_usage",
+        monkeypatch.setattr(shutil, "disk_usage",
                             lambda p: usage(1000 * 2 ** 30, 0, disks[str(p)][1] * 2 ** 30))
         checked, facts, _try = tools_status.disk_fact(framework)
         assert checked == "confirmed", "the build folder's disk is full"

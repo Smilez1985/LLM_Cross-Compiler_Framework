@@ -26,7 +26,7 @@ from PySide6.QtGui import QPixmap, QAction
 from orchestrator.gui.builder_parts import (BoardAdvice, BuildProgressPanel, PilotAlternatives, after_probe,
                                             apply_ditto_settings, bind_builder_form, board_confirmed, person_target,
                                             read_probe)
-from orchestrator.gui.dialogs import confirm_host_key, fill_recent, select_recent
+from orchestrator.gui.dialogs import fill_recent, select_recent
 from orchestrator.gui.ditto_switch import SwitchBox
 from orchestrator.gui.explain import term_label
 from orchestrator.gui.plain import ask, button_text, plain_label, plain_tooltip

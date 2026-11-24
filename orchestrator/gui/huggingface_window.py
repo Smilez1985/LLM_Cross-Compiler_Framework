@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, 
     QHeaderView, QLabel, QMessageBox, QComboBox, QDialog, 
-    QListWidget, QDialogButtonBox, QFormLayout, QCheckBox
+    QListWidget, QDialogButtonBox, QCheckBox
 )
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QColor

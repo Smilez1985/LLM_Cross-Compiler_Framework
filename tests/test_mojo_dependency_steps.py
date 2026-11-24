@@ -12,7 +12,6 @@ import random
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 import yaml
 
 from orchestrator.Core import target_dependencies as deps

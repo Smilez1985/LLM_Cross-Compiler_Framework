@@ -994,7 +994,7 @@ class TestGuiHelpers:
             targets.append(target)
             return real(*args, target=target, **kwargs)
 
-        monkeypatch.setattr(module.threading, "Thread", thread)
+        monkeypatch.setattr(threading, "Thread", thread)
         return targets
 
     @staticmethod

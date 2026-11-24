@@ -97,11 +97,18 @@ class FormatCapability(BaseModel):
     notes: Optional[UntrustedText] = None
     # What the format's SDK needs on the board (the pre-flight check); None: nothing of the board is compared
     sdk: Optional[SdkNeeds] = None
+    # Where the format's converter quantizes on this computer: cpu (in RAM) or gpu (in graphics memory, the check
+    # before a build compares this computer's GPU); with gpu, whether the whole model is loaded there (model) or it is
+    # calibrated layer by layer (layer, as AWQ, GPTQ and EXL3). Core/build_resources.py reads it.
+    quantize_on: Literal["cpu", "gpu"] = "cpu"
+    gpu_memory: Optional[Literal["model", "layer"]] = None
 
     @model_validator(mode="after")
     def _consistent(self):
         known = set(self.quantizations)
         problems = []
+        if self.gpu_memory is not None and self.quantize_on != "gpu":
+            problems.append("gpu_memory is set but quantize_on is not gpu")
         if self.default_quantization not in known:
             problems.append(f"default_quantization {self.default_quantization!r} is not in quantizations")
         for board, quants in self.board_quantizations.items():

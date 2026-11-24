@@ -15,7 +15,6 @@ Updates v2.4.0:
 
 import os
 import re
-import shutil  # noqa: F401 - tests replace shutil.disk_usage through this module (the disk rule reads it)
 from pathlib import Path
 from typing import Optional, List, Tuple
 from dataclasses import dataclass

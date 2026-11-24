@@ -38,7 +38,6 @@ Rules that hold for every call here:
 """
 
 import re
-import shutil  # noqa: F401 - tests and tools_hf replace or read shutil.disk_usage through this module
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath

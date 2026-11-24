@@ -342,8 +342,9 @@ class ModuleCreationWizard(QWizard):
         b.text("formats", "gui.field.wizard.formats", self.formats_edit, page=3,
                hint="YAML list of output formats, the template's variables: a preset (gguf, rknn, rkllm) or a "
                     "format's values (id, label, converter with command and args, input, output_extension, "
-                    "quantizations, default_quantization, runtime_libraries, board_paths, sdk, vendor_files) from "
-                    "the probe and the vendor's documentation; empty: GGUF")
+                    "quantizations, default_quantization, runtime_libraries, board_paths, sdk, vendor_files, "
+                    "quantize_on: cpu or gpu, gpu_memory: model or layer) from the probe and the vendor's "
+                    "documentation; empty: GGUF")
 
         b.text("dependencies", "gui.field.wizard.dependencies", self.dependencies_edit, page=3,
                hint="YAML list of what the SDK and toolchain need (name, version, kind: system_package, pip_package, "

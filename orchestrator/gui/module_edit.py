@@ -402,7 +402,7 @@ class ModuleEditPanel(QWidget):
             b.text("variables", "bld.edit.field.variables", self.variables_edit,
                    hint="the module's output formats as YAML (the general template's variables: converter with its "
                         "args, input, output_extension, quantizations, runtime_libraries, board_paths, sdk, "
-                        "vendor_files); the person applies them, which makes the files that hold them anew")
+                        "vendor_files, quantize_on, gpu_memory); the person applies them, which makes the files that hold them anew")
         b.add(PROPOSAL_FIELD, "bld.edit.field.proposal", "code", lambda: self._proposal, self._set_proposal,
               [self.diff_view], check=lambda _current, value: self._proposal_problem(value),
               hint="a unified diff (--- a/<file>, +++ b/<file>, @@ hunks) against the files' text now; it is applied "

@@ -429,12 +429,13 @@ Changelog-Eintrag in beiden Sprachen ergänzen.
 
 Das sind die Prüfungen aus `.github/workflows/`. Außer hadolint kommen alle Werkzeuge mit `requirements-dev.txt`.
 
-**Ruff** (`ci.yml`): nur Syntaxfehler und undefinierte Namen. Regeln: `E9` (Syntax- und Ein-/Ausgabefehler), `F63`
-(ungültige Vergleiche und Asserts), `F7` (Anweisungen an falscher Stelle, etwa `return` außerhalb einer Funktion),
-`F82` (undefinierte Namen).
+**Ruff** (`ci.yml`): Syntaxfehler, undefinierte Namen und ungenutzte Importe. Regeln: `E9` (Syntax- und
+Ein-/Ausgabefehler), `F63` (ungültige Vergleiche und Asserts), `F7` (Anweisungen an falscher Stelle, etwa `return`
+außerhalb einer Funktion), `F82` (undefinierte Namen), `F401` (ein Import, den nichts nutzt; ein Name, der absichtlich
+zum Import durch andere bleibt, steht im `__all__` des Moduls oder ist mit `# noqa: F401` und dem Grund markiert).
 
 ```bash
-ruff check --select E9,F63,F7,F82 orchestrator scripts tests targets
+ruff check --select E9,F63,F7,F82,F401 orchestrator scripts tests targets
 ```
 
 **ShellCheck** (`ci.yml`): Fehler in allen versionierten Shell-Skripten. `targets/_template` wird übersprungen, weil

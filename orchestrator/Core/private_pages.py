@@ -19,7 +19,7 @@ file's name, never the folder it lies in.
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from orchestrator.rag.private import private_label
 

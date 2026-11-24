@@ -6,7 +6,6 @@ images already on this computer, or a pull from a registry the one locality rule
 (utils/image_ref.offline_pull_refusal over utils/locality.py). Otherwise a plain stop names the image and the step to
 take while online: no pull and no build-time download in offline mode."""
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest

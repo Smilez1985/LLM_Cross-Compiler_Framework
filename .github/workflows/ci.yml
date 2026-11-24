@@ -38,8 +38,8 @@ jobs:
         shell: pwsh
         run: ./scripts/Check-PowerShell.ps1
 
-      - name: Ruff (syntax errors and undefined names)
-        run: ruff check --no-cache --select E9,F63,F7,F82 --output-format github orchestrator scripts tests targets
+      - name: Ruff (syntax errors, undefined names and unused imports)
+        run: ruff check --no-cache --select E9,F63,F7,F82,F401 --output-format github orchestrator scripts tests targets
 
       - name: ShellCheck (errors)
         # targets/_template holds placeholders that module_generator fills in, so it is not valid shell yet.

@@ -7,7 +7,6 @@ Every hash is made at run time from random characters, so this file holds no sec
 
 import json
 import random
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest

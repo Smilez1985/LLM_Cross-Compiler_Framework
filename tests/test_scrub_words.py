@@ -9,7 +9,6 @@ Every address is built at run time, so this file holds no address of a person.
 import os
 import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 
