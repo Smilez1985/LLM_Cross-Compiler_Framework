@@ -943,6 +943,13 @@ and `openai` SDKs (OpenAI-compatible servers go through `openai`).
 Ditto is optional and marked experimental: **Use at your own risk and responsibility. The creator of LLMCF is not
 liable.** This repeats the no-warranty terms of [LICENSE.txt](../LICENSE.txt) and adds nothing to them.
 
+- **Switch it on and off:** once Ditto is set up, the switch **Ditto** in the tool bar beside Ditto's avatar turns it
+  on and off everywhere, and the Builder and the module wizard each have a switch **Ditto in this window** that turns
+  it off there alone (it can be on only while the main switch is on). Off, that window's Ditto buttons are disabled
+  and their tip says which switch is off, nothing is asked and an answer that arrives later fills nothing; with the
+  main switch off, the chat says Ditto is off and keeps your question in the box (an AI app you picked in the chat is
+  not Ditto and still answers). Both are remembered, and only you switch them: no AI can (`ditto_enabled`,
+  `ditto_off_in`). Without Ditto set up the switches are not shown and the windows offer the setup as before.
 - **Badge:** the chat panel's header and the AI settings (**Tools > Configure AI Agent (Ditto)...**) show
   **Experimental** with this sentence; it stays.
 - **Notice, once per user:** the first time the chat panel is shown, a notice at its top says that Ditto is

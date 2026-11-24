@@ -290,6 +290,7 @@ class ModuleCreationWizard(QWizard):
         self.addPage(self.create_flags_page())
         self.summary_id = self.addPage(self.create_summary_page())
         self.edit_id = self.addPage(self.create_edit_page())
+        self._apply_ditto_switch()   # Ditto's buttons follow the switch from the start
         self.gui_form = self._bind_gui_form()
 
     def _bind_gui_form(self):
@@ -418,6 +419,12 @@ class ModuleCreationWizard(QWizard):
         hbox_btns.addWidget(self.btn_import_ai)
         
         import_layout.addLayout(hbox_btns)
+        # Ditto's switch for the wizard (gui/ditto_switch.py): follows the main switch, can turn Ditto off here alone;
+        # hidden while Ditto is not set up (then Ditto's buttons offer the setup as before)
+        from orchestrator.gui.ditto_switch import SwitchBox
+        self.chk_ditto = SwitchBox(lambda: self.framework_manager, "wizard")
+        self.chk_ditto.applied.connect(self._apply_ditto_switch)
+        import_layout.addWidget(self.chk_ditto)
         
         # Buttons Row 2: Knowledge Ingest (v1.6.0)
         hbox_know = QHBoxLayout()
@@ -637,6 +644,7 @@ class ModuleCreationWizard(QWizard):
     def showEvent(self, event):
         if getattr(self, "_run_providers_for", None) is not self._ditto():   # the framework came after the pages
             self._fill_run_providers()
+        self.chk_ditto.refresh()   # the switch of the framework that may have come after the pages
         super().showEvent(event)
 
     def load_probe_data(self):
@@ -1097,7 +1105,7 @@ class ModuleCreationWizard(QWizard):
         dialog = AIConfigurationDialog(self.framework_manager, self)
         if dialog.exec() == QDialog.Accepted:
             self.ai_config = dialog.get_config()
-            self.btn_import_ai.setEnabled(True)
+            self._enable_ditto_button(self.btn_import_ai)
             self.status_label.setText(f"{ui_text('msg.ai_ready')}: {self.ai_config.get('provider')}")
 
     def _store_probe(self, path):
@@ -1139,12 +1147,47 @@ class ModuleCreationWizard(QWizard):
     def _ditto(self):
         return getattr(self.framework_manager, "ditto_manager", None) if self.framework_manager else None
 
+    # --- Ditto's switch (gui/ditto_switch.py) ---------------------------------------------------------------------
+
+    def _ditto_off(self) -> str:
+        """Why Ditto does not act in the wizard now ("" when it may): its switch or the main switch is off."""
+        from orchestrator.gui.ditto_switch import off_reason
+        return off_reason(self.framework_manager, "wizard")
+
+    def _ditto_buttons(self):
+        """(button, busy) of every button that asks Ditto: busy while its own request runs."""
+        return ((self.btn_import_ai, self.ai_progress.isVisible()),
+                (self.btn_formats_propose, getattr(self, "_formats_request", None) is not None),
+                (self.btn_dependencies_propose, getattr(self, "_dependencies_request", None) is not None))
+
+    def _apply_ditto_switch(self) -> None:
+        """Ditto's buttons follow the switch: off, they are disabled and their tip says why."""
+        off = self._ditto_off()
+        for button, busy in self._ditto_buttons():
+            if button.property("ditto_tip") is None:
+                button.setProperty("ditto_tip", button.toolTip())
+            button.setEnabled(not off and not busy)
+            button.setToolTip(off or str(button.property("ditto_tip") or ""))
+
+    def _enable_ditto_button(self, button) -> None:
+        """A request of Ditto's ended: its button comes back, unless Ditto is switched off meanwhile."""
+        button.setEnabled(not self._ditto_off())
+
+    def _ditto_refused(self) -> bool:
+        """Ditto is switched off here: the reason is shown and nothing is asked."""
+        off = self._ditto_off()
+        if off:
+            self._run_problem(off)
+        return bool(off)
+
     def _run_problem(self, text: str):
         box = QMessageBox(QMessageBox.Critical, ui_text("bld.wizard.ai_error_title"), text, QMessageBox.Ok, self)
         box.setTextFormat(Qt.PlainText)
         box.exec()
 
     def run_ai_analysis(self):
+        if self._ditto_refused():
+            return
         ditto = self._ditto()
         if ditto is None:
             QMessageBox.critical(self, ui_text("status.error"), ui_text("bld.wizard.no_ditto"))
@@ -1231,6 +1274,8 @@ class ModuleCreationWizard(QWizard):
     def propose_formats(self) -> bool:
         """Ditto: Propose the Values: the format values from the imported probe and the crawled documentation, in a
         worker thread; the form shows them with their sources (on_formats_proposed). False when nothing was asked."""
+        if self._ditto_refused():
+            return False
         if not self.probe_path:
             self._run_problem(ui_text("bld.wizard.formats_no_probe"))
             return False
@@ -1261,6 +1306,8 @@ class ModuleCreationWizard(QWizard):
         """Ditto: Propose Dependencies: the entries the SDK and toolchain need, from the imported probe and the crawled
         documentation, in a worker thread; the field takes their YAML (on_dependencies_proposed). False when nothing
         was asked."""
+        if self._ditto_refused():
+            return False
         if not self.probe_path:
             self._run_problem(ui_text("bld.wizard.formats_no_probe"))
             return False
@@ -1291,7 +1338,7 @@ class ModuleCreationWizard(QWizard):
         if token is not getattr(self, "_dependencies_request", None) or not isinstance(result, tuple):
             return
         self._dependencies_request = None
-        self.btn_dependencies_propose.setEnabled(True)
+        self._enable_ditto_button(self.btn_dependencies_propose)
         kind, value = result
         if kind == "dependencies":
             self.on_dependencies_proposed(value)
@@ -1315,7 +1362,7 @@ class ModuleCreationWizard(QWizard):
         if token is not getattr(self, "_formats_request", None) or not isinstance(result, tuple):
             return
         self._formats_request = None
-        self.btn_formats_propose.setEnabled(True)
+        self._enable_ditto_button(self.btn_formats_propose)
         kind, value = result
         if kind == "formats":
             self.on_formats_proposed(value)
@@ -1354,7 +1401,7 @@ class ModuleCreationWizard(QWizard):
 
     def on_ai_error(self, err, reason=""):
         self._set_avatar_state("fail")
-        self.btn_import_ai.setEnabled(True)
+        self._enable_ditto_button(self.btn_import_ai)
         self.btn_import_std.setEnabled(True)
         self.ai_progress.setVisible(False)
         self.status_label.setText(f"❌ {ui_text('status.error')}")
@@ -1378,7 +1425,7 @@ class ModuleCreationWizard(QWizard):
 
     def on_ai_finished(self, config):
         self._set_avatar_state("success")
-        self.btn_import_ai.setEnabled(True)
+        self._enable_ditto_button(self.btn_import_ai)
         self.btn_import_std.setEnabled(True)
         self.ai_progress.setVisible(False)
         self.status_label.setText(ui_text("msg.ai_complete"))

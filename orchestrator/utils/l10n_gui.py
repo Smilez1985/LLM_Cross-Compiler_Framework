@@ -157,6 +157,14 @@ TEXTS = {
         "gui.pilot.use": "Use {model} ({quantization}, about {need} of {ram})",
         "gui.pilot.taken": "Taken: {model} with {quantization}. Undo brings your model back.",
         "gui.pilot.stale": "The model in the form changed since Ditto's answer. Ask Ditto again.",
+        "ditto.switch.main": "Ditto",
+        "ditto.switch.main_tip": "Ditto's main switch. Off: no window asks Ditto and the chat says Ditto is off. Each "
+                                 "window can also turn Ditto off for itself.",
+        "ditto.switch.window": "Ditto in this window",
+        "ditto.switch.window_tip": "Turns Ditto off in this window only; the main switch in the tool bar turns it off "
+                                   "everywhere.",
+        "ditto.switch.main_off": "Ditto is switched off (the switch \"Ditto\" in the tool bar).",
+        "ditto.switch.window_off": "Ditto is switched off in this window (the switch \"Ditto in this window\").",
 
         # documentation links for Deep Ingest
         "gui.wizard.ingest_title": "Add documentation",
@@ -322,6 +330,15 @@ TEXTS = {
         "gui.pilot.use": "{model} übernehmen ({quantization}, etwa {need} von {ram})",
         "gui.pilot.taken": "Übernommen: {model} mit {quantization}. Rückgängig bringt dein Modell zurück.",
         "gui.pilot.stale": "Das Modell im Formular hat sich seit Dittos Antwort geändert. Frag Ditto noch einmal.",
+        "ditto.switch.main": "Ditto",
+        "ditto.switch.main_tip": "Dittos Hauptschalter. Aus: Kein Fenster fragt Ditto, und der Chat sagt, dass Ditto "
+                                 "aus ist. Jedes Fenster kann Ditto auch für sich ausschalten.",
+        "ditto.switch.window": "Ditto in diesem Fenster",
+        "ditto.switch.window_tip": "Schaltet Ditto nur in diesem Fenster aus; der Hauptschalter in der Werkzeugleiste "
+                                   "schaltet ihn überall aus.",
+        "ditto.switch.main_off": "Ditto ist ausgeschaltet (der Schalter „Ditto“ in der Werkzeugleiste).",
+        "ditto.switch.window_off": "Ditto ist in diesem Fenster ausgeschaltet (der Schalter „Ditto in diesem "
+                                   "Fenster“).",
 
         "gui.wizard.ingest_title": "Dokumentation hinzufügen",
         "gui.wizard.ingest_offer": "Ditto fehlen Informationen über diese Hardware. Deep Ingest mit {n} "

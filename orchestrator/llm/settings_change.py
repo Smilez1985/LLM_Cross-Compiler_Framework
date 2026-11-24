@@ -66,8 +66,11 @@ WEB_SEARCH_SETTINGS = ("web_search_ways", "web_search_apis", "web_search_url", "
                        "web_search_engine")
 WEB_SEARCH_PERSON_ONLY_TEXT = ("{key} decides whether and how Ditto's web search reaches out. Only the person sets it, in "
                                "the framework's settings; no AI and no settings change of an AI can.")
+DITTO_SWITCH_SETTINGS = ("ditto_enabled", "ditto_off_in")
+DITTO_SWITCH_TEXT = ("{key} switches Ditto on or off. Only the person switches it, in the main window's tool bar or in "
+                     "a window's own switch; no AI and no settings change of an AI can.")
 PERSON_DECIDES = ("build_idle_timeout", "local_cache_ram_mib", "local_kv_cache", "framework_mode",
-                  "runtime_layer_toolbox", "ditto_archive_security") + WEB_SEARCH_SETTINGS
+                  "runtime_layer_toolbox", "ditto_archive_security") + WEB_SEARCH_SETTINGS + DITTO_SWITCH_SETTINGS
 # The MQTT doorbell's broker, user name, topic prefix and CA file (Core/doorbell.py): an AI may not redirect or
 # silence the person's notifications.
 MQTT_SETTINGS = ("mqtt_broker_url", "mqtt_username", "mqtt_topic_prefix", "mqtt_ca_file")
@@ -112,6 +115,8 @@ def person_only_text(key: str) -> str:
         return ARCHIVE_PERSON_ONLY_TEXT.format(key=key)
     if key in WEB_SEARCH_SETTINGS:
         return WEB_SEARCH_PERSON_ONLY_TEXT.format(key=key)
+    if key in DITTO_SWITCH_SETTINGS:
+        return DITTO_SWITCH_TEXT.format(key=key)
     if key == "runtime_layer_toolbox":
         return TOOLBOX_PERSON_ONLY_TEXT.format(key=key)
     if key in PERSON_DECIDES:
@@ -126,6 +131,8 @@ def _person_only_title(key: str) -> str:
         return "Build"
     if key == "ditto_archive_security":
         return "Ditto's archive"
+    if key in DITTO_SWITCH_SETTINGS:
+        return "Ditto's switch"
     if key in WEB_SEARCH_SETTINGS:
         return "Web search"
     if key == CACHE_OVER_CAP_OK or key in LOCAL_CACHE_SETTINGS:

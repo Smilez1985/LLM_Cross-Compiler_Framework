@@ -499,6 +499,15 @@ class ConfigManager:
                          "Days after which the trash reminds you of what it holds; nothing is ever deleted by "
                          "itself, and an AI cannot change this setting", ["min:1", "max:3650"]),
 
+            # Ditto's switch (gui/ditto_switch.py): the main switch and the windows where the person turned Ditto off;
+            # person-only (llm/settings_change PERSON_DECIDES): an AI never switches Ditto on or off
+            ConfigSchema("ditto_enabled", bool, False, True,
+                         "Ditto's main switch: off, no window asks Ditto and the chat says Ditto is off; set only by "
+                         "you"),
+            ConfigSchema("ditto_off_in", list, False, [],
+                         "The windows where you turned Ditto off (builder, wizard) while the main switch is on; set "
+                         "only by you"),
+
             # AI Agent (Ditto) Selection
             ConfigSchema("ai_provider", str, False, "OpenAI",
                          "AI provider id from configs/llm_providers.yml (anthropic, openai, google, openrouter, "
@@ -838,7 +847,7 @@ class ConfigManager:
                 "rag_reranker", "rag_rerank_default", "rag_rerank_min_score", "rag_model_idle_minutes",
                 "crawler_max_depth", "crawler_max_pages",
                 "crawler_rate_limit", "crawler_download_pdfs", "crawler_languages", "audio_announcements",
-                "chat_panel_auto_show",
+                "chat_panel_auto_show", "ditto_enabled", "ditto_off_in",
                 "trash_retention_days", "output_dir",
                 "ai_provider", "ai_model", "ai_base_url", "ai_effort", "ai_fallback_chain",
                 "ai_anthropic_workspace_id", "ai_context_window", "ai_cache_ttl", "ai_cache_cost_limit",

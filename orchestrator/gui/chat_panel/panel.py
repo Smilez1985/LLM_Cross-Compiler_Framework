@@ -846,6 +846,11 @@ class ChatPanel(QWidget):
             return
         if not question or (self.worker is not None and self.worker.isRunning()):
             return
+        from orchestrator.gui.ditto_switch import off_reason
+        off = off_reason(self.framework)   # Ditto's main switch (an AI app picked above is not Ditto)
+        if off:
+            self._local_notice(off, level="info")   # the question stays in the box
+            return
         choice = self._question_choice()
         if choice is None:
             return

@@ -27,6 +27,7 @@ from orchestrator.gui.builder_parts import (BoardAdvice, BuildProgressPanel, Pil
                                             apply_ditto_settings, bind_builder_form, board_confirmed, person_target,
                                             read_probe)
 from orchestrator.gui.dialogs import confirm_host_key, fill_recent, select_recent
+from orchestrator.gui.ditto_switch import SwitchBox
 from orchestrator.gui.explain import term_label
 from orchestrator.gui.plain import ask, button_text, plain_label, plain_tooltip
 from orchestrator.utils import input_history
@@ -529,7 +530,7 @@ class BuilderTab(QWidget):
         self.board_advice = BoardAdvice(self)
         self.board_advice.create_target.connect(
             lambda: self.create_target_requested.emit(str(getattr(self, "_last_probe_path", "") or "")))
-        self.board_advice.ask_ditto.connect(self.ask_ditto_requested.emit)
+        self.board_advice.ask_ditto.connect(self._ask_ditto_in_chat)
         tgt_layout.addWidget(self.board_advice)
         tgt_group.setLayout(tgt_layout)
         left_col.addWidget(tgt_group)
@@ -537,14 +538,13 @@ class BuilderTab(QWidget):
         # 3. AI OPTIMIZER
         ai_group = QGroupBox("3. AI Optimization (Ditto)")
         ai_layout = QVBoxLayout()
-        self.chk_ai = QCheckBox("Enable Ditto AI Optimization")
+        # Ditto's switch for the Builder (gui/ditto_switch.py): follows the main switch, can turn Ditto off here alone;
+        # hidden while Ditto is not set up (then Ask Ditto for Config says how to set it up)
+        self.chk_ai = SwitchBox(self.framework, "builder")
         self.chk_rag = QCheckBox("Use RAG Knowledge Base")
-        self.chk_rag.setEnabled(False)
-        self.chk_ai.toggled.connect(self.chk_rag.setEnabled)
         self.btn_optimize = QPushButton("✨ Ask Ditto for Config")
-        self.btn_optimize.setEnabled(False)
-        self.chk_ai.toggled.connect(self.btn_optimize.setEnabled)
         self.btn_optimize.clicked.connect(self._run_ai_optimizer)
+        self.chk_ai.applied.connect(self._apply_ditto_switch)
         ai_layout.addWidget(self.chk_ai)
         ai_layout.addWidget(self.chk_rag)
         ai_layout.addWidget(self.btn_optimize)
@@ -553,6 +553,7 @@ class BuilderTab(QWidget):
         ai_layout.addWidget(self.pilot_alternatives)
         ai_group.setLayout(ai_layout)
         left_col.addWidget(ai_group)
+        self._apply_ditto_switch()
         
         # 4. BUILD CONFIG
         build_group = QGroupBox("4. Build Configuration")
@@ -1586,7 +1587,35 @@ class BuilderTab(QWidget):
             self.gui_form.person_edited("dataset")
             self._log(f"Selected Dataset: {Path(path).name}")
 
+    def _ditto_off(self) -> str:
+        """Why Ditto does not act in the Builder now ("" when it may): its switch or the main switch is off."""
+        from orchestrator.gui.ditto_switch import off_reason
+        return off_reason(self.framework, "builder")
+
+    def _apply_ditto_switch(self):
+        """Ditto's buttons of the Builder follow its switch: off, they are disabled with the reason, and Ditto's
+        alternatives go away (nothing of Ditto's stays offered)."""
+        off = self._ditto_off()
+        running = getattr(self, "ai_worker", None) is not None and self.ai_worker.isRunning()
+        self.btn_optimize.setEnabled(not off and not running)
+        self.chk_rag.setEnabled(not off)
+        self.btn_optimize.setToolTip(plain_tooltip(off) if off else "")
+        if off and hasattr(self, "pilot_alternatives"):
+            self.pilot_alternatives.hide_alternatives()
+
+    def _ask_ditto_in_chat(self, text):
+        """The board advice's "Ask Ditto": to the chat, unless Ditto is switched off here (then the reason)."""
+        off = self._ditto_off()
+        if off:
+            self._log(off)
+            return
+        self.ask_ditto_requested.emit(text)
+
     def _run_ai_optimizer(self):
+        off = self._ditto_off()
+        if off:
+            self._log(off)
+            return
         ditto = self.framework.get_component("ditto_manager")
         if not ditto:
             QMessageBox.critical(self, "Error", "Ditto Manager not loaded.")
@@ -1623,7 +1652,11 @@ class BuilderTab(QWidget):
         return options
 
     def _on_ai_finished(self, success, config, msg):
-        self.btn_optimize.setEnabled(True)
+        self.btn_optimize.setEnabled(not self._ditto_off())
+        if self._ditto_off():   # switched off while Ditto was thinking: nothing of the answer is filled or offered
+            self._set_state("default")
+            self._log(self._ditto_off())
+            return
         if success:
             self._set_state("success")
             self._log(f"Ditto Recommendation:\n{msg}")

@@ -1029,6 +1029,14 @@ Ditto ist optional und als experimentell gekennzeichnet: **Nutzung auf eigene Ge
 von LLMCF haftet nicht.** Das wiederholt den Gewährleistungsausschluss in [LICENSE.txt](../LICENSE.txt) und fügt ihm
 nichts hinzu.
 
+- **An- und ausschalten:** Ist Ditto eingerichtet, schaltet der Schalter **Ditto** in der Werkzeugleiste neben Dittos
+  Avatar ihn überall an und aus, und der Builder und der Modul-Wizard haben je einen Schalter **Ditto in diesem
+  Fenster**, der ihn dort allein ausschaltet (er kann nur an sein, solange der Hauptschalter an ist). Aus sind die
+  Ditto-Buttons dieses Fensters abgeschaltet, ihr Tipp sagt, welcher Schalter aus ist, nichts wird gefragt und eine
+  Antwort, die später kommt, trägt nichts ein; mit dem Hauptschalter aus sagt der Chat, dass Ditto aus ist, und
+  behält deine Frage im Feld (eine KI-App, die du im Chat gewählt hast, ist nicht Ditto und antwortet weiter). Beide
+  werden gemerkt, und nur du schaltest sie: keine KI kann es (`ditto_enabled`, `ditto_off_in`). Ohne eingerichteten
+  Ditto erscheinen die Schalter nicht, und die Fenster bieten die Einrichtung an wie bisher.
 - **Abzeichen:** Der Kopf des Chat-Bereichs und die KI-Einstellungen (**Tools > Configure AI Agent (Ditto)...**)
   zeigen **Experimentell** mit diesem Satz; es bleibt.
 - **Hinweis, einmal je Benutzer:** Wenn der Chat-Bereich zum ersten Mal erscheint, sagt ein Hinweis oben darin, dass

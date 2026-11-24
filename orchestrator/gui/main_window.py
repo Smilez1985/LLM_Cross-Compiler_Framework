@@ -306,6 +306,11 @@ class MainOrchestrator(QMainWindow):
         self.btn_console.setAutoDefault(False)
         toolbar.addWidget(self.btn_console)
 
+        # Ditto's main switch, shown only when Ditto is set up (gui/ditto_switch.py)
+        from orchestrator.gui.ditto_switch import SwitchBox
+        self.chk_ditto = SwitchBox(self.framework)
+        toolbar.addWidget(self.chk_ditto)
+
         # Ditto Avatar
         assets_path = self.app_root / "assets"
         self.ditto_avatar = DittoAvatar(assets_path)
@@ -721,6 +726,9 @@ class MainOrchestrator(QMainWindow):
         chat = getattr(self, "chat_window", None)
         if chat is not None:
             chat.refresh_access()
+        # Ditto may be set up (or removed) now: the switches show or hide
+        from orchestrator.gui.ditto_switch import switch_of
+        switch_of(self.framework).changed.emit()
 
     def _open_tool_permissions(self, first_run: bool = False):
         """Ditto > Tool Permissions...: File > Settings... at Ditto > Tool permissions; at the first start the
