@@ -64,10 +64,11 @@ def question_text(host: str, port: int, key: Any, lang: Optional[str] = None) ->
 
 
 def ask_trust(parent: Any, framework: Any, host: str, port: int, key: Any, status: str, *, step: str = "",
-              lang: Optional[str] = None) -> bool:
+              lang: Optional[str] = None, manager: Any = None) -> bool:
     """The question part on the GUI thread: True for a known key, the person's "Yes" for an unknown one (then the key
-    is stored and the trust written to the audit log the CLI writes it to: remote/pairing.py first_use), False for a
-    changed key (refused, recorded for Mojo) or "No"."""
+    is stored and the trust written to the audit log the CLI writes it to: remote/pairing.py first_use; with the
+    deploy's `manager`, through its trust_host and the GUI's PersonChannel), False for a changed key (refused,
+    recorded for Mojo) or "No"."""
     from orchestrator.gui.plain import ask, plain_box
     from orchestrator.remote import pairing
     from orchestrator.remote.address import Endpoint
@@ -85,7 +86,12 @@ def ask_trust(parent: Any, framework: Any, host: str, port: int, key: Any, statu
         from orchestrator.runtime.device.person_steps import device_audit
         return device_audit(framework, folder)
 
-    outcome = pairing.first_use(TrustStore(folder), check, via="gui", audit=audit, actor="gui",
+    writer = None
+    if callable(getattr(manager, "trust_host", None)):
+        person = pairing.PersonChannel("gui", audit=audit, actor="gui")
+        writer = lambda _store, endpoint, k, pinned: manager.trust_host(endpoint.host, k, endpoint.port,  # noqa: E731
+                                                                        person=person, pinned=pinned)
+    outcome = pairing.first_use(TrustStore(folder), check, via="gui", audit=audit, actor="gui", writer=writer,
                                 ask=lambda c: ask(parent, ui_text("deploy.hostkey.title", lang),
                                                   question_text(host, port, key, lang)))
     if outcome.verdict == "changed":
@@ -105,12 +111,16 @@ def show_unreachable(parent: Any, framework: Any, host: str, port: int, error: B
 
 class HostKeyCheck(QObject):
     """The host-key step of one window: `start(host, port, then)` reads the key off the GUI thread, then asks on the
-    GUI thread and calls `then(trusted)`. One check at a time; a result for an older check is dropped."""
+    GUI thread and calls `then(trusted)`. One check at a time; a result for an older check is dropped. `manager`: a
+    function giving the deploy's DeploymentManager (the Deployment tab): the key is then read with its
+    host_key_status and a trusted one stored with its trust_host, as `llmcf deploy run` does; without it (the probe)
+    read_host_key and first_use's own writer."""
 
-    def __init__(self, parent: Any, framework: Any, lang: Optional[str] = None):
+    def __init__(self, parent: Any, framework: Any, lang: Optional[str] = None,
+                 manager: Optional[Callable[[], Any]] = None):
         super().__init__(parent)
         from orchestrator.gui.worker_relay import worker_relay
-        self.window, self.framework, self.lang = parent, framework, lang
+        self.window, self.framework, self.lang, self.manager = parent, framework, lang, manager
         self._token: Optional[object] = None
         self._pending: Optional[tuple] = None
         self.thread: Optional[threading.Thread] = None
@@ -124,11 +134,16 @@ class HostKeyCheck(QObject):
     def start(self, host: str, port: int, then: Callable[[bool], None], *, step: str = "") -> None:
         from orchestrator.gui.worker_relay import worker_relay
         token, relay, folder = object(), worker_relay(), state_dir(self.framework)
-        self._token, self._pending, self.key = token, (host, int(port), then, step), None
+        manager = self._manager()
+        self._token, self._pending, self.key = token, (host, int(port), then, step, manager), None
 
         def run() -> None:
             try:
-                result: Any = ("ok", read_host_key(folder, host, int(port)))
+                if manager is not None:
+                    status, key = manager.host_key_status(host, int(port))
+                    result: Any = ("ok", (key, status))
+                else:
+                    result = ("ok", read_host_key(folder, host, int(port)))
             except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, a broken known_hosts file
                 result = ("error", e)
             relay.done.emit(token, result)
@@ -136,10 +151,19 @@ class HostKeyCheck(QObject):
         self.thread = threading.Thread(target=run, name="host-key", daemon=True)
         self.thread.start()
 
+    def _manager(self) -> Any:
+        """The deploy's manager when the window gives one that reads and trusts keys, else None."""
+        try:
+            manager = self.manager() if callable(self.manager) else None
+        except Exception:  # noqa: BLE001 - a framework without the component: the plain path
+            return None
+        ok = callable(getattr(manager, "host_key_status", None)) and callable(getattr(manager, "trust_host", None))
+        return manager if ok else None
+
     def _done(self, token: object, result: Any) -> None:
         if token is not self._token or self._pending is None:
             return
-        host, port, then, step = self._pending
+        host, port, then, step, manager = self._pending
         self._token, self._pending = None, None
         kind, value = result
         if kind == "error":
@@ -147,7 +171,8 @@ class HostKeyCheck(QObject):
             then(False)
             return
         key, status = value
-        trusted = ask_trust(self.window, self.framework, host, port, key, status, step=step, lang=self.lang)
+        trusted = ask_trust(self.window, self.framework, host, port, key, status, step=step, lang=self.lang,
+                            manager=manager)
         self.key = key if trusted else None
         then(trusted)
 

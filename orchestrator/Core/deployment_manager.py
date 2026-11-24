@@ -634,29 +634,31 @@ class DeploymentManager:
         return TrustStore(self._state_dir())
 
     def host_key_status(self, target_ip: str, port: int = 22):
-        """('known'|'unknown'|'changed', key) for the device - shown to the user before trusting it."""
+        """('known'|'unknown'|'changed', key) of the board at target_ip:port: the deploy's one read of a host key
+        before its trust step (`llmcf deploy run`, the Deployment tab), shown to the person before trusting it. One
+        connection to the SSH port, no login: remote/trust.py TrustStore.check, the reader under
+        person_steps.read_host_key too (this module stays importable where an AI can reach it, so it names no person
+        step). Raises what the connection raised (the caller names its reason code)."""
         from orchestrator.remote.address import Endpoint
         check = self.trust_store().check(Endpoint(target_ip, port))
         return check.status, check.key
 
-    def trust_host(self, target_ip: str, key, port: int = 22, *, person: Any = None) -> None:
-        """Deprecated (DESIGN round 22, P5): a thin delegate to orchestrator/remote/pairing.py trust_presented_key,
-        the one writer of a confirmed host key, which stores it in this deploy's known_hosts under its lock and writes
-        the trust's audit row in the same step. Only the person's: `person` is the pairing.PersonChannel of the
-        calling channel (the CLI or the GUI, with its audit log). No module an AI can reach imports pairing
-        (tests/test_remote_trust.py), so nothing an AI runs holds one, and no code of the framework calls this method.
-        Without it nothing is trusted (PermissionError): the old primitive without an audit row is gone."""
-        import warnings
+    def trust_host(self, target_ip: str, key, port: int = 22, *, person: Any = None, pinned: bool = False) -> None:
+        """The deploy's trust step stores a key the person confirmed (`llmcf deploy run` and the Deployment tab hand
+        it to pairing.first_use as its writer): it goes to orchestrator/remote/pairing.py trust_presented_key, the
+        one writer of a confirmed host key, which stores it in this deploy's known_hosts under its lock and writes
+        the trust's audit row in the same step (`pinned`: a completed pairing pinned it). Only the person's: `person`
+        is the pairing.PersonChannel of the calling channel (the CLI or the GUI, with its audit log). No module an AI
+        can reach imports pairing (tests/test_remote_trust.py) or names this method (tests/test_deploy_flow.py), so
+        nothing an AI runs holds one. Without it nothing is trusted (PermissionError)."""
         from orchestrator.remote.address import Endpoint, valid_port
-        warnings.warn("DeploymentManager.trust_host is deprecated: the person's channels trust a host key with "
-                      "orchestrator.remote.pairing.trust_presented_key", DeprecationWarning, stacklevel=2)
         trust = getattr(person, "trust_presented_key", None)
         if not callable(trust):
             raise PermissionError("Only the person trusts a board's host key, in the GUI or the CLI: pass the "
                                   "channel's orchestrator.remote.pairing.PersonChannel; nothing was trusted.")
         if not valid_host(target_ip) or not valid_port(port):
             raise ValueError("the board's address must be a host name or an IP address with a port from 1 to 65535")
-        trust(self.trust_store(), Endpoint(target_ip, port), key)
+        trust(self.trust_store(), Endpoint(target_ip, port), key, pinned=pinned)
 
     def deploy_package(self, package: Path, host: str, user: str, *, port: int = 22, **options: Any) -> DeployResult:
         """Uploads the package and runs its deploy.sh on the device (_deploy_package says how), and records for Mojo

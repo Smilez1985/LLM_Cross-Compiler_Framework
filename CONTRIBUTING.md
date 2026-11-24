@@ -921,8 +921,10 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   consent's audit row are the person's: they go through `remote.pairing` (`trust_presented_key` and `first_use` with
   the trust's audit row, `pair`, `plan_replacement`/`replace_key`, `record_consent`), which no module an AI can reach
   imports (`tests/test_remote_trust.py` follows the imports from the tool modules, the MCP server, the LLM layer,
-  Ditto, the device service and the benchmark). The deprecated `DeploymentManager.trust_host` is only a thin delegate
-  to `trust_presented_key` that needs the channel's `pairing.PersonChannel`; new code calls `remote.pairing`. A new
+  Ditto, the device service and the benchmark). `DeploymentManager.trust_host` is the deploy's trust step (`llmcf deploy
+  run`, the Deployment tab): a thin delegate to `trust_presented_key` that needs the channel's `pairing.PersonChannel`,
+  handed to `pairing.first_use` as its `writer`; only the CLI and the GUI's host-key step call it, other trust code
+  calls `remote.pairing`. A new
   host key moves the board's data to its new device ID (`runtime/device/board_move.py` `BoardDataMove`, person-only:
   `stage()` copies and checks every part, then the change, then `finish()` removes the old copies, `undo()` when the
   change fails); a new kind of per-board data gets its item there. Work on a board through

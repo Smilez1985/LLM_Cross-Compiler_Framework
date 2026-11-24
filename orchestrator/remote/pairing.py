@@ -11,7 +11,7 @@ tests/test_board_steps.py check the calls and the module name in that code.
   framework's known_hosts (atomically, readable only by this user) and writes its audit row in the same step, so a key
   trusted before a login that then fails is audited too. PersonChannel(via, audit, actor) carries it for the
   deprecated DeploymentManager.trust_host, a thin delegate that trusts only with the person's channel (P5).
-- first_use(store, check, *, ask, preset_fingerprint=None, via, audit, actor=""): the one decision of trust on first
+- first_use(store, check, *, ask, preset_fingerprint=None, via, audit, actor="", writer=None): the one decision of trust on first
   use behind `llmcf deploy run`, `llmcf scan --device` and the GUI's host-key question. A known key goes on, a changed
   key is refused, an unknown key is trusted only when it matches --trust-fingerprint or the person said yes (each
   channel asks in its own way, always with "No" as the default). Returns FirstUse(verdict, check).
@@ -100,10 +100,10 @@ PERSON_CHANNELS = ("cli", "gui")
 
 @dataclass(frozen=True)
 class PersonChannel:
-    """The person's channel as the deprecated DeploymentManager.trust_host takes it (DESIGN round 22, P5): `via`
-    (cli or gui), the audit log or a function that opens it, and the actor of its rows. Only the person's channels
-    make one: no module an AI can reach imports this module (tests/test_remote_trust.py). trust_presented_key() is the
-    one implementation above, with its audit row."""
+    """The person's channel as DeploymentManager.trust_host takes it (the deploy's trust step, `llmcf deploy run` and
+    the Deployment tab): `via` (cli or gui), the audit log or a function that opens it, and the actor of its rows. Only
+    the person's channels make one: no module an AI can reach imports this module (tests/test_remote_trust.py).
+    trust_presented_key() is the one implementation above, with its audit row."""
     via: str
     audit: Any = None
     actor: str = ""
@@ -112,8 +112,8 @@ class PersonChannel:
         if self.via not in PERSON_CHANNELS:
             raise ValueError(f"a person's channel is one of {', '.join(PERSON_CHANNELS)}")
 
-    def trust_presented_key(self, store: TrustStore, endpoint: Endpoint, key: Any) -> None:
-        trust_presented_key(store, endpoint, key, via=self.via, audit=self.audit, actor=self.actor)
+    def trust_presented_key(self, store: TrustStore, endpoint: Endpoint, key: Any, *, pinned: bool = False) -> None:
+        trust_presented_key(store, endpoint, key, via=self.via, audit=self.audit, actor=self.actor, pinned=pinned)
 
 
 @dataclass(frozen=True)
@@ -130,14 +130,21 @@ class FirstUse:
         return self.verdict in ("known", "trusted", "paired")
 
 
+# Who stores a key first_use trusted: (store, endpoint, key, pinned); the deploy's is DeploymentManager.trust_host with
+# the channel's PersonChannel, which ends in trust_presented_key with the same audit row.
+TrustWriter = Callable[[TrustStore, Endpoint, Any, bool], None]
+
+
 def first_use(store: TrustStore, check: KeyCheck, *, ask: Optional[Callable[[KeyCheck], bool]],
-              preset_fingerprint: Optional[str] = None, via: str, audit: Any = None, actor: str = "") -> FirstUse:
+              preset_fingerprint: Optional[str] = None, via: str, audit: Any = None, actor: str = "",
+              writer: Optional[TrustWriter] = None) -> FirstUse:
     """The one decision of trust on first use (CLI and GUI): known goes on, changed is refused; an unknown key is
     trusted (trust_presented_key, audited) when a completed pairing pinned it (TrustStore.pinned: the person carried
     the board's fingerprints home in the probe's result file, or the PAKE session exchanged them; no question then,
     verdict "paired"), when it has `preset_fingerprint` or, without either, when `ask(check)` returns True. A
     `preset_fingerprint` that differs is refused even for a pinned key. `ask` None: nobody can be asked (no terminal),
-    so an unknown key that is not pinned is declined."""
+    so an unknown key that is not pinned is declined. `writer`: who stores the trusted key (the deploy's manager);
+    without one trust_presented_key with `via`, `audit` and `actor`."""
     if check.status == "known":
         return FirstUse("known", check)
     if check.status != "unknown":
@@ -147,7 +154,10 @@ def first_use(store: TrustStore, check: KeyCheck, *, ask: Optional[Callable[[Key
     pinned = store is not None and store.pinned(check.fingerprint, check.key_type) is not None
     if not pinned and not preset_fingerprint and (ask is None or not ask(check)):
         return FirstUse("declined", check)
-    trust_presented_key(store, check.endpoint, check.key, via=via, audit=audit, actor=actor, pinned=pinned)
+    if writer is not None:
+        writer(store, check.endpoint, check.key, pinned)
+    else:
+        trust_presented_key(store, check.endpoint, check.key, via=via, audit=audit, actor=actor, pinned=pinned)
     return FirstUse("paired" if pinned else "trusted", check)
 
 

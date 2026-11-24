@@ -571,7 +571,14 @@ class DeploymentWindow(QWidget):
         self.btn_existing.clicked.connect(self._on_existing)
         btn_layout.addWidget(self.btn_existing)
         self.package_worker = None
-        self.host_keys = HostKeyCheck(self, self.framework)
+        # the deploy reads and trusts the board's key through its manager, as `llmcf deploy run` does
+        self.host_keys = HostKeyCheck(self, self.framework, manager=self._deployment_manager)
+
+    def _deployment_manager(self):
+        """The framework's DeploymentManager (None when it is not loaded): the deploy's trust step reads and stores the
+        board's key through it (HostKeyCheck)."""
+        getter = getattr(self.framework, "get_component", None)
+        return getter("deployment_manager") if callable(getter) else None
 
     def _init_source_button(self, layout_art):
         """Other build or model file...: `llmcf deploy package ARTIFACT` takes any path, not only a build the list

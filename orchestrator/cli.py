@@ -8692,7 +8692,7 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
         _unreachable(ctx, host, port, e, step="deploy")
     store = _deploy_trust_store(ctx, dep_mgr) if status == "unknown" else None   # a store only to trust a key
     outcome = _first_use(ctx, store, KeyCheck.of(Endpoint(host, port), key, status), trust_fingerprint,
-                         nothing="deployed")
+                         nothing="deployed", writer=_deploy_trust_writer(ctx, dep_mgr, store))
     if outcome.verdict == "changed":
         _note_reach(ctx, host, port, "deploy", reasons.HOST_KEY_CHANGED)
         _print_reason(ctx, reasons.HOST_KEY_CHANGED, host, port)
@@ -8744,10 +8744,24 @@ def _deploy_trust_store(ctx: FrameworkContext, dep_mgr):
     return make() if callable(make) else TrustStore(_state_dir(ctx))
 
 
-def _first_use(ctx: Optional[FrameworkContext], store, check, trust_fingerprint: Optional[str], *, nothing: str):
+def _deploy_trust_writer(ctx: FrameworkContext, dep_mgr, store):
+    """The deploy's writer of a key the person trusted: the deployment manager's trust_host with the CLI's
+    PersonChannel (its audit log), so the deploy reads and trusts a key through its manager (host_key_status,
+    trust_host); None for a manager without it (the key is then stored by pairing.trust_presented_key directly)."""
+    if not callable(getattr(dep_mgr, "trust_host", None)) or store is None:
+        return None
+    from orchestrator.remote import pairing
+    person = pairing.PersonChannel("cli", audit=lambda: _device_audit(ctx, store.state_dir), actor="cli")
+    return lambda _store, endpoint, key, pinned: dep_mgr.trust_host(endpoint.host, key, endpoint.port, person=person,
+                                                                    pinned=pinned)
+
+
+def _first_use(ctx: Optional[FrameworkContext], store, check, trust_fingerprint: Optional[str], *, nothing: str,
+               writer=None):
     """The CLI's prompt for trust on first use (remote/pairing.py first_use decides): an unknown key is shown with its
     fingerprint and trusted when it has --trust-fingerprint or the person says yes at a terminal ("No" is the default);
-    the trust is written to the audit log. Exits when it is refused; returns the decision (known, trusted, changed)."""
+    the trust is written to the audit log (`writer`: who stores it, the deploy's manager). Exits when it is refused;
+    returns the decision (known, trusted, changed)."""
     from orchestrator.remote import pairing
     if check.status == "unknown":
         console.print(f"New device {escape(check.endpoint.host)}:{check.endpoint.port} - {escape(check.key_type)} "
@@ -8759,7 +8773,7 @@ def _first_use(ctx: Optional[FrameworkContext], store, check, trust_fingerprint:
 
     audit = (lambda: _device_audit(ctx, store.state_dir)) if ctx is not None else None
     outcome = pairing.first_use(store, check, ask=ask, preset_fingerprint=trust_fingerprint, via="cli", audit=audit,
-                                actor="cli")
+                                actor="cli", writer=writer)
     if outcome.verdict == "mismatch":
         console.print("[red]The fingerprint does not match --trust-fingerprint.[/red]")
         sys.exit(1)
