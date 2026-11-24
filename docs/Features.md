@@ -1409,7 +1409,11 @@ The rules are the same in every form (`orchestrator/tools/gui_surface.py`):
   does not fit the board's memory is not offered to it, the log shows the estimate of the chosen type, and when none
   fits you get the smallest one with a warning instead of a guess (the model is too large for the board), with smaller
   models of the same family that do fit (found on Hugging Face, each checked with the same estimate; none in offline
-  mode); Ditto never switches the model by itself. A
+  mode), one button each under the Ask Ditto button: Ditto never switches the model by itself, your click fills the
+  model and its type (marked; Undo brings your own model back). Ditto also gets this computer's check before the build
+  for each format (disk, memory of the conversion, and the graphics memory when the build uses the GPU), and the log
+  shows it for the chosen build; when a part does not fit, a warning says what works instead (without the importance
+  matrix, another format, or another computer), and you still decide when you start the build. A
   field you are editing (it has the keyboard focus) is never written. A fill that would change a field you chose
   through the form's own logic (another target resets the board) is undone completely and refused. What can never be
   filled is refused before you are asked; everything is checked again when filling.

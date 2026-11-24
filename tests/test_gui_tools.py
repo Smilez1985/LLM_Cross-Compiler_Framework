@@ -420,6 +420,50 @@ def test_the_undo_keeps_what_the_person_changed_since():
     assert not form.marked()
 
 
+def _two_fields(state):
+    return [GuiField(k, k, k, "text", (lambda k=k: state[k]), (lambda v, k=k: state.__setitem__(k, v)))
+            for k in ("model", "quant")]
+
+
+def test_the_persons_click_on_a_proposal_fills_their_field_and_undo_gives_it_back():
+    """Ditto as the pilot: the person clicks a smaller model Ditto proposed. Their click is their consent for the model
+    they had chosen; the fill is marked and undoable, and Undo gives back their model as their choice."""
+    state = {"model": "org/Big-9B", "quant": "Q4_0"}
+    form = GuiForm("f", "F", "F", _two_fields(state))
+    form.person_edited("model")
+    refused = form.fill({"model": "org/Big-4B"})
+    assert state["model"] == "org/Big-9B" and refused.refused, "without the person's consent their choice stays"
+    out = form.fill({"model": "org/Big-4B", "quant": "Q4_K_M"}, consent=("model", "quant"))
+    assert out.filled == ["model", "quant"] and out.record.released == ("model",)
+    assert state == {"model": "org/Big-4B", "quant": "Q4_K_M"}
+    assert {f.id for f in form.marked()} == {"model", "quant"} and not form.field("model").person_set
+    assert sorted(form.undo_all()) == ["model", "quant"] and state == {"model": "org/Big-9B", "quant": "Q4_0"}
+    assert form.field("model").person_set, "the person's own model is their choice again"
+    assert not form.field("quant").person_set and not form.marked()
+
+
+def test_a_consented_field_the_fill_does_not_change_stays_the_persons():
+    state = {"model": "org/Big-4B", "quant": "Q4_0"}
+    form = GuiForm("f", "F", "F", _two_fields(state))
+    form.person_edited("model")
+    out = form.fill({"model": "org/Big-4B", "quant": "Q4_K_M"}, consent=("model",))
+    assert out.unchanged == ["model"] and out.record.released == ()
+    assert form.field("model").person_set
+    form.undo_all()
+    assert form.field("model").person_set and state == {"model": "org/Big-4B", "quant": "Q4_0"}
+
+
+def test_an_edit_after_the_proposal_was_taken_is_kept_by_the_undo():
+    state = {"model": "org/Big-9B", "quant": "Q4_0"}
+    form = GuiForm("f", "F", "F", _two_fields(state))
+    form.person_edited("model")
+    form.fill({"model": "org/Big-4B"}, consent=("model",))
+    state["model"] = "org/Other-2B"
+    form.person_edited("model")
+    form.undo_all()
+    assert state["model"] == "org/Other-2B" and form.field("model").person_set
+
+
 # --- who filled: Ditto or an AI app ------------------------------------------------------------------------------
 
 def test_an_ai_apps_fill_names_the_app_and_never_looks_like_dittos(fm, builder):

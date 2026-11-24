@@ -1572,6 +1572,35 @@ class BuildService:
                 break
         return alternatives
 
+    def host_for(self, model: str, target: str, board: Optional[str], *, use_gpu: bool = False,
+                 use_imatrix: bool = False, revision: Optional[str] = None,
+                 look_up_hub: bool = True) -> Callable[..., Any]:
+        """This computer's check before a build (resource_check: disk, memory of the conversion, with the graphics
+        memory when the build uses the GPU) per format and quantization, for Ditto as the pilot: the model's facts are
+        read from the Hub once (none in offline mode, for a local model, or when the Hub cannot be asked: then the
+        local copy decides, as resource_check does), then each call only checks. `use_gpu` and `use_imatrix` are the
+        form's; a call may ask without the importance matrix (`imatrix=False`). A call returns None when the request
+        is refused or the check cannot be made; it never raises."""
+        from orchestrator.utils.locality import offline_mode
+        facts = None
+        if look_up_hub and HF_REPO_ID.match(str(model or "")) and not offline_mode(
+                getattr(self.framework, "config", None)):
+            try:
+                facts = self.hub_facts(model, revision)
+            except Exception:  # noqa: BLE001 - the Hub not reachable: the local copy decides
+                facts = None
+
+        def check(fmt: str, quantization: Optional[str], imatrix: Optional[bool] = None) -> Any:
+            try:
+                request = self.validate(self.request_in(
+                    model=model, target=target, format=fmt, board=board, quantization=quantization or None,
+                    revision=revision, use_gpu=bool(use_gpu),
+                    use_imatrix=bool(use_imatrix if imatrix is None else imatrix)), local_paths=True)
+                return self.resource_check(request, look_up_hub=facts is not None, facts=facts)
+            except Exception:  # noqa: BLE001 - a check that cannot be made decides nothing
+                return None
+        return check
+
     def resource_check(self, request: BuildRequestIn, *, look_up_hub: bool = True, facts: Any = None):
         """The check of this computer's disk and memory before a validated build (Core/build_resources.py): the disk
         rule's needs of this build (a GGUF input and a kept F16 intermediate change them) against the free space and

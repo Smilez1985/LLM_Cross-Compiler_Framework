@@ -152,6 +152,11 @@ TEXTS = {
         "gui.board.confirm": "The probe could not tell your board for sure (candidates: {candidates}). The form says "
                              "{board}. Build for {board}?",
         "gui.board.confirm.no": "The build was not started. Pick your board, then start the build.",
+        "gui.pilot.alternatives": "{model} does not fit {board} at any quantization. Smaller models of the same "
+                                  "family that fit (Ditto does not switch by itself; Undo brings your model back):",
+        "gui.pilot.use": "Use {model} ({quantization}, about {need} of {ram})",
+        "gui.pilot.taken": "Taken: {model} with {quantization}. Undo brings your model back.",
+        "gui.pilot.stale": "The model in the form changed since Ditto's answer. Ask Ditto again.",
 
         # documentation links for Deep Ingest
         "gui.wizard.ingest_title": "Add documentation",
@@ -311,6 +316,12 @@ TEXTS = {
         "gui.board.confirm": "Die Probe konnte dein Board nicht sicher bestimmen (Kandidaten: {candidates}). Im "
                              "Formular steht {board}. Für {board} bauen?",
         "gui.board.confirm.no": "Der Build wurde nicht gestartet. Wähle dein Board und starte dann den Build.",
+        "gui.pilot.alternatives": "{model} passt in keiner Quantisierung auf {board}. Kleinere Modelle derselben "
+                                  "Familie, die passen (Ditto wechselt nie von selbst; Rückgängig bringt dein Modell "
+                                  "zurück):",
+        "gui.pilot.use": "{model} übernehmen ({quantization}, etwa {need} von {ram})",
+        "gui.pilot.taken": "Übernommen: {model} mit {quantization}. Rückgängig bringt dein Modell zurück.",
+        "gui.pilot.stale": "Das Modell im Formular hat sich seit Dittos Antwort geändert. Frag Ditto noch einmal.",
 
         "gui.wizard.ingest_title": "Dokumentation hinzufügen",
         "gui.wizard.ingest_offer": "Ditto fehlen Informationen über diese Hardware. Deep Ingest mit {n} "

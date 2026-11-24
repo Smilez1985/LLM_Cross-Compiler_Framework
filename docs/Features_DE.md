@@ -1547,7 +1547,12 @@ Die Regeln sind in jedem Formular gleich (`orchestrator/tools/gui_surface.py`):
   passt, wird ihm nicht angeboten, das Log zeigt die Schätzung des gewählten Typs, und passt keiner, bekommst du den
   kleinsten mit einer Warnung statt einer Vermutung (das Modell ist zu groß für das Board), mit kleineren Modellen
   derselben Familie, die passen (auf Hugging Face gefunden, jedes mit derselben Schätzung geprüft; keine im
-  Offline-Modus); Ditto wechselt das Modell nie selbst. Ein Feld, das du gerade bearbeitest (es hat
+  Offline-Modus), je ein Button unter dem Ask-Ditto-Button: Ditto wechselt das Modell nie selbst, dein Klick trägt
+  Modell und Typ ein (markiert; Rückgängig bringt dein eigenes Modell zurück). Ditto bekommt außerdem die Prüfung
+  dieses Computers vor dem Build für jedes Format (Platte, Speicher der Konvertierung und der Grafikspeicher, wenn der
+  Build die GPU nutzt), und das Log zeigt sie für den gewählten Build; passt ein Teil nicht, sagt eine Warnung, was
+  stattdessen geht (ohne Importance-Matrix, ein anderes Format oder ein anderer Computer), und du entscheidest weiter
+  beim Start des Builds. Ein Feld, das du gerade bearbeitest (es hat
   den Tastaturfokus), wird nie beschrieben. Würde ein Ausfüllen über die Logik des Formulars ein Feld ändern, das du
   gewählt hast (ein anderes Target setzt das Board zurück), wird es ganz zurückgenommen und abgelehnt. Was nie
   ausgefüllt werden kann, wird abgelehnt, bevor du gefragt wirst; beim Ausfüllen wird alles noch einmal geprüft.

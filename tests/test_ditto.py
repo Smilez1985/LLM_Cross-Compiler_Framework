@@ -1270,6 +1270,90 @@ class TestThePilotsAlternatives:
             assert rec.alternatives == [] and "Choose a smaller model" in rec.warning
 
 
+class TestThisComputersLimits:
+    """Ditto as the pilot: this computer's check before the build (disk, memory of the conversion, graphics memory
+    when it uses the GPU; Core/build_resources.py) goes to Ditto as a fact per format and comes back with the answer;
+    a part that does not fit gives a warning with what would work instead, from the framework's checks only."""
+
+    @staticmethod
+    def check(state, needed=40, usable=27):
+        from orchestrator.Core.build_resources import ResourceCheck
+        from orchestrator.Core.disk_plan import Fit
+        gib = 1024 ** 3
+        disk = SimpleNamespace(verdict="enough", labels=["build"], sentence=lambda: "needs about 20 GB: enough")
+        return ResourceCheck(disk=[disk],
+                             host=Fit(state, needed * gib, usable * gib, "export; 32 GB RAM from the hardware probe"))
+
+    def host(self, states, imatrix_free=None):
+        """A host function as BuildService.host_for gives it: (format, quantization, imatrix=None) -> ResourceCheck."""
+        calls = []
+
+        def host(fmt, quant, imatrix=None):
+            calls.append((fmt, quant, imatrix))
+            if imatrix is False and imatrix_free is not None:
+                return self.check(imatrix_free, needed=8)
+            return self.check(states[fmt])
+        host.calls = calls
+        return host
+
+    def test_each_formats_check_is_a_fact_and_the_chosen_ones_comes_back(self, tmp_path, llm):
+        llm.script.append(answer(json.dumps({"format": "gguf", "quantization": "Q4_K_M", "optimization": "SPEED",
+                                             "explanation": "GGUF converts on the CPU."})))
+        host = self.host({"gguf": "fits", "rkllm": "does_not_fit"})
+        rec = make_ditto(tmp_path).recommend_build_settings("m", "Rockchip", {"gguf": ["Q4_K_M"], "rkllm": ["w4a16"]},
+                                                            board="rk3588", host=host)
+        prompt = llm.requests[0].messages[0].text()
+        assert "check of this computer" in prompt and "rkllm (does_not_fit)" in prompt and "gguf (fits)" in prompt
+        assert rec.host_state == "fits" and "Memory of this computer" in rec.host and rec.host_warning is None
+        schema = llm.requests[0].output_model.model_json_schema()
+        assert schema["properties"]["format"]["enum"] == ["gguf", "rkllm"], "the person decides: nothing is removed"
+        assert not {"host", "host_state", "host_warning"} & set(schema["properties"])
+
+    def test_a_build_this_computer_cannot_manage_names_what_works_instead(self, tmp_path, llm):
+        llm.script.append(answer(json.dumps({"format": "rkllm", "quantization": "w4a16", "optimization": "SPEED",
+                                             "explanation": "The NPU is fastest."})))
+        rec = make_ditto(tmp_path).recommend_build_settings(
+            "m", "Rockchip", {"gguf": ["Q4_K_M"], "rkllm": ["w4a16"]}, board="rk3588",
+            host=self.host({"gguf": "fits", "rkllm": "does_not_fit"}))
+        assert rec.format == "rkllm" and rec.host_state == "does_not_fit"
+        assert "may not manage the build of rkllm w4a16: the memory does not fit" in rec.host_warning
+        assert "gguf can be built on this computer (fits)" in rec.host_warning and "You decide" in rec.host_warning
+
+    def test_without_the_importance_matrix_is_named_when_that_fits(self, tmp_path, llm):
+        llm.script.append(answer(json.dumps({"format": "gguf", "quantization": "Q4_K_M", "optimization": "SIZE",
+                                             "explanation": "x"})))
+        host = self.host({"gguf": "does_not_fit"}, imatrix_free="fits")
+        rec = make_ditto(tmp_path).recommend_build_settings("m", "Rockchip", {"gguf": ["Q4_K_M"]}, board="rk3588",
+                                                            host=host)
+        assert "without the importance matrix, gguf Q4_K_M fits this computer's memory" in rec.host_warning
+        assert ("gguf", "Q4_K_M", False) in host.calls
+
+    def test_nothing_that_works_instead_says_so_plainly(self, tmp_path, llm):
+        llm.script.append(answer(json.dumps({"format": "gguf", "quantization": "Q4_K_M", "optimization": "SIZE",
+                                             "explanation": "x"})))
+        rec = make_ditto(tmp_path).recommend_build_settings("m", "Rockchip", {"gguf": ["Q4_K_M"]}, board="rk3588",
+                                                            host=self.host({"gguf": "does_not_fit"}))
+        assert "Build it on a computer with more memory or disk, or choose a smaller model" in rec.host_warning
+
+    def test_the_check_also_comes_with_the_warning_that_the_board_is_too_small(self, tmp_path, llm):
+        from orchestrator.Core.memory_estimate import MemoryEstimate
+        memory = lambda q: MemoryEstimate(board="rk3588", quantization=q, state="does_not_fit", need_mib=6000,  # noqa: E731
+                                          ram_mib=4000)
+        rec = make_ditto(tmp_path).recommend_build_settings("m", "Rockchip", {"gguf": ["Q4_K_M"]}, board="rk3588",
+                                                            memory=memory, host=self.host({"gguf": "fits"}))
+        assert llm.requests == [] and rec.fits is False and rec.host_state == "fits"
+
+    def test_a_check_that_cannot_be_made_says_nothing(self, tmp_path, llm):
+        def broken(*_a, **_k):
+            raise RuntimeError("no hardware probe")
+        for host in (broken, lambda *_a, **_k: None):
+            llm.script.append(answer(json.dumps({"format": "gguf", "quantization": "Q4_K_M", "optimization": "SIZE",
+                                                 "explanation": "x"})))
+            rec = make_ditto(tmp_path).recommend_build_settings("m", "Rockchip", {"gguf": ["Q4_K_M"]}, host=host)
+            assert rec.host is None and rec.host_warning is None
+            assert "check of this computer" not in llm.requests[-1].messages[0].text()
+
+
 @pytest.mark.parametrize("repo, family", [
     ("Qwen/Qwen3.5-9B-Instruct", ("Qwen", "Qwen3.5-", 9.0, "-Instruct")),
     ("HuggingFaceTB/SmolLM2-135M-Instruct", ("HuggingFaceTB", "SmolLM2-", 0.135, "-Instruct")),

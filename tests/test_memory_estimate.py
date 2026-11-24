@@ -423,3 +423,27 @@ def test_ditto_as_the_pilot_finds_smaller_models_of_the_family_that_fit(env, mon
     from orchestrator.utils import locality
     monkeypatch.setattr(locality, "offline_mode", lambda config=None: True)
     assert env.service.family_alternatives("Qwen/Qwen3.5-9B-Instruct", "ARM64", "bcm2837", ["Q4_K_M"]) == []
+
+
+def test_ditto_as_the_pilot_gets_this_computers_check_per_format(env, monkeypatch):  # noqa: F811
+    """BuildService.host_for: the model's facts from the Hub once, then this computer's check (resource_check) of the
+    validated request per format and type, with the form's GPU and importance matrix unless a call says otherwise; a
+    request the service refuses gives None (DESIGN "Ditto as the pilot")."""
+    looked, checked = [], []
+    monkeypatch.setattr(env.service, "hub_facts", lambda repo, rev: looked.append(repo) or "facts")
+    monkeypatch.setattr(env.service, "resource_check",
+                        lambda request, look_up_hub=True, facts=None: checked.append((request, look_up_hub, facts))
+                        or "check")
+    host = env.service.host_for("example/llama-8b", "ARM64", "bcm2837", use_imatrix=True)
+    assert host("gguf", "Q4_K_M") == "check" and host("gguf", "Q8_0", imatrix=False) == "check"
+    assert looked == ["example/llama-8b"], "the Hub is asked once"
+    (first, look, facts), (second, *_rest) = checked
+    assert (first.format, first.quantization, first.use_imatrix, look, facts) == ("gguf", "Q4_K_M", True, True, "facts")
+    assert (second.quantization, second.use_imatrix) == ("Q8_0", False)
+    assert host("no-such-format", "Q4_K_M") is None, "a refused request decides nothing"
+    from orchestrator.utils import locality
+    monkeypatch.setattr(locality, "offline_mode", lambda config=None: True)
+    monkeypatch.setattr(env.service, "validate", lambda request, local_paths=False: request)
+    checked.clear()
+    assert env.service.host_for("example/llama-8b", "ARM64", "bcm2837")("gguf", "Q4_K_M") == "check"
+    assert looked == ["example/llama-8b"] and checked[0][1:] == (False, None), "offline: the local copy decides"

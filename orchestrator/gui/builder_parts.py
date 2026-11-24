@@ -160,6 +160,84 @@ def apply_ditto_settings(tab: Any, config: Dict[str, Any]) -> Any:
     return outcome
 
 
+def _gb(mib: Any) -> str:
+    try:
+        return f"{float(mib) / 1024:.1f} GB"
+    except (TypeError, ValueError):
+        return "?"
+
+
+class PilotAlternatives(QWidget):
+    """Under "Ask Ditto for Config" (Ditto as the pilot): when the model fits the board at none of the offered types,
+    the smaller models of its family that fit (BuildAdvice.alternatives), one button each. Ditto never switches by
+    itself: only the person's click fills the model and its type into the form, marked and undoable, and Undo gives
+    back the person's own model as their choice (GuiForm.fill with the person's consent)."""
+
+    def __init__(self, tab: Any, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.tab = tab
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.label = plain_label("", self)
+        layout.addWidget(self.label)
+        self.column = QVBoxLayout()
+        layout.addLayout(self.column)
+        self.buttons: List[QPushButton] = []
+        self.for_model = ""     # the model of the form Ditto's answer was about
+        self.setVisible(False)
+
+    def hide_alternatives(self) -> None:
+        for button in self.buttons:
+            self.column.removeWidget(button)
+            button.deleteLater()
+        self.buttons = []
+        self.for_model = ""
+        self.setVisible(False)
+
+    def show_alternatives(self, model: str, board: str, alternatives: Sequence[Dict[str, Any]]) -> int:
+        """One button per alternative (at most 3, as the service gives them); returns the number shown."""
+        self.hide_alternatives()
+        usable = [a for a in alternatives if isinstance(a, dict) and a.get("model") and a.get("quantization")][:3]
+        if not usable:
+            return 0
+        lang = current_language()
+        self.for_model = model
+        self.label.setText(ui_text("gui.pilot.alternatives", lang, model=one_line(model), board=one_line(board or "-")))
+        for alt in usable:
+            button = QPushButton(button_text(ui_text("gui.pilot.use", lang, model=alt["model"],
+                                                     quantization=alt["quantization"], need=_gb(alt.get("need_mib")),
+                                                     ram=_gb(alt.get("ram_mib")))), self)
+            button.setAutoDefault(False)
+            button.clicked.connect(lambda *_a, chosen=dict(alt): self.take(chosen))
+            self.column.addWidget(button)
+            self.buttons.append(button)
+        self.setVisible(True)
+        return len(usable)
+
+    def take(self, alt: Dict[str, Any]) -> Any:
+        """The person's click: the model and its type into the form (their consent for the model they had chosen)."""
+        tab, lang = self.tab, current_language()
+        form = getattr(tab, "gui_form", None)
+        if form is None:
+            return None
+        if tab.model_input.currentText().strip() != self.for_model:
+            tab._log(ui_text("gui.pilot.stale", lang))
+            self.hide_alternatives()
+            return None
+        values = {"model": str(alt["model"]), "quantization": str(alt["quantization"])}
+        outcome = form.fill(values, consent=tuple(values))
+        for field_id, why in outcome.refused:
+            field = form.field(field_id)
+            name = field.label(lang) if field is not None else field_id
+            tab._log(ui_text("gui.ditto.not_filled", lang, value=one_line(values.get(field_id, "")), field=name,
+                             why=one_line(why)))
+        if "model" in outcome.filled:
+            tab._log(ui_text("gui.pilot.taken", lang, model=one_line(values["model"]),
+                             quantization=one_line(values["quantization"])))
+            self.hide_alternatives()
+        return outcome
+
+
 def board_confirmed(tab: Any) -> bool:
     """Start Build after a probe that could not tell the board for sure (N9': never guess): until the person picks a
     board, they are asked whether the board in the form is theirs ("No" is the default); their yes makes it their

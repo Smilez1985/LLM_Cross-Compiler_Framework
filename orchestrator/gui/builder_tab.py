@@ -23,8 +23,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRect
 from PySide6.QtGui import QPixmap, QAction
 
-from orchestrator.gui.builder_parts import (BoardAdvice, BuildProgressPanel, after_probe, apply_ditto_settings,
-                                            bind_builder_form, board_confirmed, person_target, read_probe)
+from orchestrator.gui.builder_parts import (BoardAdvice, BuildProgressPanel, PilotAlternatives, after_probe,
+                                            apply_ditto_settings, bind_builder_form, board_confirmed, person_target,
+                                            read_probe)
 from orchestrator.gui.dialogs import confirm_host_key, fill_recent, select_recent
 from orchestrator.gui.explain import term_label
 from orchestrator.gui.plain import ask, button_text, plain_label, plain_tooltip
@@ -341,8 +342,10 @@ class CancelBuildWorker(QThread):
 class AIOptimizerWorker(QThread):
     finished = Signal(bool, dict, str)
     
-    def __init__(self, ditto_manager, model_info, target_info, use_rag, options=None, board=None, service=None):
+    def __init__(self, ditto_manager, model_info, target_info, use_rag, options=None, board=None, service=None,
+                 use_gpu=False, use_imatrix=False):
         super().__init__()
+        self.use_gpu, self.use_imatrix = bool(use_gpu), bool(use_imatrix)   # the form's, for this computer's check
         self.service = service   # the build service: the memory estimate per type on the board (Ditto as the pilot)
         self.ditto = ditto_manager
         self.model = model_info
@@ -363,9 +366,13 @@ class AIOptimizerWorker(QThread):
             family = getattr(self.service, "family_alternatives", None)
             alternatives = ((lambda quants: family(self.model, self.target, self.board, quants))
                             if callable(family) and self.board else None)
+            # this computer's disk, memory and (for a GPU build) graphics memory per format (Core/build_resources.py)
+            host_for = getattr(self.service, "host_for", None)
+            host = host_for(self.model, self.target, self.board, use_gpu=self.use_gpu,
+                            use_imatrix=self.use_imatrix) if callable(host_for) else None
             recommendation = self.ditto.recommend_build_settings(self.model, self.target, self.options,
                                                                  board=self.board, use_knowledge=self.use_rag,
-                                                                 memory=memory, alternatives=alternatives)
+                                                                 memory=memory, alternatives=alternatives, host=host)
             self.finished.emit(True, recommendation.model_dump(), recommendation.explanation)
         except DittoError as e:
             self.finished.emit(False, {}, str(e))
@@ -541,6 +548,9 @@ class BuilderTab(QWidget):
         ai_layout.addWidget(self.chk_ai)
         ai_layout.addWidget(self.chk_rag)
         ai_layout.addWidget(self.btn_optimize)
+        # Ditto as the pilot: smaller models of the family that fit, when the model fits the board at no type
+        self.pilot_alternatives = PilotAlternatives(self)
+        ai_layout.addWidget(self.pilot_alternatives)
         ai_group.setLayout(ai_layout)
         left_col.addWidget(ai_group)
         
@@ -1585,6 +1595,7 @@ class BuilderTab(QWidget):
         self._set_state("think")
         self._log("Asking Ditto for optimal settings...")
         self.btn_optimize.setEnabled(False)
+        self.pilot_alternatives.hide_alternatives()
         
         self.ai_worker = AIOptimizerWorker(
             ditto, 
@@ -1594,6 +1605,8 @@ class BuilderTab(QWidget):
             options=self._optimizer_options(),
             board=self._selected_board(),
             service=self._build_service(),
+            use_gpu=self.chk_gpu.isChecked(),
+            use_imatrix=self.chk_imatrix.isChecked(),
         )
         self.ai_worker.finished.connect(self._on_ai_finished)
         self.ai_worker.start()
@@ -1615,11 +1628,15 @@ class BuilderTab(QWidget):
             self._set_state("success")
             self._log(f"Ditto Recommendation:\n{msg}")
             # the framework's own facts beside Ditto's words: the memory on the board and, when nothing fits, a warning
-            for line in (config.get("memory"), config.get("warning")):
+            for key in ("memory", "warning", "host", "host_warning"):
+                line = config.get(key)
                 if line:
                     self._log(str(line))
             # Through the build form: marked and undoable, and the person's own values stay (N9'')
             apply_ditto_settings(self, config)
+            if config.get("fits") is False and config.get("alternatives"):
+                self.pilot_alternatives.show_alternatives(self.model_input.currentText().strip(),
+                                                          self._selected_board() or "", config["alternatives"])
         else:
             self._set_state("fail")
             self._log(f"AI Failed: {msg}")

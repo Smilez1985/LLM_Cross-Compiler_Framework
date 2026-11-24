@@ -180,6 +180,9 @@ class FillRecord:
     before: Dict[str, Any]
     after: Dict[str, Any]
     by: Filler = DITTO
+    # fields the person had chosen and let this fill change (their click on Ditto's proposal): an undo gives them back
+    # their value and their choice
+    released: Tuple[str, ...] = ()
 
 
 @dataclass
@@ -331,15 +334,22 @@ class GuiForm:
     # --- an AI's fill ---------------------------------------------------------------------------------------------
 
     def fill(self, values: Dict[str, Any], *, current_page_only: bool = False,
-             convert: Optional[Callable[[GuiField, Any], Any]] = None, by: Optional[Filler] = None) -> FillOutcome:
+             convert: Optional[Callable[[GuiField, Any], Any]] = None, by: Optional[Filler] = None,
+             consent: Sequence[str] = ()) -> FillOutcome:
         """Fills the given fields in the form's own order (GUI thread). Each field is checked against the rules of
         this module; a refused field never stops the others. A fill that changed a field the person chose or is
         editing (through the form's own logic, e.g. a target change that resets the board) is rolled back whole.
         `convert(field, value)` turns the AI's value into the widget's (a local file id into its path); it raises
         ValueError with the reason when it cannot. `by`: who fills (Ditto when not given); every filled field is
-        marked with it."""
+        marked with it. `consent`: fields the person chose and has just agreed to have filled with these values (their
+        own click on a proposal in the GUI, never an AI's call): only for this fill, their choice does not protect them;
+        a field this fill does not change stays the person's, and Undo gives back their value and their choice."""
         by = by or DITTO
         outcome = FillOutcome()
+        released = [f for f in (self.field(fid) for fid in dict.fromkeys(consent))
+                    if f is not None and f.id in values and f.person_set]
+        for f in released:
+            f.person_set = False
         allowed_ids = {f.id for f in self.page_fields()} if current_page_only else None
         known = {f.id for f in self.fields}
         for key in values:
@@ -400,9 +410,13 @@ class GuiForm:
                     (fid, f"it would change {names}, which the person chose or is editing; nothing was filled")
                     for fid in changed]
                 outcome.unchanged = []
+                changed = []
                 return outcome
         finally:
             self.filling = False
+            for f in released:   # a released field this fill did not change is the person's again
+                if f.id not in changed:
+                    f.person_set = True
         if not changed:
             return outcome
         after = self._values()
@@ -412,7 +426,8 @@ class GuiForm:
             f.ai_ever = True
             f.ai_by = by
         self._numbers += 1
-        record = FillRecord(self._numbers, tuple(changed), before, after, by)
+        record = FillRecord(self._numbers, tuple(changed), before, after, by,
+                            tuple(f.id for f in released if f.id in changed))
         self.undo_records.append(record)
         del self.undo_records[:-MAX_UNDO]
         outcome.filled, outcome.record = changed, record
@@ -494,6 +509,11 @@ class GuiForm:
                     f = self.field(fid)
                     if f is not None and not f.person_set:
                         f.forget_ai()
+                for fid in record.released:   # the person's own value is back: their choice again
+                    f = self.field(fid)
+                    if f is not None and fid in back and same(self._value_of(f), record.before.get(fid)):
+                        f.person_set = True
+                        kept[fid] = back[fid]
             # A value the person chose stays theirs: the form's own logic may have reset it with an earlier field
             self._restore(kept)
         finally:

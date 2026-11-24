@@ -371,6 +371,54 @@ def test_dittos_recommended_settings_keep_the_persons_choice_and_are_marked(buil
     assert builder.opt_combo.currentText() == before
 
 
+def _too_large(builder):
+    """Ditto's answer for a model that fits the board at no type, with one smaller model of its family that fits."""
+    builder.format_combo.setCurrentIndex(builder.format_combo.findData("gguf"))
+    builder.board_combo.setCurrentIndex(builder.board_combo.findData("rk3566"))
+    builder.model_input.setEditText("Qwen/Qwen3.5-9B")
+    builder.gui_form.person_edited("model")
+    quant = builder.gui_form.field("quantization").choices()[0]
+    builder._on_ai_finished(True, {"format": "gguf", "quantization": quant, "optimization": "SIZE", "fits": False,
+                                   "warning": "The model is too large for rk3566.",
+                                   "alternatives": [{"model": "Qwen/Qwen3.5-2B", "quantization": quant,
+                                                     "need_mib": 1800, "ram_mib": 4096}]}, "too large")
+    return quant
+
+
+def test_a_smaller_model_of_the_family_is_taken_with_one_click_and_undone(builder):
+    """Ditto as the pilot: the alternatives stood only in the log. One button each now; Ditto never switches by
+    itself, the person's click fills model and type (marked), and Undo gives back the person's own model."""
+    from orchestrator.gui.form_surface import is_marked
+    quant = _too_large(builder)
+    panel = builder.pilot_alternatives
+    assert not panel.isHidden() and len(panel.buttons) == 1
+    assert "Qwen/Qwen3.5-9B" in panel.label.text() and "Qwen/Qwen3.5-2B" in panel.buttons[0].text()
+    assert "1.8 GB" in panel.buttons[0].text() and "4.0 GB" in panel.buttons[0].text()
+    assert builder.model_input.currentText() == "Qwen/Qwen3.5-9B", "nothing switches before the click"
+    panel.buttons[0].click()
+    assert builder.model_input.currentText() == "Qwen/Qwen3.5-2B" and is_marked(builder.model_input)
+    assert builder.quant_combo.currentText() == quant and panel.isHidden()
+    assert "Qwen/Qwen3.5-2B" in builder.log_area.toPlainText()
+    builder.fill_banner.btn_undo.click()
+    assert builder.model_input.currentText() == "Qwen/Qwen3.5-9B" and builder.gui_form.field("model").person_set
+
+
+def test_an_alternative_is_not_taken_after_the_model_changed(builder):
+    _too_large(builder)
+    builder.model_input.setEditText("org/another-model")
+    builder.pilot_alternatives.buttons[0].click()
+    assert builder.model_input.currentText() == "org/another-model"
+    assert "changed since Ditto's answer" in builder.log_area.toPlainText()
+    assert builder.pilot_alternatives.isHidden()
+
+
+def test_no_alternatives_when_the_model_fits(builder):
+    builder.format_combo.setCurrentIndex(builder.format_combo.findData("gguf"))
+    builder._on_ai_finished(True, {"format": "gguf", "quantization": "Q4_0", "fits": True,
+                                   "alternatives": [{"model": "a/b-1B", "quantization": "Q4_0"}]}, "ok")
+    assert builder.pilot_alternatives.isHidden()
+
+
 def test_the_log_view_keeps_at_most_its_limit(qapp, monkeypatch):
     """Lines past the limit were dropped from the list but stayed in the view, so the 'removed' note was wrong and
     the view grew without end."""

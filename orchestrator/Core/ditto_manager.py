@@ -493,6 +493,11 @@ class BuildAdvice(OptimizerRecommendation):
     alternatives: List[Dict[str, Any]] = Field(
         default_factory=list, description="Smaller models of the same family that fit, when this one fits at no type "
                                           "(model, quantization, need_mib, ram_mib); Ditto never switches by itself")
+    host: Optional[str] = Field(default=None, description="This computer's check of the chosen build: disk, memory "
+                                                          "of the conversion, graphics memory when it uses the GPU")
+    host_state: Optional[str] = Field(default=None, description="fits, tight, does_not_fit or unknown")
+    host_warning: Optional[str] = Field(default=None, description="Set when this computer may not manage the build, "
+                                                                  "with what would work instead")
 
 
 # --- chat history -----------------------------------------------------------------------------------------------
@@ -1081,14 +1086,17 @@ class DittoCoder:
                                  board: Optional[str] = None, use_knowledge: bool = False,
                                  notes: Optional[Dict[str, str]] = None,
                                  memory: Optional[Callable[[str], Any]] = None,
-                                 alternatives: Optional[Callable[[List[str]], List[Dict[str, Any]]]] = None
-                                 ) -> BuildAdvice:
+                                 alternatives: Optional[Callable[[List[str]], List[Dict[str, Any]]]] = None,
+                                 host: Optional[Callable[..., Any]] = None) -> BuildAdvice:
         """Format, quantization and optimization level for `model` on `target`. `options` maps each format the
         target can build to its quantization types; the answer is checked against them. `notes` describes each
         format (label, accepted inputs); by default it comes from the target's capabilities. `memory` (Ditto as the
         pilot): the framework's memory estimate per quantization on the board (BuildService.memory_for); a
         quantization it says does not fit is taken out of the choice before Ditto is asked, the estimates go to Ditto
-        as facts, and when none fits the smallest one is returned with a warning (never a refusal)."""
+        as facts, and when none fits the smallest one is returned with a warning (never a refusal). `host`: this
+        computer's check before the build per format and quantization (BuildService.host_for): its verdict per format
+        goes to Ditto as a fact, and the chosen build's check comes back with the answer, with a warning and what would
+        work instead when a part does not fit (the person decides, as before every build)."""
         options = {str(fmt): [str(q) for q in qs] for fmt, qs in options.items() if qs}
         if not options:
             raise DittoError("This target offers no format with quantization types to choose from.")
@@ -1100,6 +1108,7 @@ class DittoCoder:
             except Exception:  # noqa: BLE001 - no alternatives found: the warning alone
                 others = []
             return BuildAdvice(format=fmt, quantization=quant, optimization="SIZE", alternatives=others,
+                               **self._host_advice(fmt, quant, host, {}),
                                explanation="None of the quantizations this target offers fits the board's memory; "
                                            "this is the smallest one.",
                                memory=est.text("en"), fits=False,
@@ -1113,6 +1122,7 @@ class DittoCoder:
             options = {fmt: [q for q in qs if estimates[(fmt, q)].state != "does_not_fit"]
                        for fmt, qs in options.items()}
             options = {fmt: qs for fmt, qs in options.items() if qs}
+        per_format = self._host_per_format(options, host)
         formats = list(options)
         quants = sorted({q for qs in options.values() for q in qs})
         # The JSON schema itself lists the choices, so constrained decoding can only produce offered values;
@@ -1133,6 +1143,11 @@ class DittoCoder:
                              f"{fmt} {q}: {est.state}, about {est.need_mib} MB of {est.ram_mib} MB"
                              for (fmt, q), est in estimates.items() if q in options.get(fmt, ())
                              and est.need_mib is not None))
+        if per_format:
+            parts.append("The framework's check of this computer before the build, per format (a fact; a build that "
+                         "does not fit is the person's decision, so prefer a format this computer can build and say "
+                         "why):\n" + "\n".join(f"{fmt} ({check.state}): " + "; ".join(check.lines())
+                                                for fmt, check in per_format.items()))
         parts.append("Recommend the build settings.")
         # The target offers formats (checked above), so a `cannot` is not confirmed by the framework.
         answer = self._task_answer("json", OPTIMIZER_SYSTEM, parts, schema)
@@ -1149,7 +1164,62 @@ class DittoCoder:
         chosen = estimates.get((answer.format, quant)) if estimates else None
         return BuildAdvice(format=answer.format, quantization=quant, optimization=answer.optimization,
                            explanation=answer.explanation, memory=chosen.text("en") if chosen else None,
-                           fits=None if chosen is None or chosen.state == "unknown" else chosen.state != "does_not_fit")
+                           fits=None if chosen is None or chosen.state == "unknown" else chosen.state != "does_not_fit",
+                           **self._host_advice(answer.format, quant, host, per_format))
+
+    @staticmethod
+    def _host_per_format(options: Dict[str, List[str]], host: Optional[Callable[..., Any]]) -> Dict[str, Any]:
+        """{format: this computer's check of its first offered type}; formats whose check cannot be made are left
+        out. The conversion's memory and the disk hardly depend on the type, the format decides."""
+        if host is None:
+            return {}
+        found = {}
+        for fmt, qs in options.items():
+            try:
+                check = host(fmt, qs[0])
+            except Exception:  # noqa: BLE001 - a check that fails decides nothing
+                check = None
+            if check is not None:
+                found[fmt] = check
+        return found
+
+    @staticmethod
+    def _host_advice(fmt: str, quant: str, host: Optional[Callable[..., Any]],
+                     per_format: Dict[str, Any]) -> Dict[str, Any]:
+        """BuildAdvice's host fields for the chosen build: the check's lines and state, and when a part does not fit a
+        warning with what would work instead, all from the framework's checks: the same build without the importance
+        matrix, another offered format this computer can build; else a computer with more memory or disk."""
+        if host is None:
+            return {}
+        try:
+            check = host(fmt, quant)
+        except Exception:  # noqa: BLE001 - no check: nothing said
+            check = None
+        if check is None:
+            return {}
+        out: Dict[str, Any] = {"host": "\n".join(check.lines()), "host_state": check.state}
+        if not check.risky:
+            return out
+        instead = []
+        if check.memory_state == "does_not_fit":
+            try:
+                plain = host(fmt, quant, imatrix=False)
+            except Exception:  # noqa: BLE001
+                plain = None
+            if plain is not None and plain.memory_state not in ("does_not_fit", "unknown") \
+                    and getattr(plain.host, "needed", None) != getattr(check.host, "needed", None):
+                instead.append(f"without the importance matrix, {fmt} {quant} fits this computer's memory "
+                               f"({plain.host.sentence('memory').split(': ', 1)[1]})")
+        instead += [f"{other} can be built on this computer ({c.state})" for other, c in per_format.items()
+                    if other != fmt and not c.risky and c.state != "unknown"]
+        what = [p for p, state in (("the disk", check.disk_state), ("the memory", check.memory_state))
+                if state == "does_not_fit"]
+        out["host_warning"] = (f"This computer may not manage the build of {fmt} {quant}: {' and '.join(what)} "
+                               f"{'does' if len(what) == 1 else 'do'} not fit. "
+                               + ("Instead: " + "; ".join(instead) + ". " if instead else
+                                  "Build it on a computer with more memory or disk, or choose a smaller model. ")
+                               + "You decide before the build starts.")
+        return out
 
     @staticmethod
     def _memory_choices(options: Dict[str, List[str]], memory: Optional[Callable[[str], Any]]):
