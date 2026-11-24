@@ -32,7 +32,7 @@ import unicodedata
 from types import SimpleNamespace
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Type, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple, Type, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, field_validator, model_validator
 
@@ -481,6 +481,15 @@ class OptimizerRecommendation(BaseModel):
     @classmethod
     def _explanation(cls, v: str) -> str:
         return _limit(v, 1500, "explanation")
+
+
+class BuildAdvice(OptimizerRecommendation):
+    """Ditto's recommendation with the framework's own facts (Ditto as the pilot): the memory on the board at the chosen
+    quantization and a warning when none of the offered ones fits. These fields are never part of the model's answer
+    schema (OptimizerRecommendation is): only the framework's estimate fills them."""
+    memory: Optional[str] = Field(default=None, description="The memory estimate's line for the chosen quantization")
+    warning: Optional[str] = Field(default=None, description="Set when no offered quantization fits the board")
+    fits: Optional[bool] = Field(default=None, description="Whether the chosen quantization fits; None when unknown")
 
 
 # --- chat history -----------------------------------------------------------------------------------------------
@@ -1067,13 +1076,31 @@ class DittoCoder:
 
     def recommend_build_settings(self, model: str, target: str, options: Dict[str, Sequence[str]],
                                  board: Optional[str] = None, use_knowledge: bool = False,
-                                 notes: Optional[Dict[str, str]] = None) -> OptimizerRecommendation:
+                                 notes: Optional[Dict[str, str]] = None,
+                                 memory: Optional[Callable[[str], Any]] = None) -> BuildAdvice:
         """Format, quantization and optimization level for `model` on `target`. `options` maps each format the
         target can build to its quantization types; the answer is checked against them. `notes` describes each
-        format (label, accepted inputs); by default it comes from the target's capabilities."""
+        format (label, accepted inputs); by default it comes from the target's capabilities. `memory` (Ditto as the
+        pilot): the framework's memory estimate per quantization on the board (BuildService.memory_for); a
+        quantization it says does not fit is taken out of the choice before Ditto is asked, the estimates go to Ditto
+        as facts, and when none fits the smallest one is returned with a warning (never a refusal)."""
         options = {str(fmt): [str(q) for q in qs] for fmt, qs in options.items() if qs}
         if not options:
             raise DittoError("This target offers no format with quantization types to choose from.")
+        estimates, smallest = self._memory_choices(options, memory)
+        if estimates and smallest is not None:   # none of the offered quantizations fits: no model call, the warning
+            fmt, quant, est = smallest
+            return BuildAdvice(format=fmt, quantization=quant, optimization="SIZE",
+                               explanation="None of the quantizations this target offers fits the board's memory; "
+                                           "this is the smallest one.",
+                               memory=est.text("en"), fits=False,
+                               warning=f"The model is too large for {board}: even {quant}, the smallest offered "
+                                       f"type, needs about {est.need_mib} MB of the {est.ram_mib} MB the board has. "
+                                       "Choose a smaller model; the measurement on the board says the real need.")
+        if estimates:
+            options = {fmt: [q for q in qs if estimates[(fmt, q)].state != "does_not_fit"]
+                       for fmt, qs in options.items()}
+            options = {fmt: qs for fmt, qs in options.items() if qs}
         formats = list(options)
         quants = sorted({q for qs in options.values() for q in qs})
         # The JSON schema itself lists the choices, so constrained decoding can only produce offered values;
@@ -1088,6 +1115,12 @@ class DittoCoder:
         known = (self._knowledge(f"{target} {board or ''} {model} quantization performance", rerank=True)
                  if use_knowledge else "")
         parts = optimizer_parts(model, target, board, format_listing(options, notes), known)
+        if estimates:
+            parts.append("The framework's memory estimate on the board for each offered type (a fact; types that do "
+                         "not fit were left out):\n" + "\n".join(
+                             f"{fmt} {q}: {est.state}, about {est.need_mib} MB of {est.ram_mib} MB"
+                             for (fmt, q), est in estimates.items() if q in options.get(fmt, ())
+                             and est.need_mib is not None))
         parts.append("Recommend the build settings.")
         # The target offers formats (checked above), so a `cannot` is not confirmed by the framework.
         answer = self._task_answer("json", OPTIMIZER_SYSTEM, parts, schema)
@@ -1100,8 +1133,30 @@ class DittoCoder:
             raise DittoError(f"Ditto recommended {answer.quantization} for {answer.format}, which this target does "
                              "not offer for that format. Nothing was changed; try again or choose the settings "
                              "yourself.")
-        return OptimizerRecommendation(format=answer.format, quantization=offered[answer.quantization.lower()],
-                                       optimization=answer.optimization, explanation=answer.explanation)
+        quant = offered[answer.quantization.lower()]
+        chosen = estimates.get((answer.format, quant)) if estimates else None
+        return BuildAdvice(format=answer.format, quantization=quant, optimization=answer.optimization,
+                           explanation=answer.explanation, memory=chosen.text("en") if chosen else None,
+                           fits=None if chosen is None or chosen.state == "unknown" else chosen.state != "does_not_fit")
+
+    @staticmethod
+    def _memory_choices(options: Dict[str, List[str]], memory: Optional[Callable[[str], Any]]):
+        """({(format, quantization): estimate}, the smallest (format, quantization, estimate) when none of them fits,
+        else None). Empty when there is no estimate (no board, no memory function, or an estimate that failed)."""
+        if memory is None:
+            return {}, None
+        estimates: Dict[Tuple[str, str], Any] = {}
+        for fmt, qs in options.items():
+            for q in qs:
+                try:
+                    estimates[(fmt, q)] = memory(q)
+                except Exception:  # noqa: BLE001 - an estimate that fails decides nothing
+                    continue
+        known = [(k, e) for k, e in estimates.items() if e.state != "unknown" and e.need_mib is not None]
+        if not known or len(known) < len(estimates) or any(e.state != "does_not_fit" for _, e in known):
+            return estimates, None
+        (fmt, q), est = min(known, key=lambda item: item[1].need_mib)
+        return estimates, (fmt, q, est)
 
     def save_module(self, definition: Union[ModuleDefinition, Dict[str, Any]], targets_dir: Path,
                     module_name: Optional[str] = None, profile=None, knowledge_roots=None,

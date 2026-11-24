@@ -1542,7 +1542,10 @@ Die Regeln sind in jedem Formular gleich (`orchestrator/tools/gui_surface.py`):
 - **Deine Werte gehören dir:** Einen Wert, den du getippt, gewählt oder angeklickt hast (auch eine Datei, die du in
   einem Dateidialog gewählt hast, und die Werte eines Rezepts), überschreibt eine KI nie. Eine KI darf im Chat einen
   anderen vorschlagen; **Ask Ditto for Config** im Builder füllt das Formular nach denselben Regeln, und das
-  Builder-Log nennt jeden Wert, den es nicht eingetragen hat, und warum. Ein Feld, das du gerade bearbeitest (es hat
+  Builder-Log nennt jeden Wert, den es nicht eingetragen hat, und warum. Mit gewähltem Board bekommt Ditto zuerst die
+  Speicherschätzung des Frameworks für jeden Typ, den das Board anbietet: Ein Typ, der nicht in den Speicher des Boards
+  passt, wird ihm nicht angeboten, das Log zeigt die Schätzung des gewählten Typs, und passt keiner, bekommst du den
+  kleinsten mit einer Warnung statt einer Vermutung (das Modell ist zu groß für das Board). Ein Feld, das du gerade bearbeitest (es hat
   den Tastaturfokus), wird nie beschrieben. Würde ein Ausfüllen über die Logik des Formulars ein Feld ändern, das du
   gewählt hast (ein anderes Target setzt das Board zurück), wird es ganz zurückgenommen und abgelehnt. Was nie
   ausgefüllt werden kann, wird abgelehnt, bevor du gefragt wirst; beim Ausfüllen wird alles noch einmal geprüft.

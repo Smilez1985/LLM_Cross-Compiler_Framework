@@ -1404,7 +1404,10 @@ The rules are the same in every form (`orchestrator/tools/gui_surface.py`):
   path>`, never by a path.
 - **Your values are yours:** a value you typed, picked or clicked (also a file you chose in a file dialog, and a
   recipe's values) is never overwritten by an AI. An AI may suggest another one in the chat; **Ask Ditto for Config**
-  in the Builder fills the form by the same rules, and the Builder log names each value it did not fill and why. A
+  in the Builder fills the form by the same rules, and the Builder log names each value it did not fill and why.
+  With a board chosen, Ditto first gets the framework's memory estimate for every type the board offers: a type that
+  does not fit the board's memory is not offered to it, the log shows the estimate of the chosen type, and when none
+  fits you get the smallest one with a warning instead of a guess (the model is too large for the board). A
   field you are editing (it has the keyboard focus) is never written. A fill that would change a field you chose
   through the form's own logic (another target resets the board) is undone completely and refused. What can never be
   filled is refused before you are asked; everything is checked again when filling.

@@ -210,7 +210,8 @@ class TestOptimizerAndHealing:
         good = {"format": "gguf", "quantization": "Q4_K_M", "optimization": "SPEED", "explanation": "Estimate."}
         llm.script += [answer({**good, "cannot": {**CANNOT, "reason": "missing_information"}}), answer(good)]
         rec = make_ditto(tmp_path).recommend_build_settings("m", "Rockchip", OPTIONS, notes={})
-        assert rec == OptimizerRecommendation(**good) and len(llm.requests) == 2
+        assert OptimizerRecommendation(**rec.model_dump(include=set(OptimizerRecommendation.model_fields))) == \
+            OptimizerRecommendation(**good) and len(llm.requests) == 2
 
     def test_a_second_optimizer_cannot_is_not_confirmed(self, tmp_path, llm):
         bad = {"format": "gguf", "quantization": "Q4_K_M", "optimization": "SPEED", "explanation": "x",

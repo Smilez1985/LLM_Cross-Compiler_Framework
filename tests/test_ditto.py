@@ -368,12 +368,65 @@ class TestStructuredAnswers:
                                              "explanation": "Fast on the CPU."})))
         rec = make_ditto(tmp_path).recommend_build_settings("Qwen/Qwen3.5-0.8B", "Rockchip", self.OPTIONS,
                                                             board="rk3588")
-        assert rec == OptimizerRecommendation(format="gguf", quantization="Q8_0", optimization="SPEED",
-                                              explanation="Fast on the CPU.")
+        assert OptimizerRecommendation(**rec.model_dump(include=set(OptimizerRecommendation.model_fields))) == \
+            OptimizerRecommendation(format="gguf", quantization="Q8_0", optimization="SPEED",
+                                    explanation="Fast on the CPU.")
+        assert rec.memory is None and rec.fits is None and rec.warning is None   # no estimate was given
         schema = llm.requests[0].output_model.model_json_schema()
         assert schema["properties"]["format"]["enum"] == ["gguf", "rkllm"]
         assert set(schema["properties"]["quantization"]["enum"]) == {"Q4_K_M", "Q8_0", "w4a16"}
         assert llm.requests[0].task == "json"
+
+    # --- Ditto as the pilot: the framework's memory estimate decides what fits (DESIGN "Ditto as the pilot") ------
+
+    @staticmethod
+    def memory(needs, ram=4000):
+        """A memory function as BuildService.memory_for gives it: quantization -> MemoryEstimate."""
+        from orchestrator.Core.memory_estimate import MemoryEstimate, memory_state
+
+        def estimate(quantization):
+            need = needs.get(quantization)
+            if need is None:
+                return MemoryEstimate(board="rk3588", quantization=quantization, reason="unknown size")
+            return MemoryEstimate(board="rk3588", quantization=quantization, state=memory_state(need, ram),
+                                  need_mib=need, ram_mib=ram, ram_source="the board's probe")
+        return estimate
+
+    def test_a_type_that_does_not_fit_is_taken_out_before_ditto_is_asked(self, tmp_path, llm):
+        llm.script.append(answer(json.dumps({"format": "gguf", "quantization": "Q4_K_M", "optimization": "SPEED",
+                                             "explanation": "Fits."})))
+        rec = make_ditto(tmp_path).recommend_build_settings(
+            "m", "Rockchip", self.OPTIONS, board="rk3588", memory=self.memory({"Q4_K_M": 2000, "Q8_0": 9000}))
+        schema = llm.requests[0].output_model.model_json_schema()
+        assert "Q8_0" not in schema["properties"]["quantization"]["enum"]
+        prompt = llm.requests[0].messages[0].text()
+        assert "gguf Q4_K_M: fits, about 2000 MB of 4000 MB" in prompt and "Q8_0: does_not_fit" not in prompt
+        assert rec.quantization == "Q4_K_M" and rec.fits is True and rec.memory and rec.warning is None
+
+    def test_when_nothing_fits_the_smallest_comes_back_with_a_warning_and_no_model_call(self, tmp_path, llm):
+        rec = make_ditto(tmp_path).recommend_build_settings(
+            "m", "Rockchip", {"gguf": ["Q4_K_M", "Q8_0"]}, board="rk3588",
+            memory=self.memory({"Q4_K_M": 6000, "Q8_0": 9000}))
+        assert llm.requests == []
+        assert (rec.format, rec.quantization, rec.fits) == ("gguf", "Q4_K_M", False)
+        assert "too large for rk3588" in rec.warning and "6000 MB" in rec.warning and "4000 MB" in rec.warning
+
+    def test_an_unknown_estimate_decides_nothing(self, tmp_path, llm):
+        llm.script.append(answer(json.dumps({"format": "rkllm", "quantization": "w4a16", "optimization": "SPEED",
+                                             "explanation": "NPU."})))
+        rec = make_ditto(tmp_path).recommend_build_settings(
+            "m", "Rockchip", self.OPTIONS, board="rk3588", memory=self.memory({"Q4_K_M": 9000, "Q8_0": 9000}))
+        schema = llm.requests[0].output_model.model_json_schema()
+        assert schema["properties"]["format"]["enum"] == ["rkllm"]       # the GGUF types do not fit, w4a16 is unknown
+        assert rec.quantization == "w4a16" and rec.fits is None and rec.warning is None
+
+    def test_the_framework_s_fields_are_never_in_the_model_s_answer(self, tmp_path, llm):
+        llm.script.append(answer(json.dumps({"format": "gguf", "quantization": "Q4_K_M", "optimization": "SPEED",
+                                             "explanation": "x"})))
+        make_ditto(tmp_path).recommend_build_settings("m", "Rockchip", self.OPTIONS, board="rk3588",
+                                                      memory=self.memory({"Q4_K_M": 1000, "Q8_0": 1500}))
+        properties = llm.requests[0].output_model.model_json_schema()["properties"]
+        assert not {"memory", "warning", "fits"} & set(properties)
 
     def test_optimizer_sees_what_each_format_accepts(self, tmp_path, llm):
         llm.script.append(answer(json.dumps({"format": "gguf", "quantization": "Q8_0", "optimization": "SPEED",

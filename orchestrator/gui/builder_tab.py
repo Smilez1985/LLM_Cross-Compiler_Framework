@@ -341,8 +341,9 @@ class CancelBuildWorker(QThread):
 class AIOptimizerWorker(QThread):
     finished = Signal(bool, dict, str)
     
-    def __init__(self, ditto_manager, model_info, target_info, use_rag, options=None, board=None):
+    def __init__(self, ditto_manager, model_info, target_info, use_rag, options=None, board=None, service=None):
         super().__init__()
+        self.service = service   # the build service: the memory estimate per type on the board (Ditto as the pilot)
         self.ditto = ditto_manager
         self.model = model_info
         self.target = target_info
@@ -357,8 +358,11 @@ class AIOptimizerWorker(QThread):
             return
         from orchestrator.Core.ditto_manager import DittoError
         try:
+            memory_for = getattr(self.service, "memory_for", None)
+            memory = memory_for(self.model, self.target, self.board) if callable(memory_for) and self.board else None
             recommendation = self.ditto.recommend_build_settings(self.model, self.target, self.options,
-                                                                 board=self.board, use_knowledge=self.use_rag)
+                                                                 board=self.board, use_knowledge=self.use_rag,
+                                                                 memory=memory)
             self.finished.emit(True, recommendation.model_dump(), recommendation.explanation)
         except DittoError as e:
             self.finished.emit(False, {}, str(e))
@@ -1586,6 +1590,7 @@ class BuilderTab(QWidget):
             self.chk_rag.isChecked(),
             options=self._optimizer_options(),
             board=self._selected_board(),
+            service=self._build_service(),
         )
         self.ai_worker.finished.connect(self._on_ai_finished)
         self.ai_worker.start()
@@ -1606,6 +1611,10 @@ class BuilderTab(QWidget):
         if success:
             self._set_state("success")
             self._log(f"Ditto Recommendation:\n{msg}")
+            # the framework's own facts beside Ditto's words: the memory on the board and, when nothing fits, a warning
+            for line in (config.get("memory"), config.get("warning")):
+                if line:
+                    self._log(str(line))
             # Through the build form: marked and undoable, and the person's own values stay (N9'')
             apply_ditto_settings(self, config)
         else:

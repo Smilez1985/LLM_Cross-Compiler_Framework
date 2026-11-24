@@ -379,3 +379,20 @@ def test_build_info_json_holds_the_estimate_next_to_the_real_file_size(tmp_path,
     other.mkdir()
     (other / "m-Q4_K_M.gguf").write_bytes(b"weights")
     assert "memory_estimate" not in engine._write_build_manifest(make_config(), other)
+
+
+def test_ditto_as_the_pilot_gets_the_same_estimate_per_type(env, config_of):  # noqa: F811
+    """BuildService.memory_for: the shape and the board's memory read once, then the estimate per quantization is the
+    same one a build request of that type gets (DESIGN "Ditto as the pilot")."""
+    config_of("Llama 3.1 8B Instruct")
+    env.service.hub = hub_facts(MODELS["Llama 3.1 8B Instruct"]["parameters"])
+    memory = env.service.memory_for("example/llama-8b", "ARM64", "bcm2837")
+    from orchestrator.Core.build_service import BuildService
+    for quant in ("Q4_K_M", "Q8_0"):
+        request = BuildService.request_in(model="example/llama-8b", target="ARM64", format="gguf", board="bcm2837",
+                                          quantization=quant)
+        expected = env.service.memory_estimate(request)
+        got = memory(quant)
+        assert (got.state, got.need_mib, got.ram_mib) == (expected.state, expected.need_mib, expected.ram_mib)
+    assert memory("Q4_K_M").state == "does_not_fit"
+    assert env.service.memory_for("example/llama-8b", "ARM64", None) is None   # no board, no estimate

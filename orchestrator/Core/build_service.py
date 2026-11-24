@@ -16,7 +16,7 @@ import re
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from orchestrator.Core import job_service
 from orchestrator.Core.builder import HF_REPO_ID, MODEL_FILE_SUFFIXES, ModelFormat, OptimizationLevel
@@ -1482,6 +1482,31 @@ class BuildService:
                            ctx=getattr(request, "max_context_length", None),
                            imatrix=bool(getattr(request, "use_imatrix", True)),
                            tensor_types=list(getattr(request, "tensor_types", None) or ()))
+
+    def memory_for(self, model: str, target: str, board: Optional[str], *, revision: Optional[str] = None,
+                   look_up_hub: bool = True) -> Optional[Callable[[str], Any]]:
+        """The memory estimate of `model` on `board` per quantization (memory_estimate.estimate, as memory_estimate()
+        computes it for a request), for Ditto as the pilot: the model's shape is read once and the board's memory
+        once, then each quantization is only arithmetic. None without a board. Never raises for missing facts: an
+        estimate is then "unknown" with its reason."""
+        from orchestrator.Core import memory_estimate as me
+        from orchestrator.Core.board_profiles import board_memory
+        if not board:
+            return None
+        try:
+            caps = self.capabilities(target)
+        except Exception:  # noqa: BLE001 - a target without capabilities: the probe alone
+            caps = None
+        try:
+            _pid, probe = self._board_probe(None, board, caps, target)
+        except Exception:  # noqa: BLE001 - no probe: the board model's most memory
+            probe = None
+        ram, source = board_memory(probe, caps, board)
+        try:
+            shape = self.model_shape(model, revision, look_up_hub=look_up_hub)
+        except Exception:  # noqa: BLE001 - a model that cannot be read: unknown, said as such
+            shape = None
+        return lambda quantization: me.estimate(shape, quantization, board=board, ram_mib=ram, ram_source=source)
 
     def resource_check(self, request: BuildRequestIn, *, look_up_hub: bool = True, facts: Any = None):
         """The check of this computer's disk and memory before a validated build (Core/build_resources.py): the disk
