@@ -719,44 +719,29 @@ class LoggingManager:
     
     def export_logs(self, output_file: Path, start_time: Optional[datetime] = None,
                    end_time: Optional[datetime] = None, format: LogFormat = LogFormat.JSON) -> bool:
-        """Export logs to file"""
+        """Exports the framework's log (framework.log of every process, utils/framework_log) between `start_time`
+        and `end_time` to `output_file`, as JSON or (any other format) text, private and with the home folder
+        written as ~USER; `llmcf logs export` and the Help menu's Framework Log window do the same. Without the log
+        file (a process that never booted the framework) the newest entries this process keeps in memory are
+        exported. True when the file was written."""
+        from orchestrator.utils import framework_log
+        from orchestrator.utils.framework_log import FRAMEWORK_LOG_HANDLER
+        fmt = "json" if format == LogFormat.JSON else "text"
+        handler = next((h for h in logging.getLogger().handlers if h.get_name() == FRAMEWORK_LOG_HANDLER), None)
         try:
-            logs = self.get_recent_logs(10000)  # Get large batch
-            
-            # Filter by time if specified
-            if start_time or end_time:
-                filtered_logs = []
-                for log_entry in logs:
-                    log_time = log_entry['timestamp']
-                    if isinstance(log_time, str):
-                        log_time = datetime.fromisoformat(log_time)
-                    
-                    if start_time and log_time < start_time:
-                        continue
-                    if end_time and log_time > end_time:
-                        continue
-                    
-                    filtered_logs.append(log_entry)
-                logs = filtered_logs
-            
-            # Export in specified format
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            if format == LogFormat.JSON:
-                with open(output_file, 'w') as f:
-                    json.dump({
-                        'export_time': datetime.now().isoformat(),
-                        'total_entries': len(logs),
-                        'entries': logs
-                    }, f, indent=2, default=str)
+            if handler is not None and getattr(handler, "baseFilename", None):
+                entries = framework_log.read_entries(Path(handler.baseFilename).parent, since=start_time,
+                                                     until=end_time)
             else:
-                with open(output_file, 'w') as f:
-                    for log_entry in logs:
-                        f.write(f"{log_entry['timestamp']} - {log_entry['level']} - {log_entry['message']}\n")
-            
+                entries = [{"timestamp": e["timestamp"].isoformat() if isinstance(e["timestamp"], datetime)
+                            else str(e["timestamp"]), "level": e["level"], "logger_name": e["logger"],
+                            "message": e["message"]}
+                           for e in self.get_recent_logs(10000)
+                           if (start_time is None or e["timestamp"] >= start_time)
+                           and (end_time is None or e["timestamp"] <= end_time)]
+            framework_log.export(entries, Path(output_file), fmt)
             return True
-            
-        except Exception as e:
+        except (OSError, ValueError) as e:
             print(f"Failed to export logs: {e}", file=sys.stderr)
             return False
     

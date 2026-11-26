@@ -32,14 +32,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+# framework.log: its name, size and old files are its reader's (utils/framework_log.py); the home folder in every
+# spelling is hidden by security/paths.hide_home (the crash dialog's report and the log export use it)
+from orchestrator.security.paths import hide_home
+from orchestrator.utils.framework_log import (FRAMEWORK_LOG, FRAMEWORK_LOG_BACKUPS, FRAMEWORK_LOG_BYTES,
+                                              FRAMEWORK_LOG_HANDLER)
+
 GUI_LOG = "gui.log"
 GUI_LOG_BYTES = 5 * 1024 * 1024
 GUI_LOG_BACKUPS = 3
 GUI_LOG_HANDLER = "llmcf-gui-log"
-FRAMEWORK_LOG = "framework.log"
-FRAMEWORK_LOG_BYTES = 5 * 1024 * 1024
-FRAMEWORK_LOG_BACKUPS = 3
-FRAMEWORK_LOG_HANDLER = "llmcf-framework-log"
 CRASH_PREFIX = "crash-"
 CREATE_NO_WINDOW = 0x08000000
 CREATE_NEW_CONSOLE = 0x00000010
@@ -295,27 +297,6 @@ def telemetry_enabled(config: Any) -> bool:
         return bool(get("enable_telemetry", False)) if callable(get) else False
     except Exception:  # noqa: BLE001 - an unreadable setting is off
         return False
-
-
-def hide_home(text: str, marker: str = "~USER") -> str:
-    """This computer's home folder as `marker` in every spelling a text can name it (orchestrator/security/paths:
-    HOME, USERPROFILE and Path.home() with their real paths, either separator, a Windows path in any case, and doubled
-    as Python quotes a Windows path), and the account's name after a path separator as USER (names of three
-    characters or more, so a short one like "pi" stays elsewhere). Without that module the text is returned as it
-    is (scrub already wrote the home folder as "~")."""
-    if not text:
-        return ""
-    try:
-        from orchestrator.security.paths import home_folders, replace_folder, undouble
-        text = undouble(text)
-        for home in home_folders():
-            text = replace_folder(text, home, marker)
-    except Exception:  # noqa: BLE001 - the crash may be in the very module that scrubs
-        pass
-    username = os.getenv("USERNAME") or os.getenv("USER")
-    if username and len(username) > 2:
-        text = text.replace(f"/{username}", "/USER").replace(f"\\{username}", "\\USER")
-    return text
 
 
 def issue_link(details: str) -> str:

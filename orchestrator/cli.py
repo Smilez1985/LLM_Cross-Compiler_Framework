@@ -6708,6 +6708,78 @@ def _doctor_free_space(framework, heading: str = "Tier 2: the framework's build 
 
 
 # ============================================================================
+# LOGS (the framework's one log the person and Ditto read: framework.log of every process)
+# ============================================================================
+
+LOG_LEVEL_CHOICE = click.Choice(["debug", "info", "warning", "error"], case_sensitive=False)
+
+
+@cli.group()
+def logs():
+    """The framework's log: what every process (the CLI, the GUI, the MCP server) did and what failed"""
+
+
+def _framework_log_folder(ctx: FrameworkContext) -> Path:
+    """Where framework.log is (utils/crash_report.framework_log_folder), read from the settings without booting."""
+    from orchestrator.utils.crash_report import framework_log_folder
+    config, _resolve = _settings(ctx)
+    return framework_log_folder(config)
+
+
+@logs.command('show')
+@click.option('--level', type=LOG_LEVEL_CHOICE, default="info", show_default=True,
+              help='The lowest level shown')
+@click.option('--since', 'since', type=click.IntRange(min=0), default=0, metavar='MINUTES',
+              help='Only the last MINUTES minutes (0: all)')
+@click.option('--part', default="", metavar='TEXT', help='Only the parts of the framework whose name contains TEXT '
+                                                         '(for example BuildEngine, mojo, mcp)')
+@click.option('--lines', type=click.IntRange(min=1, max=10000), default=50, show_default=True,
+              help='The newest LINES entries')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output: the entries as a JSON list')
+@pass_context
+def logs_show(ctx: FrameworkContext, level: str, since: int, part: str, lines: int, as_json: bool):
+    """The newest entries of the framework's log, oldest first"""
+    from orchestrator.utils import framework_log
+    folder = _framework_log_folder(ctx)
+    entries = framework_log.read_entries(folder, level=level, since=framework_log.minutes_ago(since), part=part,
+                                         limit=lines)
+    if as_json:
+        click.echo(json.dumps(entries, indent=2, ensure_ascii=False, default=str))
+        return
+    if not entries:
+        console.print(f"No entries in {escape(str(folder / 'framework.log'))} for this choice.")
+        return
+    for entry in entries:
+        text = escape(_printable(framework_log.entry_text(entry)))
+        style = {"ERROR": "red", "CRITICAL": "red", "WARNING": "yellow"}.get(str(entry.get("level")), "")
+        console.print(f"[{style}]{text}[/{style}]" if style else text)
+
+
+@logs.command('export')
+@click.argument('file', type=click.Path(dir_okay=False, writable=True))
+@click.option('--level', type=LOG_LEVEL_CHOICE, default="debug", show_default=True,
+              help='The lowest level exported')
+@click.option('--since', 'since', type=click.IntRange(min=0), default=0, metavar='MINUTES',
+              help='Only the last MINUTES minutes (0: all)')
+@click.option('--format', 'fmt', type=click.Choice(["json", "text"]), default=None,
+              help='json or text (default: from the file name, .json is JSON, everything else text)')
+@pass_context
+def logs_export(ctx: FrameworkContext, file: str, level: str, since: int, fmt: Optional[str]):
+    """Write the framework's log to FILE (private, your home folder written as ~USER), to read or to attach to a bug
+    report"""
+    from orchestrator.utils import framework_log
+    entries = framework_log.read_entries(_framework_log_folder(ctx), level=level,
+                                         since=framework_log.minutes_ago(since))
+    chosen = fmt or ("json" if file.lower().endswith(".json") else "text")
+    try:
+        path = framework_log.export(entries, Path(file), chosen)
+    except OSError as e:
+        console.print(f"[red]Could not write {escape(file)}: {escape(e.strerror or str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]{len(entries)} entries written to {escape(str(path))} ({chosen}).[/green]")
+
+
+# ============================================================================
 # MOJO (the health check: Mojo Oracle looks, Mojo Miracle repairs; round 6 design 7, round 7 items 11', M', T)
 # ============================================================================
 

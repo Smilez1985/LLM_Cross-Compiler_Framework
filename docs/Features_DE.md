@@ -4586,6 +4586,11 @@ Absturz, bevor es das Fenster gibt, hinterlässt dort eine `crash-<Zeit>.txt` (u
 Meldungsfenster). Der Eintrag wird unter **Datei > Einstellungen…**, **Update**, **Starteintrag** gezeigt, repariert
 und entfernt, oder mit `llmcf launcher status|install|remove`.
 
+**Das Log des Frameworks:** Jeder Prozess (die CLI, die GUI, der MCP-Server) schreibt in `framework.log`, ein
+JSON-Objekt je Zeile, privat für dich. **Hilfe > Framework-Log...** (`llmcf logs show`) zeigt seine neuesten Einträge,
+gewählt nach Stufe, den letzten Minuten und dem Teil des Frameworks; **Exportieren...** (`llmcf logs export`) schreibt
+sie in eine Datei, mit deinem Home-Ordner als `~USER`, für einen Fehlerbericht.
+
 **Die Menüleiste** (übersetzt, mit Alt-Tastenkürzeln; die Objektnamen der Einträge bleiben gleich, so behält jeder
 Pfad der Kommandozeile seinen Mausweg):
 

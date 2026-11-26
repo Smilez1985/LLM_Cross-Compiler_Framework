@@ -90,6 +90,8 @@ MENU_LAYOUT = (
         ("act_tools_clear_history", "main.tools.clear_history"),
     )),
     ("menu_help", "main.menu.help", (
+        ("act_framework_log", "logs.menu"),
+        "-",
         ("act_help_about", "main.help.about"),
     )),
 )

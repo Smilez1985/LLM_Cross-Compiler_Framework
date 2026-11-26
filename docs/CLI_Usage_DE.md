@@ -20,6 +20,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [Überblick über alle Befehle](#überblick-über-alle-befehle)
 - [mojo](#mojo): Gesundheitscheck (Mojo Oracle) und Reparaturen (Mojo Miracle)
 - [doctor](#doctor): der alte Name von `mojo`
+- [logs](#logs): das Log des Frameworks (`show`, `export`)
 - [update](#update): das Framework aktualisieren (Git-Vorspulen, dann erneut der Installer)
 - [launcher](#launcher): der Starteintrag ohne Terminal (`status`, `install`, `remove`)
 - [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
@@ -128,6 +129,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 |---|---|
 | `mojo` | Die Installation prüfen (Mojo Oracle) und reparieren, was sich sicher reparieren lässt (Mojo Miracle) |
 | `doctor` | Der alte Name von `mojo`, mit seinen Optionen aus 3.0.0 |
+| `logs show` / `logs export` | Die neuesten Einträge des Logs des Frameworks / das Log in eine Datei geschrieben |
 | `update` | Das Framework aktualisieren: Der Checkout, aus dem du installiert hast, wird vorgespult, dann läuft sein Installer erneut mit den neuesten passenden Abhängigkeiten |
 | `launcher status` / `install` / `remove` | Der Starteintrag, der die GUI ohne Terminal öffnet (der Eintrag im Linux-Anwendungsmenü, die Windows-Verknüpfung im Startmenü): zeigen, anlegen oder reparieren, den eigenen entfernen |
 | `knowledge snapshots` | Die Snapshots der Wissensbasis mit vollem Pfad, Namen, Größe und was jeder ist auflisten; die ausgewählten löschen oder exportieren |
@@ -332,6 +334,39 @@ In der GUI: **Datei > Einstellungen…**, Seite **Update** (auch **Extras > Wart
 **Nach Updates suchen** ist `--check`, **Nur den getesteten Abhängigkeitsstand** ist `--offline`, **Framework
 aktualisieren...** prüft, fragt mit „Nein“ als Vorgabe und startet das Update dann in einem Terminal; unter Windows in
 der Konsole des Installers, und das Framework schließt sich. Eine KI startet nie ein Update.
+
+---
+
+## logs
+
+```
+llm-cli logs show [--level debug|info|warning|error] [--since MINUTEN] [--part TEXT] [--lines N] [--json]
+llm-cli logs export DATEI [--level debug|info|warning|error] [--since MINUTEN] [--format json|text]
+```
+
+Das eine Log des Frameworks, `framework.log`: was jeder Prozess (die CLI, die GUI, der MCP-Server) getan hat und was
+fehlschlug, ein JSON-Objekt je Zeile, in `~/.llm-framework/logs` (oder in `logs_dir`, wenn du dort einen absoluten
+Ordner setzt), mit seinen älteren Dateien `framework.log.1` bis `.3`. `show` gibt die neuesten Einträge aus, die
+ältesten zuerst (Fehler rot, Warnungen gelb); `export` schreibt die Einträge in DATEI, privat für dich und mit deinem
+Home-Ordner als `~USER`, zum Lesen oder als Anhang eines Fehlerberichts. Beide lesen, ohne das Framework zu starten.
+
+| Option | Bedeutung |
+|---|---|
+| `--level` | Die niedrigste Stufe: standardmäßig `info` für `show` und `debug` (alles) für `export`. |
+| `--since MINUTEN` | Nur die letzten MINUTEN Minuten; 0 (der Standard) ist alles. |
+| `--part TEXT` | (`show`) Nur die Teile des Frameworks, deren Name TEXT enthält, zum Beispiel `BuildEngine` oder `mojo`. |
+| `--lines N` | (`show`) Die neuesten N Einträge; standardmäßig 50. |
+| `--json` | (`show`) Die Einträge als JSON-Liste, für Skripte. |
+| `--format json\|text` | (`export`) Das Format der Datei; standardmäßig nach ihrem Namen: `.json` ist JSON, jeder andere Name Text. |
+
+```bash
+llm-cli logs show --level warning --since 60
+llm-cli logs export ~/framework-log.json --since 1440
+```
+
+In der GUI: **Hilfe > Framework-Log...** zeigt dieselben Einträge mit derselben Auswahl (Stufe, letzte Minuten, Teil,
+neueste Einträge), **Exportieren...** schreibt die Einträge dieser Auswahl in eine Datei (ein Name mit `.json` ist
+JSON), und **Log-Ordner öffnen** zeigt den Ordner.
 
 ---
 

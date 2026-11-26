@@ -336,6 +336,23 @@ def undouble(text: str) -> str:
     return _undouble(text)
 
 
+def hide_home(text: str, marker: str = "~USER") -> str:
+    """This computer's home folder as `marker` in every spelling a text can name it (orchestrator/security/paths:
+    HOME, USERPROFILE and Path.home() with their real paths, either separator, a Windows path in any case, and doubled
+    as Python quotes a Windows path), and the account's name after a path separator as USER (names of three
+    characters or more, so a short one like "pi" stays elsewhere): for a text the person hands on (the crash
+    dialog's GitHub report, an export of the framework's log)."""
+    if not text:
+        return ""
+    text = undouble(text)
+    for home in home_folders():
+        text = replace_folder(text, home, marker)
+    username = os.getenv("USERNAME") or os.getenv("USER")
+    if username and len(username) > 2:
+        text = text.replace(f"/{username}", "/USER").replace(f"\\{username}", "\\USER")
+    return text
+
+
 def scrub_for_ai(text: str, roots: Optional[Dict[str, str]] = None, limit: int = SCRUB_LIMIT) -> str:
     """Framework text as an AI may see it. With `roots` every path is labelled first (label_paths: a known folder by
     its label, any other path by its file name); without, this computer's home folder is shortened to '~'
@@ -376,5 +393,5 @@ def device_text(text: Any, users: Sequence[str], roots: Optional[Dict[str, str]]
     return scrub_for_ai(out)
 
 
-__all__ = ["ACCOUNT_NAME", "DEVICE_ACCOUNT", "HOME_ROOT", "SCRUB_LIMIT", "device_text", "home_folders", "label_paths",
+__all__ = ["ACCOUNT_NAME", "DEVICE_ACCOUNT", "HOME_ROOT", "SCRUB_LIMIT", "device_text", "hide_home", "home_folders", "label_paths",
            "replace_folder", "scrub_for_ai", "shorten_home", "undouble"]

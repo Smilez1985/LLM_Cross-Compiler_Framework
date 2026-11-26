@@ -4136,6 +4136,11 @@ log folder; a crash before the window exists leaves a `crash-<time>.txt` there (
 entry is shown, repaired and removed under **File > Settings...**, **Update**, **Start entry**, or with `llmcf
 launcher status|install|remove`.
 
+**The framework's log:** every process (the CLI, the GUI, the MCP server) writes to `framework.log`, one JSON object
+per line, private to you. **Help > Framework Log...** (`llmcf logs show`) shows its newest entries, chosen by level,
+the last minutes and the part of the framework; **Export...** (`llmcf logs export`) writes them to a file with your
+home folder written as `~USER`, for a bug report.
+
 **The menu bar** (translated, with Alt shortcuts; the object names of the entries stay the same, so every path of the
 command line keeps its mouse path):
 

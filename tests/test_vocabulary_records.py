@@ -333,7 +333,7 @@ def test_text_modules_are_merged_and_never_replace_a_key(monkeypatch):
                                              # the Models tab and Build > Benchmark...
                                              "orchestrator.utils.l10n_models",
                                              # the crash dialog and the start entry (starting without a terminal)
-                                             "orchestrator.utils.l10n_launch",
+                                             "orchestrator.utils.l10n_launch", "orchestrator.utils.l10n_logs",
                                              # the Ditto console beside the chat
                                              "orchestrator.utils.l10n_console",
                                              # Ditto's context window
