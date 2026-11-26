@@ -369,6 +369,8 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
                                undo="roll back or uninstall it in the Board bundle window"),
     # the person's harness runs: read only, scrubbed; starting, answering and stopping are the person's
     "harness_report": ToolFacts(delegable="not_needed", undo="nothing to undo"),
+    # the framework's log: read only, by labels, every text untrusted
+    "read_framework_log": ToolFacts(delegable="not_needed", undo="nothing to undo"),
     # a block proposed from a model: read only (a note is kept as AI text for the person); the person writes it
     "propose_bundle_block": ToolFacts(_FS({"offline_mode"}), delegable="not_needed", undo="nothing to undo"),
     "answer_approval": ToolFacts(delegable="never"),

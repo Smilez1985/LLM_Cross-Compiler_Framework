@@ -183,6 +183,7 @@ KNOWN_TOOLS = frozenset({
     "delete_artifact", "restore_knowledge_snapshot", "build_local_runtime", "start_local_runtime",
     "stop_local_runtime", "run_benchmark", "deploy_device_runtime", "list_trash", "restore_from_trash",
     "remove_pack", "bundle_plan", "bundle_deploy", "harness_report", "propose_bundle_block",
+    "read_framework_log",
     "start_tuning", "get_tuning_report", "web_search", "propose_archive_claim",
     # later
     "probe_remote_device", "run_device_benchmark",

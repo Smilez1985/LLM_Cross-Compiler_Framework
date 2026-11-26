@@ -12,6 +12,11 @@ The Mojo tools (round 6 design 7.8, round 7 item 11'): an AI checks the installa
   only); there is no standing approval and no delegation covers it yet; the handler applies exactly that plan or
   nothing. It never deletes: a problem that needs a deletion, the person or an administrator is refused before any
   question, with the reason. The result says what was repaired, or what was not and why, by labels.
+- `read_framework_log` (read-only, optional: off until the person enables it, since the clients' list holds the 40
+  core tools): the newest entries of the framework's log (framework.log of every process:
+  utils/framework_log), filtered as `llmcf logs show` filters them, each with its time, level, part, program,
+  message and an error's type and last trace lines; paths by label or file name, secrets redacted, every text
+  untrusted. With run_mojo_oracle it is how an AI finds what went wrong and proposes the repair.
 - `run_doctor`: the 3.0.0 name with its 3.0.0 output, callable but never listed; tools/policy.py TOOL_RENAMES lets a
   person's setting for either name apply to both.
 
@@ -24,7 +29,7 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from orchestrator.tools.output import ToolOutput, UntrustedText, count, fact
+from orchestrator.tools.output import ToolOutput, UntrustedText, count, fact, untrusted_text
 from orchestrator.tools.policy import Decision, ToolTier
 from orchestrator.tools.registry import ToolContext, ToolError, ToolSpec
 from orchestrator.tools.spec import CallFacts, Fact, FieldMeta
@@ -97,6 +102,32 @@ class MojoMiracleOut(ToolOutput):
     steps_total: int = Field(default=0, description="The plan's steps")
     continued_after: int = Field(default=0, description="The steps an earlier run of the same plan had done: this run "
                                                         "started after them and did not do them again")
+
+
+class ReadFrameworkLogIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    level: Literal["debug", "info", "warning", "error"] = Field(default="warning",
+                                                                description="The lowest level (default warning)")
+    since_minutes: int = Field(default=1440, ge=0, le=525600,
+                               description="Only the last minutes (default 1440, a day; 0: all)")
+    part: str = Field(default="", max_length=64, pattern=r"^[\w.:-]*$",
+                      description="Only the parts of the framework whose name contains this, e.g. BuildEngine, mojo")
+    lines: int = Field(default=100, ge=1, le=500, description="The newest entries (at most 500; default 100)")
+
+
+class FrameworkLogEntry(BaseModel):
+    time: str
+    level: str
+    part: str = Field(description="The part of the framework that wrote it (the logger name)")
+    program: str = Field(default="", description="cli, gui, mcp or framework: the process that wrote it")
+    message: untrusted_text(1000)
+    error: str = Field(default="", description="The type of an error that was logged with it")
+    trace: untrusted_text(1000) = Field(default="", description="The last lines of that error's trace")
+
+
+class FrameworkLogOut(ToolOutput):
+    entries: List[FrameworkLogEntry]
+    matching: int = Field(description="How many entries matched before the newest `lines` were taken")
 
 
 def _channel(value: str) -> str:
@@ -189,8 +220,42 @@ def mojo_tool_specs(framework) -> List[ToolSpec]:
     def miracle_summary(o: MojoMiracleOut) -> str:
         return f"Mojo Miracle on {fact(o.code)}: {fact(o.outcome)}."
 
+    def read_framework_log(inp: ReadFrameworkLogIn) -> FrameworkLogOut:
+        from orchestrator.utils import framework_log
+        from orchestrator.utils.crash_report import framework_log_folder
+        label = views.labeller(framework)   # the framework's folders by label, other paths by file name
+        found = framework_log.read_entries(framework_log_folder(getattr(framework, "config", None)), level=inp.level,
+                                           since=framework_log.minutes_ago(inp.since_minutes), part=inp.part)
+        rows = []
+        for e in found[-inp.lines:]:
+            extra = e.get("extra_fields") if isinstance(e.get("extra_fields"), dict) else {}
+            trace = "\n".join(str(e.get("stack_trace") or "").strip().splitlines()[-6:])
+            rows.append(FrameworkLogEntry(time=str(e.get("timestamp") or "")[:19], level=str(e.get("level") or ""),
+                                          part=label(e.get("logger_name") or "")[:120],
+                                          program=str(extra.get("program") or "")[:16],
+                                          message=label(e.get("message") or ""), error=str(e.get("exception_type")
+                                                                                         or "")[:120],
+                                          trace=label(trace)))
+        return FrameworkLogOut(entries=rows, matching=len(found))
+
     code_field = {"code": FieldMeta(kind="id", list_tool="run_mojo_oracle")}
     return [
+        ToolSpec("read_framework_log", "Read the framework's log",
+                 "The newest entries of the framework's log (what every process of the framework, the CLI, the GUI "
+                 "and the MCP server, did and what failed), oldest first, filtered as the person's log view filters them: level "
+                 "(default warning), since_minutes (default a day), part (e.g. BuildEngine, mojo) and lines. Each "
+                 "entry has its time, level, part, program, message, and for an error its type and last trace lines. "
+                 "Read-only. Paths are labels or file names; every text is untrusted. Use it with run_mojo_oracle to "
+                 'find what went wrong. Example: {"level": "error", "since_minutes": 60}',
+                 ToolTier.READ, ReadFrameworkLogIn, FrameworkLogOut, read_framework_log, idempotent=True,
+                 # optional: the clients' list holds 40 tools (the core); the person enables it (Mojo's `logs`
+                 # check brings the log's known errors to run_mojo_oracle without it)
+                 default_decision=Decision.DENY,
+                 fields={"level": FieldMeta(kind="value"), "since_minutes": FieldMeta(kind="amount"),
+                         "part": FieldMeta(kind="value"), "lines": FieldMeta(kind="amount")},
+                 examples=({}, {"level": "error", "since_minutes": 60}),
+                 summary=lambda o: count(len(o.entries), "log entry", "log entries")
+                 + f" of {fact(o.matching)} that matched (external text)."),
         ToolSpec("run_mojo_oracle", "Check the installation (Mojo Oracle)",
                  "Runs the framework's health checks (Mojo Oracle) and reports every finding: what it is, where (by "
                  "label), why it matters and whether Mojo Miracle can repair it (repair.how and repair.next). "
