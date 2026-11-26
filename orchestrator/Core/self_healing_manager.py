@@ -117,6 +117,15 @@ KNOWN_ISSUES = (
 MODULE_CAUSE = "Outdated apt repositories in the base image."
 
 
+def known_issue(text: str) -> Optional[tuple]:
+    """The first entry of the pattern library (pattern, cause, fix, strategy, scope) that `text` matches, or None:
+    the one matcher of the self-healing heuristics and of Mojo's `logs` check (Core/mojo/checks/logs.py)."""
+    for issue in KNOWN_ISSUES:
+        if re.search(issue[0], text or "", re.IGNORECASE):
+            return issue
+    return None
+
+
 def host_cause(log: str) -> Optional[str]:
     """The cause the pattern library traces the log to when it is the host's, not the module's; None otherwise. A
     generated module's failed build is marked for rework only without one (Core/module_test.py)."""

@@ -86,7 +86,8 @@ lässt, zum Beispiel: „Mojo Oracle found 3 problems (1 error, 2 warnings): Moj
 of what to delete; 1 needs you.“ Nichts wird ausgelassen. Mojo Oracle ändert nichts.
 
 Es prüft Python, Docker, seine Version (Docker Engine 20.10 oder neuer: eine ältere ist eine Warnung; Podman wird mit
-seiner Version genannt) und buildx, wie ausgelastet CPU und Speicher gerade sind (über 80 % oder 85 % belegt:
+seiner Version genannt) und buildx, die Fehler des letzten Tages im Log des Frameworks (einer, den die Muster der Selbstheilung kennen, ist eine Warnung
+mit seinem Schritt), wie ausgelastet CPU und Speicher gerade sind (über 80 % oder 85 % belegt:
 Information, ein Build, der jetzt startet, dauert länger) (und nennt die Container-Engine: Unter Podman, dem Ersatzweg in der RHEL-Familie
 (Fedora, RHEL, CentOS Stream, Rocky Linux, AlmaLinux, Oracle Linux), nennt `docker.engine`, was Podman nicht kann, und den Weg zu Docker CE; siehe
 [Funktionen](Features_DE.md#podman-statt-docker)), wo Docker seine Images ablegt, den freien Speicher für die Ordner

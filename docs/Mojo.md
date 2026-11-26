@@ -83,7 +83,8 @@ it, for example: "Mojo Oracle found 3 problems (1 error, 2 warnings): Mojo Mirac
 what to delete; 1 needs you." Nothing is skipped. Mojo Oracle changes nothing.
 
 It checks Python, Docker, its version (Docker Engine 20.10 or newer: an older one is a warning; Podman is named with
-its version) and buildx, how busy the CPU and the memory are right now (above 80 % or 85 % in use: information, a
+its version) and buildx, the errors of the last day in the framework's log (one the self-healing patterns know is a warning with its step),
+how busy the CPU and the memory are right now (above 80 % or 85 % in use: information, a
 build started now takes longer) (and names the container engine: under Podman, the fallback in the RHEL family
 (Fedora, RHEL, CentOS Stream, Rocky Linux, AlmaLinux, Oracle Linux), `docker.engine` lists what Podman cannot do and the way to Docker CE; see
 [Features](Features.md#podman-instead-of-docker)), where Docker keeps its images, free disk space for the cache,
