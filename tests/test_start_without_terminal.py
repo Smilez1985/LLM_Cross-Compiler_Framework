@@ -480,7 +480,10 @@ class TestCrashDialog:
         assert parts.netloc == "github.com" and parts.path.endswith("/LLM_Cross-Compiler_Framework/issues/new")
         query = parse_qs(parts.query)
         body = query["body"][0]
-        assert "RuntimeError" in body and on[2].strip() in body
+        # the dialog's details, scrubbed once more for the report (hide_home: an account name after a separator
+        # becomes USER, as on a CI runner whose account is "runner")
+        from orchestrator.utils.crash_report import hide_home
+        assert "RuntimeError" in body and hide_home(on[2]).strip() in body
         assert TOKEN not in url and str(Path.home()) not in body
         assert query["title"][0].startswith("[Bug]: llmcf ")
 
