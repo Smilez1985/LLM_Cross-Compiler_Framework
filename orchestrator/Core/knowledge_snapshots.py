@@ -41,6 +41,13 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from orchestrator.rag.errors import KnowledgeBaseError
 from orchestrator.utils.helpers import sha256_file as _sha256
 from orchestrator.utils.next_steps import WithSteps
+from orchestrator.utils.sizes import format_size
+
+
+def _size(n: int) -> str:
+    """A size in this module's sentences, which the CLI, Mojo and AI callers read in English: the one formatter."""
+    return format_size(n, "en")
+
 
 FOLDER = "knowledge_snapshots"
 SUFFIX = ".jsonl.gz"
@@ -112,10 +119,6 @@ def list_snapshots(folder: Path) -> List[SnapshotFile]:
     return out
 
 
-def size_text(n: int) -> str:
-    return f"{n / 1000 ** 3:.1f} GB" if n >= 10 ** 9 else f"{n / 1000 ** 2:.1f} MB"
-
-
 # --- room for the next snapshot (DESIGN round 8, answer 2) --------------------------------------------------
 
 @dataclass(frozen=True)
@@ -143,14 +146,14 @@ class SnapshotRoom:
     def sentence(self) -> str:
         """The numbers in one plain sentence, without a path (it reaches AI callers too)."""
         if self.check is None:
-            return f"the snapshot needs about {size_text(self.estimate)} (estimate)"
+            return f"the snapshot needs about {_size(self.estimate)} (estimate)"
         c = self.check
-        others = f", {size_text(c.reserved_by_others)} reserved by other calls" if c.reserved_by_others else ""
-        trash = f", {size_text(c.trash_bytes)} of it in the trash" if c.trash_bytes else ""
+        others = f", {_size(c.reserved_by_others)} reserved by other calls" if c.reserved_by_others else ""
+        trash = f", {_size(c.trash_bytes)} of it in the trash" if c.trash_bytes else ""
         verdict = {"enough": "enough", "tight": "enough, but tight", "does_not_fit": "not enough"}[c.verdict]
-        return (f"the snapshot needs about {size_text(self.estimate)} (estimate); {size_text(c.free)} free on that "
-                f"disk{trash}{others}, {size_text(c.reserve)} must stay free: {verdict}. The snapshots there use "
-                f"{size_text(self.folder_bytes)}")
+        return (f"the snapshot needs about {_size(self.estimate)} (estimate); {_size(c.free)} free on that "
+                f"disk{trash}{others}, {_size(c.reserve)} must stay free: {verdict}. The snapshots there use "
+                f"{_size(self.folder_bytes)}")
 
 
 class SnapshotNoRoom(WithSteps, KnowledgeBaseError):
@@ -227,12 +230,12 @@ class SnapshotDisk:
         return self.room.verdict
 
     def line(self) -> str:
-        return DISK_LINE.format(size=size_text(self.total), free=size_text(self.room.free))
+        return DISK_LINE.format(size=_size(self.total), free=_size(self.room.free))
 
     def warning(self) -> str:
         """The warning about the next snapshot ("" when it fits with room to spare); a snapshot that does not fit names
         the person's way to free space (FREE_SPACE_STEP)."""
-        size = size_text(self.room.estimate)
+        size = _size(self.room.estimate)
         if self.verdict == "does_not_fit":
             return f"{NEXT_DOES_NOT_FIT.format(size=size)} {FREE_SPACE_STEP}"
         if self.verdict == "tight":
@@ -442,10 +445,10 @@ def export_snapshots(folder: Path, names: Iterable[str], destination: Path) -> L
     except OSError:
         check = None
     if check is not None and not check.fits:
-        others = (f", {size_text(check.reserved_by_others)} of it reserved by running builds or downloads"
+        others = (f", {_size(check.reserved_by_others)} of it reserved by running builds or downloads"
                   if check.reserved_by_others else "")
-        raise ValueError(f"{destination} has {size_text(check.free)} free{others}; the export needs "
-                         f"{size_text(needed)} and {size_text(check.reserve)} must stay free there.")
+        raise ValueError(f"{destination} has {_size(check.free)} free{others}; the export needs "
+                         f"{_size(needed)} and {_size(check.reserve)} must stay free there.")
     results = []
     for name in wanted:
         snap = snapshots[name]
@@ -518,5 +521,5 @@ def snapshot_space(rag, disk_usage=None) -> List:
 __all__ = ["DISK_LINE", "ExportedSnapshot", "FOLDER", "FREE_SPACE_STEP", "KEEPING_NOTE", "NEXT_DOES_NOT_FIT",
            "NEXT_TIGHT", "SUFFIX", "SnapshotDeletion", "SnapshotDisk", "SnapshotFile", "SnapshotNoRoom", "SnapshotRoom",
            "delete_snapshots", "export_snapshots", "files_size", "folder_bytes", "folder_size", "list_snapshots",
-           "newest_size", "require_room", "room_before", "size_text", "snapshot_disk", "snapshot_files", "snapshot_folder", "snapshot_plan",
+           "newest_size", "require_room", "room_before", "snapshot_disk", "snapshot_files", "snapshot_folder", "snapshot_plan",
            "snapshot_room", "snapshot_space"]

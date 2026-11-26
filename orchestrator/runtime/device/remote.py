@@ -290,10 +290,6 @@ def _chunks(path: Path, size: int = 1 << 20) -> Iterable[bytes]:
             yield chunk
 
 
-def _hex16_glob() -> str:
-    return "[0-9a-f]" * 16
-
-
 def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, build_id: str, arch: str,
                    settings: DeploySettings, check: CheckNewBuild,
                    say: Callable[[str], None] = lambda _m: None, kv_cache: Optional[str] = None,

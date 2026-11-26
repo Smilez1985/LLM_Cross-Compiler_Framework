@@ -477,9 +477,10 @@ def podman_refusal(feature: str, engine: str) -> Optional[str]:
 
 
 def podman_note() -> str:
-    """The doctor's line about Podman: what it cannot do here and the way to Docker CE."""
-    return ("The framework works with Podman's Docker-compatible interface, with limits: " + PODMAN_LIMITS["gpu"]
-            + "; and " + PODMAN_LIMITS["buildkit"] + ". " + DOCKER_CE_WAY)
+    """Mojo's line about Podman (its Docker check, `docker.engine`): what it cannot do here and that the framework
+    refuses it with the reason; the way to Docker CE is the finding's next step (DOCKER_CE_WAY)."""
+    return ("The container engine is Podman: " + PODMAN_LIMITS["gpu"] + "; and " + PODMAN_LIMITS["buildkit"]
+            + ". The framework refuses these with the reason.")
 
 
 def main(argv: Sequence[str]) -> int:

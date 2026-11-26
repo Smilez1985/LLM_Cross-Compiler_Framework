@@ -630,24 +630,6 @@ def test_a_removal_without_an_answer_in_time_does_not_claim_dropbear_still_runs(
     assert "keeps running next to OpenSSH" not in text and "may already be stopped" in text
 
 
-def test_the_deprecated_disable_dropbear_delegates_and_keeps_its_old_answer():
-    """Deprecate-and-delegate (review): disable_dropbear runs remove_dropbear and answers (ok, reason) as before,
-    with no reason when Dropbear is off, whatever happened to its packages."""
-    from orchestrator.remote import gate, openssh_switch
-    answers = {"off": "dropbear=disabled removal=none reason=no-packages packages=none",
-               "gone": "dropbear=removed removal=removed reason=- packages=dropbear",
-               "no": "dropbear=unavailable reason=no-sudo"}
-    for key, want in (("off", (True, "")), ("gone", (True, "")), ("no", (False, "no-sudo"))):
-        seen = []
-
-        def run(script, stdin=None, timeout=None, _key=key):
-            seen.append(str(script))
-            return SimpleNamespace(out=answers[_key] + "\n")
-        assert openssh_switch.disable_dropbear(run, "") == want, key
-        assert seen == [str(gate.script("dropbear-disable"))]
-    assert openssh_switch.disable_dropbear(lambda *a, **k: None, "a\nb") == (False, "sudo")
-
-
 @POSIX
 @pytest.mark.parametrize("tool", ["apk", "rpm"])
 def test_apk_and_rpm_refuse_a_removal_that_takes_other_packages(tmp_path, tool):

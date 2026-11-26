@@ -33,10 +33,10 @@ def choose_folder(parent, title: str, start: str) -> str:
 
 def result_text(result: Any, lang: Optional[str] = None) -> str:
     """What a save did, for the person: where the model is now and how it got there."""
-    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.Core.deletion import size_text
     key = "save.done.renamed" if result.renamed else "save.done.kept" if getattr(result, "kept", False) \
         else "save.done.copied"
-    lines = [ui_text(key, lang, path=str(result.folder), files=result.files, size=size_text(result.bytes))]
+    lines = [ui_text(key, lang, path=str(result.folder), files=result.files, size=size_text(result.bytes, lang))]
     if result.zip is not None:
         lines.append(ui_text("save.done.zip", lang, path=str(result.zip)))
     lines += list(result.notes)
@@ -111,7 +111,7 @@ class CopyWorker(QThread):
     def run(self):
         from orchestrator.Core.artifact_output import DestinationRefused, copy_artifact
         from orchestrator.Core.deletion import PlanChanged
-        from orchestrator.Core.knowledge_snapshots import size_text
+        from orchestrator.Core.deletion import size_text
         try:
             trash = None
             if self.accepted is not None and self.accepted.mode == "trash":
@@ -129,7 +129,7 @@ class CopyWorker(QThread):
             self.done.emit(False, ui_text("earlier.copy_failed", self.lang, reason=str(e), next=""))
             return
         lines = [ui_text("earlier.copied", self.lang, path=str(result.folder), files=result.files,
-                         size=size_text(result.bytes), source=str(self.plan.source))]
+                         size=size_text(result.bytes, self.lang), source=str(self.plan.source))]
         if result.zip is not None:
             lines.append(ui_text("save.done.zip", self.lang, path=str(result.zip)))
         lines += list(result.notes)

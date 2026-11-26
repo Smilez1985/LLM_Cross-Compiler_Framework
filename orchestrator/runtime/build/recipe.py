@@ -423,7 +423,7 @@ def build_id_of(inputs: Mapping[str, Any]) -> str:
 
 def download_options_off(project: Optional[str] = None) -> Mapping[str, str]:
     """The download-capable options a build of `project` sets to OFF (llama.cpp: DOWNLOAD_OPTIONS_OFF; whisper.cpp:
-    WHISPER_DOWNLOAD_OPTIONS_OFF)."""
+    WHISPER_DOWNLOAD_OPTIONS_OFF): the one choice, which every build's options and check_download_options take."""
     name = _projects.project(project).name
     return WHISPER_DOWNLOAD_OPTIONS_OFF if name == _projects.WHISPER_CPP else DOWNLOAD_OPTIONS_OFF
 
@@ -463,8 +463,8 @@ def check_download_options(options: Mapping[str, str], prefetched: Sequence[str]
         if name in options and DEPENDENCY_OF_OPTION.get(name) not in prefetched:
             raise PlanError(refused_option(name, options[name]))
     whisper = _projects.project(project).name == _projects.WHISPER_CPP
-    required = (*WHISPER_DOWNLOAD_OPTIONS_OFF, "FETCHCONTENT_FULLY_DISCONNECTED") if whisper else (
-        *DOWNLOAD_OPTIONS_OFF, "FETCHCONTENT_FULLY_DISCONNECTED", "LLAMA_SUBPROCESS")
+    required = (*download_options_off(project), "FETCHCONTENT_FULLY_DISCONNECTED",
+                *(() if whisper else ("LLAMA_SUBPROCESS",)))
     if whisper:
         for name in (*DOWNLOAD_OPTIONS_OFF, *DEPRECATED_DOWNLOAD_OPTIONS, "LLAMA_SUBPROCESS"):
             problem = refused_option(name, options[name]) if name in options else None
@@ -676,12 +676,6 @@ def cmake_flag_verdicts(words: Sequence[str], *, context: str = "module",
         else:
             out.append(FlagVerdict(shown, pair, "refused", "not a CMake option the framework knows", "rule"))
     return out
-
-
-def module_flag_refusals(words: Sequence[str], *, context: str = "module", prefetched: Sequence[str] = ()) -> List[str]:
-    """`word (reason)` for each refused option of `words` (cmake_flag_verdicts), empty when none is refused."""
-    return [f"{v.word} ({v.reason})" for v in cmake_flag_verdicts(words, context=context, prefetched=prefetched)
-            if v.verdict == "refused"]
 
 
 def module_flag_decisions(words: Sequence[str], *, prefetched: Sequence[str] = ()) -> List[FlagVerdict]:
@@ -1177,8 +1171,8 @@ def cpu_feature_lines(cpu_features: Mapping[str, Any]) -> List[str]:
 
 def _every_build(source: Any, *, shared: bool, native: bool, ccache: bool,
                  project: str = _projects.LLAMA_CPP) -> Dict[str, str]:
+    options = {name: "OFF" for name in download_options_off(project)}
     if project == _projects.WHISPER_CPP:
-        options = {name: "OFF" for name in WHISPER_DOWNLOAD_OPTIONS_OFF}
         options.update(WHISPER_FIXED)
         options.update({
             "CMAKE_BUILD_TYPE": "Release",
@@ -1188,7 +1182,6 @@ def _every_build(source: Any, *, shared: bool, native: bool, ccache: bool,
             "GGML_CCACHE": "ON" if ccache else "OFF",
         })
         return options
-    options = {name: "OFF" for name in DOWNLOAD_OPTIONS_OFF}
     options.update({
         "CMAKE_BUILD_TYPE": "Release",
         "FETCHCONTENT_FULLY_DISCONNECTED": "ON",

@@ -211,22 +211,10 @@ def _helper_part_replaced(text: str) -> Optional[str]:
     return None
 
 
-def stage_runner_problem(modules: Path) -> Optional[str]:
-    """Deprecated: always None. It refused a target's own stage runner (`modules`/build.sh) that did not start its
-    modules under the stage account. A build no longer runs a target's runner at all: the framework's runtime layer
-    (orchestrator/Core/runtime_layer.py) is the runner of every build container, and a target's own build.sh is
-    ignored with a plain note (runtime_layer.own_runner_note, which the builder shows and audits). So there is nothing
-    left to refuse here; the old check of the runner's text stays as runner_text_problem for whoever reads a runner."""
-    import warnings
-    warnings.warn("sandbox.stage_runner_problem is deprecated: a target's own build.sh never runs (the runtime layer's "
-                  "runner does); see runtime_layer.own_runner_note", DeprecationWarning, stacklevel=2)
-    return None
-
-
 def runner_text_problem(modules: Path) -> Optional[str]:
     """STAGE_RUNNER_OLD or STAGE_RUNNER_REPLACES_HELPER for a target runner's text (`modules`/build.sh) that does not
     start its modules under the stage account or replaces a part of the helper, else None (also without a runner).
-    Only a description of an old runner now: no build runs it (stage_runner_problem)."""
+    Only a description of an old runner now: no build runs it."""
     runner = Path(modules) / "build.sh"
     if not runner.is_file():
         return None

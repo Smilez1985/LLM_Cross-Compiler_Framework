@@ -55,12 +55,16 @@ def test_validation_keeps_the_ssrf_guard_and_drops_only_duplicates():
     from orchestrator.utils import validation
     for kept in ("validate_public_url", "is_public_ip", "resolve_public_addresses", "_idna_host", "validate_ip_address",
                  "ValidationResult", "ValidationSeverity", "ValidationType", "validate_python_version",
-                 "validate_path", "validate_email", "ValidationError"):
+                 "validate_path", "_validate_port_availability", "ValidationError", "validate_docker_version",
+                 "validate_cpu_usage", "validate_memory_usage"):
         assert hasattr(validation, kept), kept
     for gone in ("validate_system_requirements", "validate_docker_environment", "create_comprehensive_validation_report",
                  "validate_config", "validate_directory_writable", "validate_url", "ValidationReport",
                  "SystemRequirements", "get_validation_info", "_validate_disk_space", "_validate_docker_daemon",
-                 "_validate_command_availability", "_validate_docker_image_name", "_validate_target_name"):
+                 "_validate_command_availability", "_validate_docker_image_name", "_validate_target_name",
+                 # removed 2026-11-26 (the person's decision on the recon): the preflight names the platform, the
+                 # framework uses no Compose and asks for no e-mail address
+                 "_validate_platform", "_validate_docker_compose", "validate_email"):
         assert not hasattr(validation, gone), gone
 
 

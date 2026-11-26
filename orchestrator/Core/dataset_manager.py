@@ -22,7 +22,6 @@ Every run uses the shared launch policy (orchestrator/runtime/server_policy.py):
 environment. Failures raise PerplexityError with the reason instead of returning sentinel values.
 """
 
-import json
 import re
 import subprocess
 import tempfile
@@ -30,7 +29,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from orchestrator.utils.helpers import ensure_directory
 from orchestrator.utils.helpers import sha256_file as _sha256
 from orchestrator.utils.logging import get_logger
 
@@ -110,37 +108,6 @@ class DatasetManager:
         self._catalog = catalog
         self._platform = platform
         self._profile = profile
-
-    # --- datasets ---
-    def detect_domain(self, model_path: str) -> Optional[str]:
-        """Attempts to deterministically detect the model domain."""
-        path = Path(model_path)
-        if not path.exists():
-            return None
-        marker_file = path / "domain.txt"
-        if marker_file.exists():
-            try:
-                return marker_file.read_text(encoding='utf-8').strip().lower()
-            except OSError:
-                pass
-        return None
-
-    def generate_synthetic_dataset(self, domain: str, count: int = 50) -> List[str]:
-        """Deprecated: builds use the shipped calibration text (data/calibration) or the user's own dataset."""
-        self.logger.warning("generate_synthetic_dataset is deprecated: builds use the shipped calibration text "
-                            "or your own dataset.")
-        return []
-
-    def save_dataset(self, data: List[str], path: Path) -> bool:
-        """Saves the dataset to disk."""
-        try:
-            ensure_directory(path.parent)
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to save dataset: {e}")
-            return False
 
     # --- what the check needs ---
     def _catalog_obj(self):

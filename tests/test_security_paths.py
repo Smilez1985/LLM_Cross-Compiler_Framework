@@ -14,7 +14,6 @@ Every case runs with this computer's home folder as a POSIX path and as a Window
 import getpass
 import socket
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from types import SimpleNamespace
 
 import pytest
 
@@ -590,11 +589,13 @@ def test_this_computers_account_name_is_hidden_whole_in_any_root(monkeypatch):
         assert "Doe" not in tools_runtime.device_text(text, DEVICE_USERS, ROOTS), text
 
 
-# --- the problem report (utils/telemetry.py) uses the one home-folder scrub ----------------------------------------
+# --- the error report (utils/crash_report.hide_home, the crash dialog's "Report on GitHub...") uses the one
+# home-folder scrub ----------------------------------------------------------------------------------------------
 
 def telemetry_sanitize(text):
-    from orchestrator.utils.telemetry import TelemetryManager
-    return TelemetryManager(SimpleNamespace(config={}))._sanitize(text)
+    from orchestrator.utils.crash_report import hide_home
+    from orchestrator.utils.helpers import redact_secrets
+    return hide_home(redact_secrets(text)) if text else ""
 
 
 def test_the_problem_report_keeps_its_markers(home, monkeypatch):
@@ -609,7 +610,8 @@ def test_the_problem_report_keeps_its_markers(home, monkeypatch):
 
 
 def test_the_problem_report_hides_the_home_folder_in_every_spelling(monkeypatch):
-    """Security (R0, the Stage-B leftover): _sanitize replaced only os.path.expanduser('~') letter by letter, so a home
+    """Security (R0, the Stage-B leftover; the error report's scrub, crash_report.hide_home since 2026-11-26): the old
+    problem report replaced only os.path.expanduser('~') letter by letter, so a home
     folder named by USERPROFILE, with the other separator, in another case or doubled as Python quotes a path stayed in
     the report. It now uses security.paths (home_folders, replace_folder, undouble), keeping its '~USER' marker."""
     monkeypatch.setenv("USERPROFILE", r"C:\Users\Jane Doe")

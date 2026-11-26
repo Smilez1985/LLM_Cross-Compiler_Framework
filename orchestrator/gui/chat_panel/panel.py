@@ -46,6 +46,7 @@ from orchestrator.utils.announce import announce
 from orchestrator.utils.localization import current_language, ui_text
 from orchestrator.utils.localization import get_instance as get_i18n
 from orchestrator.utils.logging import get_logger
+from orchestrator.utils.sizes import format_size
 
 logger = get_logger("ChatPanel")
 
@@ -75,15 +76,6 @@ def holds_conversation(data: bytes) -> bool:
 class HistoryNotListable(OSError):
     """This window holds a conversation of Ditto that its file does not show (the file is gone or cannot be read):
     it cannot be listed, so "Clear chat" deletes nothing."""
-
-
-def size_text(size: int, lang: str = "en") -> str:
-    """A size as the person reads it, with the exact bytes."""
-    if size < 1024:
-        return text("chat.size.bytes", lang, n=size)
-    if size < 1024 * 1024:
-        return text("chat.size.kb", lang, kb=f"{size / 1024:.1f}", n=f"{size:,}")
-    return text("chat.size.mb", lang, mb=f"{size / 1024 / 1024:.1f}", n=f"{size:,}")
 
 
 @dataclass(frozen=True)
@@ -122,11 +114,12 @@ class ClearChatDialog(QDialog):
         layout.addWidget(text_label(text("chat.clear.intro", lang), lang))
         if history is not None:
             layout.addWidget(self._item(text("chat.clear.history_name", lang), history.full_path, history.file_name,
-                                        size_text(history.size_bytes, lang), text("chat.clear.history_what", lang),
+                                        format_size(history.size_bytes, lang, exact=True),
+                                        text("chat.clear.history_what", lang),
                                         lang))
         if plan is not None and plan.rows:
             layout.addWidget(self._item(text("chat.clear.feed_name", lang, rows=plan.rows), plan.full_path,
-                                        plan.file_name, size_text(plan.size_bytes, lang),
+                                        plan.file_name, format_size(plan.size_bytes, lang, exact=True),
                                         f"{plan.what(lang)}. {text('chat.clear.feed_stays', lang)}", lang))
         if plan is not None and plan.hidden_records:
             key = "chat.clear.hidden.one" if plan.hidden_records == 1 else "chat.clear.hidden.many"
@@ -1100,4 +1093,4 @@ class ChatPanel(QWidget):
         super().closeEvent(event)
 
 
-__all__ = ["ChatPanel", "PanelHeader", "ClearChatDialog", "HistoryItem", "size_text"]
+__all__ = ["ChatPanel", "PanelHeader", "ClearChatDialog", "HistoryItem"]

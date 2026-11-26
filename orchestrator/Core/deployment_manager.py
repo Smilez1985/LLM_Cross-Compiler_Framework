@@ -808,11 +808,6 @@ class DeploymentManager:
             return {}
         return {"old_sidecar": state, "notes": [OLD_SIDECAR_NOTE.format(name=OLD_SIDECAR, state=state)]}
 
-    @staticmethod
-    def _connection_lost(ssh) -> bool:
-        """Whether the SSH session itself broke (the network dropped), not a command or a file on the board."""
-        return not ParamikoTransport(ssh).alive()
-
     def _deploy_paramiko(self, artifact: Path, ip: str, user: str, pw: Optional[str], port: int, pair: bool,
                          expect_fingerprint: Optional[str] = None, expect_sha256: Optional[str] = None,
                          on_client: Optional[Callable[[Any], None]] = None,

@@ -37,7 +37,6 @@ import os
 import platform
 import re
 import shutil
-import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -820,11 +819,6 @@ class AgentDownloader:
 
     def fetch(self, url: str, dest: Path, size: int, sha256: str, progress=None) -> Path:
         return self._downloader.fetch(url, dest, size, sha256, progress=progress)
-
-
-def python_executable() -> str:
-    """The interpreter the framework runs on (the MCP entry starts the same one)."""
-    return sys.executable
 
 
 __all__ = ["AddPreview", "AgentDownloader", "AgentEntry", "AgentError", "AgentStore", "KINDS", "LaunchSpec",

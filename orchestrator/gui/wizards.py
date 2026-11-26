@@ -180,9 +180,10 @@ class CrawlWorker(QThread):
                     break
                 room = getattr(self.rag_manager, "last_snapshot_room", None)
                 if room is not None and getattr(room, "verdict", "") == "tight":
-                    from orchestrator.Core.knowledge_snapshots import size_text
-                    self.progress.emit("  -> " + ui_text("snapshots.tight", self.lang, size=size_text(room.estimate),
-                                                         free=size_text(max(0, room.check.after))))
+                    from orchestrator.Core.deletion import size_text
+                    self.progress.emit("  -> " + ui_text("snapshots.tight", self.lang,
+                                                         size=size_text(room.estimate, self.lang),
+                                                         free=size_text(max(0, room.check.after), self.lang)))
                 for item in result.get("skipped", []):
                     self.progress.emit(f"  -> Skipped {item['url']}: {item['reason']}")
                 if result.get("skipped"):

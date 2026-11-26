@@ -385,11 +385,10 @@ class TestSecretRedaction:
         text = "Build failed: sk-learn not found, see task-runner and disk-usage-monitoring-service logs"
         assert redact_secrets(text) == text
 
-    def test_telemetry_uses_redaction(self):
-        from orchestrator.utils.telemetry import TelemetryManager
+    def test_the_error_report_uses_redaction(self):
+        from orchestrator.utils.crash_report import hide_home
 
-        tm = TelemetryManager(SimpleNamespace(config={}))
-        report = tm._sanitize(f"key sk-proj-AbCdEf0123456789_xyz-ABCDEFGHIJ in {Path.home()}/project")
+        report = hide_home(redact_secrets(f"key sk-proj-AbCdEf0123456789_xyz-ABCDEFGHIJ in {Path.home()}/project"))
 
         assert "sk-proj-AbCdEf" not in report
         assert str(Path.home()) not in report

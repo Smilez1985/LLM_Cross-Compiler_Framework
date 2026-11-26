@@ -24,8 +24,10 @@ from orchestrator.utils.localization import ui_text
 
 
 def state_dir(framework: Any) -> Path:
-    """The framework's per-user folder (where known_hosts lives)."""
-    return Path(getattr(getattr(framework, "config", None), "user_state_dir", None) or Path.home() / ".llm-framework")
+    """The framework's per-user folder (where known_hosts lives): Core/disk_plan.state_dir, the one reader of the
+    setting, ~/.llm-framework for a framework without one."""
+    from orchestrator.Core.disk_plan import state_dir as per_user_folder
+    return per_user_folder(framework) or Path.home() / ".llm-framework"
 
 
 def read_host_key(folder: Path, host: str, port: int) -> Tuple[Any, str]:

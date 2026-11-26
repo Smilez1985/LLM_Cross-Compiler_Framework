@@ -31,11 +31,10 @@ the runner's check of that), so the host trusts "done" only from that folder whe
 runner alone (read_runner_record, end_folder_state), together with the container's real exit status (the runner is
 its first process: a module cannot make it exit 0 before the last stage returned) and the inspect check
 (utils/sandbox.sandbox_problem). A host whose mounts keep no owner or mode (Docker Desktop on Windows and macOS) runs
-the build, marked "end folder unprotected". The old one-run key (END_KEY, new_end_key, seal_of) is deprecated.
+the build, marked "end folder unprotected". The old one-run key is gone; END_KEY names its file so that a check can
+say it is never written.
 """
 
-import hashlib
-import hmac
 import os
 import re
 import stat
@@ -55,7 +54,7 @@ NAME_OF_EVENT = {"build_ready": "Build ready", "build_error": "Error while build
 NAME_OF_EVENT_DE = {"build_ready": "Build fertig", "build_error": "Fehler beim Bauen", "build_stopped": "Build gestoppt"}
 
 END_RECORD = "build.end"
-END_KEY = "end.key"             # deprecated: the old one-run key file (the runtime layer keeps no key in a container)
+END_KEY = "end.key"             # the old one-run key file: never written (the runtime layer keeps no key in a container)
 # The last of the four stages of each job: a done record must name the job's last stage (this one, or the last module
 # of target.yml's slot after_target, which the builder hands to end_problem)
 LAST_STAGE = {"build": "target", "imatrix": "convert", "tune": "tune"}
@@ -118,15 +117,14 @@ _JOB = re.compile(r"^(?:build|imatrix)$")
 _INPUTS = re.compile(r"^(?:[0-9a-f]{64}|-)$")
 _TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 _SEAL = re.compile(r"^(?:[0-9a-f]{64}|-)$")
-_KEY = re.compile(r"^[0-9a-f]{32,64}$")
 MAX_RECORD_BYTES = 4096
 
 
 @dataclass(frozen=True)
 class EndRecord:
     """The stage runner's end record: status done|failed, its exit code, the stage (the failed one; for done the
-    last one), the job, the inputs digest and the UTC time; `seal` as written, `sealed` whether it fits the key
-    read_end_record was given (False without a key)."""
+    last one), the job, the inputs digest and the UTC time; `seal` as written (an old runner's; nothing checks it),
+    `sealed` whether the record is the stage runner's (read_runner_record decides it from the end folder)."""
     status: str
     exit: int
     stage: str = "-"
@@ -154,28 +152,10 @@ def record_body(status: str, code: int, stage: str, job: str, inputs: str, when:
     return f"status {status}\nexit {code}\nstage {stage}\njob {job}\ninputs {inputs}\ntime {when}"
 
 
-def seal_of(body: str, key: str) -> str:
-    """Deprecated (no key exists in a build container any more: the runtime layer's end folder, which only the stage
-    runner may write, is the record's trust; read_runner_record). The old seal of a record body: SHA-256 over key,
-    newline, body, newline, key; kept so that a record of an older build can still be checked with its key."""
-    return hashlib.sha256(f"{key}\n{body}\n{key}".encode("ascii")).hexdigest()
-
-
-def new_end_key(work: Path, job: str = "build") -> Optional[str]:
-    """Deprecated: always None, and no key file is written. It wrote a one-run key (END_KEY) into the job folder for
-    the stage runner to seal its record with. The runtime layer keeps no key in the container: the end record lives in
-    the runner's own end folder (Core/runtime_layer.py end_folder), and the host trusts it by the folder's owner and
-    mode, the container's real exit status and its inspect check (read_runner_record)."""
-    import warnings
-    warnings.warn("build_end.new_end_key is deprecated: the end record lives in the runtime layer's end folder "
-                  "(read_runner_record); no key exists", DeprecationWarning, stacklevel=2)
-    return None
-
-
-def read_end_record(path: Path, key: Optional[str] = None) -> Optional[EndRecord]:
+def read_end_record(path: Path) -> Optional[EndRecord]:
     """The end record at `path`, or None when there is none or it does not fit (a half-written or foreign file is no
     record). Never follows a link (the record, its job folder or the stages folder): the container writes them.
-    With `key` (this run's, new_end_key) the record's `sealed` says whether the stage runner wrote it."""
+    `sealed` is False here: read_runner_record decides whose record it is."""
     try:
         path = Path(path)
         if _linked(path) or not path.is_file() or path.stat().st_size > MAX_RECORD_BYTES:
@@ -200,10 +180,7 @@ def read_end_record(path: Path, key: Optional[str] = None) -> Optional[EndRecord
         return None
     if not _SEAL.match(seal):
         return None
-    sealed = bool(key and _KEY.match(key) and seal != "-"
-                  and hmac.compare_digest(seal, seal_of(record_body(status, int(code), stage, job, inputs, when),
-                                                        key)))
-    return EndRecord(status, int(code), stage, job, inputs, when, seal, sealed, end)
+    return EndRecord(status, int(code), stage, job, inputs, when, seal, False, end)
 
 
 def mounts_keep_owners(platform_name: Optional[str] = None) -> bool:
@@ -370,7 +347,7 @@ __all__ = ["END_REASONS", "STATUS_OF", "EVENT_OF", "EVENTS", "NAME_OF_EVENT", "E
            "RUNNING_NOTE", "END_GRACE", "NO_RECORD_TEXT", "FOREIGN_RECORD_TEXT", "EXIT_MISMATCH_TEXT",
            "EARLY_RECORD_TEXT", "FAILED_RECORD_TEXT", "END_KEY", "LAST_STAGE", "PREFLIGHT_STAGE", "STAGE_USER_EXIT",
            "STAGE_USER_TEXT", "STAGE_USER_REFUSED", "stage_user_problem", "EndRecord", "read_end_record",
-           "record_body", "seal_of", "new_end_key", "read_runner_record", "end_folder_state", "mounts_keep_owners",
+           "record_body", "read_runner_record", "end_folder_state", "mounts_keep_owners",
            "end_problem", "end_record_path",
            "write_cancel_note", "reason_of_timeout", "status_of", "event_of", "speaking_name", "reason_text",
            "EXIT_CODES", "EXIT_STILL_RUNNING", "exit_code"]

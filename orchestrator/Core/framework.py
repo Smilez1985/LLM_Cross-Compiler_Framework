@@ -26,7 +26,6 @@ from orchestrator.utils.logging import setup_logging, get_logger
 # names stay attributes of this module (framework.RAGManager, ...; a test may replace one).
 from orchestrator.Core.config_manager import ConfigManager
 _LAZY = {
-    "TelemetryManager": "orchestrator.utils.telemetry",
     "UpdateManager": "orchestrator.utils.updater",
     "SecretsManager": "orchestrator.Core.secrets_manager",
     "DockerManager": "orchestrator.Core.docker_manager",
@@ -59,7 +58,6 @@ if TYPE_CHECKING:  # annotations only
     from orchestrator.Core.secrets_manager import SecretsManager
     from orchestrator.Core.self_healing_manager import SelfHealingManager
     from orchestrator.Core.target_manager import TargetManager
-    from orchestrator.utils.telemetry import TelemetryManager
     from orchestrator.utils.updater import UpdateManager
 
 
@@ -105,7 +103,6 @@ class FrameworkManager:
 
         # Manager Placeholders (the annotations name the classes of _LAZY; they are not evaluated here)
         self.secrets_manager: Optional[SecretsManager] = None
-        self.telemetry: Optional[TelemetryManager] = None
         self.docker_manager: Optional[DockerManager] = None
         self.target_manager: Optional[TargetManager] = None
         self.model_manager: Optional[ModelManager] = None
@@ -137,10 +134,10 @@ class FrameworkManager:
         # installation (a module that cannot be imported) stops the boot with that cause as init_error, like every
         # other boot error: the CLI prints it and exits with 1, the GUI shows it (no traceback).
         try:
-            SecretsManager, TelemetryManager, DockerManager, BuildEngine, TargetManager, ModelManager, DittoCoder, \
+            SecretsManager, DockerManager, BuildEngine, TargetManager, ModelManager, DittoCoder, \
                 SelfHealingManager, DeploymentManager, CommunityManager, LLMOrchestrator, BuildService, JobService, \
                 UpdateManager, build_tool_registry = map(_component, (
-                    "SecretsManager", "TelemetryManager", "DockerManager", "BuildEngine", "TargetManager",
+                    "SecretsManager", "DockerManager", "BuildEngine", "TargetManager",
                     "ModelManager", "DittoCoder", "SelfHealingManager", "DeploymentManager", "CommunityManager",
                     "LLMOrchestrator", "BuildService", "JobService", "UpdateManager", "build_tool_registry"))
         except ImportError as e:
@@ -159,10 +156,8 @@ class FrameworkManager:
                 self.logger.critical("Failed to initialize SecretsManager. Aborting for security reasons.")
                 return False
 
-            # 2. Telemetry (Opt-In check happens inside)
-            self.telemetry = TelemetryManager(self)
-            
-            # 3. Docker Connectivity
+            # 2. Docker Connectivity (the person's opt-in error report, enable_telemetry, is the crash dialog's:
+            #    utils/crash_report.issue_link)
             # Relative data paths (targets, output, cache, models) resolve against the installation path,
             # never the working directory (the MCP server, for instance, is started from anywhere).
             self.docker_manager = DockerManager(self.config, base_dir=self.info.installation_path,

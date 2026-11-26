@@ -85,8 +85,8 @@ def _label(text: str = "") -> QLabel:
 
 
 def _size(size: int) -> str:
-    from orchestrator.gui.chat_panel.panel import size_text
-    return size_text(size, current_language())
+    from orchestrator.utils.sizes import format_size
+    return format_size(size, current_language(), exact=True)
 
 
 def gib(size: Optional[int], lang: Optional[str] = None) -> str:

@@ -24,6 +24,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 from orchestrator.Core import community_pack as cp
 from orchestrator.Core import knowledge_snapshots as ks
 from orchestrator.Core import knowledge_sources as sources_mod
+from orchestrator.utils.sizes import format_size
 from test_doctor_fixes import run_cli
 from test_edge_store import build_old_store, failed_state
 from test_rag import ingest_all, make_rag  # noqa: F401 - the fixture
@@ -58,7 +59,7 @@ def test_the_disk_line_says_whether_the_next_snapshot_fits(tmp_path, monkeypatch
     disk = ks.snapshot_disk(state)
     assert disk is not None and disk.verdict == verdict and disk.room.estimate == 4_000_000
     assert disk.total == 4_000_010 and disk.line() == ks.DISK_LINE.format(size="4.0 MB",
-                                                                             free=ks.size_text(free))
+                                                                             free=format_size(free, "en"))
     warning = disk.warning()
     if verdict == "enough":
         assert warning == ""

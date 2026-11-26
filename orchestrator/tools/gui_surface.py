@@ -324,13 +324,6 @@ class GuiForm:
                 f.forget_ai()
         self._emit("person", "")
 
-    def forget_person_choices(self) -> None:
-        """The person cleared the form: no value is theirs any more."""
-        for f in self.fields:
-            f.person_set = False
-            f.forget_ai()
-        self._emit("person", "")
-
     # --- an AI's fill ---------------------------------------------------------------------------------------------
 
     def fill(self, values: Dict[str, Any], *, current_page_only: bool = False,

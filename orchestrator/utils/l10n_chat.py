@@ -219,9 +219,6 @@ TEXTS = {
         "chat.clear.history_unlisted": "this window holds a conversation with Ditto that its file chat_history.json "
                                        "does not show, so it cannot be listed. Restart the program and try again",
         "chat.clear.history_changed": "it changed while you were asked; look at the list again",
-        "chat.size.bytes": "{n} bytes",
-        "chat.size.kb": "{kb} KB ({n} bytes)",
-        "chat.size.mb": "{mb} MB ({n} bytes)",
 
         # Tools > Clear Input History (the same list as "Clear chat")
         "chat.clear.input_history.name": "Input history",
@@ -447,9 +444,6 @@ TEXTS = {
                                        "und versuche es noch einmal",
         "chat.clear.history_changed": "es hat sich geändert, während du gefragt wurdest; sieh dir die Liste noch "
                                       "einmal an",
-        "chat.size.bytes": "{n} Bytes",
-        "chat.size.kb": "{kb} KB ({n} Bytes)",
-        "chat.size.mb": "{mb} MB ({n} Bytes)",
 
         "chat.clear.input_history.name": "Eingabeverlauf",
         "chat.clear.input_history.what": "die zuletzt verwendeten Modelle, Targets, Boards, URLs, Geräte und "

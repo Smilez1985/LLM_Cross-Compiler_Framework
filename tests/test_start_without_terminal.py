@@ -634,7 +634,7 @@ def test_the_uninstaller_removes_the_start_menu_shortcuts():
         'SET "SHORTCUT_NAME=LLM-Cross-Compiler-Framework.lnk"' in text
 
 
-# --- the opt-in error report without Qt (utils/crash_report.issue_link, utils/telemetry) ---------------------------
+# --- the opt-in error report without Qt (utils/crash_report.issue_link) -----------------------------------------
 
 def test_the_issue_link_keeps_the_end_of_long_details_and_scrubs_again():
     from urllib.parse import parse_qs, urlsplit
@@ -646,16 +646,7 @@ def test_the_issue_link_keeps_the_end_of_long_details_and_scrubs_again():
     assert len(url) < 30000
 
 
-def test_telemetry_is_the_persons_opt_in_and_uses_the_crash_details(monkeypatch):
-    from types import SimpleNamespace as NS
-    from urllib.parse import parse_qs, urlsplit
+def test_the_opt_in_is_the_setting_enable_telemetry():
     from orchestrator.utils.crash_report import telemetry_enabled
-    from orchestrator.utils.telemetry import TelemetryManager
     assert telemetry_enabled(None) is False and telemetry_enabled({"enable_telemetry": True}) is True
-    off = TelemetryManager(NS(config={"enable_telemetry": False}))
-    assert off.generate_issue_link(RuntimeError("x")) == ""
-    on = TelemetryManager(NS(config={"enable_telemetry": True}))
-    url = on.generate_issue_link(raised(f"bad {TOKEN}"), "the build tab", logs=f"line in {Path.home()}/log")
-    body = parse_qs(urlsplit(url).query)["body"][0]
-    assert "unexpected error in the build tab" in body and "Log (end):" in body
-    assert TOKEN not in url and str(Path.home()) not in body
+    assert telemetry_enabled({"enable_telemetry": False}) is False and telemetry_enabled({}) is False

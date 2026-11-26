@@ -117,10 +117,6 @@ class ProviderPreset(BaseModel):
         return [m.id for m in self.methods if m.opt_in]
 
     @property
-    def reject_key_prefixes(self) -> List[str]:
-        return [p for m in self.methods for p in m.reject_prefixes]
-
-    @property
     def env_names(self) -> List[str]:
         """Every environment variable a method of this preset reads."""
         return [name for m in self.methods for name in m.env]
@@ -149,12 +145,6 @@ class ProviderPreset(BaseModel):
         if self.location != "auto":
             return self.location == "local"
         return is_local_url(base_url or self.base_url)
-
-    def located_by_address(self, base_url: Optional[str] = None) -> bool:
-        """True when the "local" label comes from the server's address (location "auto" and the address counts as
-        local by check_location): a connection to it then goes only to the checked local addresses (LLMClient), so
-        the label holds for the connection too."""
-        return self.location == "auto" and self.is_local(base_url)
 
     def offline_refusal(self, base_url: Optional[str] = None, config: Any = None) -> Optional[OfflineRefusal]:
         """Why this preset cannot be used in offline mode with `base_url` (None when it can): a cloud provider, or a

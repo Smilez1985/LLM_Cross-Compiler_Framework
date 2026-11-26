@@ -57,12 +57,6 @@
   },
   {
    "from": "orchestrator.rag.migration",
-   "to": "orchestrator.Core.knowledge_snapshots",
-   "reason": "the knowledge-base conversion takes a snapshot first (to be injected)",
-   "until": "c5-split-core"
-  },
-  {
-   "from": "orchestrator.rag.migration",
    "to": "orchestrator.Core.trash",
    "reason": "the knowledge-base conversion moves the old storage to the trash (to be injected)",
    "until": "c5-split-core"

@@ -15,22 +15,8 @@ Updates v2.3.0:
 import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-from dataclasses import dataclass
 
 from orchestrator.utils.logging import get_logger
-
-@dataclass
-class ModelMetadata:
-    name: str
-    source: str
-    format: str
-    model_type: str = ""
-    size_bytes: int = 0
-    license: str = "unknown"
-    
-    @property
-    def size_gb(self) -> float:
-        return self.size_bytes / (1024 ** 3)
 
 class ModelManager:
     def __init__(self, config_or_framework: Any, base_dir: Optional[Path] = None):

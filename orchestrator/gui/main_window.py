@@ -36,7 +36,7 @@ from orchestrator.utils.localization import get_instance as get_i18n
 from orchestrator.utils.localization import ui_text
 
 # GUI Components
-from orchestrator.gui.dialogs import SecretInputDialog, HealingConfirmDialog, ToolPermissionsDialog
+from orchestrator.gui.dialogs import HealingConfirmDialog, ToolPermissionsDialog
 from orchestrator.gui.wizards import ModuleCreationWizard
 from orchestrator.gui.builder_tab import BuilderTab
 from orchestrator.gui.chat_window import ChatWindow
@@ -702,14 +702,6 @@ class MainOrchestrator(QMainWindow):
                 self.status.showMessage(ui_text("save.ai_saved", paths=", ".join(str(a) for a in flow.artifacts)),
                                         30000)
 
-    def _open_secret_dialog(self, key, name):
-        if not getattr(self.framework, 'secrets_manager', None):
-            QMessageBox.critical(self, "Error", "SecretsManager not available!")
-            return
-            
-        dlg = SecretInputDialog(self.framework, key, name, self)
-        dlg.exec()
-
     def _open_ai_config(self):
         """Ditto > AI Settings...: File > Settings... at Ditto > AI settings."""
         menu_build.open_settings(self, "ditto", "ai")
@@ -834,7 +826,7 @@ class MainOrchestrator(QMainWindow):
     def _clear_input_history(self):
         """Asks with the full list of what goes (full path, file name, size, what it is; "No" is the default) and
         deletes only the files it listed: every deletion the person can see lists exactly what it deletes."""
-        from orchestrator.gui.chat_panel.panel import size_text
+        from orchestrator.utils.sizes import format_size
         t = self.i18n.t
         history = input_history.for_config(self.framework.config)
         if history is None:
@@ -851,7 +843,7 @@ class MainOrchestrator(QMainWindow):
                 ui_text(f"chat.clear.input_history.{kind}name"),
                 ui_text("chat.clear.path", path=one_line(str(path.resolve()))),
                 ui_text("chat.clear.file", name=one_line(path.name)),
-                ui_text("chat.clear.size", size=size_text(size, lang)),
+                ui_text("chat.clear.size", size=format_size(size, lang, exact=True)),
                 ui_text("chat.clear.what_label", what=ui_text(f"chat.clear.input_history.{kind}what")))))
         if not ask(self, t("history.clear.title"), t("history.clear.question") + "\n\n" + "\n\n".join(items)):
             return

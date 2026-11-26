@@ -719,11 +719,9 @@ def test_a_targets_own_runner_is_ignored_with_a_note_and_never_run(engine, tmp_p
     from test_pipeline import make_config
     from orchestrator.Core import runtime_layer
     from orchestrator.Core.builder import BuildProgress, BuildStatus
-    from orchestrator.utils.sandbox import STAGE_RUNNER_OLD, runner_text_problem, stage_runner_problem
+    from orchestrator.utils.sandbox import STAGE_RUNNER_OLD, runner_text_problem
     target = _target_with_runner(tmp_path / "old", OLD_RUNNER, helper)
     assert runner_text_problem(target / "modules") == STAGE_RUNNER_OLD   # the old verdict, a description only
-    with pytest.warns(DeprecationWarning):
-        assert stage_runner_problem(target / "modules") is None
     progress = BuildProgress("b1", BuildStatus.BUILDING, "")
     kwargs, env, _ = engine._sandbox(make_config(), tmp_path / "builds" / "b1", target_path=target, job="build",
                                      progress=progress)
@@ -805,7 +803,6 @@ def _target_with_hollow_helper(root: Path, helper=HOLLOW_HELPER) -> Path:
 @pytest.mark.parametrize("helper", [HOLLOW_HELPER, None, "folder"], ids=["hollow", "missing", "folder"])
 def test_every_build_context_carries_the_frameworks_stage_helper(tmp_path, helper):
     from orchestrator.utils.build_context import FRAMEWORK_STAGE_HELPER, stage_build_context
-    from orchestrator.utils.sandbox import stage_runner_problem
     target = _target_with_hollow_helper(tmp_path, helper)
 
     dockerfile = stage_build_context(target, _app_folder(tmp_path), tmp_path / "ctx")
@@ -815,8 +812,6 @@ def test_every_build_context_carries_the_frameworks_stage_helper(tmp_path, helpe
     assert staged.read_bytes() == FRAMEWORK_STAGE_HELPER.read_bytes(), "the target's helper reached the build"
     # and no build reads it anyway: the layer's runner sources the layer's own helper (the target's runner files only
     # earn the plain note)
-    with pytest.warns(DeprecationWarning):
-        assert stage_runner_problem(target / "modules") is None
 
 
 def test_the_framework_helper_is_the_layers_and_both_shipped_targets_only_source_it():

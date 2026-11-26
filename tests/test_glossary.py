@@ -133,8 +133,8 @@ def test_links_into_the_manual_use_the_repository_s_current_address():
     """Merge fix (round 10b): the glossary was written before the repository was renamed to LLM_Cross-Compiler_Framework
     and linked the manual under the old address. GitHub forwards it today, but the card names the source it opens,
     so it showed the old name. The manual's address is the one the bug report link of the program uses."""
-    from orchestrator.utils.telemetry import GITHUB_REPO_URL
-    repository = GITHUB_REPO_URL.rsplit("/issues/", 1)[0]
+    from orchestrator.utils.crash_report import ISSUE_URL
+    repository = ISSUE_URL.rsplit("/issues/", 1)[0]
     assert repository == "https://github.com/Smilez1985/LLM_Cross-Compiler_Framework"
     assert REPO_DOCS == f"{repository}/blob/main/docs/"
     for term_id, entry in TERMS.items():

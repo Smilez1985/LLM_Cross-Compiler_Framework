@@ -11,8 +11,11 @@ replacement in the changelog of that round):
 - validate_python_version: the supported-Python check that Mojo's Python check (Core/mojo/checks/python.py) runs on.
 - check_docker_environment: the build engine's Docker check (ping of the framework's client, buildx), which Mojo's
   Docker check (Core/mojo/checks/docker.py) runs on as well.
-- Checks no newer code does: validate_path with its path security check, the platform, port, CPU- and memory-usage
-  and Docker version/Compose checks, validate_email, and the ValidationError family.
+- Mojo's checks of the Docker engine's version and of this computer's CPU and memory load (validate_docker_version,
+  validate_cpu_usage, validate_memory_usage: Core/mojo/checks/docker.py and load.py).
+- Checks no newer code does: validate_path with its path security check, the port check (_validate_port_availability)
+  and the ValidationError family. The platform, Docker Compose and e-mail checks are removed (2026-11-26: the
+  preflight names the platform, the framework uses no Compose, and it asks for no e-mail address).
 
 Importing this module checks nothing: the former check of the host at import time is gone (Mojo reports the Python
 version and the free disk space, decision A4; the RAM a build needs is part of every build plan, disk_plan.host_fit).
@@ -24,7 +27,6 @@ import platform
 import re
 import shutil
 import socket
-import subprocess
 import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -391,47 +393,6 @@ def validate_python_version(min_version: str, below: Optional[str] = None,
         )
 
 
-def _validate_platform(supported_platforms: List[str]) -> ValidationResult:
-    """Validate platform support"""
-    try:
-        current_platform = platform.system().lower()
-        
-        # Normalize platform names
-        platform_mapping = {
-            'windows': 'windows',
-            'linux': 'linux',
-            'darwin': 'macos'
-        }
-        
-        normalized_platform = platform_mapping.get(current_platform, current_platform)
-        
-        if normalized_platform in supported_platforms:
-            return ValidationResult(
-                valid=True,
-                severity=ValidationSeverity.SUCCESS,
-                message=f"Platform supported: {normalized_platform}",
-                validation_type=ValidationType.SYSTEM,
-                details={"platform": normalized_platform, "supported": supported_platforms}
-            )
-        else:
-            return ValidationResult(
-                valid=False,
-                severity=ValidationSeverity.ERROR,
-                message=f"Platform not supported: {normalized_platform}",
-                validation_type=ValidationType.SYSTEM,
-                details={"platform": normalized_platform, "supported": supported_platforms}
-            )
-            
-    except Exception as e:
-        return ValidationResult(
-            valid=False,
-            severity=ValidationSeverity.ERROR,
-            message=f"Platform check failed: {str(e)}",
-            validation_type=ValidationType.SYSTEM,
-            details={"exception": str(e)}
-        )
-
-
 def _validate_port_availability(port: int) -> ValidationResult:
     """Validate port availability"""
     try:
@@ -675,60 +636,6 @@ def validate_docker_version(client: Any = None, minimum: str = DOCKER_MIN_VERSIO
         )
 
 
-def _validate_docker_compose() -> ValidationResult:
-    """Validate Docker Compose availability"""
-    try:
-        # Try docker-compose command first
-        result = subprocess.run(
-            ["docker-compose", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        
-        if result.returncode == 0:
-            return ValidationResult(
-                valid=True,
-                severity=ValidationSeverity.SUCCESS,
-                message="Docker Compose available (standalone)",
-                validation_type=ValidationType.DEPENDENCY,
-                details={"type": "standalone", "version": result.stdout.strip()}
-            )
-        
-        # Try docker compose plugin
-        result = subprocess.run(
-            ["docker", "compose", "version"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        
-        if result.returncode == 0:
-            return ValidationResult(
-                valid=True,
-                severity=ValidationSeverity.SUCCESS,
-                message="Docker Compose available (plugin)",
-                validation_type=ValidationType.DEPENDENCY,
-                details={"type": "plugin", "version": result.stdout.strip()}
-            )
-        
-        return ValidationResult(
-            valid=False,
-            severity=ValidationSeverity.WARNING,
-            message="Docker Compose not available",
-            validation_type=ValidationType.DEPENDENCY
-        )
-        
-    except Exception as e:
-        return ValidationResult(
-            valid=False,
-            severity=ValidationSeverity.ERROR,
-            message=f"Docker Compose check error: {str(e)}",
-            validation_type=ValidationType.DEPENDENCY,
-            details={"exception": str(e)}
-        )
-
-
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
@@ -860,28 +767,6 @@ def validate_own_network_url(url: str, config: Any = None) -> ValidationResult:
         validation_type=ValidationType.SECURITY,
         details={"url": url, "host": parsed.hostname}
     )
-
-
-def validate_email(email: str) -> ValidationResult:
-    """Validate email address format"""
-    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    
-    if re.match(email_pattern, email):
-        return ValidationResult(
-            valid=True,
-            severity=ValidationSeverity.SUCCESS,
-            message=f"Email format valid: {email}",
-            validation_type=ValidationType.CONFIGURATION,
-            details={"email": email}
-        )
-    else:
-        return ValidationResult(
-            valid=False,
-            severity=ValidationSeverity.ERROR,
-            message=f"Invalid email format: {email}",
-            validation_type=ValidationType.CONFIGURATION,
-            details={"email": email}
-        )
 
 
 def validate_ip_address(ip: str) -> ValidationResult:

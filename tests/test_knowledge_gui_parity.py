@@ -23,6 +23,7 @@ from types import SimpleNamespace
 import pytest
 
 from orchestrator.Core import knowledge_snapshots as ks
+from orchestrator.utils.sizes import format_size
 from test_deletion_dialog import boxes
 from test_edge_store import Audit, build_old_store, failed_state
 
@@ -66,7 +67,7 @@ def test_the_snapshots_window_says_beforehand_whether_the_next_snapshot_fits(tmp
         assert calls and calls[0][0] == Path(tmp_path), "the core function of `llm-cli knowledge snapshots`"
         text = dialog.disk.text()
         assert dialog.snapshot_disk.verdict == "does_not_fit"
-        assert ui_text("snapshots.next.no_room", lang, size="3.0 MB") in text
+        assert ui_text("snapshots.next.no_room", lang, size=format_size(3_000_000, lang)) in text
         assert ui_text("snapshots.next.step", lang) in text
         # wave 6 (design A.1, changed on purpose): the window names the place, never the CLI's commands, which
         # the command line's warning keeps
@@ -78,7 +79,7 @@ def test_the_snapshots_window_says_beforehand_whether_the_next_snapshot_fits(tmp
     monkeypatch.setattr(ks, "_disk_usage", usage(int(3.5 * GB)))
     dialog = window.KnowledgeSnapshotsDialog(tmp_path, lang=lang)
     try:
-        assert ui_text("snapshots.next.tight", lang, size="3.0 MB") in dialog.disk.text()
+        assert ui_text("snapshots.next.tight", lang, size=format_size(3_000_000, lang)) in dialog.disk.text()
         if lang == "en":
             assert ks.NEXT_TIGHT.format(size="3.0 MB") in dialog.disk.text()
     finally:
@@ -131,7 +132,7 @@ def test_convert_now_is_offered_before_any_attempt_and_runs_off_the_gui_thread(q
         assert dialog.btn_convert.isHidden() and dialog.storage_status.state == "converted"
         assert ui_text("storage.used.edge", lang, folder=str(state / "qdrant_edge")) in dialog.storage.text()
         assert ui_text("storage.old.folder.kept", lang, folder=str(state / "qdrant"),
-                       size=ks.size_text(dialog.storage_status.old_folder_bytes)) in dialog.storage.text()
+                       size=format_size(dialog.storage_status.old_folder_bytes, lang)) in dialog.storage.text()
         assert not dialog.btn_old.isHidden(), "the old folder is offered for deletion only now"
     finally:
         dialog.close()

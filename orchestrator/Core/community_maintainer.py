@@ -63,6 +63,7 @@ from orchestrator.Core.community_pack import (MANIFEST_NAME, RESERVED_NAMES, SIG
 from orchestrator.utils import l10n_maintainer
 from orchestrator.utils.helpers import ensure_directory
 from orchestrator.utils.atomic import remove_tree
+from orchestrator.Core.feed_words import one_line   # a value on one line, hidden characters escaped
 
 SERVICE = "lcf-community-index"   # the keyring service of the index signing key (the script's since its first version)
 REQUIRED_CHECK = "validate"       # the job of the community repository's check workflow; main requires it
@@ -106,9 +107,6 @@ class MaintainerError(PackError):
     def state(self) -> str:
         """The last state key ("" when none is set)."""
         return self.states[-1][0] if self.states else ""
-
-    def with_state(self, state_key: str, /, **values: Any) -> "MaintainerError":
-        return self.with_states([(state_key, values)] if state_key else [])
 
     def with_states(self, states: Sequence[Tuple[str, Dict[str, Any]]]) -> "MaintainerError":
         if states and not self.states:
@@ -440,12 +438,6 @@ def check_state(rollup: Any, name: str = REQUIRED_CHECK) -> str:
 
 def _review_file(path: str, raw: bytes) -> ReviewFile:
     return ReviewFile(path, len(raw), None if b"\x00" in raw else raw.decode("utf-8", errors="replace"))
-
-
-def one_line(text: Any) -> str:
-    """A value on one line with every line break and hidden character shown as an escape (a PR title, an author)."""
-    from orchestrator.tools.confirmation import visible
-    return visible(str(text))
 
 
 def shown_text(text: str) -> str:

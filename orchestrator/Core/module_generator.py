@@ -1555,15 +1555,6 @@ class ModuleGenerator:
         with open(dst, "w", encoding="utf-8", newline="\n") as f:  # LF like every file of the module
             yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
-    def _write_build_script(self, target_dir: Path, data: Dict[str, Any]):
-        """Deprecated: writes nothing. It wrote modules/build.sh, the target's own stage runner (the template's, or a
-        self-contained dispatcher without a template folder). A build no longer runs a target's runner at all: the
-        framework's runtime layer (Core/runtime_layer.py) runs the stage modules in the order of target.yml's
-        stages: block, and a build.sh a target ships is ignored with a plain note (runtime_layer.own_runner_note)."""
-        import warnings
-        warnings.warn("ModuleGenerator._write_build_script is deprecated: a generated target has no build.sh (the "
-                      "framework's runtime layer is the runner of every build)", DeprecationWarning, stacklevel=2)
-
     def _write_profile_script(self, target_dir: Path, data: Dict[str, Any]):
         """Generates the hardware probe script for the target."""
         content = f'''#!/bin/bash

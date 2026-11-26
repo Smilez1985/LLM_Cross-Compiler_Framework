@@ -25,9 +25,10 @@ class StepChanged(RuntimeError):
 
 
 def state_dir(framework) -> Path:
-    """The folder check_user_state looks at."""
-    config = getattr(framework, "config", None)
-    return Path(getattr(config, "user_state_dir", Path.home() / ".llm-framework"))
+    """The folder check_user_state looks at: the per-user folder (Core/disk_plan.state_dir, the one reader of the
+    setting), ~/.llm-framework for a framework without one."""
+    from orchestrator.Core.disk_plan import state_dir as per_user_folder
+    return per_user_folder(framework) or Path.home() / ".llm-framework"
 
 
 def plan(framework, _finding: Finding) -> Optional[RepairPlan]:

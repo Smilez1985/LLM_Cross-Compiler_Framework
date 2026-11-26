@@ -5,13 +5,11 @@ the channel of a server the framework hands one of the person's ACP agents.
 It has its own module so `llm-cli` can take the token out of the environment before any command runs without
 importing the token store (lazy loading); orchestrator.tools.mcp_tokens re-exports ENV_VAR. How a client starts the
 server (launch_command, installation_root) lives in orchestrator/utils/stdio_programs.py, the one implementation the
-MCP server's entries, Ditto as an ACP agent and the entry the ACP client hands an agent (Core/acp_hosts.py) share;
-the two names here stay as deprecated delegates.
+MCP server's entries, Ditto as an ACP agent and the entry the ACP client hands an agent (Core/acp_hosts.py) share.
 """
 
 import re
-from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 ENV_VAR = "LCF_MCP_TOKEN"      # the token of a stdio client, read once by `llm-cli mcp serve`
 # The channel label of a stdio server the framework hands one of the person's ACP agents (session/new.mcpServers):
@@ -38,20 +36,4 @@ def checked_channel(value: Any) -> str:
     return text if channel_label(text[len(CHANNEL_PREFIX):]) == text else ""
 
 
-def installation_root() -> Path:
-    """Deprecated name: the one implementation is orchestrator/utils/stdio_programs.installation_root (shared by the
-    MCP server, Ditto as an ACP agent and the ACP client); this name stays for its callers."""
-    from orchestrator.utils.stdio_programs import installation_root as root
-    return root()
-
-
-def launch_command(app_root: Path, windows: Optional[bool] = None) -> Dict[str, Any]:
-    """Deprecated name: how a client starts the MCP server over stdio. The one implementation is
-    orchestrator/utils/stdio_programs.launch_command (its default command is `mcp serve`); this name stays for its
-    callers."""
-    from orchestrator.utils.stdio_programs import launch_command as launch
-    return launch(app_root, windows)
-
-
-__all__ = ["CHANNEL_ENV", "CHANNEL_PREFIX", "ENV_VAR", "channel_label", "checked_channel", "installation_root",
-           "launch_command"]
+__all__ = ["CHANNEL_ENV", "CHANNEL_PREFIX", "ENV_VAR", "channel_label", "checked_channel"]

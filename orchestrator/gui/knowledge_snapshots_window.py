@@ -38,8 +38,9 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox, QFileDialog, QHeaderView, QLabel,
                                QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout)
 
-from orchestrator.Core.knowledge_snapshots import (delete_snapshots, export_snapshots, list_snapshots, size_text,
-                                                   snapshot_folder, snapshot_plan)
+from orchestrator.Core.deletion import size_text as _size_text
+from orchestrator.Core.knowledge_snapshots import (delete_snapshots, export_snapshots, list_snapshots, snapshot_folder,
+                                                   snapshot_plan)
 from orchestrator.utils.localization import current_language, ui_text
 
 COLUMNS = ("snapshots.col.name", "snapshots.col.taken", "snapshots.col.size", "snapshots.col.what",
@@ -112,15 +113,19 @@ class KnowledgeSnapshotsDialog(QDialog):
     def _t(self, key: str, **values) -> str:
         return ui_text(key, self.lang, **values)
 
+    def _size(self, n: int) -> str:
+        """A size in the window's language (the one formatter, utils/sizes through Core/deletion.size_text)."""
+        return _size_text(n, self.lang)
+
     def reload(self) -> None:
         self.snapshots = list_snapshots(self.folder)
         total = sum(s.size_bytes for s in self.snapshots)
-        self.intro.setText(self._t("snapshots.intro", n=len(self.snapshots), size=size_text(total),
+        self.intro.setText(self._t("snapshots.intro", n=len(self.snapshots), size=self._size(total),
                                    folder=str(self.folder)))
         self.disk.setText(self._disk_line(total))
         self.table.setRowCount(len(self.snapshots))
         for row, snap in enumerate(self.snapshots):
-            for column, value in enumerate((snap.name, snap.taken, size_text(snap.size_bytes), snap.what,
+            for column, value in enumerate((snap.name, snap.taken, self._size(snap.size_bytes), snap.what,
                                             str(snap.path))):
                 cell = QTableWidgetItem(value)   # plain text, never rich text
                 if column == 0:
@@ -193,7 +198,7 @@ class KnowledgeSnapshotsDialog(QDialog):
                                  points=status.points))
         if status.old_folder:
             key = "storage.old.folder.kept" if status.state == "converted" else "storage.old.folder"
-            lines.append(self._t(key, folder=status.old_folder, size=size_text(status.old_folder_bytes)))
+            lines.append(self._t(key, folder=status.old_folder, size=self._size(status.old_folder_bytes)))
         return "\n".join(lines)
 
     def _convert(self) -> None:
@@ -241,8 +246,8 @@ class KnowledgeSnapshotsDialog(QDialog):
         self.snapshot_disk = disk
         if disk is None:
             return ""
-        lines = [self._t("snapshots.disk", size=size_text(disk.total), free=size_text(disk.room.free))]
-        size = size_text(disk.room.estimate)
+        lines = [self._t("snapshots.disk", size=self._size(disk.total), free=self._size(disk.room.free))]
+        size = self._size(disk.room.estimate)
         if disk.verdict == "does_not_fit":
             lines.append(f"{self._t('snapshots.next.no_room', size=size)} {self._t('snapshots.next.step')}")
         elif disk.verdict == "tight":

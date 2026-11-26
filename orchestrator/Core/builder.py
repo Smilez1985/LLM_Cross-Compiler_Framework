@@ -1502,18 +1502,6 @@ class BuildEngine:
                          "downloaded.")
         return self.docker_client.images.get(tag)
 
-    def _offline_image(self, config: BuildConfiguration, progress: BuildProgress, tag: str, inputs: str,
-                       dockerfile: Path) -> Image:
-        """Deprecated (round 36): the image build asks _earlier_image and, without one, the offline plan
-        (_offline_build_plan). Kept for callers of the 3.1.0 name: the image built earlier from the same inputs, else
-        OfflineImageMissing (with the plan's stop text when a source is not local)."""
-        earlier = self._earlier_image(config, progress, tag, inputs)
-        if earlier is not None:
-            return earlier
-        self._offline_build_plan(config, progress, dockerfile)
-        raise OfflineImageMissing(f"Offline mode is on, and the image of the target {config.target_arch} for these "
-                                  "settings is not on this computer; its sources are local, so a build can make it.")
-
     def _llama_cpp_args(self, config: BuildConfiguration, progress: BuildProgress, dockerfile: Path) -> Dict[str, str]:
         """LLAMA_CPP_TAG and LLAMA_CPP_COMMIT from the pin, and LLAMA_CMAKE_ARGS from the build recipe's plan for the
         conversion tools (purpose host-tools) on this machine, when the target's Dockerfile takes it. The image runs

@@ -129,18 +129,3 @@ def test_an_outside_stop_without_the_note_still_counts(image):
     assert looped.returncode == 75
     assert "started 3 times with the same inputs" in looped.stderr
 
-
-def test_the_generated_fallback_runner_is_no_more(tmp_path):
-    """Changed on purpose (the runtime layer): a module generated without the template folder got a self-contained
-    runner with its own end record; no build runs a target's runner any more, so the generator writes none and says
-    the method is deprecated."""
-    import pytest
-    from orchestrator.Core.module_generator import ModuleGenerator
-    gen = ModuleGenerator.__new__(ModuleGenerator)
-    gen.template_dir = tmp_path / "no-template"
-    written = {}
-    gen._write_file = lambda path, content: written.__setitem__(path.name, content)
-    gen._make_executable = lambda path: None
-    with pytest.warns(DeprecationWarning):
-        gen._write_build_script(tmp_path, {"module_name": "Example", "quantization_logic": ""})
-    assert written == {}

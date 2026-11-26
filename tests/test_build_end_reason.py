@@ -131,29 +131,6 @@ def test_only_the_runners_done_record_with_exit_0_is_done(engine):
         engine._ended_by_record(progress, 0, "CONT: ")
 
 
-def test_a_seal_fits_only_its_own_key_and_body(tmp_path):
-    key = "ab" * 16
-    body = build_end.record_body("done", 0, "target", "build", "-", "2026-10-31T12:00:00Z")
-    path = tmp_path / "build.end"
-    path.write_text(f"{body}\nseal {build_end.seal_of(body, key)}\n", encoding="ascii")
-    assert build_end.read_end_record(path, key=key).sealed
-    assert not build_end.read_end_record(path, key="cd" * 16).sealed
-    assert not build_end.read_end_record(path).sealed
-    forged = body.replace("status done", "status done").replace("exit 0", "exit 0").replace("target", "convert")
-    path.write_text(f"{forged}\nseal {build_end.seal_of(body, key)}\n", encoding="ascii")
-    assert not build_end.read_end_record(path, key=key).sealed
-
-
-def test_no_key_is_written_any_more(tmp_path):
-    """Changed on purpose (the runtime layer): the one-run key in the work folder (end.key), which a module could
-    find wherever the runner's isolation failed, is gone; new_end_key is deprecated, writes nothing and says so. The
-    end folder, which only the runner may write, is the record's trust (test_runtime_layer.py)."""
-    work = tmp_path / "work"
-    with pytest.warns(DeprecationWarning):
-        assert build_end.new_end_key(work) is None
-    assert not (work / "stages" / "build" / build_end.END_KEY).exists()
-
-
 def test_a_stale_record_is_removed_before_the_container_starts(engine, client, tmp_path, monkeypatch):
     work = _work(tmp_path)
     record = build_end.end_record_path(work, "build")

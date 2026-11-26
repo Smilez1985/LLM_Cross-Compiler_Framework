@@ -32,14 +32,6 @@ SETTING_DATASET = "default_calibration_dataset"
 DATASETS_LABEL = "datasets"
 
 
-class DefaultDatasetMissing(ValueError):
-    """The file `default_calibration_dataset` names is not there."""
-
-    def __init__(self, name: str):
-        super().__init__(f"The default calibration dataset '{name}' (setting {SETTING_DATASET}) was not found.")
-        self.name = name
-
-
 def _get(config: Any, key: str, default: Any = None) -> Any:
     get = getattr(config, "get", None)
     try:

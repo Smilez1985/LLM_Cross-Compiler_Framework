@@ -43,7 +43,7 @@ from urllib.parse import urlparse
 from orchestrator.llm.auth.resolver import CredentialResolver, ResolvedCredential
 from orchestrator.llm.auth.store import CredentialStore
 from orchestrator.llm.catalog import Catalog, ProviderPreset, load_catalog
-from orchestrator.llm.errors import LLMError, NotConfigured, ProviderUnavailable, RateLimited, Refused
+from orchestrator.llm.errors import LLMError, NotConfigured, ProviderUnavailable, Refused
 from orchestrator.llm.filter_report import FilterReport
 from orchestrator.llm.privacy import PrivacyFilter, normalize_level, restore, restore_obj, without_secrets
 from orchestrator.llm.providers import adapter_class
@@ -81,7 +81,7 @@ def offline_http_client(config: Any, *, offline: bool = True):
     when the connection is opened (LocalityRefused, which map_openai_error turns into the plain refusal).
 
     In offline mode (`offline` True) `config` holds the person's opt-outs (offline mode's reach); online, a server
-    labelled local by its address (ProviderPreset.located_by_address) gets this client with `config` None and
+    labelled local by its address (location "auto": ProviderPreset.is_local) gets this client with `config` None and
     `offline` False: the label without the opt-outs (check_location) then holds for the connection too, so prompts
     sent without the privacy filter never reach a public address."""
     import httpcore2
@@ -375,7 +375,7 @@ class LLMClient:
             if self._offline_http is None:
                 self._offline_http = offline_http_client(self.config)
             return self._offline_http
-        # labelled local by its address (location "auto": ProviderPreset.located_by_address), as `target` says; not
+        # labelled local by its address (location "auto": ProviderPreset.is_local), as `target` says; not
         # judged a second time here, so the client always fits the privacy filter the caller decided with target.local
         if target.local and target.base_url and not is_loopback_url(target.base_url) \
                 and getattr(target.preset, "location", "") == "auto":
@@ -555,8 +555,11 @@ class LLMClient:
                 if e.result is not None:
                     e.result = self._restore(e.result, mapping, report)
                 raise
-            except (RateLimited, ProviderUnavailable) as e:
-                wait = e.retry_after if e.retry_after is not None else self._backoff(attempt)
+            except LLMError as e:
+                if not e.retryable:   # the error says whether a retry can help (llm/errors.py: the one list)
+                    raise
+                retry_after = getattr(e, "retry_after", None)
+                wait = retry_after if retry_after is not None else self._backoff(attempt)
                 if attempt >= MAX_RETRIES or wait > max_wait:
                     raise
                 attempt += 1

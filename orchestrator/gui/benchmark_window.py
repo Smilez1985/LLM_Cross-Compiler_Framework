@@ -191,11 +191,6 @@ class BenchmarkWindow(QMainWindow):
         self._fill_earlier()
         self._update_note()
 
-    def select_model(self, key: str) -> None:
-        index = self.cb_model.findData(key)
-        if index >= 0:
-            self.cb_model.setCurrentIndex(index)
-
     def _fill_boards(self) -> None:
         from orchestrator.runtime.device.trusted import DeviceStoreError, TrustedDevices
         state = self._state()

@@ -769,7 +769,7 @@ def storage_lines(status: StorageStatus) -> List[Tuple[str, str]]:
     """The status in plain English lines for the command line, each with its style ("", "yellow" or "red"): the
     storage in use, the conversion and the old folder (the GUI says the same in the person's language,
     l10n_knowledge)."""
-    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.utils.sizes import format_size
     lines: List[Tuple[str, str]] = []
     if status.used == "qdrant-edge":
         lines.append(("", f"Storage: Qdrant Edge in {status.folder}."))
@@ -791,7 +791,7 @@ def storage_lines(status: StorageStatus) -> List[Tuple[str, str]]:
                                 f"{status.failure}"))
         lines.append(("", retry_sentence(status.code)))
     if status.old_folder:
-        kept = size_text(status.old_folder_bytes)
+        kept = format_size(status.old_folder_bytes, "en")
         if status.state == "converted":
             lines.append(("", f"The old folder {status.old_folder} ({kept}) is kept until you delete it: 'llm-cli "
                               "knowledge storage delete-old' (or Tools > Knowledge Snapshots... > Delete the old "

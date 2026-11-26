@@ -377,7 +377,7 @@ def _check_base(base: Any, backend: str) -> None:
 def offline_base_refusal(base: Any, tag: str) -> str:
     """The plain stop of offline mode when the runtime-base stage is not on this computer: building it pulls the base
     image and installs the runtime libraries from the distribution's package mirrors, which offline mode does not
-    allow (the offline image rule of the target images, Core/builder._offline_image)."""
+    allow (the offline image rule of the target images)."""
     return (f"Offline mode is on, and the runtime base of Ditto's image ({tag}) is not on this computer. Building it "
             f"pulls {getattr(base, 'image', 'its base image')} and installs its runtime libraries from the "
             "distribution's package mirrors, which offline mode does not allow. Set up Docker mode once with offline "

@@ -26,7 +26,7 @@ def _parts(framework):
 
 
 def plan(framework, _finding: Finding) -> Optional[RepairPlan]:
-    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.Core.deletion import size_text
     cm, rag = _parts(framework)
     found = (cm.untagged_imports(rag) if cm is not None and rag is not None else [])[:50]
     if not found:

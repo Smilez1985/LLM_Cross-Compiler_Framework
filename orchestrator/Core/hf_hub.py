@@ -130,7 +130,7 @@ class HubFile:
 
 def hub_file(sibling: Any) -> HubFile:
     """One entry of model_info(files_metadata=True).siblings with its size and LFS sha256 (what the fetcher checks a
-    download against). The one parser of the Hub's file list: HubClient.info, file_at_commit, the Take over's Hub
+    download against). The one parser of the Hub's file list: HubClient.info, repository_file, the Take over's Hub
     list, hf_lookup.look_up and the Builder's staging (BuildEngine._hub_files) read it here."""
     lfs = getattr(sibling, "lfs", None)
     sha = getattr(lfs, "sha256", None) if lfs is not None and not isinstance(lfs, dict) else \
@@ -823,21 +823,14 @@ def _api_for(api: Any) -> Callable[[Any], Any]:
     return api if callable(api) and not hasattr(api, "model_info") else (lambda _token: api)
 
 
-def file_at_commit(api: Any, repo: str, filename: str, token: Any = False,
-                   revision: Optional[str] = None) -> Tuple[str, HubFile]:
-    """The commit (`revision`, else the current one) of `repo` and its file `filename` with the size and LFS sha256 the
-    Hub lists for that commit: what HubFetcher checks the download against. `api`: the Hub's API, or a factory of it
-    per token (hub_api); `token`: the person's token or False (never an implicit one), sent only when the Hub refuses
-    the look-up without it. HubError when the repository, the commit or the file is not there or the Hub lists no
-    size."""
-    commit, file, _needed = repository_file(api, repo, filename, token, revision)
-    return commit, file
-
-
 def repository_file(api: Any, repo: str, filename: str, token: Any = False,
                     revision: Optional[str] = None) -> Tuple[str, HubFile, bool]:
-    """file_at_commit and whether Hugging Face needs the token for the file (the repository is gated or private:
-    needs_token, or the look-up was refused without the token)."""
+    """(commit, file, token needed): the commit (`revision`, else the current one) of `repo` and its file `filename`
+    with the size and LFS sha256 the Hub lists for that commit (what HubFetcher checks the download against), and
+    whether Hugging Face needs the token for the file (the repository is gated or private: needs_token, or the
+    look-up was refused without the token). `api`: the Hub's API, or a factory of it per token (hub_api); `token`:
+    the person's token or False (never an implicit one), sent only when the Hub refuses the look-up without it.
+    HubError when the repository, the commit or the file is not there or the Hub lists no size."""
     if not REPO_ID.match(repo or ""):
         raise HubError(f"'{repo}' is not a Hugging Face repository id (owner/name).", code="invalid_value")
     if not safe_filename(filename):
@@ -867,7 +860,7 @@ def download_for_person(models_dir: Path, repo: str, filename: str, *, api: Any,
                         progress: Optional[Callable[[str, int, int], None]] = None, owner: str = "gui",
                         disk_usage: Any = None) -> Path:
     """One file the person chose in the GUI's Hugging Face browser, through the same verified fetcher as the AI's
-    download_hf_file (one code path): pinned to the commit looked up first (file_at_commit), into
+    download_hf_file (one code path): pinned to the commit looked up first (repository_file), into
     download_path(models_dir, ...), resumable from its `.part` file, checked against the Hub's size and sha256 before
     it gets its name, stopped between two chunks by `stop` (DownloadStopped; the part stays). The one disk rule comes
     first (Core/disk_plan room with the reserve and what other calls reserved in `ledger`): disk_plan.InsufficientSpace

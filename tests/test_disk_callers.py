@@ -251,7 +251,7 @@ class TestSnapshotExportRoom:
         monkeypatch.setattr(ks.shutil, "disk_usage", fixed(2 * GIB + 999, total=16 * GB))
         with pytest.raises(ValueError) as e:
             ks.export_snapshots(folder, [name], target)
-        assert str(e.value) == f"{target} has 2.1 GB free; the export needs 0.0 MB and 2.1 GB must stay free there."
+        assert str(e.value) == f"{target} has 2.1 GB free; the export needs 1 kB and 2.1 GB must stay free there."
 
     def test_nothing_to_copy_is_never_refused(self, tmp_path, monkeypatch):
         ks, folder, target = self.snapshot(tmp_path)

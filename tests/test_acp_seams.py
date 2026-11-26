@@ -100,12 +100,11 @@ def test_the_old_helper_names_delegate():
 def test_the_agents_mcp_entry_is_the_one_launch_command(tmp_path):
     from orchestrator import mcp_server
     from orchestrator.Core.acp_hosts import AgentEntry, AgentStore
-    from orchestrator.tools import mcp_env
     from orchestrator.utils import stdio_programs
     root = stdio_programs.installation_root()
     one = stdio_programs.launch_command(root)
-    assert mcp_env.launch_command(root) == one == mcp_server.launch_command(root)
-    assert mcp_env.installation_root() == root == mcp_server.installation_root() == REPO_ROOT.resolve()
+    assert one == mcp_server.launch_command(root)
+    assert root == mcp_server.installation_root() == REPO_ROOT.resolve()
     store = AgentStore(tmp_path / "home", config={}, environ={"PATH": ""})
     entry = store.mcp_entry(AgentEntry(id="fake", name="Fake", kind="command"))
     assert entry["command"] == one["command"] and entry["args"] == one["args"]

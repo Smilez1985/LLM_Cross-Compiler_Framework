@@ -677,12 +677,6 @@ def without_paths(text: str, lang: Optional[str] = None) -> str:
     return text
 
 
-def protect_paths(text: str, lang: Optional[str] = None) -> str:
-    """fill_paths for a text that is formatted afterwards: the filled-in paths cannot carry braces anyway, so this is
-    the same; kept as the name ui_text uses."""
-    return fill_paths(text, lang)
-
-
 def window_of(object_name: Optional[str]) -> Optional[str]:
     """The objectName of what opens the window an object lives in (its menu action, the main window's tab, or the
     object itself when it is a menu entry); None for an unknown object."""

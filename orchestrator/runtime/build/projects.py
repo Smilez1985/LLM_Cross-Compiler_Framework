@@ -33,11 +33,6 @@ class Project:
     package_prefix: str                          # <prefix>-<arch>-<build id[:16]>.tar.gz
     start_script: bool                           # the board package carries llama-server.sh (llama.cpp only)
 
-    @property
-    def purposes(self) -> Tuple[str, ...]:
-        return tuple(self.targets)
-
-
 PROJECTS: Mapping[str, Project] = {
     LLAMA_CPP: Project(
         name=LLAMA_CPP, folder="llama.cpp",

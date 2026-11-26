@@ -19,7 +19,7 @@ llama.cpp pin").
 """
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 # The pin this inventory was read from (configs/llama_runtime.yml, llama_cpp.source).
 PIN_COMMIT = "d81235049384534c167caea52b85a694f6103d14"
@@ -172,15 +172,6 @@ PLANNED_ARCHES = ("x86_64", "arm64")
 def rows(arch: Optional[str] = None, kind: Optional[str] = None) -> Tuple[CpuOption, ...]:
     """The rows of one architecture and/or kind, in table order."""
     return tuple(r for r in OPTIONS if (arch is None or r.arch == arch) and (kind is None or r.kind == kind))
-
-
-def by_probe_key() -> Dict[str, CpuOption]:
-    """The first row each probe key decides."""
-    out: Dict[str, CpuOption] = {}
-    for row in OPTIONS:
-        if row.probe_key and row.probe_key not in out:
-            out[row.probe_key] = row
-    return out
 
 
 def feature_label(probe_key: str) -> str:

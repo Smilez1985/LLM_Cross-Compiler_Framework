@@ -21,7 +21,7 @@ def check_storage(state_dir) -> List[Finding]:
     """The storage of the local knowledge base, from the conversion record only (nothing is opened): a conversion
     that failed (a warning: the old storage is still in use, with the reason and how to try again), or the old folder
     kept after a conversion (information: only the person deletes it, through the deletion list; round 5 f)."""
-    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.Core.deletion import size_text
     from orchestrator.rag import migration
     try:
         info = migration.summary(state_dir)
@@ -63,8 +63,8 @@ def check_knowledge(framework) -> List[Finding]:
     round, answer 2): when the next snapshot (about the size of the newest) would not fit, Deep Ingest, restores and
     knowledge pack imports are refused until there is room, which is a warning with the person's list; when it fits
     but leaves little free space, that is information. Reads the folder only, never opens the knowledge base."""
-    from orchestrator.Core.knowledge_snapshots import (FREE_SPACE_STEP, list_snapshots, room_before, size_text,
-                                                       snapshot_folder)
+    from orchestrator.Core.deletion import size_text
+    from orchestrator.Core.knowledge_snapshots import FREE_SPACE_STEP, list_snapshots, room_before, snapshot_folder
     config = getattr(framework, "config", None)
     state_dir = getattr(config, "user_state_dir", None)
     if state_dir is None:

@@ -236,11 +236,6 @@ class AuthMethodSpec(BaseModel):
             raise ValueError(f"method '{self.id}': env and reject_prefixes belong to key methods")
         return self
 
-    @property
-    def needs_key(self) -> bool:
-        """A stored or environment key is required (bearer_optional works without one)."""
-        return self.type == "api_key"
-
     def binds_origin(self, preset: Any) -> bool:
         """Whether the key belongs to one endpoint (R6): keys of presets whose base URL the user can change and
         keys of local engines. Changing the base URL then never carries the key over."""

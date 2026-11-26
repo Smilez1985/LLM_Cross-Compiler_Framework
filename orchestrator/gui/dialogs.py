@@ -399,9 +399,6 @@ class AIConfigurationDialog(QDialog):
     def _secrets(self):
         return getattr(self.framework, 'secrets_manager', None)
 
-    def _key_method(self, preset):
-        return key_method(preset)
-
     def _change(self, preset=None) -> Optional[AISettingsChange]:
         """The change the dialog's fields describe (llm/settings_change.py holds the rules)."""
         preset = preset or self._preset()

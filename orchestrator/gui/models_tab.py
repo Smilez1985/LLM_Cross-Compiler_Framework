@@ -162,13 +162,6 @@ class ModelsTab(QWidget):
             return None
         return self.shown[index]
 
-    def select_key(self, key: str) -> bool:
-        for i, row in enumerate(self.shown):
-            if row.key == key:
-                self.table.selectRow(i)
-                return True
-        return False
-
     def _update_buttons(self) -> None:
         row = self.current()
         self.btn_open.setEnabled(row is not None and row.path is not None)

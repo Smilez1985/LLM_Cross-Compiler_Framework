@@ -14,6 +14,8 @@ from orchestrator.utils.next_steps import WithSteps
 
 
 class LLMError(WithSteps, Exception):
+    # Whether the client tries the request again after a pause (llm/client.py, with retry_after when the provider
+    # names one): the one list of what is retried is the classes that set it (RateLimited, ProviderUnavailable).
     retryable = False
 
     def __init__(self, message: str, *, provider: str = "", status: Optional[int] = None,

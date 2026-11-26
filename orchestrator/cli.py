@@ -2386,7 +2386,7 @@ def _use_earlier(ctx: FrameworkContext, earlier, output_dir: str) -> None:
     framework's build folder) copies nothing: the earlier build is named."""
     from orchestrator.Core.artifact_output import DestinationRefused, build_folder, copy_artifact, plan_copy
     from orchestrator.Core.deletion import PlanChanged
-    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.Core.deletion import size_text
     from orchestrator.utils.localization import ui_text
     fm = ctx.framework_manager
     source = str(earlier.info.get("path") or "")
@@ -2792,7 +2792,7 @@ def build_save(ctx: FrameworkContext, artifact: str, destination: Optional[str])
     from orchestrator.Core.artifact_output import (BUILDS, DestinationRefused, build_folder, list_artifacts,
                                                    output_folder, save_artifact)
     from orchestrator.Core.build_service import artifact_id
-    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.Core.deletion import size_text
     ctx.require_framework()
     fm = ctx.framework_manager
     waiting = [a for a in list_artifacts(fm) if a.where == BUILDS]
@@ -3203,7 +3203,7 @@ def build_image_plan(ctx: FrameworkContext, target: str, gpu: bool, as_json: boo
     if as_json:
         click.echo(json.dumps({"target": target, "images_here": len(images), **plan.ai()}, indent=2))
         return
-    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.Core.deletion import size_text
     console.print(f"[bold]Build container images of {escape(target)} on this computer:[/bold] "
                   + (", ".join(escape(", ".join(i.tags) or i.image_id[:19]) + f" ({size_text(i.size)})"
                                for i in images) or "none"))
@@ -3289,7 +3289,7 @@ def build_image_export(ctx: FrameworkContext, target: str, dest: Path, image: Op
     """Saves TARGET's build container image into a file with its sha256 file, for another offline computer
     (docker save). Nothing on this computer changes."""
     from orchestrator.Core import build_image
-    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.Core.deletion import size_text
     fm = _image_framework(ctx)
     try:
         result = build_image.export_image(fm, target, dest, actor="cli", image=image)
@@ -4469,7 +4469,7 @@ def runtime_ensure(ctx: FrameworkContext, mode: str, force: bool, placement: str
 
 def _runtime_objects_table(title: str, plan) -> None:
     """Every object of a list: its name, full path (or Docker's ID), file name, size and what it is."""
-    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.Core.deletion import size_text
     table = Table(title=title)
     for column in ("Name", "Full path or ID", "File name", "Size", "What it is"):
         table.add_column(column, overflow="fold")
@@ -4482,7 +4482,7 @@ def _runtime_objects_table(title: str, plan) -> None:
 
 
 def _runtime_removed(removal) -> None:
-    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.Core.deletion import size_text
     for name in removal.deleted:
         console.print(f"[green]Deleted: {escape(name)}[/green]")
     _print_kept(removal)
@@ -4496,7 +4496,7 @@ def _runtime_space_shortage(ctx: FrameworkContext, rt, shortage, run):
     again without the old mode's build), and only at a terminal: without one nothing is deleted or built. When the new
     mode then fails, you are told so and offered the old mode again. Returns the result of the switch; exits when
     nothing was switched."""
-    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.Core.deletion import size_text
     from orchestrator.runtime.llama_server import LocalRuntimeError
     from orchestrator.runtime.runtime_mode import (LeftoversChanged, RuntimeModeError, SpaceShortage, mode_label,
                                                    remove_leftovers)
@@ -4573,7 +4573,7 @@ def _runtime_leftovers(ctx: FrameworkContext, rt, plan) -> None:
     """W2: the new mode works, so the old mode goes completely: the full list (name, full path or ID, file name, size,
     what each is), then exactly that list is deleted for good after your one yes at a terminal (default no; no choice
     per item, no trash). Without a terminal nothing is removed."""
-    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.Core.deletion import size_text
     from orchestrator.runtime.runtime_mode import LeftoversChanged, RuntimeModeError, remove_leftovers
     _runtime_objects_table(f"Every object of the old mode: {len(plan.items)}, {size_text(plan.total_bytes)}", plan)
     console.print("The new mode works. Everything on this list is deleted for good (not into the trash), so the old "
@@ -6670,7 +6670,7 @@ def _doctor_free_space(framework, heading: str = "Tier 2: the framework's build 
     Framework Build Images... in the GUI: the one deletion path for the framework's Docker images. Returns how many
     images were deleted and, when none was, why ("" when the person chose none). The listing and the deletion are
     docker_objects.offer_image_list's, which the GUI's Mojo window opens with its deletion dialog."""
-    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.Core.deletion import size_text
     from orchestrator.Core.mojo.docker_objects import offer_image_list
     cache_note = ("Docker's build cache is not touched: it cannot be limited to the framework ('docker system df' "
                   "shows its size; 'docker builder prune' would clear it for every project on this computer).")
@@ -7116,7 +7116,8 @@ def knowledge_snapshots(click_ctx):
 @pass_context
 def knowledge_snapshots_list(ctx: FrameworkContext):
     """Every snapshot with its full path, file name, size and what it is; nothing is deleted"""
-    from orchestrator.Core.knowledge_snapshots import KEEPING_NOTE, list_snapshots, size_text, snapshot_folder
+    from orchestrator.Core.deletion import size_text
+    from orchestrator.Core.knowledge_snapshots import KEEPING_NOTE, list_snapshots, snapshot_folder
     ctx.require_framework()
     folder = snapshot_folder(ctx.framework_manager.config.user_state_dir)
     snapshots = list_snapshots(folder)
@@ -7203,7 +7204,8 @@ def knowledge_snapshots_prune(ctx: FrameworkContext):
 @pass_context
 def knowledge_snapshots_export(ctx: FrameworkContext, names: Tuple[str, ...], destination: Path):
     """Copy the snapshots NAMES to a folder you choose; each copy is checked by sha256. Nothing is deleted."""
-    from orchestrator.Core.knowledge_snapshots import export_snapshots, size_text, snapshot_folder
+    from orchestrator.Core.deletion import size_text
+    from orchestrator.Core.knowledge_snapshots import export_snapshots, snapshot_folder
     ctx.require_framework()
     folder = snapshot_folder(ctx.framework_manager.config.user_state_dir)
     try:

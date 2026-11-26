@@ -32,12 +32,10 @@ def check_docker(framework) -> List[Finding]:
     privilege = _privilege_findings(client) + _version_findings(client)
     if docker.engine == "podman":
         # Rootless Podman is the default engine install.sh sets up: it builds, with limits named here.
-        from orchestrator.utils.docker_engine import DOCKER_CE_WAY, PODMAN_LIMITS
+        from orchestrator.utils.docker_engine import DOCKER_CE_WAY, podman_note
         return [_ok("docker", "docker.daemon", "Container engine reachable: Podman, through its Docker-compatible "
                                                "interface (builds run there)"),
-                Finding("docker", "docker.engine", Severity.INFO,
-                        "The container engine is Podman: " + PODMAN_LIMITS["gpu"] + "; and "
-                        + PODMAN_LIMITS["buildkit"] + ". The framework refuses these with the reason.",
+                Finding("docker", "docker.engine", Severity.INFO, podman_note(),
                         DOCKER_CE_WAY, where="the container engine",
                         why="Under Podman, GPU builds and BuildKit features are not available; everything else "
                             "builds.", cannot="admin")] + privilege + stale \

@@ -432,12 +432,6 @@ def removal_text(done: DropbearRemoval) -> str:
     return f"Dropbear is off (stopped and disabled by the init system); {note}."
 
 
-def disable_dropbear(run: Callable[..., object], password: str = "") -> Tuple[bool, str]:
-    """Deprecated: remove_dropbear (which also says what happened to Dropbear's packages). (ok, reason)."""
-    done = remove_dropbear(run, password)
-    return done.ok, ("" if done.ok else done.reason)   # as before: no reason when Dropbear is off
-
-
 def _answer(text: str, key: str) -> Tuple[bool, str, str]:
     """(ok, reason, state) of an answer key=STATE or key=unavailable reason=WORD."""
     for line in (text or "").splitlines():
@@ -492,6 +486,6 @@ def wait_until_answers(host: str, port: int, *, seconds: float = WAIT_SECONDS, b
 __all__ = ["ALPINE_NOTE", "DROPIN", "DropbearRemoval", "REMOVAL_NOTES", "REMOVE_COMMANDS", "FAMILY_MANAGER", "SSH_SOCKET",
            "INSTALL_COMMANDS", "INSTALL_TIMEOUT", "PACKAGES", "PACMAN_SYNC_DIR",
            "PREPARE_COMMANDS", "SWITCH_PORT", "SWITCH_REASONS", "SwitchPlan",
-           "SwitchUnavailable", "banner_of", "disable_dropbear", "install", "manager_for", "plan",
+           "SwitchUnavailable", "banner_of", "install", "manager_for", "plan",
            "remove_dropbear", "removable_packages", "removal_text",
            "wait_until_answers"]
