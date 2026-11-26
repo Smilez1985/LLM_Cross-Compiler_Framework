@@ -473,12 +473,12 @@ def test_new_snapshots_never_delete_older_ones_and_post_no_reminder(tmp_path, mo
     """create_snapshot (every ingest, every restore's backup, on every channel) keeps every snapshot, however many
     there are: no limit, no count that deletes, reminds or warns (sixth round: as many as the disk holds)."""
     from test_optional_tools import Store, rag_with
-    from orchestrator.Core import request_store
     from orchestrator.Core.chat_feed import FeedStore
     rag = rag_with(tmp_path, Store())
     feed = FeedStore(tmp_path / "feed", key=b"k" * 32)
     rag.framework = SimpleNamespace(chat_feed=feed)
-    monkeypatch.setitem(request_store._PROGRAM, "kind", "gui")
+    from orchestrator.utils import program as program_kind
+    monkeypatch.setitem(program_kind._PROGRAM, "kind", "gui")
     for i in range(40):
         snapshot(rag.snapshot_dir, f"pre_ingest_{i}", when=1_000_000 + i)
     assert rag.create_snapshot("pre_ingest_new")

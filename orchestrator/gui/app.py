@@ -28,7 +28,8 @@ if str(root_dir) not in sys.path:
 from orchestrator.Core.config_manager import ConfigManager
 from orchestrator.Core.vault_key import set_passphrase_prompt
 from orchestrator.llm.sdk_env import guard_sdk_environment
-from orchestrator.utils.crash_report import add_gui_log, guard_streams, log_folder, windowless_children
+from orchestrator.utils.crash_report import (add_framework_log, add_gui_log, framework_log_folder, guard_streams,
+                                             log_folder, windowless_children)
 from orchestrator.utils.logging import setup_logging
 
 # GUI Imports
@@ -58,6 +59,7 @@ def start_without_terminal(cfg_mgr: ConfigManager, app) -> Path:
     from orchestrator.utils import launcher
     folder = log_folder(cfg_mgr)
     add_gui_log(folder)
+    add_framework_log(framework_log_folder(cfg_mgr))   # the one log of every process (once per process)
     from orchestrator.utils.crash_report import telemetry_enabled
     crash_dialog.install(folder, telemetry=lambda: telemetry_enabled(cfg_mgr))
     QGuiApplication.setDesktopFileName(launcher.ENTRY_ID)

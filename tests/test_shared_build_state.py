@@ -83,7 +83,8 @@ class TestSummaries:
             assert store.get("req_shared01")["status"] == status.value
 
     def test_the_orchestrator_shares_a_queued_request(self, tmp_path, monkeypatch):
-        monkeypatch.setitem(request_store._PROGRAM, "kind", "gui")  # as the GUI's entry point sets it
+        from orchestrator.utils import program as program_kind
+        monkeypatch.setitem(program_kind._PROGRAM, "kind", "gui")  # as the GUI's entry point sets it
         config = SimpleNamespace(user_state_dir=tmp_path / "state", targets_dir=REPO_ROOT / "targets",
                                  get=lambda key, default=None: default)
         engine = SimpleNamespace(targets_dir=REPO_ROOT / "targets", base_dir=tmp_path,

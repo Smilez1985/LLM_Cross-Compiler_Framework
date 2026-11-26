@@ -23,6 +23,9 @@ from typing import Any, Dict, List, Optional
 
 from orchestrator.Core.build_records import _private_folder, is_alive, this_process
 from orchestrator.utils.helpers import redact_secrets
+# Which kind of program this process is: utils/program.py (the bottom layer, so the framework's log can name it too);
+# re-exported under the names this module always had.
+from orchestrator.utils.program import PROGRAMS, program, set_program  # noqa: F401
 
 REQUESTS_FOLDER = "build_requests"
 FINISHED = ("completed", "error", "cancelled")
@@ -30,19 +33,6 @@ KEEP_FINISHED = 200       # older finished summaries are removed when a new requ
 MAX_TEXT = 2000           # one error, warning or stage
 MAX_MESSAGES = 5          # the newest errors and warnings kept per request
 SUMMARY_KEYS = ("model", "target", "format", "board", "quantization", "optimization", "revision")
-PROGRAMS = ("gui", "cli", "mcp", "api", "framework")
-
-_PROGRAM = {"kind": "framework"}
-
-
-def set_program(kind: str) -> None:
-    """Which kind of program this process is (gui, cli, mcp, api); set once by its entry point and written into
-    every summary, so a person sees where a build runs and where to stop it."""
-    _PROGRAM["kind"] = kind if kind in PROGRAMS else "framework"
-
-
-def program() -> str:
-    return _PROGRAM["kind"]
 
 
 def requests_dir(state_dir: Path) -> Path:

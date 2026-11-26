@@ -369,7 +369,9 @@ das in einfachen Worten, mit **Log-Ordner öffnen** und **Details kopieren** (de
 System, ohne Geheimnisse und ohne deinen Home-Ordner) und, wenn du mit `llmcf config set enable_telemetry true`
 zugestimmt hast, **Auf GitHub melden...** (nach deinem Ja öffnet sich das GitHub-Formular für ein neues Issue im
 Browser, gefüllt mit diesen Details; nichts wird gesendet, bevor du es dort abschickst); das Log ist `gui.log` in deinem Log-Ordner
-(`~/.llm-framework/logs`). Ein Absturz, bevor es das Fenster gibt, landet dort in einer `crash-<Zeit>.txt`.
+(`~/.llm-framework/logs`), und `framework.log` ist das eine Log jedes Prozesses (CLI, GUI
+und MCP-Server schreiben hinein: ein JSON-Objekt je Zeile, privat, beim Start eines Prozesses rotiert), ebenfalls in
+`~/.llm-framework/logs` oder in `logs_dir`, wenn du dort einen absoluten Ordner setzt. Ein Absturz, bevor es das Fenster gibt, landet dort in einer `crash-<Zeit>.txt`.
 
 In der GUI: **Datei > Einstellungen…**, Seite **Update**, Teil **Starteintrag**: der Zustand ist `status`, **Anlegen
 oder reparieren** ist `install`, **Entfernen** ist `remove`.

@@ -9,8 +9,9 @@ a terminal).
 - `windowless_children`: in a process without a console on Windows, a console program started without creation flags
   of its own would open a console window that flashes up; it gets CREATE_NO_WINDOW instead. A program that asks for a
   console of its own (CREATE_NEW_CONSOLE) keeps it.
-- `log_folder`, `add_gui_log`: the log folder (the setting logs_dir) and gui.log in it, rotated, through the same
-  redaction as every log.
+- `log_folder`, `add_gui_log`, `add_framework_log`: the log folder (the setting logs_dir), gui.log in it (the GUI's
+  readable log, rotated) and framework.log (one JSON object per line, from every process: the CLI, the GUI, the MCP
+  server; rotated when a process starts), both private and through the same redaction as every log.
 - `crash_details`: the text "Copy details" copies and a crash file holds: the traceback, llmcf's version, the Python
   version and the operating system, with secrets redacted and the home folder written as "~".
 - `issue_link`, `telemetry_enabled`: with the setting enable_telemetry (off by default), the crash dialog's "Report on
@@ -35,6 +36,10 @@ GUI_LOG = "gui.log"
 GUI_LOG_BYTES = 5 * 1024 * 1024
 GUI_LOG_BACKUPS = 3
 GUI_LOG_HANDLER = "llmcf-gui-log"
+FRAMEWORK_LOG = "framework.log"
+FRAMEWORK_LOG_BYTES = 5 * 1024 * 1024
+FRAMEWORK_LOG_BACKUPS = 3
+FRAMEWORK_LOG_HANDLER = "llmcf-framework-log"
 CRASH_PREFIX = "crash-"
 CREATE_NO_WINDOW = 0x08000000
 CREATE_NEW_CONSOLE = 0x00000010
@@ -128,19 +133,19 @@ def log_folder(config: Any = None) -> Path:
     return fallback_log_folder()
 
 
-def add_gui_log(folder: Path, level: int = logging.INFO) -> Optional[logging.Handler]:
-    """gui.log in `folder` (created, private where the system has modes) on the root logger, rotated at 5 MB with
-    three old files; the redaction filter of every log handler applies (utils/logging.install_log_redaction). None
-    when the folder cannot be written: the GUI starts anyway."""
-    try:
-        folder.mkdir(parents=True, exist_ok=True)
-        handler = logging.handlers.RotatingFileHandler(folder / GUI_LOG, maxBytes=GUI_LOG_BYTES,
-                                                       backupCount=GUI_LOG_BACKUPS, encoding="utf-8", delay=True)
-    except OSError:
-        return None
-    handler.set_name(GUI_LOG_HANDLER)
+def _private_folder(folder: Path) -> None:
+    """`folder` made when it is missing, private to its owner where the system has modes (an existing folder, maybe
+    one the person chose for the setting logs_dir, keeps its modes); OSError when it cannot be made."""
+    if not folder.is_dir():
+        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+
+def _on_root(handler: logging.Handler, name: str, level: int, formatter: logging.Formatter) -> logging.Handler:
+    """`handler` named, levelled and formatted on the root logger, with the redaction of every log handler
+    (utils/logging.install_log_redaction)."""
+    handler.set_name(name)
     handler.setLevel(level)
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    handler.setFormatter(formatter)
     try:
         from orchestrator.utils.logging import install_log_redaction
         logging.getLogger().addHandler(handler)
@@ -148,6 +153,99 @@ def add_gui_log(folder: Path, level: int = logging.INFO) -> Optional[logging.Han
     except Exception:  # noqa: BLE001 - without the redaction module the handler still gets the root's filters
         logging.getLogger().addHandler(handler)
     return handler
+
+
+def _named_handler(name: str) -> Optional[logging.Handler]:
+    return next((h for h in logging.getLogger().handlers if h.get_name() == name), None)
+
+
+def framework_log_folder(config: Any = None) -> Path:
+    """Where framework.log goes: the setting logs_dir when it is an absolute folder (the person chose it), else the
+    per-user folder's logs (the config's user_state_dir, else fallback_log_folder). Never the working folder: a
+    relative logs_dir (a developer checkout's default) resolves against it, and a start of the framework writes
+    nothing there (DESIGN, the data folders are made by what uses them). Never raises; nothing is created."""
+    try:
+        value = str(config.get("logs_dir") or "").strip() if config is not None else ""
+        if value and Path(os.path.expanduser(value)).is_absolute():
+            return Path(os.path.expanduser(value))
+        state = getattr(config, "user_state_dir", None) if config is not None else None
+        if isinstance(state, (str, Path)) and str(state):
+            return Path(state) / "logs"
+    except Exception:  # noqa: BLE001 - a broken setting must not stop the log
+        pass
+    return fallback_log_folder()
+
+
+def add_gui_log(folder: Path, level: int = logging.INFO) -> Optional[logging.Handler]:
+    """gui.log in `folder` (created, private where the system has modes) on the root logger, rotated at 5 MB with
+    three old files; the redaction filter of every log handler applies (utils/logging.install_log_redaction). None
+    when the folder cannot be written: the GUI starts anyway."""
+    try:
+        _private_folder(folder)
+        handler = logging.handlers.RotatingFileHandler(folder / GUI_LOG, maxBytes=GUI_LOG_BYTES,
+                                                       backupCount=GUI_LOG_BACKUPS, encoding="utf-8", delay=True)
+    except OSError:
+        return None
+    return _on_root(handler, GUI_LOG_HANDLER, level,
+                    logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+
+
+class _ProgramFilter(logging.Filter):
+    """Marks each record of framework.log with the program that wrote it (cli, gui, mcp, ...: utils/program.py)
+    and its process id, since several processes write to the one file."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            from orchestrator.utils.program import program
+            record.program = program()
+        except Exception:  # noqa: BLE001 - a record is never dropped for its label
+            record.program = "framework"
+        record.pid = os.getpid()
+        return True
+
+
+def _rotate_framework_log(path: Path) -> None:
+    """framework.log moved to framework.log.1 (and on, the oldest of FRAMEWORK_LOG_BACKUPS dropped) when it is over
+    FRAMEWORK_LOG_BYTES: when a process starts, under a lock of the folder, since several processes append to the
+    one file and a rotation while they write would lose lines. A file another process holds open (Windows) or a lock
+    that is not free is left: the next start rotates it."""
+    try:
+        if not path.is_file() or path.stat().st_size <= FRAMEWORK_LOG_BYTES:
+            return
+        from orchestrator.utils.file_lock import file_lock
+        with file_lock(path.with_name(path.name + ".lock"), timeout=2):
+            if path.stat().st_size <= FRAMEWORK_LOG_BYTES:
+                return   # another process rotated it meanwhile
+            for n in range(FRAMEWORK_LOG_BACKUPS - 1, 0, -1):
+                older = path.with_name(f"{path.name}.{n}")
+                if older.exists():
+                    os.replace(older, path.with_name(f"{path.name}.{n + 1}"))
+            os.replace(path, path.with_name(f"{path.name}.1"))
+    except Exception:  # noqa: BLE001 - a log that cannot be rotated is still written to
+        pass
+
+
+def add_framework_log(folder: Path, level: int = logging.INFO) -> Optional[logging.Handler]:
+    """framework.log in `folder` (created, private) on the root logger: one JSON object per line (the structured
+    formatter of utils/logging, with the program and the process id), appended by every process (the CLI, the GUI,
+    the MCP server) and rotated when a process starts (_rotate_framework_log); the redaction of every log applies.
+    Once per process: a second call returns the handler there is. None when the folder cannot be written."""
+    existing = _named_handler(FRAMEWORK_LOG_HANDLER)
+    if existing is not None:
+        return existing
+    path = Path(folder) / FRAMEWORK_LOG
+    try:
+        _private_folder(Path(folder))
+        _rotate_framework_log(path)
+        os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600))   # private from its first byte
+        if os.name == "posix":
+            os.chmod(path, 0o600)
+        handler = logging.FileHandler(path, mode="a", encoding="utf-8")
+    except OSError:
+        return None
+    from orchestrator.utils.logging import LogFormat, StructuredFormatter
+    handler.addFilter(_ProgramFilter())
+    return _on_root(handler, FRAMEWORK_LOG_HANDLER, level, StructuredFormatter(LogFormat.JSON))
 
 
 # --- the details of a crash -----------------------------------------------------------------------------------------

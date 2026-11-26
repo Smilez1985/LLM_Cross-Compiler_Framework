@@ -504,13 +504,14 @@ def hermetic_docker_engine(monkeypatch):
 def no_crash_dialog_left():
     """A test that starts the GUI (orchestrator/gui/app.main) sets the crash dialog's sys.excepthook and
     threading.excepthook; they go back after the test, so an error in a Qt slot of a later test never waits on a
-    modal crash dialog nobody closes; its gui.log handler (in the test's own folder) is closed too."""
+    modal crash dialog nobody closes; its gui.log handler and the framework.log handler of a test that booted the
+    framework (both in the test's own folder) are closed too, so the next test's process logs where it says."""
     yield
     crash_dialog = sys.modules.get("orchestrator.gui.crash_dialog")
     if crash_dialog is not None:
         crash_dialog.uninstall()
     root = logging.getLogger()
-    for handler in [h for h in root.handlers if h.get_name() == "llmcf-gui-log"]:
+    for handler in [h for h in root.handlers if h.get_name() in ("llmcf-gui-log", "llmcf-framework-log")]:
         root.removeHandler(handler)
         handler.close()
 

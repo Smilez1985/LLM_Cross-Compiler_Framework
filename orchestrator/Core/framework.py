@@ -97,6 +97,9 @@ class FrameworkManager:
         self.config = ConfigManager(config_file)
         level = (log_level or self.config.get("log_level", "INFO") or "INFO").upper()
         setup_logging(level=level if level in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL") else "INFO")
+        # One log of every process the person and Ditto can read (framework.log in the log folder, JSON lines)
+        from orchestrator.utils.crash_report import add_framework_log, framework_log_folder
+        add_framework_log(framework_log_folder(self.config))
         self.logger = get_logger("FrameworkKernel")
         
         self.logger.info(f"Booting {self.info.name} v{self.info.version} ({self.info.edition})...")

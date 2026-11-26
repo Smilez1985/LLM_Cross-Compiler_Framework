@@ -362,7 +362,9 @@ removed. When the GUI meets an error nobody caught, a dialog says so in plain wo
 **Copy details** (the traceback, the version, Python and the system, without secrets or your home folder) and, if you
 opted in with `llmcf config set enable_telemetry true`, **Report on GitHub...** (after your yes, GitHub's form for a
 new issue opens in your browser filled with those details; nothing is sent until you submit it there); the log
-is `gui.log` in your log folder (`~/.llm-framework/logs`). A crash before the window exists goes into a
+is `gui.log` in your log folder (`~/.llm-framework/logs`), and `framework.log` is the one log of every process (the
+CLI, the GUI and the MCP server write to it: one JSON object per line, private, rotated when a process starts), in
+`~/.llm-framework/logs` too, or in `logs_dir` when you set it to an absolute folder. A crash before the window exists goes into a
 `crash-<time>.txt` there.
 
 In the GUI: **File > Settings...**, page **Update**, part **Start entry**: the state is `status`, **Create or Repair**
