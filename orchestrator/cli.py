@@ -2492,6 +2492,9 @@ def _resolve_healing_interactively(orchestrator, request_id, proposal):
     # CLI text (no escape sequence, C1 control or bidi override reaches the terminal), markup escaped.
     console.print(f"[bold magenta]Self-Healing ({origin}): {escape(_printable(proposal.summary))}[/bold magenta]")
     console.print(f"Cause: {escape(_printable(proposal.root_cause))}")
+    from orchestrator.Core.self_healing_manager import scope_text
+    from orchestrator.utils.localization import ui_text
+    console.print(escape(_printable(ui_text("healing.scope", where=scope_text(getattr(proposal, "target_scope", ""))))))
     label = "The framework will" if automatic else "Manual step (not run by the framework)"
     console.print(f"{label}: [italic]{escape(_printable(proposal.fix_command))}[/italic]")
     approved = False
@@ -3156,7 +3159,8 @@ def _print_client_proposals(proposals: list) -> None:
         console.print(f"  Summary: {text(p.summary)}")
         if p.root_cause:
             console.print(f"  Cause: {text(p.root_cause)}")
-        console.print(f"  Manual step ({escape(_printable(p.where))}, not run by the framework): "
+        from orchestrator.Core.self_healing_manager import scope_text
+        console.print(f"  Manual step ({escape(_printable(scope_text(p.where)))}, not run by the framework): "
                       f"[italic]{text(p.manual_step)}[/italic]")
         console.print(f"  Confidence: {p.confidence:.0%}" + (f", {escape(_printable(p.created))}" if p.created
                                                                 else ""))

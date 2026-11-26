@@ -446,6 +446,48 @@ class TestCrashDialog:
         assert len(reporter.dialogs) == 1 and "thread worker-1" in reporter.dialogs[0].details_text
         assert reporter.dialogs[0].thread() is qapp.thread()
 
+    def test_report_on_github_only_with_the_opt_in_after_a_yes(self, qapp, tmp_path, monkeypatch):
+        """enable_telemetry (off by default) shows "Report on GitHub…"; after the person's yes GitHub's form opens
+        filled with the details the dialog shows (scrubbed), nothing is sent from here; "No" opens nothing."""
+        from urllib.parse import parse_qs, urlsplit
+        from orchestrator.gui import crash_dialog, plain
+        seen, opened, answers = [], [], []
+
+        def shown(dialog):   # while the dialog is open (it is deleted after Close)
+            visible = dialog.btn_report.isVisibleTo(dialog)
+            results = []
+            if visible:
+                answers.extend([False, True])
+                results = [dialog.report_on_github(), len(opened), dialog.report_on_github()]
+            seen.append((visible, dialog.btn_report.objectName(), dialog.details_text, results))
+            return 0
+
+        monkeypatch.setattr(crash_dialog, "_exec", shown)
+        monkeypatch.setattr(crash_dialog, "open_address", lambda url: opened.append(url) or True)
+        monkeypatch.setattr(plain, "ask", lambda parent, title, text: answers.pop(0))
+        for opted_in in (False, True):
+            found = crash_dialog.CrashReporter(tmp_path / "logs", telemetry=lambda o=opted_in: o)
+            error = raised(f"bad value {TOKEN} in {Path.home()}/x")
+            found.excepthook(type(error), error, error.__traceback__)
+            qapp.processEvents()
+            found.deleteLater()
+        (off, on) = seen
+        assert off[0] is False and off[3] == [], "without the opt-in there is no button"
+        assert on[0] is True and on[1] == "btn_crash_report"
+        assert on[3] == [False, 0, True], "No opens nothing; Yes opens the form"
+        (url,) = opened
+        parts = urlsplit(url)
+        assert parts.netloc == "github.com" and parts.path.endswith("/LLM_Cross-Compiler_Framework/issues/new")
+        query = parse_qs(parts.query)
+        body = query["body"][0]
+        assert "RuntimeError" in body and on[2].strip() in body
+        assert TOKEN not in url and str(Path.home()) not in body
+        assert query["title"][0].startswith("[Bug]: llmcf ")
+
+    def test_an_unreadable_opt_in_is_off(self, reporter):
+        reporter.telemetry = lambda: 1 / 0
+        assert reporter._telemetry() is False
+
     def test_ctrl_c_keeps_pythons_own_handling(self, reporter):
         called = []
         reporter.previous_hook = lambda *a: called.append(a[0])
@@ -510,7 +552,8 @@ def test_the_update_page_shows_creates_and_removes_the_entry(qapp, monkeypatch, 
 def test_the_crash_texts_exist_in_both_languages():
     from orchestrator.utils.localization import ui_text
     for lang in ("en", "de"):
-        for key in ("crash.title", "crash.summary", "crash.why", "crash.open_log", "launcher.title"):
+        for key in ("crash.title", "crash.summary", "crash.why", "crash.open_log", "launcher.title", "crash.report",
+                    "crash.report.tip", "crash.report.title", "crash.report.question"):
             assert ui_text(key, lang) != key
     assert ui_text("crash.open_log", "de") == "Log-Ordner öffnen" and ui_text("words.error.copy", "de") == \
         "Details kopieren"
@@ -589,3 +632,30 @@ def test_the_uninstaller_removes_the_start_menu_shortcuts():
         assert f'del "{folder}\\!LNK_NAME!"' in cleanup, folder
     assert launcher.SHORTCUT_FILE == "LLM-Cross-Compiler-Framework.lnk" and \
         'SET "SHORTCUT_NAME=LLM-Cross-Compiler-Framework.lnk"' in text
+
+
+# --- the opt-in error report without Qt (utils/crash_report.issue_link, utils/telemetry) ---------------------------
+
+def test_the_issue_link_keeps_the_end_of_long_details_and_scrubs_again():
+    from urllib.parse import parse_qs, urlsplit
+    from orchestrator.utils.crash_report import ISSUE_BODY_MAX, issue_link
+    details = "llmcf 3.4.0 - unexpected error\n" + "x" * (ISSUE_BODY_MAX * 2) + f"\nTHE END {TOKEN}"
+    url = issue_link(details)
+    body = parse_qs(urlsplit(url).query)["body"][0]
+    assert "THE END" in body and TOKEN not in url and len(body) < ISSUE_BODY_MAX + 500
+    assert len(url) < 30000
+
+
+def test_telemetry_is_the_persons_opt_in_and_uses_the_crash_details(monkeypatch):
+    from types import SimpleNamespace as NS
+    from urllib.parse import parse_qs, urlsplit
+    from orchestrator.utils.crash_report import telemetry_enabled
+    from orchestrator.utils.telemetry import TelemetryManager
+    assert telemetry_enabled(None) is False and telemetry_enabled({"enable_telemetry": True}) is True
+    off = TelemetryManager(NS(config={"enable_telemetry": False}))
+    assert off.generate_issue_link(RuntimeError("x")) == ""
+    on = TelemetryManager(NS(config={"enable_telemetry": True}))
+    url = on.generate_issue_link(raised(f"bad {TOKEN}"), "the build tab", logs=f"line in {Path.home()}/log")
+    body = parse_qs(urlsplit(url).query)["body"][0]
+    assert "unexpected error in the build tab" in body and "Log (end):" in body
+    assert TOKEN not in url and str(Path.home()) not in body

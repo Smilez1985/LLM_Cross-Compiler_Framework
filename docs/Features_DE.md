@@ -552,7 +552,9 @@ Scheitert ein Build, sieht sich der Self-Healing-Manager das Log an:
    wird verworfen, wenn sie einen gefährlichen Befehl enthält.
 
 Der Vorschlag wartet auf deine Entscheidung: ein Dialog in der GUI, eine Frage in der CLI oder das Tool
-`resolve_healing` für Ditto und MCP-Clients (Einstellung `healing_approval_timeout`, Standard 900 s). Selbst wendet
+`resolve_healing` für Ditto und MCP-Clients (Einstellung `healing_approval_timeout`, Standard 900 s). Der Dialog und
+die Frage sagen, wo der Schritt läuft („Wo es läuft: dieser Computer“ oder „das Board“), ebenso der Fix-Vorschlag
+eines KI-Clients. Selbst wendet
 das Framework nur feste, eingebaute Korrekturen an:
 
 | Problem | Was das Framework nach deinem „Ja“ tut |
@@ -1444,6 +1446,9 @@ die Vorgaben).
   zehn Minuten werden zu einer Zeile zusammengefasst („Claude Code hat 6 Dinge erledigt“, **Zeigen**). **Neu, seit du
   zuletzt geschaut hast** markiert den ersten neuen Eintrag, mit einer Zusammenfassung, die aus den Einträgen selbst
   gezählt wird, nie aus dem, was eine KI geschrieben hat.
+- **Darauf antworten:** Im Kontextmenü eines Eintrags (auf seinem Text oder daneben) bezieht sich deine nächste
+  Nachricht auf diesen Eintrag; über dem Eingabefeld steht dann „Zu: <Absender>, <Zeit>“, und Escape oder
+  **Entfernen** nimmt den Bezug weg. Der Bezug wird mit deiner Nachricht gespeichert.
 - **Nur reiner Text:** Was eine KI, eine App oder ein Dateiname geschrieben hat, erscheint als reiner Text,
   versteckte Zeichen als Escape-Folgen: keine Formatierung, keine Bilder, nichts Anklickbares. Eine Adresse in einem
   Text öffnet sich nur über ihr Kontextmenü (**Adresse öffnen…**), nach einer Frage, die die ganze Adresse zeigt.
@@ -4573,7 +4578,9 @@ Framework**, dein eigener Eintrag, vom Installer geschrieben), unter Windows im 
 Desktop; beide öffnen das Fenster ohne Terminal- oder Konsolenfenster. Trifft das Fenster auf einen Fehler, den
 niemand abgefangen hat, verschwindet es nicht einfach: Ein Dialog sagt das in einfachen Worten, mit **Log-Ordner
 öffnen**, **Details kopieren** (der Traceback, die Version, Python und das System, ohne Geheimnisse und ohne deinen
-Home-Ordner, für einen Fehlerbericht) und **Schließen**, und das Programm läuft weiter; eine Serie von Fehlern zeigt
+Home-Ordner, für einen Fehlerbericht), mit der Einstellung `enable_telemetry` (deine Zustimmung, standardmäßig aus)
+**Auf GitHub melden...** (nach deinem Ja öffnet sich das GitHub-Formular für ein neues Issue im Browser, gefüllt mit
+diesen Details; nichts wird gesendet, bevor du es dort abschickst) und **Schließen**, und das Programm läuft weiter; eine Serie von Fehlern zeigt
 einen Dialog, der die übrigen zählt. Alles, was das Fenster loggt, steht in `gui.log` in deinem Log-Ordner; ein
 Absturz, bevor es das Fenster gibt, hinterlässt dort eine `crash-<Zeit>.txt` (unter Windows auch ein
 Meldungsfenster). Der Eintrag wird unter **Datei > Einstellungen…**, **Update**, **Starteintrag** gezeigt, repariert

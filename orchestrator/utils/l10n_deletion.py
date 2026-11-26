@@ -102,6 +102,9 @@ TEXTS = {
         "images.unavailable": "Docker cannot be asked: {reason}",
         "images.done": "{n} images deleted, about {size}.",
         "healing.free_docker": "Free Docker space…",
+        "healing.scope": "Where it runs: {where}",
+        "healing.scope.host": "this computer",
+        "healing.scope.device": "the board",
     },
     "de": {
         "deletion.title": "Löschen",
@@ -194,5 +197,8 @@ TEXTS = {
         "images.unavailable": "Docker lässt sich nicht fragen: {reason}",
         "images.done": "{n} Images gelöscht, etwa {size}.",
         "healing.free_docker": "Docker-Platz freigeben…",
+        "healing.scope": "Wo es läuft: {where}",
+        "healing.scope.host": "dieser Computer",
+        "healing.scope.device": "das Board",
     },
 }

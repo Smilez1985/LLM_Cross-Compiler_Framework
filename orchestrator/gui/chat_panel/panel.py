@@ -433,6 +433,7 @@ class ChatPanel(QWidget):
         self.feed_view.escape_pressed.connect(self.focus_composer)
         self.feed_view.earlier_requested.connect(self._load_earlier)
         self.feed_view.open_approval.connect(self.open_approvals_requested.emit)
+        self.feed_view.reply_requested.connect(self._reply_to)
         self.header.btn_clear.clicked.connect(self._confirm_clear_history)
         self.header.act_clear.triggered.connect(self._confirm_clear_history)
         self.header.act_approvals.triggered.connect(lambda: self.open_approvals_requested.emit(""))
@@ -450,6 +451,12 @@ class ChatPanel(QWidget):
 
     def focus_composer(self) -> None:
         self.composer.input.setFocus(Qt.ShortcutFocusReason)
+
+    def _reply_to(self, entry_id: str, about: str) -> None:
+        """A bubble's "Reply to this": the next message refers to that row (the composer's chip "About: …", which
+        Escape or "Remove" takes away), and the cursor goes to the composer."""
+        self.composer.set_reply_to(entry_id, about)
+        self.focus_composer()
 
     def set_auto_show(self, enabled: bool) -> None:
         blocked = self.header.act_auto_show.blockSignals(True)

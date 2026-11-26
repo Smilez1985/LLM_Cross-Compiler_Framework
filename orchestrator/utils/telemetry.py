@@ -1,98 +1,48 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Telemetry & Support (v2.3.0)
-DIREKTIVE: Goldstandard, Privacy First (Opt-In), Sanitization.
+LLM Cross-Compiler Framework - the person's opt-in error report
 
-Zweck:
-Erstellt anonymisierte Fehlerberichte als GitHub Issue Links.
-Sammelt keine Daten im Hintergrund, sondern bereitet sie für den User vor.
-Entfernt sensible Pfade und Secrets (Sanitization).
-
-Updates v2.3.0:
-- Fixed f-string syntax error by separating log block construction.
-- Dynamic version retrieval.
-- Robust user path anonymization.
+With the setting enable_telemetry (off by default; only the person sets it), an unexpected error can be reported as a
+GitHub issue: the crash dialog's "Report on GitHub…" opens GitHub's form for a new issue filled with the details the
+dialog shows (utils/crash_report.crash_details and issue_link: the traceback, llmcf's version, Python and the system,
+secrets redacted and the home folder written as "~"). Nothing is collected in the background, and nothing is sent until
+the person reads the form in the browser and submits it.
 """
 
-import sys
 import platform
-import urllib.parse
-import os
+import sys
 from typing import Dict
 
-from orchestrator.utils.logging import get_logger
+from orchestrator.utils.crash_report import ISSUE_URL, crash_details, hide_home, issue_link, telemetry_enabled
 from orchestrator.utils.helpers import redact_secrets
+from orchestrator.utils.logging import get_logger
 
-GITHUB_REPO_URL = "https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/issues/new"
+GITHUB_REPO_URL = ISSUE_URL   # kept under its old name
+
 
 class TelemetryManager:
     """
-    Verwaltet Fehlerberichterstattung und Anonymisierung.
+    The person's opt-in error report (setting enable_telemetry, off by default): a link to GitHub's form for a new
+    issue, filled with the crash dialog's details (utils/crash_report.issue_link). The crash dialog offers it as
+    "Report on GitHub…"; nothing is collected in the background and nothing is sent until the person submits the form.
     """
-    
+
     def __init__(self, framework_manager):
         self.logger = get_logger(__name__)
         self.framework = framework_manager
-        
-        # Safe config access (v2.3 ConfigManager)
-        config = getattr(framework_manager, 'config', {})
-        get_cfg = getattr(config, 'get', lambda k, d=None: d)
-        
-        self.enabled = get_cfg("enable_telemetry", False) # Standard: False (Opt-In)
+        self.enabled = telemetry_enabled(getattr(framework_manager, 'config', None))   # Opt-In
 
     def generate_issue_link(self, error: Exception, context: str = "", logs: str = "") -> str:
-        """
-        Generiert einen mailto-artigen Link für ein neues GitHub Issue.
-        """
+        """The form's address for `error` (crash_details, `where` = `context`) with the end of `logs`, scrubbed; ""
+        when the person did not opt in or it cannot be made."""
         if not self.enabled:
             self.logger.debug("Telemetry disabled. Skipping report generation.")
             return ""
-
         try:
-            # 1. System Info sammeln
-            sys_info = self._get_system_info()
-            
-            # 2. Report Body bauen
-            # Wir bereiten den Log-Teil separat vor, um f-String Syntaxfehler zu vermeiden
-            sanitized_logs = self._sanitize(logs[-2000:] if logs else "No logs provided")
-            
-            # Konstruktion des Body-Strings (Sicherere Methode)
-            body_parts = [
-                "**Describe the bug**",
-                "A clear description of what happened.",
-                "",
-                "**Context**",
-                str(context),
-                "",
-                "**Error Message**",
-                str(error),
-                "",
-                "**System Information**",
-                f"- OS: {sys_info['os']}",
-                f"- Python: {sys_info['python']}",
-                f"- Framework Version: {sys_info['version']}",
-                f"- Architecture: {sys_info['arch']}",
-                "",
-                "**Logs (Last 20 lines)**",
-                "```text",
-                sanitized_logs,
-                "```"
-            ]
-            body = "\n".join(body_parts)
-
-            # 3. URL Encoding
-            params = {
-                "title": f"[Bug]: {str(error)[:60]}...",
-                "body": body,
-                "labels": "bug,automated-report"
-            }
-            
-            query_string = urllib.parse.urlencode(params)
-            full_url = f"{GITHUB_REPO_URL}?{query_string}"
-            
-            self.logger.info("Generated GitHub Issue Link (Sanitized).")
-            return full_url
-            
+            details = crash_details(error, str(context or ""))
+            if logs:
+                details += "\nLog (end):\n" + self._sanitize(logs[-2000:])
+            return issue_link(details)
         except Exception as e:
             self.logger.error(f"Failed to generate telemetry link: {e}")
             return ""
@@ -112,26 +62,9 @@ class TelemetryManager:
         }
 
     def _sanitize(self, text: str) -> str:
-        """
-        Entfernt PII (Personally Identifiable Information) und Secrets.
-        """
-        if not text: return ""
-        
-        # 1. API Keys / Tokens
-        text = redact_secrets(text)
-        
-        # 2. This computer's home folder as "~USER", in every spelling a text can name it (orchestrator/security/paths:
-        # HOME, USERPROFILE and Path.home() with their real paths, either separator, a Windows path in any case, and
-        # doubled as Python quotes a Windows path); the one scrub the AI-facing texts use too
-        from orchestrator.security.paths import home_folders, replace_folder, undouble
-        text = undouble(text)
-        for home in home_folders():
-            text = replace_folder(text, home, "~USER")
-            
-        # Fallback Username check
-        username = os.getenv("USERNAME") or os.getenv("USER")
-        if username and len(username) > 2: # Avoid replacing short names like "pi" accidentally globally without context
-             # Simple heuristic: Only replace if preceded by path separator
-             text = text.replace(f"/{username}", "/USER").replace(f"\\{username}", "\\USER")
-            
-        return text
+        """Secrets redacted (helpers.redact_secrets), this computer's home folder as "~USER" in every spelling and the
+        account's name after a separator as USER (crash_report.hide_home, which the crash dialog's report uses too);
+        an empty text stays empty."""
+        if not text:
+            return ""
+        return hide_home(redact_secrets(text))

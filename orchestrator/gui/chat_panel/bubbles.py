@@ -35,7 +35,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Type
 
 from PySide6.QtCore import QUrl, Qt, Signal
 from PySide6.QtGui import QDesktopServices, QFontDatabase, QGuiApplication, QPixmap
@@ -168,33 +168,44 @@ def confirm_open_link(parent: Optional[QWidget], url: str, lang: str = "en") -> 
     return True
 
 
-def text_label(value: str, lang: str = "en", *, caption: bool = False, mono: bool = False) -> QLabel:
-    """A plain-text label with a context menu: Copy, Select all and, for each address in the text, "Open address…"
-    (behind a question; nothing is clickable inline)."""
+def text_label(value: str, lang: str = "en", *, caption: bool = False, mono: bool = False,
+               reply: Optional[Callable[[], None]] = None) -> QLabel:
+    """A plain-text label with a context menu: Copy, Select all, "Reply to this" when `reply` is given (the bubble's
+    row) and, for each address in the text, "Open address…" (behind a question; nothing is clickable inline)."""
     label = plain_label(value)
     if caption:
         label.setObjectName("caption")
     if mono:
         label.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
     label.setContextMenuPolicy(Qt.CustomContextMenu)
-    label.customContextMenuRequested.connect(lambda pos, lab=label: _label_menu(lab, pos, lang))
+    label.customContextMenuRequested.connect(lambda pos, lab=label: _label_menu(lab, pos, lang, reply))
     return label
 
 
-def _label_menu(label: QLabel, pos: Any, lang: str) -> None:
+def _label_menu(label: QLabel, pos: Any, lang: str, reply: Optional[Callable[[], None]] = None) -> None:
+    menu = label_menu(label, lang, reply)
+    menu.exec(label.mapToGlobal(pos))
+
+
+def label_menu(label: QLabel, lang: str, reply: Optional[Callable[[], None]] = None) -> QMenu:
+    """The label's context menu (built, not shown)."""
     menu = QMenu(label)
     selected = label.selectedText() or label.text()
     menu.addAction(button_text(text("chat.bubble.copy", lang))).triggered.connect(
         lambda: QGuiApplication.clipboard().setText(selected))
     menu.addAction(button_text(text("chat.bubble.select_all", lang))).triggered.connect(
         lambda: label.setSelection(0, len(label.text())))
+    if reply is not None:
+        action = menu.addAction(button_text(text("chat.bubble.reply", lang)))
+        action.setObjectName("act_chat_reply")
+        action.triggered.connect(lambda: reply())
     urls = list(dict.fromkeys(URL_RE.findall(label.text())))[:10]
     if urls:
         menu.addSeparator()
         for url in urls:
             action = menu.addAction(button_text(text("chat.bubble.open_address", lang) + " " + url))
             action.triggered.connect(lambda _=False, u=url: confirm_open_link(label, u, lang))
-    menu.exec(label.mapToGlobal(pos))
+    return menu
 
 
 def make_button(label: str) -> QPushButton:
@@ -228,9 +239,9 @@ class MessageBody(QWidget):
     text, unchanged."""
 
     def __init__(self, value: str, lang: str = "en", names: Optional[SpeakingNames] = None,
-                 parent: Optional[QWidget] = None):
+                 parent: Optional[QWidget] = None, *, reply: Optional[Callable[[], None]] = None):
         super().__init__(parent)
-        self.value, self.lang, self.names = value or "", lang, names
+        self.value, self.lang, self.names, self.reply = value or "", lang, names, reply
         self.segments = split_segments(self.value, names)
         self.original = False
         self.layout_ = QVBoxLayout(self)
@@ -281,7 +292,7 @@ class MessageBody(QWidget):
             if len(lines) > budget:
                 body, cut = "\n".join(lines[:budget]) + "\n…", True
             budget -= len(lines)
-            self.content_layout.addWidget(text_label(body, self.lang, mono=block.kind == "code"))
+            self.content_layout.addWidget(text_label(body, self.lang, mono=block.kind == "code", reply=self.reply))
         legend = [] if self.original or self.names is None else self.names.legend(self.value)
         if legend:
             self.content_layout.addWidget(text_label(text("chat.bubble.legend", self.lang) + "\n"
@@ -302,14 +313,14 @@ class AiTextBox(QFrame):
     """AI text inside a bubble the framework wrote (R6), with its caption and R7 rendering."""
 
     def __init__(self, value: str, lang: str = "en", names: Optional[SpeakingNames] = None,
-                 parent: Optional[QWidget] = None):
+                 parent: Optional[QWidget] = None, *, reply: Optional[Callable[[], None]] = None):
         super().__init__(parent)
         self.setObjectName("aiText")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 4)
         self.caption = text_label(feed_text("chat.ai_text.caption", lang), lang, caption=True)
         layout.addWidget(self.caption)
-        self.body = MessageBody(value, lang, names, self)
+        self.body = MessageBody(value, lang, names, self, reply=reply)
         layout.addWidget(self.body)
 
 
@@ -340,6 +351,7 @@ class Bubble(QFrame):
     navigate = Signal(int)   # -1: the bubble above, +1: the one below
     jump = Signal(str)       # "first" or "last"
     escape = Signal()
+    reply_requested = Signal(str, str)   # the row's entry id and what the composer's chip says ("About: …")
 
     def __init__(self, entry: Optional[FeedEntry] = None, *, row_id: int = 0, lang: str = "en",
                  names: Optional[SpeakingNames] = None, parent: Optional[QWidget] = None):
@@ -391,7 +403,8 @@ class Bubble(QFrame):
                 row.addWidget(avatar)
             else:
                 avatar.deleteLater()
-        header = text_label(f"{self.sender_text()} · {self.time_text()}", self.lang, caption=True)
+        header = text_label(f"{self.sender_text()} · {self.time_text()}", self.lang, caption=True,
+                            reply=self.reply_action())
         row.addWidget(header, stretch=1)
         self.layout_.addLayout(row)
 
@@ -400,10 +413,34 @@ class Bubble(QFrame):
         self.layout_.addWidget(label)
         return label
 
+    def can_reply(self) -> bool:
+        """A saved row of the feed can be replied to (its entry id goes with the next message, FeedRefs.reply_to);
+        a row shown here only, a question that waits or a group is not one."""
+        return self.entry is not None and self.row_id >= 0 and bool(self.entry.entry_id)
+
+    def reply_action(self) -> Optional[Callable[[], None]]:
+        """What the context menus of the bubble's texts offer as "Reply to this" (None: this row cannot be one)."""
+        return self.request_reply if self.can_reply() else None
+
+    def request_reply(self) -> None:
+        """"Reply to this": the composer refers the next message to this row (its sender and time)."""
+        if self.can_reply():
+            self.reply_requested.emit(self.entry_id, f"{self.sender_text()}, {self.time_text()}")
+
+    def contextMenuEvent(self, event: Any) -> None:
+        """Right-click on the bubble outside its text: "Reply to this" for a saved row."""
+        if not self.can_reply():
+            return super().contextMenuEvent(event)
+        menu = QMenu(self)
+        action = menu.addAction(button_text(text("chat.bubble.reply", self.lang)))
+        action.setObjectName("act_chat_reply")
+        action.triggered.connect(self.request_reply)
+        menu.exec(event.globalPos())
+
     def add_text(self, value: str, *, warning: bool = False) -> QLabel:
         if warning:
             value = f"{text('chat.bubble.warning', self.lang)} {value}"
-        label = text_label(value, self.lang)
+        label = text_label(value, self.lang, reply=self.reply_action())
         self.layout_.addWidget(label)
         return label
 
@@ -492,7 +529,8 @@ class DittoBubble(Bubble):
 
     def build(self) -> None:
         self.add_header(with_avatar=True)
-        self.body = self.add_widget(MessageBody(self.entry.ai_text, self.lang, self.names, self))
+        self.body = self.add_widget(MessageBody(self.entry.ai_text, self.lang, self.names, self,
+                                                reply=self.reply_action()))
 
 
 class ClientBubble(Bubble):
@@ -507,7 +545,8 @@ class ClientBubble(Bubble):
             self.add_text(framework_text(self.entry, self.lang))
             self.add_caption(text("chat.bubble.written_by_framework", self.lang))
         if self.entry.ai_text:
-            self.ai_box = self.add_widget(AiTextBox(self.entry.ai_text, self.lang, self.names, self))
+            self.ai_box = self.add_widget(AiTextBox(self.entry.ai_text, self.lang, self.names, self,
+                                                    reply=self.reply_action()))
 
 
 class NoticeBubble(Bubble):
@@ -539,7 +578,8 @@ class RecordBubble(Bubble):
             self.add_caption(text("chat.bubble.written_by_framework", self.lang))
         self.add_warnings()
         if self.entry.ai_text:
-            self.ai_box = self.add_widget(AiTextBox(self.entry.ai_text, self.lang, self.names, self))
+            self.ai_box = self.add_widget(AiTextBox(self.entry.ai_text, self.lang, self.names, self,
+                                                    reply=self.reply_action()))
         self.add_steps()
 
     def add_warnings(self) -> None:
@@ -570,7 +610,8 @@ class DecisionBubble(RecordBubble):
         self.add_caption(text("chat.bubble.written_by_framework", self.lang))
         self.add_warnings()
         if self.entry.ai_text:
-            self.ai_box = self.add_widget(AiTextBox(self.entry.ai_text, self.lang, self.names, self))
+            self.ai_box = self.add_widget(AiTextBox(self.entry.ai_text, self.lang, self.names, self,
+                                                    reply=self.reply_action()))
 
 
 class JobResultBubble(RecordBubble):

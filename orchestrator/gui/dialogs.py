@@ -162,6 +162,14 @@ class HealingConfirmDialog(QDialog):
         lbl_root.setTextFormat(Qt.PlainText)
         lbl_root.setWordWrap(True)
         layout.addWidget(lbl_root)
+
+        # where the step runs (this computer or the board): the analysis says it, the person sees it
+        from orchestrator.Core.self_healing_manager import scope_text
+        from orchestrator.utils.localization import ui_text
+        self.lbl_scope = QLabel(ui_text("healing.scope", where=scope_text(getattr(proposal, "target_scope", ""))))
+        self.lbl_scope.setObjectName("lbl_healing_scope")
+        self.lbl_scope.setTextFormat(Qt.PlainText)
+        layout.addWidget(self.lbl_scope)
         
         origin = "AI suggestion" if getattr(proposal, "is_ai_generated", False) else "Known issue"
         heading = ("What the framework will do before retrying the build:" if self.automatic

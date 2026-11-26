@@ -58,7 +58,8 @@ def start_without_terminal(cfg_mgr: ConfigManager, app) -> Path:
     from orchestrator.utils import launcher
     folder = log_folder(cfg_mgr)
     add_gui_log(folder)
-    crash_dialog.install(folder)
+    from orchestrator.utils.crash_report import telemetry_enabled
+    crash_dialog.install(folder, telemetry=lambda: telemetry_enabled(cfg_mgr))
     QGuiApplication.setDesktopFileName(launcher.ENTRY_ID)
     try:
         launcher.refresh()

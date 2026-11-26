@@ -13,6 +13,12 @@ TEXTS = {
         "crash.why": "What you were doing may not have finished. The program keeps running; the details are in the "
                      "log.",
         "crash.open_log": "Open Log Folder",
+        "crash.report": "Report on GitHub...",
+        "crash.report.tip": "Opens GitHub's form for a new issue, filled with the details shown here.",
+        "crash.report.title": "Report on GitHub",
+        "crash.report.question": "Open GitHub's form for a new issue in your browser, filled with the details shown "
+                                 "here (secrets removed, your home folder written as ~)? Read them there first: "
+                                 "nothing is sent until you submit the form.",
         "crash.more": "{count} more error(s) were logged while this message was open.",
         "crash.early": "The framework could not start: {reason}\n\nThe details are in {file}",
         "launcher.title": "Start entry",
@@ -44,6 +50,12 @@ TEXTS = {
         "crash.why": "Was du gerade getan hast, ist vielleicht nicht fertig geworden. Das Programm läuft weiter; die "
                      "Details stehen im Log.",
         "crash.open_log": "Log-Ordner öffnen",
+        "crash.report": "Auf GitHub melden...",
+        "crash.report.tip": "Öffnet das GitHub-Formular für ein neues Issue, gefüllt mit den hier gezeigten Details.",
+        "crash.report.title": "Auf GitHub melden",
+        "crash.report.question": "Das GitHub-Formular für ein neues Issue im Browser öffnen, gefüllt mit den hier "
+                                 "gezeigten Details (Geheimnisse entfernt, dein Home-Ordner als ~ geschrieben)? Lies "
+                                 "sie dort zuerst: Nichts wird gesendet, bevor du das Formular abschickst.",
         "crash.more": "{count} weitere(r) Fehler wurde(n) geloggt, während diese Meldung offen war.",
         "crash.early": "Das Framework konnte nicht starten: {reason}\n\nDie Details stehen in {file}",
         "launcher.title": "Starteintrag",

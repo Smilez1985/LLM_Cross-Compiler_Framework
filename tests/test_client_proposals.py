@@ -212,6 +212,7 @@ class TestShownToThePerson:
         flat = " ".join(out.split())
         assert "Out of[2J memory \u00e4" in flat and "cause31m A" in flat
         assert "Add swap [bold]now[/bold]" in flat, "markup is shown, never applied"
+        assert "Manual step (this computer, not run by the framework)" in flat
         assert "the AI client with the token 'ci' (Evil]0;titleClient, self-reported)" in flat
 
     def test_the_gui_lists_proposals_as_plain_text(self, env, qapp):

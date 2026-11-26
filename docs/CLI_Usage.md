@@ -359,7 +359,9 @@ repair, and remove it without installing again.
 
 Each GUI start also rewrites your Linux entry when it no longer fits this installation, but never creates one you
 removed. When the GUI meets an error nobody caught, a dialog says so in plain words, with **Open Log Folder** and
-**Copy details** (the traceback, the version, Python and the system, without secrets or your home folder); the log
+**Copy details** (the traceback, the version, Python and the system, without secrets or your home folder) and, if you
+opted in with `llmcf config set enable_telemetry true`, **Report on GitHub...** (after your yes, GitHub's form for a
+new issue opens in your browser filled with those details; nothing is sent until you submit it there); the log
 is `gui.log` in your log folder (`~/.llm-framework/logs`). A crash before the window exists goes into a
 `crash-<time>.txt` there.
 
@@ -2880,7 +2882,8 @@ itself) and its confidence. The framework checks the answer before you see it: a
 Ditto was given and no key of the probe is left empty and named as a gap (a value is read, never guessed), a value for
 a path the template does not have or with a dangerous command is refused, and every value goes through the template's
 checks, each reason named at its field. The result is a draft, never a module: `--out FILE` writes its formats as
-YAML for `module create --formats FILE --ask-values`, `--json` prints it whole for scripts.
+YAML for `module create --formats FILE --ask-values`, `--json` prints it whole for scripts (saved to a file, `module
+create --formats` takes that file too: each proposed format as its values).
 
 | Option | Meaning |
 |---|---|

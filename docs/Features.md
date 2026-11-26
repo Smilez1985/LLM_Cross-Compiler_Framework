@@ -519,7 +519,8 @@ When a build fails, the self-healing manager looks at the log:
    command.
 
 The proposal waits for your decision: a dialog in the GUI, a question in the CLI, or the `resolve_healing` tool
-for Ditto and MCP clients (setting `healing_approval_timeout`, default 900 s). The framework only applies fixed,
+for Ditto and MCP clients (setting `healing_approval_timeout`, default 900 s). The dialog and the question say where
+the step runs ("Where it runs: this computer" or "the board"), as does an AI client's fix proposal. The framework only applies fixed,
 built-in fixes itself:
 
 | Problem | What the framework does after your "yes" |
@@ -1316,6 +1317,9 @@ gives the defaults).
 - **Filter:** All, Needs you, Decisions, Ditto chat. Routine decisions of one app within ten minutes are folded into
   one line ("Claude Code did 6 things", **Show**). **New since you last looked** marks the first new entry, with a
   summary counted from the entries themselves, never from what an AI wrote.
+- **Reply to this:** in the context menu of an entry (on its text or beside it) your next message refers to that
+  entry; the composer shows "About: <sender>, <time>" above the input, and Escape or **Remove** takes it away. The
+  reference is saved with your message.
 - **Plain text only:** whatever an AI, an app or a file name wrote is shown as plain text with hidden characters as
   escapes: no formatting, no images, nothing clickable. An address in a text opens only from its context menu
   (**Open address…**), after a question that shows the whole address. Your messages sit on the right; Ditto's on the
@@ -4124,7 +4128,9 @@ technical detail to expand and copy (Ditto reads the English detail and explains
 Framework**, your own entry, written by the installer), on Windows in the Start menu and, if you want, on the desktop;
 both open the window without a terminal or console window. When the window meets an error nobody caught, it does not
 just vanish: a dialog says so in plain words, with **Open Log Folder**, **Copy details** (the traceback, the version,
-Python and the system, without secrets or your home folder, for a bug report) and **Close**, and the program keeps
+Python and the system, without secrets or your home folder, for a bug report), with the setting `enable_telemetry`
+(your opt-in, off by default) **Report on GitHub...** (after your yes, GitHub's form for a new issue opens in your
+browser filled with those details; nothing is sent until you submit it there), and **Close**, and the program keeps
 running; a burst of errors shows one dialog that counts the rest. Everything the window logs is in `gui.log` in your
 log folder; a crash before the window exists leaves a `crash-<time>.txt` there (on Windows also a message box). The
 entry is shown, repaired and removed under **File > Settings...**, **Update**, **Start entry**, or with `llmcf

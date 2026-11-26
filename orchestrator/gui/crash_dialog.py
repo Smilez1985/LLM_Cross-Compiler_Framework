@@ -8,8 +8,10 @@ scrubbed details, logger "llmcf.crash"), then shown on the GUI thread (from anot
 a QObject that lives there). One dialog at a time: an error while it is open or waiting is logged and counted, and the
 open dialog says how many more were logged. The dialog is the error box (gui/error_dialog.ErrorDialog) with a short
 plain message, "Open log folder", "Copy details" (the traceback, llmcf's version, Python and the operating system,
-scrubbed by utils/crash_report.crash_details) and Close; the program keeps running after Close. Ctrl+C keeps
-Python's own handling.
+scrubbed by utils/crash_report.crash_details), with the setting enable_telemetry (the person's opt-in, off by default)
+"Report on GitHub…" (after a question, GitHub's form for a new issue opens in the browser filled with those details;
+nothing is sent until the person submits it there: utils/crash_report.issue_link), and Close; the program keeps running
+after Close. Ctrl+C keeps Python's own handling.
 """
 
 import logging
@@ -24,7 +26,7 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QPushButton
 
 from orchestrator.gui.error_dialog import ErrorDialog
 from orchestrator.gui.plain import button_text, plain_label
-from orchestrator.utils.crash_report import crash_details
+from orchestrator.utils.crash_report import crash_details, issue_link
 from orchestrator.utils.localization import ui_text
 
 log = logging.getLogger("llmcf.crash")
@@ -39,12 +41,17 @@ def open_folder(folder: Path) -> bool:
     return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder))))
 
 
+def open_address(url: str) -> bool:
+    """Opens `url` in the browser (tests replace this)."""
+    return bool(QDesktopServices.openUrl(QUrl(url)))
+
+
 class CrashDialog(ErrorDialog):
     """The error box for an unexpected error: the message, the details folded away, "Open log folder", "Copy
-    details" and Close."""
+    details", "Report on GitHub…" when `telemetry` (the person opted in) and Close."""
 
     def __init__(self, details: str, folder: Path, parent: Any = None, lang: Optional[str] = None,
-                 opener: Optional[Callable[[Path], bool]] = None):
+                 opener: Optional[Callable[[Path], bool]] = None, telemetry: bool = False):
         super().__init__(parent, ui_text("crash.summary", lang), why=ui_text("crash.why", lang), details=details,
                          title=ui_text("crash.title", lang), kind="critical", lang=lang)
         self.setObjectName("crash_dialog")
@@ -58,8 +65,15 @@ class CrashDialog(ErrorDialog):
         self.btn_open_log.setObjectName("btn_crash_open_log")
         self.btn_open_log.setAutoDefault(False)
         self.btn_open_log.clicked.connect(self.open_log_folder)
+        self.btn_report = QPushButton(button_text(ui_text("crash.report", self.lang)), self)
+        self.btn_report.setObjectName("btn_crash_report")
+        self.btn_report.setAutoDefault(False)
+        self.btn_report.setToolTip(ui_text("crash.report.tip", self.lang))
+        self.btn_report.clicked.connect(self.report_on_github)
+        self.btn_report.setVisible(bool(telemetry))
         row = QHBoxLayout()
         row.addWidget(self.btn_open_log)
+        row.addWidget(self.btn_report)
         row.addStretch(1)
         self.layout().insertLayout(3, row)
 
@@ -71,6 +85,15 @@ class CrashDialog(ErrorDialog):
     def open_log_folder(self) -> bool:
         return bool((self.opener or open_folder)(self.folder))
 
+    def report_on_github(self) -> bool:
+        """After the person's yes ("No" is the default), GitHub's form for a new issue opens in the browser, filled
+        with the details this dialog shows and "Copy details" copies (ErrorDialog.details_text, scrubbed); nothing is
+        sent until the person submits it there."""
+        from orchestrator.gui.plain import ask
+        if not ask(self, ui_text("crash.report.title", self.lang), ui_text("crash.report.question", self.lang)):
+            return False
+        return open_address(issue_link(self.details_text))
+
 
 class CrashReporter(QObject):
     """Logs every uncaught error and shows at most one CrashDialog at a time, always on the GUI thread."""
@@ -78,13 +101,14 @@ class CrashReporter(QObject):
     reported = Signal(str)
 
     def __init__(self, folder: Path, app: Optional[QApplication] = None,
-                 opener: Optional[Callable[[Path], bool]] = None):
+                 opener: Optional[Callable[[Path], bool]] = None, telemetry: Optional[Callable[[], bool]] = None):
         super().__init__(None)
         app = app or QApplication.instance()
         if app is not None:
             self.moveToThread(app.thread())
         self.folder = Path(folder)
         self.opener = opener
+        self.telemetry = telemetry   # whether the person opted in to error reports (read when a dialog opens)
         self.lock = threading.Lock()
         self.busy = False      # a dialog is open or on its way
         self.more = 0          # errors logged while it was
@@ -144,7 +168,8 @@ class CrashReporter(QObject):
                     self.dialog.set_more(self.more)
             return
         try:
-            self.dialog = CrashDialog(details, self.folder, parent=QApplication.activeWindow(), opener=self.opener)
+            self.dialog = CrashDialog(details, self.folder, parent=QApplication.activeWindow(), opener=self.opener,
+                                      telemetry=self._telemetry())
             with self.lock:
                 self.dialog.set_more(self.more)
             self.shown += 1
@@ -160,6 +185,13 @@ class CrashReporter(QObject):
                 dialog.deleteLater()
 
 
+    def _telemetry(self) -> bool:
+        try:
+            return bool(self.telemetry()) if callable(self.telemetry) else False
+        except Exception:  # noqa: BLE001 - an unreadable setting is off
+            return False
+
+
 def _exec(dialog: CrashDialog) -> int:
     """Shows the dialog modally (tests replace this)."""
     return dialog.exec()
@@ -169,11 +201,13 @@ _reporter: Optional[CrashReporter] = None
 
 
 def install(folder: Path, app: Optional[QApplication] = None,
-            opener: Optional[Callable[[Path], bool]] = None) -> CrashReporter:
-    """Sets sys.excepthook and threading.excepthook to the crash reporter (once; a second call returns it)."""
+            opener: Optional[Callable[[Path], bool]] = None,
+            telemetry: Optional[Callable[[], bool]] = None) -> CrashReporter:
+    """Sets sys.excepthook and threading.excepthook to the crash reporter (once; a second call returns it).
+    `telemetry`: whether the person opted in to error reports (the setting enable_telemetry, read for each dialog)."""
     global _reporter
     if _reporter is None:
-        _reporter = CrashReporter(folder, app, opener)
+        _reporter = CrashReporter(folder, app, opener, telemetry)
         sys.excepthook = _reporter.excepthook
         threading.excepthook = _reporter.thread_excepthook
     return _reporter
@@ -183,12 +217,14 @@ def report_now(error: BaseException, where: str = "") -> None:
     """The crash dialog for `error` right now (the reporter install made, else one for the default log folder)."""
     if _reporter is None:
         from orchestrator.Core.config_manager import ConfigManager
-        from orchestrator.utils.crash_report import log_folder
+        from orchestrator.utils.crash_report import log_folder, telemetry_enabled
+        config = None
         try:
-            folder = log_folder(ConfigManager())
+            config = ConfigManager()
+            folder = log_folder(config)
         except Exception:  # noqa: BLE001 - the settings may be what failed
             folder = log_folder()
-        CrashReporter(folder).show_now(error, where)
+        CrashReporter(folder, telemetry=lambda: telemetry_enabled(config)).show_now(error, where)
         return
     _reporter.show_now(error, where)
 
@@ -203,4 +239,4 @@ def uninstall() -> None:
         _reporter = None
 
 
-__all__ = ["CrashDialog", "CrashReporter", "install", "open_folder", "report_now", "uninstall"]
+__all__ = ["CrashDialog", "CrashReporter", "install", "open_address", "open_folder", "report_now", "uninstall"]

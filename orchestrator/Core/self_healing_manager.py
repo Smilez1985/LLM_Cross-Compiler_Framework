@@ -134,8 +134,19 @@ class HealingProposal:
     fix_command: str       # Bash Command oder Config-Change
     confidence: float      # 0.0 bis 1.0
     strategy: HealingStrategy # NEU: Klassifizierung der Lösung
-    target_scope: str      # "HOST" oder "DEVICE"
+    target_scope: str      # "HOST" (this computer) or "DEVICE" (the board): where the step runs (scope_text)
     is_ai_generated: bool = False # NEU: Herkunftsnachweis
+
+# Where a healing step runs, in the person's words (the dialog, the CLI's question, a client's fix proposal).
+SCOPE_KEYS = {"HOST": "healing.scope.host", "DEVICE": "healing.scope.device"}
+
+
+def scope_text(scope: str, lang: str = None) -> str:
+    """"This computer" for HOST, "the board" for DEVICE (ui_text); another value as it is."""
+    from orchestrator.utils.localization import ui_text
+    key = SCOPE_KEYS.get(str(scope or "").upper())
+    return ui_text(key, lang) if key else str(scope or "")
+
 
 # ============================================================================
 # SELF HEALING MANAGER

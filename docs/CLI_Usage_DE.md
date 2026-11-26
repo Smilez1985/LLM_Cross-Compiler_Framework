@@ -366,7 +366,9 @@ an oder reparieren ihn und entfernen ihn, ohne neu zu installieren.
 Jeder Start der GUI schreibt deinen Linux-Eintrag außerdem neu, wenn er nicht mehr zu dieser Installation passt, legt
 aber nie einen an, den du entfernt hast. Trifft die GUI auf einen Fehler, den niemand abgefangen hat, sagt ein Dialog
 das in einfachen Worten, mit **Log-Ordner öffnen** und **Details kopieren** (der Traceback, die Version, Python und das
-System, ohne Geheimnisse und ohne deinen Home-Ordner); das Log ist `gui.log` in deinem Log-Ordner
+System, ohne Geheimnisse und ohne deinen Home-Ordner) und, wenn du mit `llmcf config set enable_telemetry true`
+zugestimmt hast, **Auf GitHub melden...** (nach deinem Ja öffnet sich das GitHub-Formular für ein neues Issue im
+Browser, gefüllt mit diesen Details; nichts wird gesendet, bevor du es dort abschickst); das Log ist `gui.log` in deinem Log-Ordner
 (`~/.llm-framework/logs`). Ein Absturz, bevor es das Fenster gibt, landet dort in einer `crash-<Zeit>.txt`.
 
 In der GUI: **Datei > Einstellungen…**, Seite **Update**, Teil **Starteintrag**: der Zustand ist `status`, **Anlegen
@@ -3009,7 +3011,8 @@ den Ditto bekam, und kein Schlüssel der Probe, bleibt leer und wird als Lücke 
 geraten); ein Wert für einen Pfad, den die Vorlage nicht hat, oder mit einem gefährlichen Befehl wird abgelehnt; und
 jeder Wert geht durch die Prüfungen der Vorlage, jeder Grund an seinem Feld genannt. Das Ergebnis ist ein Entwurf, nie
 ein Modul: `--out DATEI` schreibt seine Formate als YAML für `module create --formats DATEI --ask-values`, `--json`
-gibt ihn ganz an Skripte.
+gibt ihn ganz an Skripte (in eine Datei gespeichert, nimmt `module create --formats` auch diese Datei: jedes
+vorgeschlagene Format als seine Werte).
 
 | Option | Bedeutung |
 |---|---|

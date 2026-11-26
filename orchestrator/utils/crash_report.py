@@ -13,6 +13,8 @@ a terminal).
   redaction as every log.
 - `crash_details`: the text "Copy details" copies and a crash file holds: the traceback, llmcf's version, the Python
   version and the operating system, with secrets redacted and the home folder written as "~".
+- `issue_link`, `telemetry_enabled`: with the setting enable_telemetry (off by default), the crash dialog's "Report on
+  GitHub…" opens GitHub's form for a new issue filled with crash_details; nothing is sent until the person submits it.
 - `write_crash_file`, `native_message`: a crash before Qt exists goes into crash-<UTC time>.txt in the log folder and,
   on Windows without a console, into a native message box.
 """
@@ -179,6 +181,58 @@ def crash_details(error: BaseException, where: str = "") -> str:
              f"System: {platform.platform(terse=True)} ({platform.machine() or 'unknown machine'})",
              "", trace.rstrip()]
     return scrub("\n".join(lines)) + "\n"
+
+
+# GitHub's form for a new issue of the framework, and the most of the details it is filled with (an address longer than
+# about 8000 characters is refused by browsers and by GitHub).
+ISSUE_URL = "https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/issues/new"
+ISSUE_BODY_MAX = 6000
+
+
+def telemetry_enabled(config: Any) -> bool:
+    """The setting enable_telemetry (the person's opt-in to error reports as GitHub issues): off by default and when it
+    cannot be read."""
+    try:
+        get = getattr(config, "get", None)
+        return bool(get("enable_telemetry", False)) if callable(get) else False
+    except Exception:  # noqa: BLE001 - an unreadable setting is off
+        return False
+
+
+def hide_home(text: str, marker: str = "~USER") -> str:
+    """This computer's home folder as `marker` in every spelling a text can name it (orchestrator/security/paths:
+    HOME, USERPROFILE and Path.home() with their real paths, either separator, a Windows path in any case, and doubled
+    as Python quotes a Windows path), and the account's name after a path separator as USER (names of three
+    characters or more, so a short one like "pi" stays elsewhere). Without that module the text is returned as it
+    is (scrub already wrote the home folder as "~")."""
+    if not text:
+        return ""
+    try:
+        from orchestrator.security.paths import home_folders, replace_folder, undouble
+        text = undouble(text)
+        for home in home_folders():
+            text = replace_folder(text, home, marker)
+    except Exception:  # noqa: BLE001 - the crash may be in the very module that scrubs
+        pass
+    username = os.getenv("USERNAME") or os.getenv("USER")
+    if username and len(username) > 2:
+        text = text.replace(f"/{username}", "/USER").replace(f"\\{username}", "\\USER")
+    return text
+
+
+def issue_link(details: str) -> str:
+    """GitHub's form for a new issue, filled with `details` (crash_details: already scrubbed, scrubbed again here
+    and the home folder hidden in every spelling, hide_home): its
+    first line as the title, the details in a code block, cut from the front to ISSUE_BODY_MAX so the end of the
+    traceback stays. Nothing is sent: the person reads the form in the browser and submits it or not."""
+    from urllib.parse import urlencode
+    text = hide_home(scrub(details or "")).strip()
+    title = (text.splitlines() or ["unexpected error"])[0][:120]
+    if len(text) > ISSUE_BODY_MAX:
+        text = "…\n" + text[-ISSUE_BODY_MAX:]
+    body = "\n".join(["**What happened**", "", "(Please describe what you were doing.)", "",
+                      "**Details** (from the crash dialog)", "", "```text", text, "```"])
+    return f"{ISSUE_URL}?{urlencode({'title': f'[Bug]: {title}', 'body': body, 'labels': 'bug,automated-report'})}"
 
 
 def write_crash_file(details: str, folder: Optional[Path] = None,

@@ -102,6 +102,7 @@ class FeedView(QScrollArea):
     escape_pressed = Signal()
     earlier_requested = Signal()
     open_approval = Signal(str)
+    reply_requested = Signal(str, str)   # a bubble's "Reply to this": its entry id and the chip's words
 
     def __init__(self, lang: str = "en", names: Optional[SpeakingNames] = None, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -209,6 +210,7 @@ class FeedView(QScrollArea):
         bubble.navigate.connect(lambda delta, b=bubble: self.move_focus(b, delta))
         bubble.jump.connect(self.jump)
         bubble.escape.connect(self.escape_pressed.emit)
+        bubble.reply_requested.connect(self.reply_requested.emit)
         self._bubbles[stored.entry.entry_id] = bubble
         self._stored[stored.entry.entry_id] = stored
         return bubble

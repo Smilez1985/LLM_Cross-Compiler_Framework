@@ -719,8 +719,9 @@ def source_image_problems(images: Any) -> tuple:
 
 def parse_formats(value: Any) -> List[Any]:
     """The formats a module declares, from what the wizard's field, `llm-cli module create --formats FILE` or a tool
-    give: a list of formats (each its values or a preset name), YAML or JSON text of one, or a template_variables
-    block; nothing (empty text, None) declares none (the module builds GGUF)."""
+    give: a list of formats (each its values or a preset name), YAML or JSON text of one, a template_variables block,
+    or a proposal saved with `llm-cli module propose-values --json` (each proposed format taken as its values:
+    proposal_formats); nothing (empty text, None) declares none (the module builds GGUF)."""
     if value is None or (isinstance(value, str) and not value.strip()):
         return []
     if isinstance(value, str):
@@ -736,7 +737,16 @@ def parse_formats(value: Any) -> List[Any]:
         value = [value]
     if not isinstance(value, list):
         raise ValueError("formats: a list of formats, each its values or a preset name (gguf, rknn, rkllm)")
-    return value
+    return proposal_formats(value)
+
+
+def proposal_formats(formats: List[Any]) -> List[Any]:
+    """The formats of a list as `module propose-values --json` writes it: each proposed format ({"id", "values",
+    "complete", "proposed"}) becomes its values; every other entry (values, a preset name) stays as it is. The one
+    unwrapping of a saved proposal: parse_formats (the wizard, `module create --formats FILE`, the tools) and
+    format_proposal.proposal_from_text read through it (here, in the reader: this module must not import
+    format_proposal, which reaches Ditto)."""
+    return [f["values"] if isinstance(f, dict) and "values" in f and "id" in f else f for f in formats]
 
 
 def _validate_formats(formats: Any, problems: List[str]) -> List[Dict[str, Any]]:

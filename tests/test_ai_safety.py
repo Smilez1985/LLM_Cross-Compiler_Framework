@@ -400,6 +400,14 @@ class TestHealingGui:
         dialog = HealingConfirmDialog(manual)
         assert dialog.automatic is False and dialog.txt_command.isReadOnly()
 
+    def test_healing_dialog_says_where_the_step_runs(self):
+        """The analysis says where its step runs (HOST: this computer, DEVICE: the board); the person sees it."""
+        from orchestrator.gui.dialogs import HealingConfirmDialog
+        for scope, words in (("HOST", "this computer"), ("DEVICE", "the board")):
+            proposal = HealingProposal("AI", "cause", "apt install libfoo", 0.5, HealingStrategy.MANUAL_INTERVENTION,
+                                       scope, is_ai_generated=True)
+            assert HealingConfirmDialog(proposal).lbl_scope.text() == f"Where it runs: {words}"
+
 
 class TestCliHealingPrompt:
 
@@ -412,6 +420,7 @@ class TestCliHealingPrompt:
         cli._resolve_healing_interactively(orchestrator, "r1", proposal)  # pytest's stdin is not a tty
         out = capsys.readouterr().out
         assert "[/usr/lib/aarch64-linux-gnu]" in out and 's/[/]usr//' in out
+        assert "Where it runs: this computer" in out
         assert decisions == [("r1", False)]
 
     def test_the_proposal_loses_its_control_characters_and_keeps_its_text(self, capsys):
@@ -432,3 +441,10 @@ class TestCliHealingPrompt:
         assert "Lib]0;owned fehlt \u00fc \U0001f469\u200d\U0001f4bb" in flat
         assert "cause2J esrever" in flat and "make clean[2Kok" in flat
         assert decisions == [("r1", False)]
+
+
+def test_scope_text_names_where_a_step_runs_in_both_languages():
+    from orchestrator.Core.self_healing_manager import scope_text
+    assert scope_text("HOST", "en") == "this computer" and scope_text("device", "en") == "the board"
+    assert scope_text("HOST", "de") == "dieser Computer" and scope_text("DEVICE", "de") == "das Board"
+    assert scope_text("ELSEWHERE", "en") == "ELSEWHERE" and scope_text("", "en") == ""
