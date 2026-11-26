@@ -274,15 +274,22 @@ class TestCancellation:
         monkeypatch.setattr(registry, "call", capture)
 
         async def go():
+            # The client abandons the call at the moment its handler runs, not after a fixed time: a fixed 0.5 seconds
+            # asked for the handler to have started that soon, which a loaded Windows runner did not keep (the CI of
+            # 2026-11-24 found it: the call was then cancelled before its handler started, a case of its own below).
             async with Client(server) as client:
-                with anyio.move_on_after(0.5):
-                    await client.call_tool("slow", {"text": "x"})
+                async with anyio.create_task_group() as group:
+                    async def ask():
+                        await client.call_tool("slow", {"text": "x"})
+                    group.start_soon(ask)
+                    assert await anyio.to_thread.run_sync(lambda: registry.entered.wait(30))
+                    group.cancel_scope.cancel()
                 # Back in the client while the handler still runs: the cancel event must already be set.
                 assert await anyio.to_thread.run_sync(lambda: contexts[0].cancel.wait(5))
                 assert registry.writes == [], "the handler has not returned yet"
                 registry.release.set()
         asyncio.run(go())
-        assert wait_for(lambda: [o for _, o in outcomes(registry)][-1:] == ["ok"])
+        assert wait_for(lambda: [o for _, o in outcomes(registry)][-1:] == ["ok"], 30), outcomes(registry)
         started, cancelled, end = entries(registry)
         assert [started["outcome"], cancelled["outcome"]] == ["started", "cancelled"]
         assert end["links"] == [started["id"]] and "cancelled the call while it ran" in end["detail"]
