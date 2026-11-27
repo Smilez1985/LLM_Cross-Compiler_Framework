@@ -1020,12 +1020,12 @@ class log_step:
 
 def _wrap(func, part: Optional[str], step: Optional[str], threshold_ms: float, errors: bool):
     """`func` (plain or async) inside log_step, with its own name (functools.wraps)."""
-    import asyncio
     import functools
+    import inspect
     name = step or func.__qualname__
     where = part or func.__module__
 
-    if asyncio.iscoroutinefunction(func):
+    if inspect.iscoroutinefunction(func):
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
             with log_step(where, name, threshold_ms, errors):
