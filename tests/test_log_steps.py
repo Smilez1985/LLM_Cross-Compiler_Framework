@@ -31,7 +31,9 @@ def records(caplog):
 
 @pytest.fixture(autouse=True)
 def no_part_levels():
-    apply_part_levels({})
+    """The test parts at INFO whatever level an earlier test gave the framework (at WARNING a step's duration, level
+    PERFORMANCE, is rightly not written); no other part has its own level."""
+    apply_part_levels({part: "INFO" for part in ("PartA", "PartB", "PartC", "ToolRegistry", "BuildEngine", "Mojo")})
     yield
     apply_part_levels({})
 
