@@ -309,7 +309,7 @@ DELETION_KINDS = ("artifact", "model_file", "download", "knowledge_snapshot", "t
                   "acp_agent",  # an ACP agent the person added: its folders and its entry (Core/acp_hosts.py)
                   "f16_intermediate",  # a kept F16 intermediate of GGUF builds (Core/f16_cache.py)
                   "model_archive",  # a model archive taken in (Core/model_archive.py)
-                  "board_files",  # a board's stored probe, settings and measurement (runtime/device/person_steps.py)
+                  "board_files",  # a board's stored probe, settings and measurement (deploy devices remove)
                   "knowledge_collection")  # a collection of the knowledge base, emptied by `knowledge clear`
 # Docker's own objects have no host path; every other item is listed with its full path.
 NO_PATH_KINDS = ("docker_image", "build_cache", "docker_container", "knowledge_collection")
