@@ -636,19 +636,23 @@ class TestKeyStorage:
         assert dialog.chooser.rb_keyring.text() == "Schlüsselbund des Betriebssystems (Standard) (aktuell)"
 
 
-# --- the AI settings' Security > Set OpenAI API Key in the ephemeral storage -----------------------------------------
+# --- the Secrets window says when nothing was saved (the one way of a secret by mouse) ------------------------------
 
-def test_the_openai_key_dialog_says_when_nothing_was_saved(qapp, monkeypatch):
-    from orchestrator.gui import dialogs
-    said = []
-    sm = SimpleNamespace(get_secret=lambda key: None, set_secret=lambda key, value: True, storage_mode="ephemeral")
-    monkeypatch.setattr(dialogs.QMessageBox, "warning", lambda parent, title, text: said.append(text))
-    monkeypatch.setattr(dialogs.QMessageBox, "information", lambda parent, title, text: said.append(text))
-    dlg = dialogs.SecretInputDialog(SimpleNamespace(secrets_manager=sm), "openai_api_key", "OpenAI API Key")
-    dlg.input_field.setText(OPENAI_KEY)
-    dlg._save_secret()
-    assert said == ["Secret 'openai_api_key' is kept in memory for this run only (secret_storage: ephemeral); "
-                    "nothing was saved."]
+def test_the_secrets_window_says_when_nothing_was_saved_and_names_the_vault(qapp):
+    """The Secrets window replaced the old SecretInputDialog (2026-11-27, compared first): it says that an ephemeral
+    storage saved nothing and names the vault when it did."""
+    from orchestrator.gui.signin_windows import SecretsWindow
+    from orchestrator.utils.localization import ui_text
+    shown = []
+    window = SimpleNamespace(_t=lambda key, **kw: ui_text(key, "en", **kw),
+                             _show=lambda label, text, ok: shown.append((text, ok)), lbl_result=None,
+                             txt_value=SimpleNamespace(clear=lambda: None), txt_repeat=SimpleNamespace(clear=lambda: None),
+                             reload=lambda: None)
+    SecretsWindow._on_stored(window, SimpleNamespace(name="openai_api_key", memory_only=True), None)
+    SecretsWindow._on_stored(window, SimpleNamespace(name="openai_api_key", memory_only=False), None)
+    assert shown == [("Secret 'openai_api_key' is kept in memory for this run only (secret_storage: ephemeral); "
+                      "nothing was saved.", False),
+                     ("Secret 'openai_api_key' stored in the encrypted credential vault.", True)]
 
 
 # --- texts ---------------------------------------------------------------------------------------------------------

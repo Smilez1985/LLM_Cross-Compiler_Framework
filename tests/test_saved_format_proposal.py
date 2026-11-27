@@ -1,11 +1,13 @@
 """A proposal saved with `llm-cli module propose-values --json` is taken by `module create --formats FILE`, the wizard
-and the tools (maintainer, 2026-11-24, recon: the bridge format_proposal.proposal_from_text was built but the one
-reader, module_generator.parse_formats, refused the file's fields id, complete and proposed).
+and the tools (maintainer, 2026-11-24, recon: the one reader, module_generator.parse_formats, refused the file's fields id,
+complete and proposed; the bridge format_proposal.proposal_from_text went on 2026-11-27, parse_formats reads it and
+says why a text is no valid YAML).
 """
 
 import json
 
-from orchestrator.Core.format_proposal import proposal_from_text
+import pytest
+
 from orchestrator.Core.module_generator import _validate_formats, parse_formats, proposal_formats
 from orchestrator.schemas.target_template import gguf_format
 
@@ -26,10 +28,10 @@ def test_the_saved_json_is_read_as_its_formats_values():
     assert _validate_formats(saved_proposal(values), problems) and problems == [], problems
 
 
-def test_the_one_unwrapping_is_shared_with_the_bridge():
-    values = gguf_format(["Q4_K_M"])
-    assert proposal_from_text(saved_proposal(values)) == parse_formats(saved_proposal(values))
+def test_values_and_presets_stay_and_a_broken_text_says_why():
     assert proposal_formats(["gguf", {"id": "x"}]) == ["gguf", {"id": "x"}], "values and presets stay as they are"
+    with pytest.raises(ValueError, match="not valid YAML or JSON"):
+        parse_formats("formats: [unclosed")
 
 
 def test_the_formats_as_before_are_read_as_before():

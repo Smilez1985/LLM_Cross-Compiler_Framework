@@ -224,6 +224,23 @@ def row_for_call(data: Mapping[str, Any], *, program: str, job_window: Optional[
                 client=data.get("client", ""), asked_in=asked_in)
 
 
+def changed_setting_keys(entries: Any) -> List[str]:
+    """The setting keys an AI app's update_settings changed, as the activity rows among `entries` (StoredEntry or
+    FeedEntry objects of the chat feed) name them, in order and once each: what the GUI takes from config.yml again
+    (config_manager.take_saved_settings)."""
+    keys: List[str] = []
+    for item in entries or ():
+        entry = getattr(item, "entry", item)
+        params = getattr(entry, "params", None) or {}
+        if getattr(entry, "kind", "") != "ai_action" or params.get("tool") != "update_settings":
+            continue
+        for key in str(params.get("keys") or "").split(","):
+            key = key.strip()
+            if key and key not in keys:
+                keys.append(key)
+    return keys
+
+
 def row_for_event(kind: str, data: Mapping[str, Any]) -> Optional[Row]:
     """The row of a registry event other than call_done: grant_used, approval, approval_end, or blocked for
     refused_before_question. None for the person's own calls and for events that are no row."""

@@ -58,8 +58,10 @@ def open_log_window(window) -> Optional[object]:
         existing.activateWindow()
         existing.refresh()
         return existing
+    from orchestrator.Core.config_manager import take_saved_settings
     framework = getattr(window, "framework", None)
     config = getattr(framework, "config", None)
+    take_saved_settings(config)   # the levels per part `llmcf logs level` saved meanwhile, applied here too
     dialog = FrameworkLogWindow(framework_log_folder(config), parent=window, config=config)
     window.framework_log_window = dialog
     dialog.show()

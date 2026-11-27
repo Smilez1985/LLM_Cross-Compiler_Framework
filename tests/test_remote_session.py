@@ -37,6 +37,7 @@ from orchestrator.utils import ssh_trust  # noqa: E402
 import test_board_deploy as tbd  # noqa: E402
 from test_board_deploy import HOST, TARGET, board, manager, package, run  # noqa: E402,F401 - the fake board
 from test_deployment import config  # noqa: E402,F401 - the manager fixture's configuration
+from orchestrator.remote.session import RemoteSession  # noqa: E402
 
 PART = f"{TARGET}/deploy_model_1.zip.part"
 FINAL = f"{TARGET}/deploy_model_1.zip"
@@ -82,7 +83,7 @@ def test_a_clean_deploy_runs_these_commands_in_this_order(manager, board, packag
     result, _events = run(manager, package)
     assert result.success and result.exit_status == 0 and result.device_state == "ok"
     assert result.resumed == 0 and result.waited_s == 0.0 and result.code == "" and result.reason == ""
-    start = DeploymentManager._remote_start_cmd(TARGET, package.name)
+    start = RemoteSession.detached_command(TARGET, DeploymentManager._install_job(package.name))
     poll = (f"cat {TARGET}/{dmod.INSTALL_STATUS} 2>/dev/null || "
             f"{{ [ -d {TARGET} ] && echo running || echo gone; }}")
     from orchestrator.runtime.device import board_clock

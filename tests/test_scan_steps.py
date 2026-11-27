@@ -396,16 +396,16 @@ class TestMakePackage:
         broken.write_bytes(b"not a zip")
         assert package_model_name(broken) is None and package_model_name(tmp_path / "missing.zip") is None
 
-    def test_a_failed_package_keeps_its_reason(self, tmp_path):
-        from orchestrator.Core.deployment_manager import DeployError, DeploymentManager
+    def test_a_failed_package_raises_its_reason_with_the_next_step(self, tmp_path):
+        from orchestrator.Core.deployment_manager import DeployError, DeploymentManager, make_package
         manager = DeploymentManager(SimpleNamespace())
 
         def refuse(*a, **k):
             raise DeployError("The image is not pinned.", next="Package without Docker images.")
 
         manager.create_package = refuse
-        assert manager.create_deployment_package(tmp_path / "m.gguf", "Rockchip", {}, tmp_path) is None
-        assert manager.last_package_error.next == "Package without Docker images."
-        manager.create_package = lambda *a, **k: tmp_path / "deploy.zip"
-        assert manager.create_deployment_package(tmp_path / "m.gguf", "Rockchip", {}, tmp_path) is not None
-        assert manager.last_package_error is None
+        model = tmp_path / "m.gguf"
+        model.write_bytes(b"GGUF")
+        with pytest.raises(DeployError) as e:
+            make_package(manager, SimpleNamespace(), model, "Rockchip", False, tmp_path)
+        assert e.value.next == "Package without Docker images."

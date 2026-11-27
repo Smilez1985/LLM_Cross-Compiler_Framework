@@ -32,7 +32,7 @@ import shlex
 import socket
 import tempfile
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 from orchestrator.remote import transport
 from orchestrator.remote.trust import (HostKeyChanged, HostKeyError, UnknownHostKey, check_host_key,  # noqa: F401
@@ -273,8 +273,3 @@ def _install_plain(client, public_line: str) -> None:
     if stdout.channel.recv_exit_status() != 0:
         raise HostKeyError(f"Could not install the framework key: {stderr.read().decode(errors='replace').strip()}")
 
-
-def system_ssh_options(state_dir: Path) -> List[str]:
-    """Options that make OpenSSH use the framework key and known_hosts and never ask or auto-accept, with a login
-    time limit and keepalive: the one list of orchestrator/remote/transport.py openssh_options (its old name)."""
-    return transport.openssh_options(state_dir)

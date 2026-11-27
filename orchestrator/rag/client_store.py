@@ -107,22 +107,6 @@ class ClientKnowledgeStore(KnowledgeStore):
             self.client.upsert(collection_name=self.collection, points=list(points[start:start + self.UPSERT_BATCH]),
                                wait=True)
 
-    def delete_stale(self, source: str, keep_ids: Sequence[str]) -> None:
-        """Removes chunks of a re-ingested document that its new version no longer contains."""
-        flt = models.Filter(must=[models.FieldCondition(key="source", match=models.MatchValue(value=source))],
-                            must_not=[models.HasIdCondition(has_id=list(keep_ids))] if keep_ids else None)
-        self.client.delete(collection_name=self.collection, points_selector=models.FilterSelector(filter=flt),
-                           wait=True)
-
-    def delete_origin_stale(self, origin_pack: str, keep_sha256: str) -> None:
-        """Removes the excerpts of an installed pack (origin_pack) that its current import did not write (their
-        origin_sha256 is another one, or missing)."""
-        flt = models.Filter(
-            must=[models.FieldCondition(key="origin_pack", match=models.MatchValue(value=origin_pack))],
-            must_not=[models.FieldCondition(key="origin_sha256", match=models.MatchValue(value=keep_sha256))])
-        self.client.delete(collection_name=self.collection, points_selector=models.FilterSelector(filter=flt),
-                           wait=True)
-
     def query(self, dense: List[float], sparse: Optional[SparseVec], limit: int,
               dense_floor: Optional[float] = None) -> List[ScoredHit]:
         """Hybrid query: dense and (if given) BM25 candidates, fused with RRF, so scores are always rank-based."""

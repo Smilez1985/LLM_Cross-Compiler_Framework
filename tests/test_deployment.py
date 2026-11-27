@@ -90,8 +90,8 @@ def artifact(tmp_path):
 
 def build_package(tmp_path, config, artifact, use_docker, docker_client=None, profile="rk3588"):
     dm = DeploymentManager(FakeFramework(config, docker_client))
-    pkg = dm.create_deployment_package(artifact, profile, {"use_docker": use_docker}, tmp_path / "out")
-    assert pkg is not None and pkg.exists()
+    pkg = dm.create_package(artifact, profile, {"use_docker": use_docker}, tmp_path / "out")
+    assert pkg.exists()
     extract = tmp_path / "pkg"
     with zipfile.ZipFile(pkg) as zf:
         zf.extractall(extract)
@@ -100,9 +100,11 @@ def build_package(tmp_path, config, artifact, use_docker, docker_client=None, pr
 
 class TestPackageCreation:
 
-    def test_missing_artifact_returns_none(self, tmp_path, config):
+    def test_a_missing_artifact_is_refused_with_its_reason(self, tmp_path, config):
+        from orchestrator.Core.deployment_manager import DeployError
         dm = DeploymentManager(FakeFramework(config))
-        assert dm.create_deployment_package(tmp_path / "nope.gguf", "", {}, tmp_path / "out") is None
+        with pytest.raises(DeployError):
+            dm.create_package(tmp_path / "nope.gguf", "", {}, tmp_path / "out")
 
     def test_native_package(self, tmp_path, config, artifact):
         pkg = build_package(tmp_path, config, artifact, use_docker=False)
@@ -164,8 +166,10 @@ class TestBuildHandoff:
         assert "chmod +x" not in script
 
     def test_archive_is_never_executed(self, tmp_path, config, build_dir):
+        from orchestrator.Core.deployment_manager import DeployError
         dm = DeploymentManager(FakeFramework(config))
-        assert dm.create_deployment_package(build_dir.parent / "Q4_K_M.zip", "", {}, tmp_path / "out") is None
+        with pytest.raises(DeployError):
+            dm.create_package(build_dir.parent / "Q4_K_M.zip", "", {}, tmp_path / "out")
         with pytest.raises(ValueError):
             dm._generate_deploy_script("tool.sh", "", use_docker=False)
 
@@ -265,7 +269,6 @@ class TestDockerPackages:
         with pytest.raises(DeployError, match="neither pinned by its digest") as e:
             dm.create_package(artifact, "", {"use_docker": True}, tmp_path / "out")
         assert e.value.code == "not_supported" and client.pulled == []
-        assert dm.create_deployment_package(artifact, "", {"use_docker": True}, tmp_path / "out") is None
 
     def test_an_image_pulled_by_a_tag_earlier_is_still_refused(self, tmp_path, config, artifact):
         from orchestrator.Core.deployment_manager import DeployError
@@ -329,16 +332,16 @@ class TestSSHDeployment:
     def test_invalid_user_is_rejected_before_connecting(self, dm, artifact, user):
         assert dm.deploy_package(artifact, "192.168.1.50", user).success is False
 
-    def test_remote_command_quotes_package_name(self):
-        cmd = DeploymentManager._remote_install_cmd("/tmp/llm_deploy", "evil; rm -rf ~.zip")
+    def test_the_install_job_quotes_a_package_name_that_is_no_plain_word(self):
+        cmd = DeploymentManager._install_job("evil; rm -rf ~.zip")
         tokens = shlex.split(cmd)
         assert "evil; rm -rf ~.zip" in tokens
 
     def test_deploy_script_runs_through_sh_also_where_tmp_is_noexec(self, config, tmp_path):
         """The package is unpacked in /tmp/llm_deploy.*: executing ./deploy.sh there fails on boards that mount /tmp
         noexec (and on boards without bash); sh reads the script instead of executing it."""
-        cmd = DeploymentManager._remote_install_cmd("/tmp/llm_deploy.x", "pkg.zip")
-        assert "./deploy.sh" not in cmd and "chmod +x" not in cmd and cmd.endswith("&& sh deploy.sh")
+        cmd = DeploymentManager._install_job("pkg zip.zip")   # no plain word: the job as a script
+        assert "./deploy.sh" not in cmd and "chmod +x" not in cmd and "sh deploy.sh >>" in cmd
         script = DeploymentManager(FakeFramework(config))._generate_deploy_script("model.gguf", "", False)
         assert script.startswith("#!/bin/sh\n")
         path = tmp_path / "deploy.sh"

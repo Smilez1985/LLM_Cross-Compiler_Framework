@@ -22,7 +22,6 @@ from datetime import datetime
 import click
 import yaml
 
-from orchestrator.Core.build_formats import ModelFormat
 from orchestrator.llm.sdk_env import guard_sdk_environment
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.lazy_imports import lazy_attributes, lazy_value
@@ -233,18 +232,6 @@ def _allow_sdk_env_headers(config_path: Optional[str]) -> Any:
     except Exception as e:
         get_logger(__name__).warning(f"Could not read ai_allow_sdk_env_headers ({e.__class__.__name__}).")
         return False
-
-
-def model_format_from_string(format_str: str) -> ModelFormat:
-    """Convert string to ModelFormat enum (by name or value, any letter case; GGUF for an unknown one). Kept for its
-    callers: `build start` lets BuildService.start_build normalize the format now."""
-    try:
-        return ModelFormat[format_str.upper()]
-    except KeyError:
-        try:
-            return ModelFormat(format_str.lower())
-        except ValueError:
-            return ModelFormat.GGUF
 
 
 # ============================================================================
@@ -10659,18 +10646,6 @@ def _stored_runtime(state_dir: Path, device_id: str, profile):
         console.print(f"[red]The runtime for this device is not built yet (or the device's profile changed): "
                       f"llm-cli device runtime build {device_id}[/red]")
         sys.exit(1)
-    except (steps.PackageNeedsSource, PackageError) as e:
-        _package_refused(e, device_id)
-
-
-def _ensure_package(state_dir: Path, device_id: str, builds, build):
-    """(the device's runtime store, its checked tarball) of a stored build (steps.ensure_package); exits with the
-    reason and the next step when it cannot be packaged. Kept for older callers: `device runtime deploy` finds its
-    build and tarball through _stored_runtime (steps.stored_runtime), with the same words."""
-    from orchestrator.runtime.device.package import PackageError
-    from orchestrator.runtime.device import steps
-    try:
-        return steps.ensure_package(state_dir, device_id, builds, build, _pinned_llama_source)
     except (steps.PackageNeedsSource, PackageError) as e:
         _package_refused(e, device_id)
 

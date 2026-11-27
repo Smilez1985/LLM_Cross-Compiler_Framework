@@ -14,7 +14,7 @@ Updates v2.3.0:
 
 Board deployment (eighth round N4-N7):
 - The board is named by its address or its host name (192.168.1.50 or myboard.local); the host key is trusted per
-  host string, after the person compared the fingerprint (dialogs.confirm_host_key).
+  host string, after the person compared the fingerprint (gui/host_key.HostKeyCheck).
 - When the network drops during the deploy (a Wi-Fi board), the window shows that it waits for the board, how long
   it has waited and the limit, with a Cancel button; the upload then continues where it stopped
   (DeploymentManager.deploy_package).
@@ -110,7 +110,7 @@ class DeploymentWorker(QThread):
         self.kv_setting = KV_KEEP       # what the board's deploy settings get: None (automatic), a type, or KV_KEEP
         self.device_id = None           # the board's record after a successful deploy
         self.model_name = None          # the GGUF model the package installed (for the benchmark on the board)
-        self.package_error = None       # why _make_package made no package (a DeployError with its next step)
+        self.package_error = None       # why the deploy made no package (a DeployError with its next step)
         # the one cancel of a board step (remote/session.py CancelToken): it holds the deploy's SSH session
         from orchestrator.remote.session import CancelToken
         self._stop = CancelToken()
@@ -183,24 +183,6 @@ class DeploymentWorker(QThread):
         elif kind == "deploy":
             self.progress.emit(f"🚀 Deploying to {self.target_ip}...")
 
-    def _make_package(self, dep_mgr):
-        """Step 1 of a deploy on its own, kept for older callers (run() packages through person_steps.deploy_build):
-        the package of the selected build in the configured output folder, made as run() makes it (make_package: the
-        image name of a Docker package; Cancel stops it). None when it cannot be made; the reason is then in
-        `package_error`, never in the manager's shared state."""
-        from orchestrator.Core.deployment_manager import DeployError, make_package, package_folder
-        self.package_error = None
-        self._on_step("package")
-        try:
-            extra = {"containers": self.docker_config["containers"]} \
-                if (self.docker_config or {}).get("containers") is not None else {}
-            return make_package(dep_mgr, self.framework, self.artifact_path, self.profile_name,
-                                bool((self.docker_config or {}).get("use_docker")), package_folder(self.framework),
-                                kv_cache=self.kv_cache, cancelled=self._stop.is_set, **extra)
-        except DeployError as e:
-            self.package_error = e
-            return None
-
     def _model_name(self):
         """The GGUF model deploy.sh copied to models/ in the home folder (for the benchmark on the board); with Docker
         it goes into the container instead, so there is no path on the board to measure."""
@@ -225,7 +207,7 @@ class DeploymentWorker(QThread):
         return "\n\n".join(parts)
 
     def _remember_device(self, port=None, key=None):
-        """After a deployment to a device whose host key the person confirmed in this window (confirm_host_key) and
+        """After a deployment to a device whose host key the person confirmed in this window (HostKeyCheck) and
         that the framework logged in to: its record, so AI tools may name it for deploy_to_device (each deploy is
         still confirmed). Written only here and in the CLI, never by a tool; it never fails the deployment. The record
         and its audit row are the CLI's (person_steps.remember_deployed: the registry's audit log, else the per-user

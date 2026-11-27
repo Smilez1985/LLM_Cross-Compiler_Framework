@@ -2098,11 +2098,6 @@ class LocalLLMRuntime:
             docker.stop_container(orphan.container_id, timeout=10)
         return len(orphans)
 
-    def restart(self, **kwargs) -> LocalEndpoint:
-        self.stop()
-        return self.start(**kwargs)
-
-
 def managed_endpoint(data_dir: Optional[Path] = None) -> Optional[LocalEndpoint]:
     """The managed server of this user (LLM_FRAMEWORK_HOME or ~/.llm-framework, or `data_dir`)."""
     home = os.environ.get("LLM_FRAMEWORK_HOME") or Path.home() / ".llm-framework"

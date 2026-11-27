@@ -280,10 +280,15 @@ class TestPartLevels:
             "BuildEngine": "DEBUG", "bad part": "INFO"} if key == "log_levels" else default))
         assert tools_status.setting_value(framework, "log_levels") == ["BuildEngine: DEBUG"]
 
-    def test_the_setting_is_a_setting_of_the_person(self, tmp_path):
+    def test_the_setting_is_a_setting_of_the_person_and_is_saved(self, tmp_path):
+        """With the real ConfigManager: the levels are written to config.yml and read by the next start."""
         from orchestrator.Core.config_manager import ConfigManager
         config = ConfigManager(tmp_path / "configs")
         assert config.get(LOG_LEVELS_SETTING) == {}
+        set_part_level(config, "PartSaved", "warning")
+        assert ConfigManager(tmp_path / "configs").get(LOG_LEVELS_SETTING) == {"PartSaved": "WARNING"}
+        set_part_level(config, "PartSaved", None)
+        assert ConfigManager(tmp_path / "configs").get(LOG_LEVELS_SETTING) == {}
 
 
 class TestCommandLine:

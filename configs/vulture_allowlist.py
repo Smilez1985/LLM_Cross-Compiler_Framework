@@ -14,10 +14,10 @@ Reasons:
 - BY_NAME: a window's button handler, connected by its name in the window's button table (getattr).
 - PREPARATION: a preparation kept for its roadmap row (decision A: the delegations, the enterprise mode's groundwork).
 - TEST_API: a reading or test API only tests call (decision E).
-- KEPT: kept by the maintainer's decision (2026-11-26: runner_text_problem, _validate_port_availability; decision D:
-  configure_logger, part of the logging toolkit).
-- OPEN: found by the recon of 2026-11-27 after the decisions A to E, reported to the maintainer; each waits for the
-  decision per case (wire, fold into the better one, or remove with its replacement named).
+- KEPT: kept by the maintainer's decision (2026-11-26: runner_text_problem, _validate_port_availability; 2026-11-27:
+  configure_logger, log_exceptions and LoggingManager.export_logs, the logging toolkit).
+- OPEN: found and reported to the maintainer, waiting for the decision per case (wire, fold into the better one, or
+  remove with its replacement named).
 """
 
 PROTOCOL = "protocol: called by a library or a protocol by its name"
@@ -91,6 +91,9 @@ ALLOWED = {
     "orchestrator/gui/harness_window.py::_on_stop": BY_NAME,
     "orchestrator/gui/harness_window.py::_on_take_in": BY_NAME,
     # PREPARATION
+    "orchestrator/llm/auth/resolver.py::register_refresher": PREPARATION,
+    "orchestrator/llm/auth/resolver.py::register_type": PREPARATION,
+    "orchestrator/gui/chat_panel/composer.py::set_hint": PREPARATION,
     "orchestrator/Core/chat_feed.py::delegated_answer": PREPARATION,
     "orchestrator/Core/config_manager.py::ConfigFormat": PREPARATION,
     "orchestrator/Core/config_manager.py::ConfigScope": PREPARATION,
@@ -100,6 +103,17 @@ ALLOWED = {
     "orchestrator/Core/config_manager.py::get_all": PREPARATION,
     "orchestrator/tools/audit.py::delegation_uses": PREPARATION,
     # TEST_API
+    "orchestrator/Core/model_manager.py::_detect_model_format": TEST_API,
+    "orchestrator/remote/gate.py::is_restricted_line": TEST_API,
+    "orchestrator/remote/gate.py::restricted_line": TEST_API,
+    "orchestrator/utils/next_steps/__init__.py::dialog_kwargs": TEST_API,
+    "orchestrator/tools/policy.py::damaged": TEST_API,
+    "orchestrator/runtime/profile.py::soc_model_known": TEST_API,
+    "orchestrator/runtime/hardware.py::settings_view": TEST_API,
+    "orchestrator/runtime/device/package.py::tarballs": TEST_API,
+    "orchestrator/runtime/device/board_clock.py::working_rtc": TEST_API,
+    "orchestrator/remote/pair_pake.py::key_lines": TEST_API,
+    "orchestrator/Core/chat_feed.py::person_message": TEST_API,
     "orchestrator/Core/chat_feed.py::max_id": TEST_API,
     "orchestrator/Core/community_pack.py::sshsig_verify": TEST_API,
     "orchestrator/Core/memory_estimate.py::shape_parameters": TEST_API,
@@ -120,41 +134,11 @@ ALLOWED = {
     "orchestrator/tools/approvals.py::waiting_ids": TEST_API,
     "orchestrator/tools/confirmation.py::argument_lines": TEST_API,
     # KEPT
+    "orchestrator/utils/logging.py::log_exceptions": KEPT,
+    "orchestrator/utils/logging.py::export_logs": KEPT,
     "orchestrator/utils/logging.py::configure_logger": KEPT,
     "orchestrator/utils/sandbox.py::runner_text_problem": KEPT,
     "orchestrator/utils/validation.py::_validate_port_availability": KEPT,
     # OPEN
-    "orchestrator/cli.py::model_format_from_string": OPEN,
-    "orchestrator/cli.py::_ensure_package": OPEN,
-    "orchestrator/Core/chat_feed.py::person_message": OPEN,
-    "orchestrator/Core/config_manager.py::reload_user_config": OPEN,
-    "orchestrator/Core/deployment_manager.py::create_deployment_package": OPEN,
-    "orchestrator/Core/deployment_manager.py::_remote_install_cmd": OPEN,
-    "orchestrator/Core/deployment_manager.py::_remote_start_cmd": OPEN,
-    "orchestrator/Core/format_proposal.py::proposal_from_text": OPEN,
-    "orchestrator/Core/model_manager.py::_detect_model_format": OPEN,
-    "orchestrator/gui/chat_panel/composer.py::set_hint": OPEN,
-    "orchestrator/gui/deployment_window.py::_make_package": OPEN,
-    "orchestrator/gui/dialogs.py::SecretInputDialog": OPEN,
-    "orchestrator/gui/dialogs.py::confirm_host_key": OPEN,
-    "orchestrator/llm/auth/resolver.py::register_type": OPEN,
-    "orchestrator/llm/auth/resolver.py::register_refresher": OPEN,
-    "orchestrator/rag/client_store.py::delete_stale": OPEN,
-    "orchestrator/rag/client_store.py::delete_origin_stale": OPEN,
-    "orchestrator/rag/edge_store.py::delete_stale": OPEN,
-    "orchestrator/rag/edge_store.py::delete_origin_stale": OPEN,
-    "orchestrator/remote/gate.py::restricted_line": OPEN,
-    "orchestrator/remote/gate.py::is_restricted_line": OPEN,
-    "orchestrator/remote/pair_pake.py::key_lines": OPEN,
-    "orchestrator/runtime/device/board_clock.py::working_rtc": OPEN,
-    "orchestrator/runtime/device/package.py::tarballs": OPEN,
-    "orchestrator/runtime/hardware.py::settings_view": OPEN,
-    "orchestrator/runtime/llama_server.py::restart": OPEN,
-    "orchestrator/runtime/profile.py::soc_model_known": OPEN,
-    "orchestrator/tools/policy.py::damaged": OPEN,
-    "orchestrator/utils/logging.py::export_logs": OPEN,
-    "orchestrator/utils/logging.py::log_exceptions": OPEN,
-    "orchestrator/utils/next_steps/__init__.py::dialog_kwargs": OPEN,
-    "orchestrator/utils/ssh_trust.py::system_ssh_options": OPEN,
-    "orchestrator/utils/validation.py::validate_ip_address": OPEN,
+    "orchestrator/remote/transport.py::host_key": OPEN,
 }

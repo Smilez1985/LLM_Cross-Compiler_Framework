@@ -134,36 +134,6 @@ class TestStoreContract:
         hits = store.query([1.0, 0.0, 0.0, 0.0], None, 10, dense_floor=0.9)
         assert {h.payload["chunk_index"] for h in hits} == {0, 3}
 
-    def test_delete_stale_keeps_only_the_new_version_of_a_source(self, backend):
-        store = backend.make()
-        store.ensure()
-        points = _points(store)
-        store.upsert(points)
-        keep = [str(points[0].id)]
-        store.delete_stale("s0", keep)
-        left = sorted(r.payload["chunk_index"] for r in store.records())
-        assert left == [0, 1, 3, 5]
-        store.delete_stale("s1", [])
-        assert sorted(r.payload["chunk_index"] for r in store.records()) == [0]
-
-    def test_delete_origin_stale_removes_only_the_older_version_of_one_pack(self, backend):
-        """DESIGN round 23 item 2: after a pack's import, its excerpts with another digest (or none: imported before
-        excerpts carried it) go; other packs' excerpts and your own pages stay."""
-        store = backend.make()
-        store.ensure()
-        origins = {0: {"origin_pack": "p", "origin_sha256": "new"}, 1: {"origin_pack": "p", "origin_sha256": "old"},
-                   2: {"origin_pack": "p"}, 3: {"origin_pack": "q", "origin_sha256": "old"}}
-        points = []
-        for i in range(6):
-            dense = [0.05] * DIM
-            dense[i % 3] = 1.0
-            points.append(store.point(str(uuid.uuid5(uuid.NAMESPACE_URL, f"o{i}")), dense, SparseVec([100 + i], [1.0]),
-                                      {"source": f"s{i % 2}", "chunk_index": i, "content": f"text {i}",
-                                       **origins.get(i, {})}))
-        store.upsert(points)
-        store.delete_origin_stale("p", "new")
-        assert sorted(r.payload["chunk_index"] for r in store.records()) == [0, 3, 4, 5]
-
     def test_records_payload_fields_and_source_records(self, backend):
         store = backend.make()
         store.ensure()

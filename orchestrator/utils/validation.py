@@ -7,7 +7,7 @@ what the newer code uses or what no newer code does, and removed what newer code
 replacement in the changelog of that round):
 
 - The SSRF guard for every URL the framework fetches: validate_public_url with is_public_ip, resolve_public_addresses
-  and _idna_host (crawler, crawl jobs, target sources, image registry), and validate_ip_address.
+  and _idna_host (crawler, crawl jobs, target sources, image registry).
 - validate_python_version: the supported-Python check that Mojo's Python check (Core/mojo/checks/python.py) runs on.
 - check_docker_environment: the build engine's Docker check (ping of the framework's client, buildx), which Mojo's
   Docker check (Core/mojo/checks/docker.py) runs on as well.
@@ -743,25 +743,3 @@ def validate_own_network_url(url: str, config: Any = None) -> ValidationResult:
         details={"url": url, "host": parsed.hostname}
     )
 
-
-def validate_ip_address(ip: str) -> ValidationResult:
-    """Validate IP address format"""
-    try:
-        ip_obj = ipaddress.ip_address(ip)
-        
-        return ValidationResult(
-            valid=True,
-            severity=ValidationSeverity.SUCCESS,
-            message=f"IP address valid: {ip} ({type(ip_obj).__name__})",
-            validation_type=ValidationType.CONFIGURATION,
-            details={"ip": ip, "type": type(ip_obj).__name__}
-        )
-        
-    except ValueError as e:
-        return ValidationResult(
-            valid=False,
-            severity=ValidationSeverity.ERROR,
-            message=f"Invalid IP address: {ip} - {str(e)}",
-            validation_type=ValidationType.CONFIGURATION,
-            details={"ip": ip, "error": str(e)}
-        )

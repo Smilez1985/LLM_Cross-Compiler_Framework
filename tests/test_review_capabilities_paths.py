@@ -510,13 +510,10 @@ class FakeDeploymentManager:
     def __init__(self):
         self.calls = []
 
-    def create_deployment_package(self, **kwargs):
-        self.calls.append(kwargs)
-        return Path(kwargs["output_dir"]) / "deploy_x.zip"
-
     def create_package(self, artifact_path, profile_name, docker_config, output_dir, cancelled=None):
-        return self.create_deployment_package(artifact_path=artifact_path, profile_name=profile_name,
-                                              docker_config=docker_config, output_dir=output_dir)
+        self.calls.append(dict(artifact_path=artifact_path, profile_name=profile_name, docker_config=docker_config,
+                               output_dir=output_dir))
+        return Path(output_dir) / "deploy_x.zip"
 
 
 def framework_with_targets(make_framework, folder, rockchip=True):

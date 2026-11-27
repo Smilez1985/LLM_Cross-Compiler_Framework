@@ -919,6 +919,8 @@ class ConfigManager:
                 "local_cache_ram_mib", "local_cache_keep_minutes", "local_kv_cache", "local_cache_over_cap_ok",
                 # the framework mode (set_framework_mode: the person's alone)
                 "framework_mode",
+                # the levels per part of the framework's log (utils/logging.set_part_level: the person's alone)
+                "log_levels",
                 # v2.3
                 "image_trivy", "image_base_debian", "image_inference_runtime",
                 "enable_security_scan", "llama_cpp_version", "build_jobs", "healing_approval_timeout",
@@ -1155,6 +1157,26 @@ def set_person_setting(config: Any, key: str, value: Any, *, save: bool = True) 
         raise ValueError(f"{key} cannot be '{value}'.")
     saver = getattr(config, "save_user_config", None)
     return bool(saver()) if save and callable(saver) else True
+
+
+def take_saved_settings(config: Any, keys: Optional[Iterable[str]] = None) -> Optional["SettingsReload"]:
+    """What another framework process saved to config.yml since this one read it, taken into this one
+    (ConfigManager.reload_user_config, `keys` or every key): the GUI calls it when the activity row of an AI app's
+    update_settings names keys, and when File > Settings... or Help > Framework Log... opens. When `log_levels`
+    changed, the levels per part are applied again (utils/logging.apply_part_levels). None without a reloadable
+    config; never raises (a file that cannot be read changes nothing)."""
+    reload = getattr(config, "reload_user_config", None)
+    if not callable(reload):
+        return None
+    try:
+        result = reload(list(keys) if keys is not None else None)
+    except Exception as e:  # noqa: BLE001 - the window opens anyway with what this process holds
+        get_logger(__name__).warning(f"The settings another process saved were not read: {e.__class__.__name__}")
+        return None
+    if "log_levels" in getattr(result, "changed", ()):
+        from orchestrator.utils.logging import LOG_LEVELS_SETTING, apply_part_levels
+        apply_part_levels(config.get(LOG_LEVELS_SETTING, {}))
+    return result
 
 
 if __name__ == "__main__":

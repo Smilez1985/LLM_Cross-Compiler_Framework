@@ -190,20 +190,6 @@ class TestHuggingFaceBrowserThreads:
 class TestVaultWording:
     """Secrets go to the encrypted credential vault (its key may be in the keyring); the GUI said 'Keyring'."""
 
-    @pytest.mark.parametrize("language, expected", [
-        ("en", "This value is stored in the encrypted credential vault."),
-        ("de", "Dieser Wert wird im verschlüsselten Tresor für Zugangsdaten gespeichert."),
-    ])
-    def test_secret_dialog_names_the_vault(self, monkeypatch, language, expected):
-        from PySide6.QtWidgets import QLabel
-        from orchestrator.gui import dialogs
-        from orchestrator.utils import localization
-        monkeypatch.setattr(dialogs, "get_i18n", lambda: localization.LocalizationManager(language))
-        sm = SimpleNamespace(get_secret=lambda key: None, set_secret=lambda key, value: True)
-        dlg = dialogs.SecretInputDialog(SimpleNamespace(secrets_manager=sm), "openai_api_key", "OpenAI API Key")
-        texts = [label.text() for label in dlg.findChildren(QLabel)]
-        assert expected in texts and not any("Keyring" in t for t in texts)
-
     def test_no_gui_message_says_the_value_is_in_the_keyring(self):
         sources = [REPO_ROOT / "orchestrator" / "gui" / name for name in ("dialogs.py", "huggingface_window.py")]
         sources.append(REPO_ROOT / "orchestrator" / "utils" / "localization.py")

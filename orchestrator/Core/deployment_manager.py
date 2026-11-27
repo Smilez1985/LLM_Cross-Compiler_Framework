@@ -322,25 +322,8 @@ class DeploymentManager:
         self.logger = get_logger("DeploymentManager")
         self.framework = framework_manager
         self._clock, self._sleep = time.monotonic, time.sleep  # the waiting for a board (tests replace them)
-        # why create_deployment_package returned None; kept for its older callers only (it is shared by every caller
-        # of this manager): the framework's own callers take the reason with the call (make_package raises it, and
-        # person_steps.deploy_build returns it as package_error)
-        self.last_package_error: Optional[DeployError] = None
 
     # --- PACKAGE GENERATION ---
-
-    def create_deployment_package(self, artifact_path: Path, profile_name: str, docker_config: Dict, output_dir: Path,
-                                  kv_cache: Optional[str] = None) -> Optional[Path]:
-        """The package (see create_package), or None when it cannot be made (the reason is logged and kept in
-        `last_package_error`, so a caller can show it with its next step). Kept for older callers: the framework's
-        own callers use make_package (it raises the reason) or person_steps.deploy_build (it returns it)."""
-        self.last_package_error = None
-        try:
-            return self.create_package(artifact_path, profile_name, docker_config, output_dir, kv_cache=kv_cache)
-        except DeployError as e:
-            self.logger.error(str(e))
-            self.last_package_error = e
-            return None
 
     def create_package(self, artifact_path: Path, profile_name: str, docker_config: Dict, output_dir: Path, *,
                        cancelled: Optional[Callable[[], bool]] = None, kv_cache: Optional[str] = None) -> Path:
@@ -754,29 +737,15 @@ class DeploymentManager:
         return reasons.check_port(ip, port, timeout=2) is None
 
     @staticmethod
-    def _remote_install_cmd(target_dir: str, package_name: str) -> str:
-        d, pkg = shlex.quote(target_dir), shlex.quote(package_name)
-        # sh reads the script instead of executing it from /tmp, which many boards mount noexec (and deploy.sh is
-        # plain POSIX sh, so boards without bash, such as Alpine, run it too).
-        return f"cd {d} && unzip -o {pkg} && sh deploy.sh"
-
-    @staticmethod
     def _install_job(package_name: str) -> str:
-        """The installation as a job on the board: unzip and deploy.sh (read by sh, as in _remote_install_cmd) write
+        """The installation as a job on the board: unzip and deploy.sh (read by sh, never run from /tmp, which many boards mount
+        noexec; deploy.sh is plain POSIX sh, so boards without bash run it too) write
         into INSTALL_LOG."""
         try:   # llmcf's job `install` (runtime/device/board_ops.py): a gated board starts it as start-install
             return gate.job("install", package_name)
         except gate.GateRefused:   # a package name that is no plain word: the same command as a script
             pkg = shlex.quote(package_name)
             return f"unzip -o {pkg} > {INSTALL_LOG} 2>&1 && sh deploy.sh >> {INSTALL_LOG} 2>&1"
-
-    @staticmethod
-    def _remote_start_cmd(target_dir: str, package_name: str) -> str:
-        """Starts the installation on the board on its own (nohup, nothing attached to the SSH session), so a network
-        drop never stops deploy.sh halfway: its exit status goes into INSTALL_STATUS. The marker INSTALL_STARTED is
-        made first, and a folder that has it is never started again, also when this command reaches the board twice
-        (RemoteSession.detached_command)."""
-        return remote_session.RemoteSession.detached_command(target_dir, DeploymentManager._install_job(package_name))
 
     # A private, unpredictable folder on the device (a fixed /tmp path could be pre-created by another user).
     REMOTE_MKTEMP = "mktemp -d /tmp/llm_deploy.XXXXXXXX"
@@ -1032,7 +1001,8 @@ class _BoardSession:
         return self._install(name, target_dir)
 
     def _install(self, name: str, target_dir: str) -> DeployResult:
-        """Starts the installation once (DeploymentManager._remote_start_cmd) and waits for its exit status; after a
+        """Starts the installation once (RemoteSession.run_detached with _install_job: on its own, nohup, nothing
+        attached to the SSH session, the marker first so it never starts twice) and waits for its exit status; after a
         network drop the session waits for the board, logs in again and keeps waiting for the same installation. Once
         the start command is on its way, the installation may run on the board even when its answer is lost: from then
         on the device state is unknown until the board says how deploy.sh ended."""

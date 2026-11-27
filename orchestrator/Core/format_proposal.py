@@ -32,7 +32,6 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from orchestrator.Core.ditto_manager import CannotAnswer
-from orchestrator.Core.module_generator import proposal_formats
 from orchestrator.Core.template_values import (field_by_path, field_problems, format_fields, get_value,
                                                missing_required, set_value)
 
@@ -337,10 +336,3 @@ def retrieve(rag: Any, probe: str, board: str = "", limit: int = 6, logger: Any 
             out.append((source or "the knowledge base", content))
     return out
 
-
-def proposal_from_text(text: str) -> List[Dict[str, Any]]:
-    """The formats of a saved proposal (its JSON or the YAML of its formats), for `module create --formats`."""
-    data = yaml.safe_load(text) if text and text.strip() else []
-    if isinstance(data, dict) and isinstance(data.get("formats"), list):
-        return proposal_formats(data["formats"])
-    return data if isinstance(data, list) else []

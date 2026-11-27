@@ -30,6 +30,7 @@ from orchestrator.utils import ssh_trust  # noqa: E402
 import test_deploy_tools as dt  # noqa: E402
 from conftest import posix_shell  # noqa: E402
 from test_deployment import FakeFramework, config  # noqa: E402,F401
+from orchestrator.remote.session import RemoteSession  # noqa: E402
 
 fw = dt.fw
 online = dt.online
@@ -493,7 +494,7 @@ class TestWaitingForTheBoard:
             # deploy.sh runs in a folder of its own since the package is signed (DESIGN, decision of 2026-10-31); the upload
             # folder it came from is $LLMCF_UPLOAD_DIR
             z.writestr("deploy.sh", 'echo run >> "$LLMCF_UPLOAD_DIR/../runs"\necho installed\n')
-        cmd = DeploymentManager._remote_start_cmd(str(board_dir), "pkg.zip")
+        cmd = RemoteSession.detached_command(str(board_dir), DeploymentManager._install_job("pkg.zip"))
         assert "./deploy.sh" not in cmd and "sh deploy.sh" in cmd and "nohup" in cmd
         first = subprocess.run([sh, "-c", cmd], capture_output=True, text=True, timeout=30)
         second = subprocess.run([sh, "-c", cmd], capture_output=True, text=True, timeout=30)

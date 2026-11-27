@@ -328,7 +328,10 @@ def open_settings(window, page: Optional[str] = None, section: Optional[str] = N
     same page in the new texts. The main window's settings_closed() runs afterwards (the chat reads Ditto's access
     again)."""
     from PySide6.QtCore import Qt
+    from orchestrator.Core.config_manager import take_saved_settings
     from orchestrator.gui.settings_window import SettingsDialog
+    # what the CLI or an MCP server saved meanwhile is shown, not this process's older copy
+    take_saved_settings(getattr(getattr(window, "framework", None), "config", None))
     notice, dialog = "", None
     while True:
         try:

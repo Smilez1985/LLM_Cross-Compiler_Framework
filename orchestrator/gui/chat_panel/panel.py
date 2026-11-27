@@ -526,6 +526,12 @@ class ChatPanel(QWidget):
     def _on_new_entries(self, entries: List[StoredEntry]) -> None:
         self.feed_view.append_entries(entries)
         self._after_new_rows()
+        # an AI app changed settings in another process (its update_settings row names them): this one takes them
+        from orchestrator.Core.activity import changed_setting_keys
+        keys = changed_setting_keys(entries)
+        if keys:
+            from orchestrator.Core.config_manager import take_saved_settings
+            take_saved_settings(getattr(self.framework, "config", None), keys)
         if self.ditto is not None:
             for stored in entries:
                 self.build_turns.offer(stored)

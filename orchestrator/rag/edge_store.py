@@ -268,23 +268,6 @@ class EdgeKnowledgeStore(KnowledgeStore):
         must_not = [qe.HasIdCondition(point_ids={str(i) for i in keep_ids})] if keep_ids else None
         return qe.Filter(must=must, must_not=must_not)
 
-    def delete_stale(self, source: str, keep_ids: Sequence[str]) -> None:
-        """Removes chunks of a re-ingested document that its new version no longer contains."""
-        shard = self._shard
-        shard.update(qe.UpdateOperation.delete_points_by_filter(self._source_filter(source, keep_ids)))
-        shard.flush()
-        self.written += 1
-
-    def delete_origin_stale(self, origin_pack: str, keep_sha256: str) -> None:
-        """Removes the excerpts of an installed pack (origin_pack) that its current import did not write (their
-        origin_sha256 is another one, or missing)."""
-        shard = self._shard
-        flt = qe.Filter(must=[qe.FieldCondition(key="origin_pack", match=qe.MatchValue(value=origin_pack))],
-                        must_not=[qe.FieldCondition(key="origin_sha256", match=qe.MatchValue(value=keep_sha256))])
-        shard.update(qe.UpdateOperation.delete_points_by_filter(flt))
-        shard.flush()
-        self.written += 1
-
     def query(self, dense: List[float], sparse: Optional[SparseVec], limit: int,
               dense_floor: Optional[float] = None) -> List[ScoredHit]:
         """Hybrid query: dense and (if given) BM25 candidates, fused with RRF, so scores are always rank-based."""

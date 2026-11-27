@@ -11,7 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 from orchestrator.utils.helpers import redact_secrets, safe_extract_archive, sanitize_filename
-from orchestrator.utils.validation import validate_ip_address, validate_public_url
+from orchestrator.remote.address import valid_host
+from orchestrator.utils.validation import validate_public_url
 
 
 class TestArchiveExtraction:
@@ -176,15 +177,21 @@ class TestFilenameSanitization:
 class TestValidationResultTruthiness:
     """Call sites use `if not validate_x(...)`; a result object must behave like its .valid flag."""
 
-    @pytest.mark.parametrize("ip", ["192.168.1.100", "10.20.30.1", "8.8.8.8", "::1"])
+    @pytest.mark.parametrize("ip", ["192.168.1.100", "10.20.30.1", "8.8.8.8", "::1", "fe80::1%eth0"])
     def test_valid_ips(self, ip):
-        assert validate_ip_address(ip)
+        assert valid_host(ip)   # remote/address.valid_host, the one check (validate_ip_address went on 2026-11-27)
 
-    @pytest.mark.parametrize("ip", ["256.1.1.1", "192.168.1", "not-an-ip", "192.168.77.1.1", "", "1.2.3.4; rm -rf /"])
+    @pytest.mark.parametrize("ip", ["256.1.1.1", "192.168.1", "192.168.77.1.1", "", "1.2.3.4; rm -rf /",
+                                    "[fe80::1]", "-oProxyCommand=x", "8.8.8.8%eth0"])
     def test_invalid_ips(self, ip):
-        result = validate_ip_address(ip)
-        assert not result
-        assert result.valid is False
+        assert not valid_host(ip)
+
+    def test_a_result_is_as_true_as_its_valid_flag(self):
+        from orchestrator.utils.validation import ValidationResult, ValidationSeverity, ValidationType
+        for valid in (True, False):
+            result = ValidationResult(valid=valid, severity=ValidationSeverity.SUCCESS if valid else
+                                      ValidationSeverity.ERROR, message="", validation_type=ValidationType.CONFIGURATION)
+            assert bool(result) is valid
 
 
 class TestSSRFGuard:

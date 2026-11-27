@@ -589,14 +589,14 @@ def test_the_threads_of_a_test_never_outlive_it():
     assert not [t for t in threading.enumerate() if t.name == "boards-step"]
 
 
-def test_no_framework_code_reads_the_shared_package_error():
+def test_no_framework_code_keeps_a_shared_package_error():
     """The reason a package could not be made comes back with the call (make_package raises it, deploy_build returns
-    it as package_error): no framework module reads DeploymentManager.last_package_error, which every caller of one
-    manager shares (it stays for older callers of create_deployment_package only)."""
+    it as package_error): the manager keeps no shared last_package_error any more (removed with
+    create_deployment_package on 2026-11-27)."""
     from conftest import REPO_ROOT
     readers = [p.relative_to(REPO_ROOT).as_posix() for p in (REPO_ROOT / "orchestrator").rglob("*.py")
                if "last_package_error" in p.read_text(encoding="utf-8")]
-    assert readers == ["orchestrator/Core/deployment_manager.py"], readers
+    assert readers == [], readers
 
 
 def test_the_ai_s_deploy_hands_the_flow_no_person_only_hook():
@@ -753,38 +753,22 @@ def test_a_refused_login_reaches_the_ai_as_it_is(ai_board, monkeypatch):
     assert ai_board.order == ["ensure_build", "connect"], "nothing else ran"
 
 
-class TestReplacedHelpersDelegate:
-    """The helpers the one deploy step and the one flow replaced stay, as delegates onto them (nothing is removed
-    without the maintainer's word: round 11 D-del, round 22 P5)."""
+class TestTheOneWaysOfThePackage:
+    """The replaced helpers (the tab's _make_package, the CLI's _ensure_package) are gone after the maintainer's
+    decision of 2026-11-27, each compared first: their one ways stay pinned here (make_package, _stored_runtime)."""
 
-    def test_the_tabs_package_step_makes_the_package_as_its_deploy_makes_it(self, qapp, tmp_path, monkeypatch):
-        from orchestrator.Core.deployment_manager import DEFAULT_INFERENCE_IMAGE
+    def test_make_package_stops_on_a_cancel_and_says_why_without_shared_state(self, tmp_path):
+        from orchestrator.Core.deployment_manager import DeployError, make_package
         framework = Framework(tmp_path)
-        real_create = framework.manager.create_package
-        seen = []
+        build = a_build(tmp_path / "b")
+        package = make_package(framework.manager, framework, build, "Rockchip", False, tmp_path / "output")
+        assert package.parent == tmp_path / "output" and package.is_file()
+        with pytest.raises(DeployError, match="Packaging was cancelled"):
+            make_package(framework.manager, framework, a_build(tmp_path / "c"), "Rockchip", False,
+                         tmp_path / "output", cancelled=lambda: True)
+        assert not hasattr(framework.manager, "last_package_error"), "no shared state of the manager"
 
-        def create_package(artifact_path, profile_name, docker_config, output_dir, **extra):
-            seen.append((dict(docker_config), sorted(extra), Path(output_dir)))
-            return real_create(artifact_path, profile_name, {"use_docker": False}, output_dir, **extra)
-
-        monkeypatch.setattr(framework.manager, "create_package", create_package)
-        tab = TestDeploymentTabDeploy()
-        worker, _done = tab.worker(framework, a_build(tmp_path / "b"))
-        worker.docker_config, worker.kv_cache = {"use_docker": True}, "q8_0"
-        said = []
-        worker.progress.connect(said.append)
-        package = worker._make_package(framework.manager)
-        assert package is not None and package.parent == tmp_path / "output" and package.is_file()
-        assert seen == [({"use_docker": True, "image_name": DEFAULT_INFERENCE_IMAGE}, ["cancelled", "kv_cache"],
-                         tmp_path / "output")]
-        assert said == ["📦 Generating Deployment Package..."] and worker.package_error is None
-        worker, _done = tab.worker(framework, a_build(tmp_path / "c"))
-        worker.cancel()
-        assert worker._make_package(framework.manager) is None
-        assert "Packaging was cancelled" in str(worker.package_error)
-        assert framework.manager.last_package_error is None, "no shared state of the manager is written"
-
-    def test_the_clis_package_check_of_a_stored_build(self, tmp_path, monkeypatch):
+    def test_the_clis_stored_runtime_says_why_a_tarball_cannot_be_used(self, tmp_path, monkeypatch):
         from orchestrator import cli as cli_module
         from orchestrator.runtime.device import steps
         from orchestrator.runtime.device.package import PackageError
@@ -793,21 +777,22 @@ class TestReplacedHelpersDelegate:
         monkeypatch.setattr(cli_module, "_pinned_llama_source", lambda: PIN)
         asked = []
 
-        def ensure(state, device_id, builds, build, source):
-            asked.append((state, device_id, builds, build, source()))
-            return "devices", "packaged"
+        def stored(state, device_id, profile, source):
+            asked.append((state, device_id, profile, source()))
+            return "runtime"
 
-        monkeypatch.setattr(steps, "ensure_package", ensure)
-        assert cli_module._ensure_package(tmp_path, "0123456789abcdef", "builds", "build") == ("devices", "packaged")
-        assert asked == [(tmp_path, "0123456789abcdef", "builds", "build", PIN)]
+        monkeypatch.setattr(steps, "stored_runtime", stored)
+        assert cli_module._stored_runtime(tmp_path, "0123456789abcdef", "profile") == "runtime"
+        assert asked == [(tmp_path, "0123456789abcdef", "profile", PIN)]
         for error, text in ((steps.PackageNeedsSource("no source"), "needs the pinned source"),
-                            (PackageError("the tarball is damaged"), "the tarball is damaged")):
+                            (PackageError("the tarball is damaged"), "the tarball is damaged"),
+                            (steps.NotBuilt("not built"), "not built yet")):
             def refuse(*a, error=error, **k):
                 raise error
 
-            monkeypatch.setattr(steps, "ensure_package", refuse)
+            monkeypatch.setattr(steps, "stored_runtime", refuse)
             with pytest.raises(SystemExit) as e:
-                cli_module._ensure_package(tmp_path, "0123456789abcdef", "builds", "build")
+                cli_module._stored_runtime(tmp_path, "0123456789abcdef", "profile")
             assert e.value.code == 1 and text in " ".join(printed.getvalue().split())
 
 

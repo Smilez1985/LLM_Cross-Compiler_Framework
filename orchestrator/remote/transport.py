@@ -418,7 +418,7 @@ def openssh_options(state_dir: Path, *, known_hosts: Optional[Path] = None, acce
     The framework's own paths in options that expand %-tokens are written with '%%' for a '%' (Q5, openssh_file); -F's
     path is read literally. The key file is made private to this account first (OpenSSH refuses a key others can read:
     utils/atomic.py owner_only, an ACL on Windows). The framework key and known_hosts are read through
-    orchestrator/utils/ssh_trust at call time (ssh_trust.system_ssh_options is this function's old name).
+    orchestrator/utils/ssh_trust at call time.
 
     `known_hosts` and `accept_new` serve one call only: reading the key a board behind a jump host presents
     (remote/trust.presented_key_through_openssh): a temporary known_hosts instead of the framework's, into which

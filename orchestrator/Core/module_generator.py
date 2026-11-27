@@ -743,9 +743,9 @@ def parse_formats(value: Any) -> List[Any]:
 def proposal_formats(formats: List[Any]) -> List[Any]:
     """The formats of a list as `module propose-values --json` writes it: each proposed format ({"id", "values",
     "complete", "proposed"}) becomes its values; every other entry (values, a preset name) stays as it is. The one
-    unwrapping of a saved proposal: parse_formats (the wizard, `module create --formats FILE`, the tools) and
-    format_proposal.proposal_from_text read through it (here, in the reader: this module must not import
-    format_proposal, which reaches Ditto)."""
+    unwrapping of a saved proposal: parse_formats (the wizard, `module create --formats FILE`, the tools and a
+    saved proposal) reads through it (here, in the reader: this module must not import format_proposal, which reaches
+    Ditto)."""
     return [f["values"] if isinstance(f, dict) and "values" in f and "id" in f else f for f in formats]
 
 

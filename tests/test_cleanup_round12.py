@@ -53,12 +53,12 @@ def test_validation_keeps_the_ssrf_guard_and_drops_only_duplicates():
     """The functions callers and tests use stay at their path (tests monkeypatch validate_public_url there); the ones
     newer code does better are gone (round 12 item 10, see the changelog for each replacement)."""
     from orchestrator.utils import validation
-    for kept in ("validate_public_url", "is_public_ip", "resolve_public_addresses", "_idna_host", "validate_ip_address",
+    for kept in ("validate_public_url", "is_public_ip", "resolve_public_addresses", "_idna_host",
                  "ValidationResult", "ValidationSeverity", "ValidationType", "validate_python_version",
                  "validate_path", "_validate_port_availability", "ValidationError", "validate_docker_version",
                  "validate_cpu_usage", "validate_memory_usage"):
         assert hasattr(validation, kept), kept
-    for gone in ("validate_system_requirements", "validate_docker_environment", "create_comprehensive_validation_report",
+    for gone in ("validate_ip_address", "validate_system_requirements", "validate_docker_environment", "create_comprehensive_validation_report",
                  "validate_config", "validate_directory_writable", "validate_url", "ValidationReport",
                  "SystemRequirements", "get_validation_info", "_validate_disk_space", "_validate_docker_daemon",
                  "_validate_command_availability", "_validate_docker_image_name", "_validate_target_name",

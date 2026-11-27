@@ -4,7 +4,6 @@ LLM Cross-Compiler Framework - GUI Dialogs (v2.3.0 Enterprise)
 DIREKTIVE: Goldstandard UI Components.
 
 Updates:
-- SecretInputDialog supports Keyring integration.
 - HealingDialog allows editing of AI proposals.
 - LanguageSelectionDialog for first-run setup.
 """
@@ -66,73 +65,6 @@ class LanguageSelectionDialog(QDialog):
     def accept(self):
         self.selected_lang = self.cb_lang.currentData()
         super().accept()
-
-class SecretInputDialog(QDialog):
-    """
-    Secure dialog to input API Keys and secrets.
-    Stores directly to SecretsManager (Keyring).
-    """
-    def __init__(self, framework, secret_key: str, display_name: str, parent=None):
-        super().__init__(parent)
-        self.framework = framework
-        self.secret_key = secret_key
-        # Safe I18n access
-        self.i18n = get_i18n() if get_i18n else None
-        
-        self.setWindowTitle(f"Security: {display_name}")
-        self.setMinimumWidth(400)
-        
-        layout = QVBoxLayout(self)
-        
-        info_text = "This value is stored in the encrypted credential vault."
-        if self.i18n:
-             info_text = self.i18n.t("secrets.dialog_info", info_text)
-             
-        info_lbl = QLabel(info_text)
-        info_lbl.setWordWrap(True)
-        layout.addWidget(info_lbl)
-        
-        form = QFormLayout()
-        self.input_field = QLineEdit()
-        self.input_field.setEchoMode(QLineEdit.Password)
-        self.input_field.setPlaceholderText("sk-...")
-        
-        # Check if secret exists (via framework -> secrets_manager)
-        sm = getattr(self.framework, 'secrets_manager', None)
-        if sm:
-            exists = sm.get_secret(secret_key)
-            if exists:
-                self.input_field.setPlaceholderText("******** (Stored)")
-        
-        form.addRow(display_name + ":", self.input_field)
-        layout.addLayout(form)
-        
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self._save_secret)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-        
-    def _save_secret(self):
-        val = self.input_field.text().strip()
-        if not val:
-            QMessageBox.warning(self, "Error", "Secret cannot be empty.")
-            return
-            
-        # The same step as `llmcf secrets set`: in the ephemeral storage nothing is saved, and the dialog says so.
-        from orchestrator.Core.secret_entries import SecretNotStored, SecretsUnavailable, store_secret
-        try:
-            stored = store_secret(getattr(self.framework, 'secrets_manager', None), self.secret_key, val)
-        except SecretsUnavailable:
-            QMessageBox.critical(self, "Error", "SecretsManager is not initialized!")
-            return
-        except SecretNotStored:
-            QMessageBox.critical(self, "Error", "Failed to store secret via SecretsManager.")
-            return
-        if stored.memory_only:
-            QMessageBox.warning(self, "Security", ui_text("secrets.memory_only", name=self.secret_key))
-        else:
-            QMessageBox.information(self, "Success", "Secret stored in the encrypted credential vault.")
-        self.accept()
 
 class HealingConfirmDialog(QDialog):
     """
@@ -1711,16 +1643,3 @@ class AIFoldersDialog(QDialog):
         self.refresh()
         return True
 
-
-def confirm_host_key(parent, framework, host: str, port: int = 22) -> bool:
-    """Trust on first use, never silently: shows an unknown device's host key fingerprint and stores it
-    only if the user confirms ("No" is the default); a changed key is refused. Reads the key in the calling thread:
-    a window that must not wait uses gui/host_key.HostKeyCheck, which asks the same question after reading the key
-    off the GUI thread."""
-    from orchestrator.gui import host_key
-    try:
-        key, status = host_key.read_host_key(host_key.state_dir(framework), host, port)
-    except Exception as e:
-        host_key.show_unreachable(parent, framework, host, port, e)
-        return False
-    return host_key.ask_trust(parent, framework, host, port, key, status)

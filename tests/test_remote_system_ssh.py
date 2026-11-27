@@ -37,6 +37,7 @@ import test_board_deploy as tbd  # noqa: E402
 from test_board_deploy import HOST, TARGET  # noqa: E402
 from test_deployment import FakeFramework, config  # noqa: E402,F401 - the manager's configuration
 from tests.file_modes import MODE_644
+from orchestrator.remote.session import RemoteSession  # noqa: E402
 
 USER = "radxa"
 # OpenSSH options that take a value (ssh(1), scp(1)); every other option is a flag
@@ -572,7 +573,7 @@ class TestTheSecondTransport:
         result, events = deploy(sys_manager, package)
         assert result.success and system_board.starts == 1 and result.resumed == 1, result.reason
         starts = [c.script for c in system_board.fake.ssh_calls() if "nohup" in c.script]
-        assert starts == [DeploymentManager._remote_start_cmd(TARGET, package.name)], \
+        assert starts == [RemoteSession.detached_command(TARGET, DeploymentManager._install_job(package.name))], \
             "deploy.sh starts once, detached from the session (nohup behind a marker), never attached"
         assert not [c for c in system_board.fake.ssh_calls() if ATTACHED_INSTALL in c.script]
         assert [(e.kind, e.step) for e in events if e.kind == "back"] == [("back", "install")]
@@ -714,10 +715,6 @@ class TestTheOpenSshTransport:
         assert config_value(path) == '"C:/Users/Jane Doe/.llm-framework/known_hosts"'
         with pytest.raises(AssertionError, match="splits"):
             unquote_config(f"{path}")   # what the option carried before: two files
-
-    def test_the_old_option_name_is_the_one_list(self, tmp_path):
-        from orchestrator.remote import transport
-        assert ssh_trust.system_ssh_options(tmp_path) == transport.openssh_options(tmp_path)
 
     def test_only_the_framework_s_known_hosts_decides(self, tmp_path):
         """OpenSSH also reads this computer's system-wide known_hosts unless GlobalKnownHostsFile says otherwise: a key

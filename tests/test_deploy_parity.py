@@ -225,12 +225,6 @@ class TestHostKeyCheck:
         assert wait_for(qapp, lambda: answers)
         assert answers == [False] and "SSH server" in told[0][0] and "192.0.2.71" in told[0][0]
 
-    def test_the_old_one_call_question_still_works(self, qapp, window_framework, monkeypatch, told):
-        from orchestrator.gui import dialogs, host_key
-        monkeypatch.setattr(host_key, "read_host_key", lambda folder, host, port: (FakeHostKey(), "known"))
-        assert dialogs.confirm_host_key(None, window_framework, "192.0.2.72") is True
-        monkeypatch.setattr(host_key, "read_host_key", lambda folder, host, port: (FakeHostKey(), "unknown"))
-        assert dialogs.confirm_host_key(None, window_framework, "192.0.2.72") is False and told
 
 
 # --- the Deployment tab -------------------------------------------------------------------------------------------
@@ -395,7 +389,7 @@ class TestDeploymentTab:
         (worker,) = started
         assert worker.package == package and worker.artifact_path is None and worker.password == "pw-made-up"
         calls = []
-        manager = SimpleNamespace(create_deployment_package=lambda **kw: pytest.fail("nothing is packaged"),
+        manager = SimpleNamespace(create_package=lambda *a, **kw: pytest.fail("nothing is packaged"),
                                   deploy_package=lambda *a, **kw: calls.append(a) or DeployResult(True, exit_status=0))
         monkeypatch.setattr(window_framework, "get_component", lambda name: manager)
         monkeypatch.setattr(worker, "_remember_device", lambda *a, **k: None)

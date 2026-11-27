@@ -5,8 +5,7 @@ for the person to compare, and stored only after their "Yes" ("No" is the defaul
 
 `HostKeyCheck` reads the key in a plain worker thread (a board that does not answer holds the network for up to ten
 seconds, never the window) and asks on the GUI thread through gui/worker_relay.py (the key of a check that went on
-stays in `HostKeyCheck.key`, so the deploy needs no second read); `confirm_host_key` in
-gui/dialogs.py does the same in one call where a window still reads the key itself. The question uses the words of
+stays in `HostKeyCheck.key`, so the deploy needs no second read). The question uses the words of
 the CLI's (`llmcf deploy run`, `llmcf scan --device`): compare with ssh-keygen on the board, then trust it.
 
 A board that cannot be reached says why and what to do (its SSH reason code, orchestrator/runtime/device/

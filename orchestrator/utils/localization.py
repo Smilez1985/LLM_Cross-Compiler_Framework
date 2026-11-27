@@ -103,7 +103,6 @@ class TextTable:
             "dlg.token.err_empty": "Token cannot be empty!",
             
             # Secrets Dialog (NEW)
-            "secrets.dialog_info": "This value is stored in the encrypted credential vault.",
 
             # Sign-in (AI settings > Sign in..., Ditto's chat header)
             "dlg.ai.sign_in": "Sign in...",
@@ -317,7 +316,6 @@ class TextTable:
             "dlg.token.err_empty": "Token darf nicht leer sein!",
             
             # Secrets Dialog (NEW)
-            "secrets.dialog_info": "Dieser Wert wird im verschlüsselten Tresor für Zugangsdaten gespeichert.",
 
             # Sign-in (AI settings > Sign in..., Ditto's chat header)
             "dlg.ai.sign_in": "Anmelden...",
