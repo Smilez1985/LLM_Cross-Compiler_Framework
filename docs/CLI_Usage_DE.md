@@ -342,6 +342,9 @@ der Konsole des Installers, und das Framework schließt sich. Eine KI startet ni
 ```
 llm-cli logs show [--level debug|info|warning|error] [--since MINUTEN] [--part TEXT] [--lines N] [--json]
 llm-cli logs export DATEI [--level debug|info|warning|error] [--since MINUTEN] [--format json|text]
+llm-cli logs level TEIL debug|info|warning|error|critical
+llm-cli logs level TEIL --reset
+llm-cli logs levels [--json]
 ```
 
 Das eine Log des Frameworks, `framework.log`: was jeder Prozess (die CLI, die GUI, der MCP-Server) getan hat und was
@@ -364,9 +367,27 @@ llm-cli logs show --level warning --since 60
 llm-cli logs export ~/framework-log.json --since 1440
 ```
 
+Das Log sagt auch, wo ein Fehler geschah und wie lange ein Schritt dauerte: Jeder Schritt eines Builds, ein
+Tool-Aufruf, der 2 Sekunden oder länger brauchte, und eine Mojo-Prüfung, die 1 Sekunde oder länger brauchte, bekommen
+einen Eintrag mit dem Schritt und seiner Dauer (Stufe `PERFORMANCE`, ab `info` gezeigt), und ein Fehler nennt einmal
+seinen Teil und seinen Schritt, mit seinem Verlauf.
+
+`level` gibt einem Teil des Frameworks eine eigene Stufe, gespeichert in deinen Einstellungen (`log_levels`): TEIL ist
+ein Name, wie `show` ihn ausgibt (zum Beispiel `BuildEngine`, `ToolRegistry`, `Mojo`), oder sein Anfang bis zu einem
+Punkt (`orchestrator.Core` deckt jeden Teil darunter); der genaueste gewinnt. `--reset` entfernt die eigene Stufe des
+Teils, und `levels` listet die Teile, die eine haben. Ein Teil auf `debug` erreicht auch `framework.log`, während jeder
+andere Teil auf seiner Stufe bleibt. Später gestartete Prozesse übernehmen die Änderung; eine laufende GUI übernimmt sie,
+wenn du sie in ihrem Fenster setzt, oder bei ihrem nächsten Start. Nur du setzt sie; eine KI darf sie lesen.
+
+```bash
+llm-cli logs level BuildEngine debug
+llm-cli logs level BuildEngine --reset
+```
+
 In der GUI: **Hilfe > Framework-Log...** zeigt dieselben Einträge mit derselben Auswahl (Stufe, letzte Minuten, Teil,
 neueste Einträge), **Exportieren...** schreibt die Einträge dieser Auswahl in eine Datei (ein Name mit `.json` ist
-JSON), und **Log-Ordner öffnen** zeigt den Ordner.
+JSON), **Log-Ordner öffnen** zeigt den Ordner, und die Zeile **Stufe eines Teils** setzt (**Stufe setzen**) und
+entfernt (**Zurücksetzen**) die eigene Stufe eines Teils, mit den Teilen, die eine haben, daneben.
 
 ---
 

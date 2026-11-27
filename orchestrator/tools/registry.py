@@ -37,7 +37,7 @@ from orchestrator.tools.policy import (TIER_CAPS, Decision, DecisionRule, Policy
 from orchestrator.tools.spec import (CHANNELS, DAY, LIMITS, CallerLimits, CallFacts, FieldMeta, GrantRule,
                                      ToolLimits, example_problems)
 from orchestrator.utils.helpers import redact_secrets
-from orchestrator.utils.logging import get_logger
+from orchestrator.utils.logging import get_logger, log_step
 from orchestrator.utils.untrusted import sanitize_untrusted, wrap_untrusted
 
 
@@ -224,6 +224,7 @@ FAILED_NEXT = ("Tell the person what failed and why; run_mojo_oracle and the fra
 FAILED_STEPS = ("mojo.oracle",)
 # A pending approval: the person answers in the framework (its notice, or the list of pending approvals).
 APPROVAL_STEPS = ("approvals.list",)
+SLOW_CALL_MS = 2000  # a tool call this slow gets its duration in the framework's log (utils/logging.log_step)
 GUARD_SIZE = 512  # failing calls remembered per registry for the repeat guard
 EXAMPLE_AFTER = 3  # input errors in a session before every input error shows an example call
 
@@ -1789,7 +1790,9 @@ class ToolRegistry:
 
         token = _CALL.set((self, ctx.actor))
         try:
-            raw = spec.handler(inp, ctx) if spec.takes_context else spec.handler(inp)
+            # a call slower than SLOW_CALL_MS gets its duration in the framework's log; its errors are logged below
+            with log_step("ToolRegistry", f"tool {spec.name}", SLOW_CALL_MS, errors=False):
+                raw = spec.handler(inp, ctx) if spec.takes_context else spec.handler(inp)
             result = self._output(spec, raw, [r.note(spec.name) for r in call_repairs(ctx)] + list(ctx.notes))
         except ResultTooLarge as e:
             end("error", str(e), reason_code="limit_reached")

@@ -337,6 +337,9 @@ closes. An AI never starts an update.
 ```
 llm-cli logs show [--level debug|info|warning|error] [--since MINUTES] [--part TEXT] [--lines N] [--json]
 llm-cli logs export FILE [--level debug|info|warning|error] [--since MINUTES] [--format json|text]
+llm-cli logs level PART debug|info|warning|error|critical
+llm-cli logs level PART --reset
+llm-cli logs levels [--json]
 ```
 
 The framework's one log, `framework.log`: what every process (the CLI, the GUI, the MCP server) did and what
@@ -359,9 +362,26 @@ llm-cli logs show --level warning --since 60
 llm-cli logs export ~/framework-log.json --since 1440
 ```
 
+The log also says where an error happened and how long a step took: every step of a build, a tool call that took
+2 seconds or longer and a Mojo check that took 1 second or longer get an entry with the step and its duration (level
+`PERFORMANCE`, shown from `info` on), and an error names its part and its step once, with its trace.
+
+`level` gives one part of the framework its own level, saved in your settings (`log_levels`): PART is a name as
+`show` prints it (for example `BuildEngine`, `ToolRegistry`, `Mojo`) or the start of one up to a dot
+(`orchestrator.Core` covers every part below it); the most specific one wins. `--reset` removes the part's own level,
+and `levels` lists the parts that have one. A part set to `debug` reaches `framework.log` too, while every other part
+stays at its level. Processes started later take the change; a running GUI takes it when you set it in its window or
+at its next start. Only you set it; an AI may read it.
+
+```bash
+llm-cli logs level BuildEngine debug
+llm-cli logs level BuildEngine --reset
+```
+
 In the GUI: **Help > Framework Log...** shows the same entries with the same choices (level, last minutes, part,
-newest entries), **Export...** writes the entries of that choice to a file (a `.json` name is JSON), and **Open Log
-Folder** shows the folder.
+newest entries), **Export...** writes the entries of that choice to a file (a `.json` name is JSON), **Open Log
+Folder** shows the folder, and the row **Level of a part** sets (**Set Level**) and removes (**Reset**) a part's own
+level, with the parts that have one beside it.
 
 ---
 

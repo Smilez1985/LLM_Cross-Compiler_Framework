@@ -30,6 +30,16 @@ TEXTS = {
         "logs.export.done": "{n} entries written to {path}.",
         "logs.export.failed": "The log could not be written to {path}: {reason}",
         "logs.folder": "Open Log Folder",
+        "logs.part_level": "Level of a part:",
+        "logs.part_level.part": "Part, for example BuildEngine or orchestrator.Core",
+        "logs.part_level.set": "Set Level",
+        "logs.part_level.reset": "Reset",
+        "logs.part_level.tip": "Gives this part of the framework (a name as the entries show it, or the start of one "
+                               "up to a dot) its own log level, saved in your settings. Only you set it; an AI may "
+                               "read it.",
+        "logs.part_level.none": "No part has its own level.",
+        "logs.part_level.list": "Own levels: {levels}",
+        "logs.part_level.failed": "The level was not set: {reason}",
     },
     "de": {
         "logs.menu": "Framework-Log...",
@@ -56,5 +66,15 @@ TEXTS = {
         "logs.export.done": "{n} Einträge nach {path} geschrieben.",
         "logs.export.failed": "Das Log konnte nicht nach {path} geschrieben werden: {reason}",
         "logs.folder": "Log-Ordner öffnen",
+        "logs.part_level": "Stufe eines Teils:",
+        "logs.part_level.part": "Teil, zum Beispiel BuildEngine oder orchestrator.Core",
+        "logs.part_level.set": "Stufe setzen",
+        "logs.part_level.reset": "Zurücksetzen",
+        "logs.part_level.tip": "Gibt diesem Teil des Frameworks (ein Name, wie die Einträge ihn zeigen, oder sein "
+                               "Anfang bis zu einem Punkt) eine eigene Log-Stufe, gespeichert in deinen Einstellungen. "
+                               "Nur du setzt sie; eine KI darf sie lesen.",
+        "logs.part_level.none": "Kein Teil hat eine eigene Stufe.",
+        "logs.part_level.list": "Eigene Stufen: {levels}",
+        "logs.part_level.failed": "Die Stufe wurde nicht gesetzt: {reason}",
     },
 }

@@ -8,7 +8,10 @@ worker thread (a long log must not hold the window; the result comes back throug
 entries as plain text, one line each, oldest first. The level, the last minutes, the part of the framework and the
 number of entries are the CLI's --level, --since, --part and --lines. Export... writes the entries of that choice to a
 file the person picks (utils/framework_log.export: private, the home folder written as ~USER; a .json file is JSON,
-any other text), Open Log Folder shows the folder. Every text is plain text.
+any other text), Open Log Folder shows the folder. The row "Level of a part" is `llm-cli logs level PART LEVEL` and
+`--reset` (utils/logging.set_part_level: saved, applied in this program at once) with the parts that have their own
+level beside it (`llm-cli logs levels`); it is shown when the window has the person's settings. Every text is plain
+text.
 """
 
 import threading
@@ -23,6 +26,7 @@ from orchestrator.gui.plain import button_text, plain_box, plain_label, plain_to
 from orchestrator.utils.localization import current_language, ui_text
 
 LEVELS = ("info", "warning", "error", "debug")   # the CLI's --level choices, the default first
+PART_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")   # `llm-cli logs level PART LEVEL`
 
 
 def choose_export_file(parent: Any, title: str, start: str, filters: str) -> str:
@@ -33,10 +37,11 @@ def choose_export_file(parent: Any, title: str, start: str, filters: str) -> str
 class FrameworkLogWindow(QDialog):
     """The framework's log: the CLI's filters, the entries, Export... and Open Log Folder."""
 
-    def __init__(self, folder: Path, parent: Any = None, lang: Optional[str] = None):
+    def __init__(self, folder: Path, parent: Any = None, lang: Optional[str] = None, config: Any = None):
         super().__init__(parent)
         from orchestrator.gui.worker_relay import worker_relay
         self.folder, self.lang = Path(folder), lang or current_language()
+        self.config = config   # the person's settings, for the levels per part (None: the row is not shown)
         self.entries: List[dict] = []
         self._token: Optional[object] = None
         self.setObjectName("framework_log_window")
@@ -80,6 +85,8 @@ class FrameworkLogWindow(QDialog):
             row.addWidget(button)
         row.addStretch(1)
         layout.addLayout(row)
+        if self.config is not None:
+            layout.addLayout(self._part_level_row())
         worker_relay().done.connect(self._done, Qt.QueuedConnection)
         self.refresh()
 
@@ -92,6 +99,56 @@ class FrameworkLogWindow(QDialog):
         button.setAutoDefault(False)
         button.clicked.connect(lambda _=False: slot())
         return button
+
+    def _part_level_row(self) -> QHBoxLayout:
+        """`llm-cli logs level PART LEVEL` and `--reset` by mouse, with the parts that have their own level."""
+        row = QHBoxLayout()
+        row.addWidget(plain_label(self._t("logs.part_level"), self))
+        self.txt_part_level_part = QLineEdit(self)
+        self.txt_part_level_part.setObjectName("txt_part_level_part")
+        self.txt_part_level_part.setPlaceholderText(self._t("logs.part_level.part"))
+        self.txt_part_level_part.setToolTip(plain_tooltip(self._t("logs.part_level.tip")))
+        row.addWidget(self.txt_part_level_part, stretch=1)
+        self.cmb_part_level = QComboBox(self)
+        self.cmb_part_level.setObjectName("cmb_part_level")
+        for level in PART_LEVELS:
+            self.cmb_part_level.addItem(level, level)
+        row.addWidget(self.cmb_part_level)
+        self.btn_part_level_set = self._button("btn_part_level_set", "logs.part_level.set", self.set_part_level)
+        self.btn_part_level_reset = self._button("btn_part_level_reset", "logs.part_level.reset",
+                                                 self.reset_part_level)
+        row.addWidget(self.btn_part_level_set)
+        row.addWidget(self.btn_part_level_reset)
+        self.lbl_part_levels = plain_label("", self)
+        self.lbl_part_levels.setObjectName("lbl_part_levels")
+        row.addWidget(self.lbl_part_levels, stretch=1)
+        self._show_part_levels()
+        return row
+
+    def _show_part_levels(self) -> None:
+        from orchestrator.utils.logging import LOG_LEVELS_SETTING, part_levels_of
+        levels = part_levels_of(self.config.get(LOG_LEVELS_SETTING, {}))
+        self.lbl_part_levels.setText(self._t("logs.part_level.list", levels=", ".join(
+            f"{part}: {level}" for part, level in sorted(levels.items()))) if levels else
+            self._t("logs.part_level.none"))
+
+    def _change_part_level(self, level: Optional[str]) -> bool:
+        from orchestrator.utils.logging import set_part_level
+        try:
+            set_part_level(self.config, self.txt_part_level_part.text().strip(), level)
+        except (OSError, ValueError) as e:
+            plain_box(self, "warning", self._t("logs.part_level"), self._t("logs.part_level.failed", reason=str(e)))
+            return False
+        self._show_part_levels()
+        return True
+
+    def set_part_level(self) -> bool:
+        """`llm-cli logs level PART LEVEL`: saved and applied in this program at once."""
+        return self._change_part_level(self.cmb_part_level.currentData())
+
+    def reset_part_level(self) -> bool:
+        """`llm-cli logs level PART --reset`."""
+        return self._change_part_level(None)
 
     def choice(self) -> dict:
         """The CLI's filters as the window holds them (--level, --since, --part, --lines)."""
@@ -162,4 +219,4 @@ class FrameworkLogWindow(QDialog):
         return open_folder(self.folder)
 
 
-__all__ = ["FrameworkLogWindow", "LEVELS", "choose_export_file"]
+__all__ = ["FrameworkLogWindow", "LEVELS", "PART_LEVELS", "choose_export_file"]

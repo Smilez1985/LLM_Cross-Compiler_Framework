@@ -19,6 +19,7 @@ Key Responsibilities:
 import sys
 import json
 import logging
+import re
 import logging.handlers
 import threading
 import time
@@ -256,6 +257,8 @@ class StructuredFormatter(logging.Formatter):
         # Add performance info if available
         if hasattr(record, 'execution_time_ms'):
             parts.insert(-1, f"[{record.execution_time_ms:.2f}ms]")
+        elif hasattr(record, 'duration_ms'):
+            parts.insert(-1, f"[{record.duration_ms:.0f}ms]")
         
         return " ".join(parts)
 
@@ -436,6 +439,10 @@ class LoggingManager:
         self.memory_handler: Optional[MemoryHandler] = None
         self._initialized = False
         self._lock = threading.Lock()
+        # the levels per part (step 7 of the one log): the person's setting log_levels, checked (part_levels_of)
+        self.part_levels: Dict[str, str] = {}
+        self._before_part: Dict[str, int] = {}   # a logger's own level before a part level was set on it
+        self._sink_base: Dict[int, int] = {}      # id(root or framework.log handler) -> its level without the parts
         
         # Add custom log level
         logging.addLevelName(LogLevel.PERFORMANCE.value, "PERFORMANCE")
@@ -572,7 +579,9 @@ class LoggingManager:
         
         if config and not logger.handlers:
             self._configure_logger(logger, config)
-        
+        if self.part_levels:
+            self._apply_part_level(name, logger)
+
         # Add performance tracking methods
         self._add_performance_methods(logger, config)
         
@@ -681,6 +690,41 @@ class LoggingManager:
         logger.end_perf = end_performance_tracking
         logger.trace = trace
     
+    def _apply_part_level(self, name: str, logger: logging.Logger) -> None:
+        level = part_level_for(name, self.part_levels)
+        if level is not None:
+            self._before_part.setdefault(name, logger.level)
+            logger.setLevel(level)
+        elif name in self._before_part:
+            logger.setLevel(self._before_part.pop(name))
+
+    def apply_part_levels(self, levels: Any) -> Dict[str, str]:
+        """The one place that applies the levels per part (the setting log_levels; part_levels_of checks it): every
+        logger whose name is a part or lies below one (a dotted prefix) gets that level, the most specific part
+        winning; a logger no part names any more gets its own level back. The root logger and framework.log take the
+        lowest level asked for, so a part set to DEBUG reaches framework.log and every other part stays as it was.
+        Called at boot, after a change and after set_global_level. Returns the levels now in force."""
+        with self._lock:
+            self.part_levels = part_levels_of(levels)
+            for name in list(logging.Logger.manager.loggerDict):
+                logger = logging.Logger.manager.loggerDict.get(name)
+                if isinstance(logger, logging.Logger):
+                    self._apply_part_level(name, logger)
+            self._open_sinks()
+            return dict(self.part_levels)
+
+    def _open_sinks(self) -> None:
+        """The root logger and framework.log's handler at the lowest of their own level and the parts' levels."""
+        from orchestrator.utils.framework_log import FRAMEWORK_LOG_HANDLER
+        root = logging.getLogger()
+        lowest = min((logging.getLevelName(v) for v in self.part_levels.values()), default=None)
+        sinks = [root] + [h for h in root.handlers if h.get_name() == FRAMEWORK_LOG_HANDLER]
+        for sink in sinks:
+            base = self._sink_base.setdefault(id(sink), sink.level)
+            sink.setLevel(min(base, lowest) if lowest is not None else base)
+        if lowest is None:
+            self._sink_base.clear()
+
     def get_recent_logs(self, count: int = 100) -> List[Dict[str, Any]]:
         """Get recent log entries from memory handler"""
         if self.memory_handler:
@@ -716,6 +760,8 @@ class LoggingManager:
             for name in logging.Logger.manager.loggerDict:
                 logger = logging.getLogger(name)
                 logger.setLevel(level.value)
+            self._before_part.clear()   # the new level is every logger's own now
+        self.apply_part_levels(self.part_levels)
     
     def export_logs(self, output_file: Path, start_time: Optional[datetime] = None,
                    end_time: Optional[datetime] = None, format: LogFormat = LogFormat.JSON) -> bool:
@@ -767,6 +813,77 @@ class LoggingManager:
 # Global instance for framework-wide use
 _logging_manager: Optional[LoggingManager] = None
 
+# The levels per part (step 7 of the one log): the person's setting {part: level}. A part is a logger name (the
+# `part` of `llmcf logs show`) or a dotted prefix of one; an AI reads the setting (get_settings), never changes it.
+LOG_LEVELS_SETTING = "log_levels"
+PART_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+MAX_PARTS = 50
+_PART = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]{0,63}(?:\.[A-Za-z_][A-Za-z0-9_-]{0,63}){0,7}$")
+
+
+def valid_part(part: Any) -> bool:
+    return isinstance(part, str) and len(part) <= 200 and bool(_PART.match(part))
+
+
+def part_levels_of(value: Any) -> Dict[str, str]:
+    """The setting's levels per part, checked: a part that is no logger name, a level that is not DEBUG to
+    CRITICAL and everything beyond MAX_PARTS are left out (a hand-edited config.yml never breaks the logging)."""
+    found: Dict[str, str] = {}
+    if isinstance(value, dict):
+        for part, level in value.items():
+            word = str(level or "").strip().upper()
+            if valid_part(part) and word in PART_LEVELS and len(found) < MAX_PARTS:
+                found[part] = word
+    return found
+
+
+def part_level_for(name: str, levels: Dict[str, str]) -> Optional[str]:
+    """The level of logger `name`: its own part, else the longest part that is a dotted prefix of it, else None."""
+    if not levels:
+        return None
+    pieces = str(name).split(".")
+    for end in range(len(pieces), 0, -1):
+        level = levels.get(".".join(pieces[:end]))
+        if level is not None:
+            return level
+    return None
+
+
+def apply_part_levels(levels: Any) -> Dict[str, str]:
+    """The process's levels per part (LoggingManager.apply_part_levels), e.g. from config.get(LOG_LEVELS_SETTING)."""
+    global _logging_manager
+    if _logging_manager is None:
+        _logging_manager = setup_logging()
+    return _logging_manager.apply_part_levels(levels)
+
+
+def set_part_level(config: Any, part: str, level: Optional[str]) -> Dict[str, str]:
+    """The person's one writer of the levels per part (`llmcf logs level`, Help > Framework Log...): `level` DEBUG to
+    CRITICAL (any case) sets the part's level, None removes it. Checked (ValueError, nothing changes), saved to
+    config.yml (OSError when it cannot be saved; the setting stays as it was) and applied in this process at once;
+    another running process takes it at its next start. Returns the levels now."""
+    if not valid_part(part):
+        raise ValueError(f"'{part}' is no part of the framework: a logger name such as BuildEngine or "
+                         "orchestrator.Core, as the framework's log names it.")
+    levels = part_levels_of(config.get(LOG_LEVELS_SETTING, {}) if config is not None else {})
+    before = dict(levels)
+    if level is None:
+        levels.pop(part, None)
+    else:
+        word = str(level).strip().upper()
+        if word not in PART_LEVELS:
+            raise ValueError(f"The level is one of {', '.join(PART_LEVELS)}, not '{level}'.")
+        if part not in levels and len(levels) >= MAX_PARTS:
+            raise ValueError(f"At most {MAX_PARTS} parts have their own level; reset one first.")
+        levels[part] = word
+    if config.set(LOG_LEVELS_SETTING, levels) is False:
+        raise ValueError("The levels per part could not be set.")
+    save = getattr(config, "save_user_config", None)
+    if callable(save) and not save():
+        config.set(LOG_LEVELS_SETTING, before)
+        raise OSError("The levels per part could not be saved to config.yml; they stay as they were.")
+    return apply_part_levels(levels)
+
 
 def setup_logging(config_file: Optional[Path] = None,
                  level: Union[str, LogLevel] = LogLevel.INFO,
@@ -806,6 +923,8 @@ def setup_logging(config_file: Optional[Path] = None,
     # Credentials never reach a log; set_global_level() above also reset the SDK loggers.
     install_log_redaction()
     configure_sdk_loggers(level.value, debug_http)
+    if _logging_manager.part_levels:   # the person's levels per part over the SDK loggers' defaults
+        _logging_manager.apply_part_levels(_logging_manager.part_levels)
     return _logging_manager
 
 
@@ -847,72 +966,94 @@ def get_logging_stats() -> Optional[LoggingStats]:
 
 
 # ============================================================================
-# PERFORMANCE DECORATORS
+# DECORATORS: WHERE AN ERROR HAPPENED, HOW LONG A STEP TOOK (step 6 of the one log)
 # ============================================================================
 
-def log_performance(logger_name: str = "framework", threshold_ms: float = 100.0):
-    """
-    Decorator for automatic performance logging.
-    
-    Args:
-        logger_name: Logger name to use
-        threshold_ms: Minimum execution time to log
-    """
+_LOGGED = "_llmcf_logged"     # set on an exception a step has logged: an outer step does not log it again
+
+
+def _log_failure(logger: logging.Logger, part: str, step: str, error: BaseException) -> None:
+    """One error entry with its trace, its part and its step, once per exception."""
+    if getattr(error, _LOGGED, False):
+        return
+    try:
+        setattr(error, _LOGGED, True)
+    except Exception:  # noqa: BLE001 - an exception without attributes is logged each time
+        pass
+    logger.error(f"{step} failed: {error.__class__.__name__}: {error}",
+                 exc_info=(type(error), error, error.__traceback__),
+                 extra={"step": step, "part": part})
+
+
+def _log_duration(logger: logging.Logger, part: str, step: str, duration_ms: float, threshold_ms: float,
+                  failed: bool) -> None:
+    if duration_ms >= threshold_ms:
+        logger.log(LogLevel.PERFORMANCE.value, f"{step} took {duration_ms:.0f} ms" + (" and failed" if failed else ""),
+                   extra={"step": step, "part": part, "duration_ms": round(duration_ms, 1)})
+
+
+class log_step:
+    """A step of the framework as a `with` block: its duration as one PERFORMANCE entry (`step`, `duration_ms`) when
+    it took `threshold_ms` or longer (0: always), and an error it raises logged once with its trace, part and step
+    (`errors=False`: the caller logs its errors itself, only the time is written). The error is always raised on;
+    nothing of the step's arguments is written, only the part, the step and the time."""
+
+    def __init__(self, part: str, step: str, threshold_ms: float = 0.0, errors: bool = True):
+        self.part, self.step, self.threshold_ms, self.errors = part, step, float(threshold_ms), errors
+        self.duration_ms: Optional[float] = None
+
+    def __enter__(self) -> "log_step":
+        self._began = time.perf_counter()
+        return self
+
+    def __exit__(self, kind, error, trace) -> bool:
+        self.duration_ms = (time.perf_counter() - self._began) * 1000
+        try:
+            logger = get_logger(self.part)
+            if error is not None and self.errors and isinstance(error, Exception):
+                _log_failure(logger, self.part, self.step, error)
+            _log_duration(logger, self.part, self.step, self.duration_ms, self.threshold_ms, error is not None)
+        except Exception:  # noqa: BLE001 - logging never changes the step's outcome
+            pass
+        return False    # never swallows the error
+
+
+def _wrap(func, part: Optional[str], step: Optional[str], threshold_ms: float, errors: bool):
+    """`func` (plain or async) inside log_step, with its own name (functools.wraps)."""
+    import asyncio
+    import functools
+    name = step or func.__qualname__
+    where = part or func.__module__
+
+    if asyncio.iscoroutinefunction(func):
+        @functools.wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            with log_step(where, name, threshold_ms, errors):
+                return await func(*args, **kwargs)
+        return async_wrapper
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with log_step(where, name, threshold_ms, errors):
+            return func(*args, **kwargs)
+    return wrapper
+
+
+def log_performance(logger_name: Optional[str] = None, threshold_ms: float = 100.0, step: Optional[str] = None):
+    """Decorator: the function's duration as a PERFORMANCE entry when it took `threshold_ms` or longer (the part is
+    `logger_name`, by default the function's module; the step its name or `step`). Its errors are not logged here
+    (log_exceptions does that); they are always raised on."""
     def decorator(func):
-        def wrapper(*args, **kwargs):
-            logger = get_logger(logger_name)
-            
-            start_time = time.perf_counter()
-            try:
-                result = func(*args, **kwargs)
-                return result
-            finally:
-                execution_time = (time.perf_counter() - start_time) * 1000
-                
-                if execution_time >= threshold_ms:
-                    logger.log(
-                        LogLevel.PERFORMANCE.value,
-                        f"Function {func.__name__} took {execution_time:.2f}ms",
-                        extra={
-                            'execution_time_ms': execution_time,
-                            'function_name': func.__name__,
-                            'module_name': func.__module__
-                        }
-                    )
-        
-        return wrapper
+        return _wrap(func, logger_name, step, threshold_ms, errors=False)
     return decorator
 
 
-def log_exceptions(logger_name: str = "framework", re_raise: bool = True):
-    """
-    Decorator for automatic exception logging.
-    
-    Args:
-        logger_name: Logger name to use
-        re_raise: Whether to re-raise the exception
-    """
+def log_exceptions(logger_name: Optional[str] = None, step: Optional[str] = None, threshold_ms: float = float("inf")):
+    """Decorator: an error of the function logged once with its trace, its part (`logger_name`, by default the
+    function's module) and its step (its name or `step`), and always raised on (a decorator never swallows an
+    error). `threshold_ms`: also its duration, when it took that long or longer (default: never)."""
     def decorator(func):
-        def wrapper(*args, **kwargs):
-            logger = get_logger(logger_name)
-            
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                logger.error(
-                    f"Exception in {func.__name__}: {str(e)}",
-                    exc_info=True,
-                    extra={
-                        'function_name': func.__name__,
-                        'module_name': func.__module__,
-                        'exception_type': type(e).__name__
-                    }
-                )
-                
-                if re_raise:
-                    raise
-        
-        return wrapper
+        return _wrap(func, logger_name, step, threshold_ms, errors=True)
     return decorator
 
 

@@ -50,7 +50,7 @@ WRITABLE = ORDINARY + tuple(TIGHTEN_ONLY)
 # sandbox); they are named here already, so the day they exist they are read-only for an AI.
 OVERSIGHT = ("audio_announcements", "chat_panel_auto_show", "relay_questions_to_clients", "trash_retention_days",
              "bench_untrusted_sandbox_ok")
-READ_ONLY = ("max_concurrent_builds", "auto_cleanup", "log_level", "rag_embedding_model",
+READ_ONLY = ("max_concurrent_builds", "auto_cleanup", "log_level", "log_levels", "rag_embedding_model",
              "rag_reranker", "rag_rerank_min_score", "healing_approval_timeout", "llama_cpp_version", "image_trivy",
              "image_base_debian", "image_inference_runtime", "gui_auto_refresh",
              "gui_refresh_interval", "api_enabled") + OVERSIGHT
@@ -378,6 +378,9 @@ def setting_value(framework, key: str) -> SettingValue:
         return [f"{name}: {scheme_and_host(e.get('url') if isinstance(e, dict) else e)}" for name, e in value.items()]
     if key in URL_KEYS:
         return scheme_and_host(value)
+    if key == "log_levels":   # the levels per part as checked (utils/logging.part_levels_of): "part: LEVEL"
+        from orchestrator.utils.logging import part_levels_of
+        return [f"{part}: {level}" for part, level in part_levels_of(value).items()]
     if isinstance(value, (bool, int, str)) or value is None:
         return value
     if isinstance(value, float):

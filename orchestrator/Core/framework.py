@@ -100,6 +100,9 @@ class FrameworkManager:
         # One log of every process the person and Ditto can read (framework.log in the log folder, JSON lines)
         from orchestrator.utils.crash_report import add_framework_log, framework_log_folder
         add_framework_log(framework_log_folder(self.config))
+        # the person's levels per part (`llmcf logs level`), after framework.log so it takes the lowest one asked for
+        from orchestrator.utils.logging import LOG_LEVELS_SETTING, apply_part_levels
+        apply_part_levels(self.config.get(LOG_LEVELS_SETTING, {}))
         self.logger = get_logger("FrameworkKernel")
         
         self.logger.info(f"Booting {self.info.name} v{self.info.version} ({self.info.edition})...")

@@ -4602,7 +4602,10 @@ und entfernt, oder mit `llmcf launcher status|install|remove`.
 **Das Log des Frameworks:** Jeder Prozess (die CLI, die GUI, der MCP-Server) schreibt in `framework.log`, ein
 JSON-Objekt je Zeile, privat für dich. **Hilfe > Framework-Log...** (`llmcf logs show`) zeigt seine neuesten Einträge,
 gewählt nach Stufe, den letzten Minuten und dem Teil des Frameworks; **Exportieren...** (`llmcf logs export`) schreibt
-sie in eine Datei, mit deinem Home-Ordner als `~USER`, für einen Fehlerbericht.
+sie in eine Datei, mit deinem Home-Ordner als `~USER`, für einen Fehlerbericht. Es sagt, wo ein Fehler geschah (sein Teil
+und sein Schritt, einmal, mit seinem Verlauf) und wie lange ein Schritt dauerte (jeder Build-Schritt, ein Tool-Aufruf
+ab 2 Sekunden, eine Mojo-Prüfung ab 1 Sekunde); seine Zeile **Stufe eines Teils** (`llmcf logs level`) gibt einem Teil
+des Frameworks eine eigene Stufe, zum Beispiel `BuildEngine` auf debug, während alles andere auf info bleibt.
 
 **Die Menüleiste** (übersetzt, mit Alt-Tastenkürzeln; die Objektnamen der Einträge bleiben gleich, so behält jeder
 Pfad der Kommandozeile seinen Mausweg):

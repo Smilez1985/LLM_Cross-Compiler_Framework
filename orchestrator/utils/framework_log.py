@@ -12,6 +12,7 @@ person named.
   framework (the logger name), the newest `limit` of them, oldest first. A line that is no JSON object is skipped
   (a half-written last line, a foreign file).
 - entry_text(entry): one entry as one readable line.
+- A step's duration (utils/logging.log_step, level PERFORMANCE) is ranked as INFO, TRACE as DEBUG.
 - export(entries, path, fmt): the entries as JSON or text in `path`, private, with the home folder written as
   ~USER (security/paths.hide_home), for a bug report or for the person's own look.
 """
@@ -37,8 +38,12 @@ def log_files(folder: Path) -> List[Path]:
     return [folder / name for name in names if (folder / name).is_file()]
 
 
+RANKED_AS = {"PERFORMANCE": "INFO", "TRACE": "DEBUG"}   # the framework's own levels (utils/logging.LogLevel)
+
+
 def _level_rank(level: Any) -> int:
     name = str(level or "").upper()
+    name = RANKED_AS.get(name, name)
     return LEVELS.index(name) if name in LEVELS else 0
 
 

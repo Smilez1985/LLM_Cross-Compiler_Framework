@@ -22,6 +22,7 @@ from orchestrator.Core.mojo.findings import Check, Finding, MojoReport, Severity
 if TYPE_CHECKING:
     from orchestrator.Core.mojo.offers import Offer
 
+MOJO_CHECK_MS = 1000   # a Mojo check this slow gets its duration in the framework's log (utils/logging.log_step)
 DEFAULT_CHECKS: List[Check] = [check_python, check_docker, check_load, check_logs, check_disk, check_targets, check_user_state,
                                check_secrets, check_tool_policy, check_chat_feed, check_calibration, check_community,
                                check_dependencies, check_versions,
@@ -97,12 +98,15 @@ class Mojo:
 
     def run(self) -> MojoReport:
         """Mojo Oracle: every check, nothing changed."""
+        from orchestrator.utils.logging import log_step
         findings = []
         for check in self.checks:
+            name = getattr(check, "__name__", "check").replace("check_", "")
             try:
-                findings.extend(check(self.framework))
+                # a slow check gets its duration in the framework's log, a crash its trace before it is a finding
+                with log_step("Mojo", f"mojo check {name}", MOJO_CHECK_MS):
+                    findings.extend(check(self.framework))
             except Exception as e:  # a broken check is itself a finding, never a crash of Mojo
-                name = getattr(check, "__name__", "check").replace("check_", "")
                 findings.append(Finding(name, f"{name}.check_crashed", Severity.ERROR, f"The check failed: {e}",
                                         where=f"the {name} check",
                                         why="This area was not checked, so a problem there would go unseen.",

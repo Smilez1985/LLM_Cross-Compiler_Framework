@@ -430,6 +430,8 @@ class ConfigManager:
                          "targets_dir itself"),
 
             ConfigSchema("log_level", str, False, "INFO", "Logging level", ["regex:^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$"]),
+            # the levels per part (utils/logging.set_part_level, `llmcf logs level`): {logger name or prefix: level}
+            ConfigSchema("log_levels", dict, False, {}, "Logging level per part of the framework"),
             
             # Build Settings
             ConfigSchema("max_concurrent_builds", int, False, 2, "Maximum concurrent builds", ["min:1", "max:10"]),

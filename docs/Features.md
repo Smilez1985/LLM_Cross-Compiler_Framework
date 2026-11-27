@@ -4151,7 +4151,10 @@ launcher status|install|remove`.
 **The framework's log:** every process (the CLI, the GUI, the MCP server) writes to `framework.log`, one JSON object
 per line, private to you. **Help > Framework Log...** (`llmcf logs show`) shows its newest entries, chosen by level,
 the last minutes and the part of the framework; **Export...** (`llmcf logs export`) writes them to a file with your
-home folder written as `~USER`, for a bug report.
+home folder written as `~USER`, for a bug report. It says where an error happened (its part and its step, once, with
+its trace) and how long a step took (every build step, a tool call of 2 seconds or more, a Mojo check of 1 second or
+more); its row **Level of a part** (`llmcf logs level`) gives one part of the framework its own level, for example
+`BuildEngine` on debug while everything else stays at info.
 
 **The menu bar** (translated, with Alt shortcuts; the object names of the entries stay the same, so every path of the
 command line keeps its mouse path):

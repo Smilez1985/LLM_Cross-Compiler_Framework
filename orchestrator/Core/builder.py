@@ -39,7 +39,7 @@ from docker.types import DeviceRequest
 from orchestrator import __version__
 from orchestrator.Core import build_identity, build_large, build_records
 from orchestrator.tools import local_files
-from orchestrator.utils.logging import get_logger
+from orchestrator.utils.logging import get_logger, log_performance
 from orchestrator.utils.build_context import stage_build_context
 from orchestrator.utils.docker_engine import (create_container, engine_name, ensure_docker_host, podman_refusal,
                                              save_image)
@@ -87,6 +87,7 @@ class BuildCancelled(Exception):
 
 
 STAGING_WATCH_EVERY = 2.0    # seconds between two disk checks while a model is staged
+BUILD_STEP_MS = 0             # every build step gets its duration in the framework's log (a build has few steps)
 CONTAINER_WATCH_EVERY = 5.0  # seconds between two disk checks while a stage container runs
 CONTAINER_WAIT_POLL = 30.0   # the longest single wait for a stage container between two checks of its time limits
 END_RECORD_POLL = 5.0        # the same while the stage runner's end record is watched for (Core/build_end.py)
@@ -1105,7 +1106,8 @@ class BuildEngine:
                 prog.failed_step = prog.current_stage
                 prog.failed_in_module = module_failure(prog.current_stage, prog.end_reason,
                                                        "\n".join(prog.logs[-400:]))
-            self.logger.error(f"Build {bid} failed: {e}", exc_info=True)
+            step = prog.failed_step or prog.current_stage or "?"
+            self.logger.error(f"Build {bid} failed in {step}: {e}", exc_info=True, extra={"step": step})
             self._keep_or_discard(config, prog)
             return BuildStatus.FAILED
 
@@ -1194,6 +1196,7 @@ class BuildEngine:
         if not config.build_id or not config.model_source or not config.output_dir:
             raise ValidationError("Missing required build config (ID, Source, or Output)")
 
+    @log_performance("BuildEngine", BUILD_STEP_MS, step="build step environment")
     def _prepare_build_environment(self, config: BuildConfiguration, progress: BuildProgress, target_path: Path):
         progress.current_stage = "Preparing env"
         progress.progress_percent = 10
@@ -1209,6 +1212,7 @@ class BuildEngine:
         with open(build_temp / "build_config.json", 'w') as f:
             json.dump(asdict(config), f, indent=2, default=str)
 
+    @log_performance("BuildEngine", BUILD_STEP_MS, step="build step dockerfile")
     def _generate_dockerfile(self, config: BuildConfiguration, progress: BuildProgress, target_path: Path) -> Path:
         progress.current_stage = "Generating Dockerfile"
         progress.progress_percent = 20
@@ -1262,6 +1266,7 @@ class BuildEngine:
             prog.add_warning(f"Dockerfile check (hadolint) gave no result for {name}: {result.detail}. The check is "
                              "advisory; the build goes on.")
 
+    @log_performance("BuildEngine", BUILD_STEP_MS, step="build step image")
     def _build_docker_image(self, config: BuildConfiguration, progress: BuildProgress, path: Path) -> Image:
         progress.current_stage = "Building Image"
         progress.progress_percent = 40
@@ -1696,6 +1701,7 @@ class BuildEngine:
         tail = [l for l in progress.logs if prefix in l][-lines:]
         return "\n".join(tail)
 
+    @log_performance("BuildEngine", BUILD_STEP_MS, step="build step security scan")
     def _scan_image_security(self, image_tag: str, progress: BuildProgress, build_id: Optional[str] = None,
                              timeout: Optional[int] = None):
         if not self._get_conf("enable_security_scan", True):
@@ -1846,6 +1852,7 @@ class BuildEngine:
         except Exception:
             return None
 
+    @log_performance("BuildEngine", BUILD_STEP_MS, step="build step model")
     def _stage_model(self, config: BuildConfiguration, progress: BuildProgress) -> Tuple[str, Dict[str, Dict[str, str]]]:
         """Returns the model path inside the container and the extra volumes needed to reach it.
         Local paths are mounted read-only; HuggingFace repo ids are downloaded into cache/models/hf."""
@@ -2553,6 +2560,7 @@ class BuildEngine:
                 pass
         return sorted(gids)
 
+    @log_performance("BuildEngine", BUILD_STEP_MS, step="build step importance matrix")
     def _generate_imatrix(self, config: BuildConfiguration, progress: BuildProgress, image: Image, target_path: Path,
                           staged: Tuple[str, Dict[str, Dict[str, str]]]):
         """
@@ -2623,6 +2631,7 @@ class BuildEngine:
         else:
             progress.add_warning("IMatrix generation finished but 'imatrix.dat' not found.")
 
+    @log_performance("BuildEngine", BUILD_STEP_MS, step="build step modules")
     def _execute_build_modules(self, config: BuildConfiguration, progress: BuildProgress, image: Image, target_path: Path,
                                staged: Tuple[str, Dict[str, Dict[str, str]]]):
         progress.current_stage = "Running modules"
@@ -2718,6 +2727,7 @@ class BuildEngine:
         if exit_code != 0:
             raise RuntimeError(f"Build script failed with exit code {exit_code}\n{self._log_tail(progress, 'CONT: ')}")
 
+    @log_performance("BuildEngine", BUILD_STEP_MS, step="build step tuning")
     def _execute_tuning(self, config: BuildConfiguration, progress: BuildProgress, image: Image, target_path: Path,
                         staged: Tuple[str, Dict[str, Dict[str, str]]]):
         """The tuning job of a tuning run (Core/tuning.py): the stages up to convert write the F16 into the job's own
@@ -2928,6 +2938,7 @@ class BuildEngine:
             candidate = dst.with_name(f"{dst.name}-{n}")
         return candidate
 
+    @log_performance("BuildEngine", BUILD_STEP_MS, step="build step publish")
     def _publish_artifacts(self, config: BuildConfiguration, progress: BuildProgress):
         """Moves the staged files into the output folder (the manifest last) and the ZIP next to it. When an earlier
         build is in that folder, this one goes next to it (_free_folder): nothing of an earlier build is replaced."""
@@ -2977,6 +2988,7 @@ class BuildEngine:
                 fout.write(chunk)
         shutil.copystat(src, dst)
 
+    @log_performance("BuildEngine", BUILD_STEP_MS, step="build step artifacts")
     def _extract_artifacts(self, config, progress):
         progress.current_stage = "Extracting"
         progress.progress_percent = 85
@@ -3278,6 +3290,7 @@ class BuildEngine:
         if text:
             progress.add_warning(text)
 
+    @log_performance("BuildEngine", BUILD_STEP_MS, step="build step golden artifact")
     def _create_golden_artifact(self, config: BuildConfiguration, progress: BuildProgress):
         progress.current_stage = "Archiving"
         progress.progress_percent = 95

@@ -6779,6 +6779,56 @@ def logs_export(ctx: FrameworkContext, file: str, level: str, since: int, fmt: O
     console.print(f"[green]{len(entries)} entries written to {escape(str(path))} ({chosen}).[/green]")
 
 
+PART_LEVEL_CHOICE = click.Choice(["debug", "info", "warning", "error", "critical"], case_sensitive=False)
+
+
+@logs.command('level')
+@click.argument('part')
+@click.argument('level', type=PART_LEVEL_CHOICE, required=False)
+@click.option('--reset', is_flag=True, help='Remove the part\'s own level: it logs at the framework\'s level again')
+@pass_context
+def logs_level(ctx: FrameworkContext, part: str, level: Optional[str], reset: bool):
+    """Give one part of the framework its own log level: PART is a name as `logs show` shows it (for example
+    BuildEngine or ToolRegistry) or a dotted prefix of one (orchestrator.Core covers everything below it), LEVEL debug,
+    info, warning, error or critical. Saved in your settings; this command and every process started later use it
+    (a running GUI takes it in Help > Framework Log... or at its next start). Only you set it; an AI may read it."""
+    from orchestrator.utils.logging import set_part_level
+    if reset == (level is not None):
+        console.print("[red]Give a LEVEL, or --reset to remove the part's own level.[/red]")
+        sys.exit(2)
+    config, _resolve = _settings(ctx)
+    try:
+        levels = set_part_level(config, part, None if reset else level)
+    except ValueError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+    except OSError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    if reset:
+        console.print(f"[green]{escape(part)} logs at the framework's level again.[/green]")
+    else:
+        console.print(f"[green]{escape(part)}: {levels[part]}[/green]")
+
+
+@logs.command('levels')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output: the levels as a JSON object')
+@pass_context
+def logs_levels(ctx: FrameworkContext, as_json: bool):
+    """The parts of the framework that have their own log level"""
+    from orchestrator.utils.logging import LOG_LEVELS_SETTING, part_levels_of
+    config, _resolve = _settings(ctx)
+    levels = part_levels_of(config.get(LOG_LEVELS_SETTING, {}))
+    if as_json:
+        click.echo(json.dumps(levels, indent=2))
+        return
+    if not levels:
+        console.print("No part has its own log level; every part logs at the framework's level.")
+        return
+    for part, level in sorted(levels.items()):
+        console.print(f"{escape(part)}: {level}")
+
+
 # ============================================================================
 # MOJO (the health check: Mojo Oracle looks, Mojo Miracle repairs; round 6 design 7, round 7 items 11', M', T)
 # ============================================================================

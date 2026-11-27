@@ -3,7 +3,8 @@
 The framework's log in the main window's menus (W1': every action of `llm-cli logs` also by mouse).
 
 Help > Framework Log... opens orchestrator/gui/log_window.py: the entries of framework.log with the CLI's filters
-(level, last minutes, part of the framework, number of entries), Export... and Open Log Folder. The window loads when
+(level, last minutes, part of the framework, number of entries), Export..., Open Log Folder and the row "Level of a
+part" (`logs level`, `logs levels`). The window loads when
 the entry is first used, not with the main window (lazy loading).
 """
 
@@ -24,12 +25,17 @@ CLI_PATHS: Dict[str, str] = {
     "logs export --level": "cmb_log_level",
     "logs export --since": "spin_log_since",
     "logs export --format": "btn_log_export",
+    "logs level": "btn_part_level_set",             # Framework Log window > Level of a part: part, level, Set Level
+    "logs level --reset": "btn_part_level_reset",
+    "logs levels": "lbl_part_levels",               # the parts with their own level, beside the row
 }
 WINDOW_OBJECTS: Dict[str, str] = {name: "act_framework_log" for name in (
     "cmb_log_level", "spin_log_since", "txt_log_part", "spin_log_lines", "btn_log_export", "btn_log_folder",
-    "btn_log_refresh")}
+    "btn_log_refresh", "txt_part_level_part", "cmb_part_level", "btn_part_level_set", "btn_part_level_reset",
+    "lbl_part_levels")}
 MACHINE_ONLY: Dict[str, str] = {
     "logs show --json": "machine-readable output; the Framework Log window shows the same entries",
+    "logs levels --json": "machine-readable output; the Framework Log window shows the same levels",
 }
 
 
@@ -53,7 +59,8 @@ def open_log_window(window) -> Optional[object]:
         existing.refresh()
         return existing
     framework = getattr(window, "framework", None)
-    dialog = FrameworkLogWindow(framework_log_folder(getattr(framework, "config", None)), parent=window)
+    config = getattr(framework, "config", None)
+    dialog = FrameworkLogWindow(framework_log_folder(config), parent=window, config=config)
     window.framework_log_window = dialog
     dialog.show()
     return dialog
