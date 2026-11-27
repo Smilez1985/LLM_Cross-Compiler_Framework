@@ -12,7 +12,6 @@ narrows access or switches to an intact build). Every other error is counted in 
 newest one. The check only reads: no marker of what was seen is written, so the window is the last day.
 """
 
-import re
 from datetime import datetime, timedelta
 from typing import Dict, List
 
@@ -25,8 +24,8 @@ WHY = ("The same error comes back until its cause is fixed, and a build or a req
 
 def _code(cause: str) -> str:
     """A finding code of a known cause: logs.known.<the cause in words, lower case>."""
-    words = re.sub(r"[^a-z0-9]+", "_", cause.lower()).strip("_")[:60] or "error"
-    return f"logs.known.{words}"
+    from orchestrator.Core.self_healing_manager import cause_code
+    return f"logs.known.{cause_code(cause)}"
 
 
 def _who(strategy_value: str, cause: str) -> str:

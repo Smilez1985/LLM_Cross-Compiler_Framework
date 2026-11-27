@@ -6,7 +6,9 @@ Ditto's archive learns from tool results (DESIGN, Ditto, the archive's rows; dec
 (Ditto's turns, an AI client over MCP, the CLI) is offered to the archive: the listed tool's extractor (Core/archive_
 extractors.py) takes typed fields out of the result, and the archive stores an entry for each candidate that has a
 ground. The subscriber only queues the work; one worker thread does it, so a call is never slowed or changed and a
-failure is logged once and ignored. The work never downloads a model (`local_models_only`): without the embedding model
+failure is logged once and ignored. A build that ends in this process is offered too, as get_build_status shows it
+(`on_build_end`, the orchestrator's end listener): a build the person ran in the GUI or llmcf that a step of the
+self-healing pattern library healed teaches the archive without any tool call (step 5 of the one log). The work never downloads a model (`local_models_only`): without the embedding model
 on this computer the archive is simply not offered anything.
 """
 
@@ -33,6 +35,7 @@ class ArchiveRecorder:
         self.offered = 0
         self.stored = 0
         self._listened = archive_sources.listened_tools(archive.table)
+        self.status_of: Optional[Callable[[str], Any]] = None   # a request's get_build_status (attach_archive)
 
     def attach(self, registry: Any) -> "ArchiveRecorder":
         """Subscribes to the registry's result observers (nothing happens for a registry without them)."""
@@ -50,6 +53,16 @@ class ArchiveRecorder:
             if self._worker is None or not self._worker.is_alive():
                 self._worker = threading.Thread(target=self._work, name="archive-recorder", daemon=True)
                 self._worker.start()
+
+    def on_build_end(self, facts: Any) -> None:
+        """The orchestrator's end listener: a request that ended done is offered as get_build_status shows it (its
+        status is read on the worker, never on the build's thread); every other end is not looked at."""
+        rid = str((facts or {}).get("request_id") or "") if isinstance(facts, dict) else ""
+        if not rid or facts.get("end_reason") != "done" or "get_build_status" not in self._listened \
+                or self.status_of is None:
+            return
+        status_of = self.status_of
+        self.on_result("get_build_status", None, lambda: status_of(rid))
 
     def _work(self) -> None:
         while True:
@@ -69,6 +82,8 @@ class ArchiveRecorder:
 
     def _offer(self, tool: str, result: Any) -> None:
         from orchestrator.Core.rag_manager import local_models_only
+        if callable(result):   # a build end: its status, read here
+            result = result()
         candidates = extract(tool, result, self.context)
         with local_models_only():
             for candidate in candidates:
@@ -110,7 +125,19 @@ def attach_archive(framework: Any) -> Optional[ArchiveRecorder]:
             return service.capabilities(target) if service is not None else None
         except Exception:  # noqa: BLE001 - an unknown target declares nothing
             return None
-    return ArchiveRecorder(archive, capabilities).attach(registry)
+    recorder = ArchiveRecorder(archive, capabilities).attach(registry)
+    orchestrator = getattr(framework, "orchestrator", None)
+    if service is not None and callable(getattr(orchestrator, "add_end_listener", None)):
+        recorder.status_of = service.get_status
+        unsubscribe = orchestrator.add_end_listener(recorder.on_build_end)
+        previous = recorder._unsubscribe
+
+        def both() -> None:
+            if previous is not None:
+                previous()
+            unsubscribe()
+        recorder._unsubscribe = both
+    return recorder
 
 
 __all__ = ["ArchiveRecorder", "attach_archive"]

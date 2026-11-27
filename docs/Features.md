@@ -1266,6 +1266,16 @@ Apple, Banana Pi, Qualcomm, Intel, NXP, Google Coral, Kneron, DeepX, MemryX, Aml
 same**. A sentence that still holds an address, an e-mail address, a path or a secret after the cleaning is dropped,
 never stored cleaned.
 
+The archive also keeps what fixed a known error. When a build fails with a cause the self-healing patterns know (memory,
+a full disk, the container engine's permission, the network, a base image's package sources) and then ends done after
+the patterns' step, the build's status (`get_build_status`, field `healed`) says what healed it, and the archive gets
+one entry per target and cause with the build as its evidence: either the framework's automatic step healed it (fewer
+compile jobs, a retry) and the retried build of the same run finished, or it was your step, because the same build
+(model, target, format, quantization) failed with the cause and ended done within 7 days. A build you run in the GUI or
+with `llm-cli` teaches it as well as one an AI app starts. Only the patterns' own words go into the sentence, never an
+AI's or your text; a step whose text the cleaning would change (a command with `sudo`, a path) is named only as the
+patterns' step. Ditto finds the entry the next time the error comes.
+
 An entry is a claim until it is confirmed. You confirm at will. Ditto confirms by itself only when enough independent
 sources, that is different domains, say the same: 3 at the level low, 5 at mid (the default), 7 at high; only you set
 the level, never an AI app. A manufacturer's page or a passed test lets an entry in but never confirms it alone. A newer

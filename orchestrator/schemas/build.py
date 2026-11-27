@@ -148,6 +148,18 @@ class ClientProposalOut(BaseModel):
     created: str = ""
 
 
+class HealedStep(BaseModel):
+    """What healed a build that failed with a cause of the self-healing pattern library (step 5 of the one log): only
+    the library's own words, never an AI's or a person's text."""
+    target: str
+    cause: str = Field(description="The pattern library's cause the build failed with")
+    step: str = Field(description="The pattern library's step for that cause")
+    how: Literal["automatic", "person"] = Field(description="automatic: the framework applied the library's step and "
+                                                            "the retried build of the same run finished; person: the "
+                                                            "same build failed with the cause within 7 days and this "
+                                                            "one ended done")
+
+
 class BuildStatusOut(BaseModel):
     request_id: str
     status: str
@@ -174,6 +186,9 @@ class BuildStatusOut(BaseModel):
         default=None, description="How the build ended, None while it runs: done (its end record says done; the only "
                                   "success), failed, cancelled, soft_cap (an AI-started build ran past its soft cap) or "
                                   "idle (a step printed nothing for the idle timeout)")
+    healed: Optional[HealedStep] = Field(default=None, description="What healed a failed build of it, by the "
+                                                                   "self-healing pattern library; None when nothing "
+                                                                   "did")
 
 
 class BuildList(BaseModel):

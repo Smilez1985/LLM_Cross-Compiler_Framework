@@ -1388,6 +1388,17 @@ CIX, Hailo, Axelera AI, SunFounder, NVIDIA, AMD, Apple, Banana Pi, Qualcomm, Int
 Amlogic und SpacemiT stehen in `configs/archive_sources.yml` mit den Chips, die ihre Seiten nennen) oder **mehrere unabhängige Quellen, die dasselbe sagen**. Ein Satz, der nach dem Bereinigen noch
 eine Adresse, eine E-Mail-Adresse, einen Pfad oder ein Secret enthält, wird verworfen, nie bereinigt gespeichert.
 
+Das Archiv behält auch, was einen bekannten Fehler behob. Scheitert ein Build an einer Ursache, die die Muster der
+Selbstheilung kennen (Speicher, volle Platte, das Recht auf die Container-Engine, Netzwerk, die Paketquellen eines
+Basis-Images), und endet er danach mit done nach dem Schritt der Muster, sagt der Status des Builds (`get_build_status`,
+Feld `healed`), was ihn heilte, und das Archiv bekommt einen Eintrag je Target und Ursache mit dem Build als Beleg:
+Entweder heilte ihn der automatische Schritt des Frameworks (weniger Compile-Jobs, ein neuer Versuch), und der
+wiederholte Build desselben Laufs wurde fertig, oder es war dein Schritt, weil derselbe Build (Modell, Target, Format,
+Quantisierung) an der Ursache scheiterte und innerhalb von 7 Tagen mit done endete. Ein Build, den du in der GUI oder mit
+`llm-cli` startest, lehrt es ebenso wie einer, den eine KI-App startet. Nur die eigenen Wörter der Muster kommen in den
+Satz, nie der Text einer KI oder deiner; ein Schritt, dessen Text das Bereinigen ändern würde (ein Befehl mit `sudo`, ein
+Pfad), wird nur als Schritt der Muster genannt. Ditto findet den Eintrag, wenn der Fehler das nächste Mal kommt.
+
 Ein Eintrag ist eine Behauptung, bis er bestätigt ist. Du bestätigst nach Belieben. Ditto bestätigt nur von selbst, wenn
 genug unabhängige Quellen, also verschiedene Domains, dasselbe sagen: 3 bei der Stufe niedrig, 5 bei mittel (die
 Vorgabe), 7 bei hoch; die Stufe stellst nur du ein, nie eine KI-App. Die Seite eines Herstellers oder ein bestandener Test

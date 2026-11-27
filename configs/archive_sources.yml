@@ -19,6 +19,7 @@ version: 1
 
 listen:
   - get_artifact_details
+  - get_build_status
   - search_knowledge
   - read_knowledge_source
 

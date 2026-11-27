@@ -126,6 +126,40 @@ def known_issue(text: str) -> Optional[tuple]:
     return None
 
 
+def library_step(cause: str) -> Optional[str]:
+    """The pattern library's step for one of its causes (its fix text), None for any other text: a text read back from
+    a file or a result is named only when it is a cause of the library (closed words)."""
+    for _pattern, known, fix, _strategy, _scope in KNOWN_ISSUES:
+        if cause == known:
+            return fix
+    return None
+
+
+def cause_code(cause: str) -> str:
+    """A known cause in closed, key-safe words: lower case, every other character an underscore (Mojo's finding code
+    logs.known.<code>, the archive's key healing:<target>/<code>/helps)."""
+    return re.sub(r"[^a-z0-9]+", "_", str(cause or "").lower()).strip("_")[:60] or "error"
+
+
+HEALED_HOW = ("automatic", "person")   # the library's automatic step in the same run; the person's step (7 days)
+HEALED_DAYS = 7                        # how long after a failed build the same build that ended done counts
+
+
+def healed_of(value: object) -> Optional[dict]:
+    """A build request's `healed` record ({target, cause, step, how}) with closed words only, or None: the cause must
+    be one of the pattern library, the step is the library's step for it (never a text the record carries), the target
+    one word and `how` automatic or person. Every reader of a stored or shared record goes through this."""
+    if not isinstance(value, dict):
+        return None
+    cause, how, target = value.get("cause"), value.get("how"), value.get("target")
+    step = library_step(cause) if isinstance(cause, str) else None
+    if step is None or how not in HEALED_HOW:
+        return None
+    if not (isinstance(target, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,40}", target)):
+        return None
+    return {"target": target, "cause": cause, "step": step, "how": how}
+
+
 def host_cause(log: str) -> Optional[str]:
     """The cause the pattern library traces the log to when it is the host's, not the module's; None otherwise. A
     generated module's failed build is marked for rework only without one (Core/module_test.py)."""

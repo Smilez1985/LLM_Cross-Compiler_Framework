@@ -19,7 +19,7 @@ import uuid
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Any
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 
 from orchestrator.utils.any_path import is_absolute_anywhere, last_part
@@ -169,6 +169,14 @@ class WorkflowState:
     # How the request ended (Core/build_end.py END_REASONS: done, failed, cancelled, soft_cap, idle); None while it
     # runs. Set once when it ends (LLMOrchestrator.end_reason_of); the status above stays for old readers.
     end_reason: Optional[str] = None
+    # The pattern library's cause of the request's first failed build (self_healing_manager.known_issue), None when it
+    # knows none; shared with the summary, so a later build of another process can tell what the person's step healed.
+    known_cause: Optional[str] = None
+    # What healed it (step 5 of the one log; self_healing_manager.healed_of): {target, cause, step, how}, how automatic
+    # (the library's automatic step was applied and the retried build of this run finished) or person (the same build
+    # failed with the cause within HEALED_DAYS and this one ended done). Only closed words of the library. The archive
+    # learns from it only when the request ended done (archive_extractors.from_healing).
+    healed: Optional[Dict[str, str]] = None
 
     @property
     def progress_percent(self) -> int:
@@ -186,7 +194,7 @@ class WorkflowState:
 
 # WorkflowState fields whose change is written to the shared build state (request_store)
 WATCHED_FIELDS = frozenset({"status", "current_stage", "total_builds", "completed_builds", "failed_builds",
-                            "end_time", "end_reason"})
+                            "end_time", "end_reason", "known_cause", "healed"})
 
 class BuildQueueFull(RuntimeError):
     """The build queue holds MAX_UNFINISHED_REQUESTS unfinished requests; a tool caller's new one is refused, not
@@ -541,6 +549,7 @@ class LLMOrchestrator:
             self._release_disk(request)
             if request.request_id in self._workflows:
                 self.end_reason_of(self._workflows[request.request_id])  # with the end, before it is shared
+                self._healed_by_person(self._workflows[request.request_id])
                 self._share(self._workflows[request.request_id])  # errors and warnings added at the end
                 self._announce_end(self._workflows[request.request_id])  # with them: the end, once
             self._active_tasks.pop(request.request_id, None)
@@ -753,6 +762,8 @@ class LLMOrchestrator:
         if not approved:
             return False
 
+        from orchestrator.Core.self_healing_manager import known_issue
+        issue = None if proposal.is_ai_generated else known_issue(job.error_log or "")
         applied = await loop.run_in_executor(None, self.self_healing.apply_fix, proposal)
         if not applied:
             # errors are shown by the CLI summary and the GUI; a warning alone would go unnoticed
@@ -760,7 +771,60 @@ class LLMOrchestrator:
             return False
         state.current_stage = f"Retrying {job.job_id} after the fix"
         self.logger.info(f"Fix applied; retrying {job.job_id}.")
-        return await self._run_job(job, req, attempt=2)
+        ok = await self._run_job(job, req, attempt=2)
+        if ok and issue is not None and state.healed is None:
+            # the library's own step was applied and the retried build is done; it counts once the request ends done
+            state.healed = {"target": str(job.target_architecture), "cause": issue[1], "step": issue[2],
+                            "how": "automatic"}
+        return ok
+
+    def _note_cause(self, state: "WorkflowState", job: "BuildJob") -> None:
+        """Keeps the pattern library's cause of the request's first failed build that it knows (known_cause)."""
+        if state.known_cause is not None:
+            return
+        from orchestrator.Core.self_healing_manager import known_issue
+        issue = known_issue(job.error_log or "")
+        if issue is not None:
+            state.known_cause = issue[1]
+
+    def _healed_by_person(self, state: "WorkflowState") -> None:
+        """A request that ended done after the same build (model, target, format, quantization) failed with a cause
+        of the pattern library within HEALED_DAYS, and that nothing healed automatically: the person's step healed
+        it (step 5 of the one log). The earlier request is read from the shared build state (request_store), so a
+        failure in the GUI and the success in llmcf count as well; its cause must be one of the library."""
+        store = getattr(self, "request_store", None)
+        if store is None or state.healed is not None or state.end_reason != "done":
+            return
+        from orchestrator.Core.self_healing_manager import HEALED_DAYS, healed_of
+        keys = ("model", "target", "format", "quantization")
+        mine = {k: (state.summary or {}).get(k) for k in keys}
+        target = mine.get("target")
+        if not mine.get("model") or not isinstance(target, str) or "," in target:
+            return
+        mine = {k: (None if v is None else str(v)) for k, v in mine.items()}
+        oldest = datetime.now() - timedelta(days=HEALED_DAYS)
+        try:
+            records = store.read()
+        except (OSError, ValueError):
+            return
+        for record in records:   # newest first
+            summary = record.get("summary") if isinstance(record.get("summary"), dict) else {}
+            if record.get("request_id") == state.request_id or record.get("end_reason") in ("done", "cancelled"):
+                continue
+            if record.get("status") not in ("error", "completed", "interrupted"):
+                continue   # one that still runs has not failed
+            if {k: summary.get(k) for k in keys} != mine:
+                continue
+            try:
+                when = datetime.fromisoformat(str(record.get("ended") or record.get("started") or ""))
+            except ValueError:
+                continue
+            if when < oldest:
+                continue
+            healed = healed_of({"target": target, "cause": record.get("known_cause"), "how": "person"})
+            if healed is not None:
+                state.healed = healed
+                return
 
     def add_client_proposal(self, request_id: str, proposal: Any) -> Any:
         """Keeps an AI client's fix proposal (client_proposals.ClientProposal, already validated and filtered) with
@@ -900,6 +964,8 @@ class LLMOrchestrator:
             success = await self._run_job(job, req)
             if state.status == OrchestrationStatus.CANCELLED:
                 return
+            if not success:
+                self._note_cause(state, job)
 
             # --- SELF-HEALING: diagnose, ask the user, apply an approved fix, retry once ---
             if not success and self.self_healing:

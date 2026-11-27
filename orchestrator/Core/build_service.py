@@ -28,7 +28,7 @@ from orchestrator.Core.orchestrator import (BuildQueueFull, BuildRequest, Orches
                                             WorkflowState, WorkflowType)
 from orchestrator.schemas.build import (ArtifactDetails, ArtifactFile, ArtifactList, ArtifactOut, BuildHandle,
                                         BuildList, BuildRequestIn, BuildStatusOut, ClientProposalOut,
-                                        FormatSummary, LogTail, PendingHealing, RequestSummary, TargetList,
+                                        FormatSummary, HealedStep, LogTail, PendingHealing, RequestSummary, TargetList,
                                         TargetOut)
 from orchestrator.schemas.targets import TargetCapabilities
 from orchestrator.tools.local_files import (LocalFileError, LocalFiles, LocalInputs, is_path, labels_hint,
@@ -377,7 +377,14 @@ class BuildService:
                 created=p.created) for p in getattr(state, "client_proposals", [])],
             owner=owner_actor(getattr(state, "owner", "")) or None,
             request=RequestSummary(**getattr(state, "summary", {})) if getattr(state, "summary", None) else None,
-            end_reason=self._end_reason(state))
+            end_reason=self._end_reason(state), healed=self._healed(getattr(state, "healed", None)))
+
+    @staticmethod
+    def _healed(value: Any) -> Optional[HealedStep]:
+        """What healed a build, in the pattern library's words only (self_healing_manager.healed_of)."""
+        from orchestrator.Core.self_healing_manager import healed_of
+        found = healed_of(value)
+        return HealedStep(**found) if found else None
 
     def _end_reason(self, state: WorkflowState) -> Optional[str]:
         """The request's end reason (the orchestrator's one rule, Core/build_end.py), None while it runs."""
@@ -547,7 +554,7 @@ class BuildService:
                                    format=summary.get("format"), board=summary.get("board"),
                                    quantization=summary.get("quantization"),
                                    optimization=summary.get("optimization"), revision=summary.get("revision")),
-            process="other", started_in=self._program(record))
+            process="other", started_in=self._program(record), healed=self._healed(record.get("healed")))
 
     @staticmethod
     def _program(record: Dict[str, Any]) -> str:

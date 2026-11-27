@@ -47,6 +47,8 @@ def snapshot(state: Any) -> Dict[str, Any]:
     """The summary of a WorkflowState as it is shared: no host path (the model by its label, no artifact paths), the
     owner by its caller class only (never an MCP session key), errors and warnings redacted and capped."""
     from orchestrator.Core.job_service import owner_actor
+    from orchestrator.Core.self_healing_manager import healed_of, library_step
+    cause = getattr(state, "known_cause", None)
     status = getattr(getattr(state, "status", None), "value", str(getattr(state, "status", "")))
     summary = getattr(state, "summary", None) or {}
     started, ended = getattr(state, "start_time", None), getattr(state, "end_time", None)
@@ -64,6 +66,9 @@ def snapshot(state: Any) -> Dict[str, Any]:
         "awaiting_decision": status == "awaiting_approval",
         # how it ended (Core/build_end.py END_REASONS), None while it runs
         "end_reason": getattr(state, "end_reason", None),
+        # the pattern library's cause of its first failed build and what healed it (closed words of the library only)
+        "known_cause": cause if isinstance(cause, str) and library_step(cause) is not None else None,
+        "healed": healed_of(getattr(state, "healed", None)),
         "owner": owner_actor(getattr(state, "owner", "") or ""),
         "label": _text(getattr(state, "label", "") or ""),
         "summary": {k: (None if summary.get(k) is None else str(summary.get(k))) for k in SUMMARY_KEYS},

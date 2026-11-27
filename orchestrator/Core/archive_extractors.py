@@ -10,6 +10,10 @@ title that matches a strict pattern. A tool that has no extractor teaches the ar
 
 - `get_artifact_details`: a green-tested artifact build (the build ended `done`, its manifest records a passed
   functional test, and its target, board, format and quantization are ones the target declares) is the ground `tested`.
+- `get_build_status`: a build that failed with a cause of the self-healing pattern library and ended `done` after the
+  library's step (the framework's automatic step in the same run, or the person's step and the same build done within
+  7 days: the request's `healed`) is the ground `tested` for that step on its target (step 5 of the one log). The cause
+  and the step are the library's own words (self_healing_manager.healed_of), never a text of the result.
 - `search_knowledge` and `read_knowledge_source`: a page of a listed manufacturer's website (by registrable domain) is
   the ground `vendor`: the entry says that the manufacturer's own page exists for a target; the page's statements are
   not copied.
@@ -22,13 +26,16 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
-from orchestrator.Core.ditto_archive import Candidate
+from orchestrator.Core.ditto_archive import Candidate, normalized, private_reason
 from orchestrator.rag.private import is_private
+from orchestrator.schemas.archive import TEXT_MAX
 from orchestrator.utils import archive_sources
 
 _WORD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,40}$")
 _TITLE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,:+()/&_-]{2,100}$")
 _ARTIFACT = re.compile(r"^a_[0-9a-f]{16}$")
+_REQUEST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+HEALED_BY = {"automatic": "the framework's automatic step", "person": "the person's step"}
 
 
 @dataclass
@@ -76,6 +83,32 @@ def from_artifact(result: Any, ctx: ExtractContext) -> List[Candidate]:
     return [Candidate(key, text, "tested", [f"build:{artifact}"], value_type="flag", value="true")]
 
 
+def from_healing(result: Any, ctx: ExtractContext) -> List[Candidate]:
+    """A build request that ended done after a step of the pattern library healed it: one entry per target and cause.
+    Every word of the sentence is closed: a target the framework declares, the library's cause and its step (named
+    only as the library's step when the archive's cleaners would change its text)."""
+    from orchestrator.Core.self_healing_manager import cause_code, healed_of
+    from orchestrator.security.paths import scrub_for_ai
+    healed = getattr(result, "healed", None)
+    healed = healed.model_dump() if hasattr(healed, "model_dump") else healed
+    found = healed_of(healed)
+    request_id = str(getattr(result, "request_id", "") or "")
+    if found is None or getattr(result, "end_reason", None) != "done" or not _REQUEST.match(request_id):
+        return []
+    target = _word(found["target"])
+    if not target or ctx.capabilities(target) is None:
+        return []
+    cause = found["cause"].rstrip(".")
+    head = (f"For target {target}, a build that failed with the known cause \"{cause}\" ended done again after "
+            f"{HEALED_BY[found['how']]} from the self-healing pattern library")
+    text = f"{head}: {found['step']}"
+    if (len(text) > TEXT_MAX or scrub_for_ai(normalized(text), limit=TEXT_MAX * 4).strip() != normalized(text)
+            or private_reason(text)):
+        text = f"{head}."
+    key = f"healing:{target}/{cause_code(found['cause'])}/helps"
+    return [Candidate(key, text, "tested", [f"build:{request_id}"], value_type="flag", value="true")]
+
+
 def _pages(result: Any) -> List[Any]:
     """The hits of a search or the one source of a read, whatever the tool's result model is called."""
     hits = getattr(result, "results", None)
@@ -117,6 +150,7 @@ def from_pages(result: Any, ctx: ExtractContext) -> List[Candidate]:
 
 EXTRACTORS: Dict[str, Callable[[Any, ExtractContext], List[Candidate]]] = {
     "get_artifact_details": from_artifact,
+    "get_build_status": from_healing,
     "search_knowledge": from_pages,
     "read_knowledge_source": from_pages,
 }
@@ -134,4 +168,4 @@ def extract(tool: str, result: Any, ctx: ExtractContext) -> List[Candidate]:
         return []
 
 
-__all__ = ["EXTRACTORS", "ExtractContext", "extract", "from_artifact", "from_pages"]
+__all__ = ["EXTRACTORS", "ExtractContext", "HEALED_BY", "extract", "from_artifact", "from_healing", "from_pages"]
