@@ -91,11 +91,13 @@ class KnowledgeSnapshotsDialog(QDialog):
         self.open_folder = QPushButton(self._t("snapshots.open").replace("&", "&&"), self)
         self.btn_old = QPushButton(self._t("storage.old.delete").replace("&", "&&"), self)
         self.btn_convert = QPushButton(self._t("storage.convert").replace("&", "&&"), self)
+        self.btn_clear = QPushButton(self._t("knowledge.clear").replace("&", "&&"), self)
         for button, slot, name in ((self.btn_delete, self._delete, "btn_knowledge_snapshots_delete"),
                                    (self.btn_export, self._export, "btn_knowledge_snapshots_export"),
                                    (self.open_folder, self._open_folder, "btn_knowledge_snapshots_open"),
                                    (self.btn_old, self._delete_old_store, "btn_knowledge_storage_delete_old"),
-                                   (self.btn_convert, self._convert, "btn_knowledge_storage_convert")):
+                                   (self.btn_convert, self._convert, "btn_knowledge_storage_convert"),
+                                   (self.btn_clear, self._clear, "btn_knowledge_clear")):
             button.setObjectName(name)   # menus/knowledge.py names them in CLI_PATHS
             button.setAutoDefault(False)
             button.clicked.connect(slot)
@@ -341,6 +343,45 @@ class KnowledgeSnapshotsDialog(QDialog):
                       for path in result.remaining]   # what stayed, to delete by hand
             self._box("warning", "\n".join(lines))
         self.reload()
+
+    def _clear(self) -> Optional[Any]:
+        """`knowledge clear`: the collections in the deletion dialog ("No" by default), then RAGManager.
+        clear_knowledge_base on the person's yes (a snapshot of the active one first, audited). Returns its result."""
+        from orchestrator.Core.deletion import PlanChanged
+        from orchestrator.Core.knowledge_snapshots import SnapshotNoRoom
+        from orchestrator.gui.deletion_dialog import ask_deletion
+        from orchestrator.gui.plain import one_line
+        from orchestrator.rag.errors import KnowledgeBaseError
+        ensure = getattr(self.framework, "ensure_rag_manager", None)
+        rag = ensure() if callable(ensure) else None
+        try:
+            plan = rag.clear_plan() if rag is not None else None
+        except KnowledgeBaseError as e:
+            self._box("warning", self._t("knowledge.clear.failed", reason=one_line(str(e))))
+            return None
+        if plan is None:
+            self._box("information", self._t("knowledge.clear.none"))
+            return None
+        accepted = ask_deletion(self, plan, title=self._t("knowledge.clear.title"),
+                                intro=self._t("knowledge.clear.intro"), lang=self.lang)
+        if accepted is None:
+            return None
+        audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
+        try:
+            result = rag.clear_knowledge_base(accepted, audit=audit)
+        except PlanChanged:
+            self._box("warning", self._t("deletion.changed"))
+            self.reload()
+            return None
+        except (PermissionError, RuntimeError, SnapshotNoRoom) as e:
+            self._box("warning", self._t("knowledge.clear.failed", reason=one_line(str(e))))
+            return None
+        if result:
+            self._box("information", self._t("knowledge.clear.done", snapshot=result.snapshot or "-"))
+        else:
+            self._box("warning", self._t("knowledge.clear.failed", reason=result.problem))
+        self.reload()
+        return result
 
     def _export(self) -> None:
         from orchestrator.gui.plain import one_line

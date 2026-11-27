@@ -15,6 +15,7 @@ from orchestrator.Core.private_pages import (PrivatePageError, add_private_page,
 from orchestrator.Core.rag_manager import OWN_HOLDER, source_kind
 from orchestrator.rag.private import PRIVATE_FIELD, PRIVATE_PREFIX, is_private, private_label, shareable
 from test_rag import make_rag  # noqa: F401 - the fixture
+from tests.knowledge_clear import clear_knowledge  # noqa: E402
 
 PAGE = ("<!DOCTYPE html><html><head><title>NPU guide</title></head><body><h1>NPU guide</h1>"
         "<p>Quantize the model before it runs on the NPU accelerator.</p>"
@@ -231,7 +232,7 @@ class TestSnapshots:
         with gzip.open(snapshot_path(rag, name), "rt", encoding="utf-8") as f:
             header = json.loads(f.readline())
         assert header["private"] >= 1
-        rag.clear_knowledge_base()
+        clear_knowledge(rag)
         assert rag.list_sources() == []
         assert rag.restore_snapshot(name)
         kinds = {e["source"]: e["kind"] for e in rag.list_sources()}

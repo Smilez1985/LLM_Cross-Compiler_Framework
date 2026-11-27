@@ -62,6 +62,20 @@ def _crawler_class() -> Any:
 
 from orchestrator.rag.private import PRIVATE_FIELD, is_private, private_label  # noqa: E402 - the private pages' one marker
 
+
+@dataclass
+class KnowledgeCleared:
+    """What `knowledge clear` did: whether it emptied the knowledge base, the snapshot of the active collection made
+    first (its name, for `knowledge snapshots`), the collections emptied, and why not."""
+    done: bool
+    snapshot: Optional[str] = None
+    problem: str = ""
+    emptied: Optional[List[str]] = None
+
+    def __bool__(self) -> bool:
+        return self.done
+
+
 COLLECTION_NAME = "framework_knowledge"  # alias of the active collection (one collection per embedding model)
 MIN_SPARSE_QUERY_TOKENS = 3  # shorter queries use the dense ranking only, unless they hold an identifier
 _IDENTIFIER = re.compile(r"\d|_|[A-Z]{2,}|\w[.-]\w")  # E2041, GGML_CUDA, RKNN, librkllmrt.so
@@ -1622,16 +1636,72 @@ class RAGManager:
                 payload.pop(key, None)
             yield {"source": payload.pop("source", ""), "content": payload.pop("content", ""), "metadata": payload}
 
-    def clear_knowledge_base(self) -> bool:
-        """Deletes all stored vectors (of every embedding model used so far)."""
+    def clear_plan(self):
+        """What `knowledge clear` empties, as a deletion plan (Deletion and the trash): every collection of the
+        knowledge base (the active one with its number of chunks, those of earlier embedding models), each with where
+        it is stored; Ditto's archive is no collection of the knowledge base and is never listed. Only "permanent" is
+        offered: the active collection is saved as a snapshot first, which `knowledge snapshots` brings back. None
+        when there is nothing stored. KnowledgeBaseError when the knowledge base cannot be read."""
+        from orchestrator.Core.deletion import plan_of
+        from orchestrator.tools.spec import DeletionItem
+        where = self._storage_label()
+
+        def collections(store) -> List[Tuple[str, Optional[int]]]:
+            names = store.knowledge_collections()
+            active = store.collection if store.collection in names else None
+            return ([(active, store.count())] if active else []) + [(n, None) for n in names if n != active]
+
+        items = []
+        for name, count in self._with_store(collections):
+            if count == 0:
+                continue   # an empty active collection: nothing to empty
+            what = (f"the knowledge base's active collection, {count} chunks, stored in {where} (saved as a snapshot "
+                    "first)" if count is not None else
+                    f"a collection of an earlier embedding model, stored in {where}")
+            items.append(DeletionItem(kind="knowledge_collection", speaking_name=name, full_path="", file_name=name,
+                                      size_bytes=0, what=what))
+        return plan_of(items, ("permanent",))
+
+    def clear_knowledge_base(self, accepted: Any, audit: Any = None) -> "KnowledgeCleared":
+        """`knowledge clear`: empties exactly the collections of the plan the person accepted (clear_plan), in the GUI
+        or at a terminal, never an AI's (PermissionError). The plan is built again and must be the accepted one
+        (PlanChanged); the active collection is saved as the snapshot pre_clear_<time> first, and without room for it
+        nothing is emptied (SnapshotNoRoom); the emptying is audited before anything goes (RuntimeError, nothing
+        emptied, without the audit log). Returns KnowledgeCleared (true when emptied, with the snapshot's name)."""
+        from orchestrator.Core.deletion import require_person, require_same
+        accepted = require_person(accepted)
+        if accepted.actor not in ("gui", "cli"):
+            raise PermissionError("Only the person empties the knowledge base, in the GUI or at a terminal.")
+        try:
+            current = self.clear_plan()
+        except KnowledgeBaseError as e:
+            self._fail(e)
+            return KnowledgeCleared(False, problem="the knowledge base could not be read")
+        require_same(accepted, current, "the list of the knowledge base's collections")
+        if audit is None or not callable(getattr(audit, "record", None)):
+            raise RuntimeError("The audit log is not available, so the knowledge base was not emptied.")
+        snapshot = self.create_snapshot(f"pre_clear_{datetime.now().strftime('%Y%m%d_%H%M%S')}", "emptying the "
+                                        "knowledge base")   # SnapshotNoRoom: nothing is emptied
+        active = [i for i in accepted.plan.items if "active collection" in i.what]
+        if active and not snapshot:
+            return KnowledgeCleared(False, problem="the snapshot of the active collection could not be written")
+        names = [i.speaking_name for i in accepted.plan.items]
+        try:
+            audit.record(accepted.actor, "knowledge_cleared", "framework", "person", "started", approved=True,
+                         arguments={"collections": names, "snapshot": snapshot or ""},
+                         detail=f"{len(names)} collections of the knowledge base emptied",
+                         extra=accepted.audit_extra())
+        except Exception:  # noqa: BLE001 - the reason could name a host path
+            raise RuntimeError("The audit log cannot record the emptying; the knowledge base was not emptied.") \
+                from None
         try:
             self._sources = None
             self._with_store(lambda store: (store.drop_all(), store.ensure()))
         except KnowledgeBaseError as e:
             self._fail(e)
-            return False
+            return KnowledgeCleared(False, snapshot, problem="the knowledge base could not be emptied")
         self.logger.info("Knowledge Base cleared.")
-        return True
+        return KnowledgeCleared(True, snapshot, emptied=names)
 
     def _storage_label(self) -> str:
         """Where the knowledge base lives, for display: never the userinfo part of a server URL."""

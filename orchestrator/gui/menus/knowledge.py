@@ -43,6 +43,7 @@ CLI_PATHS: Dict[str, str] = {
     "knowledge storage show": ACT_SNAPSHOTS,
     "knowledge storage convert": "btn_knowledge_storage_convert",
     "knowledge storage delete-old": "btn_knowledge_storage_delete_old",
+    "knowledge clear": "btn_knowledge_clear",        # Tools > Knowledge Snapshots... > Empty Knowledge Base...
     "knowledge index-docs": ACT_INDEX_DOCS,
     "knowledge index-docs --with-code": ACT_INDEX_DOCS,   # the question's check box
     "knowledge sources": ACT_SOURCES,
@@ -112,6 +113,7 @@ WINDOW_OBJECTS: Dict[str, str] = {
     "btn_knowledge_snapshots_open": ACT_SNAPSHOTS,
     "btn_knowledge_storage_convert": ACT_SNAPSHOTS,
     "btn_knowledge_storage_delete_old": ACT_SNAPSHOTS,
+    "btn_knowledge_clear": ACT_SNAPSHOTS,
     "lbl_knowledge_snapshots_disk": ACT_SNAPSHOTS,
     "lbl_knowledge_storage": ACT_SNAPSHOTS,
     "cmb_knowledge_sources_kind": ACT_SOURCES,

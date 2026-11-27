@@ -16,6 +16,7 @@ import pytest
 
 from orchestrator.tools.tools_runtime import label_paths
 from test_rag import ingest_all, make_rag  # noqa: F401  (make_rag is a fixture)
+from tests.knowledge_clear import clear_knowledge  # noqa: E402
 
 KEY = b"k" * 32
 
@@ -224,7 +225,7 @@ def test_clearing_the_knowledge_base_deletes_the_vectors_on_windows(make_rag, wi
     count = rag.get_status()["vector_count"]
     assert count > 0
     name = rag.create_snapshot("before_clear")
-    assert rag.clear_knowledge_base() and rag.get_status()["vector_count"] == 0
+    assert clear_knowledge(rag) and rag.get_status()["vector_count"] == 0
     assert rag.restore_snapshot(name) and rag.get_status()["vector_count"] == count
 
 
@@ -232,7 +233,7 @@ def test_vectors_that_cannot_be_deleted_are_reported(make_rag, windows_deletes):
     rag = make_rag()
     ingest_all(rag)
     windows_deletes.set(lambda path, ignore_errors=False, **kw: None)  # e.g. another program holds a file
-    assert rag.clear_knowledge_base() is False
+    assert not clear_knowledge(rag)
     assert "could not be deleted" in (rag.last_error or "")
 
 
@@ -291,7 +292,7 @@ def test_clearing_the_old_local_storage_deletes_the_vectors_on_windows(make_rag,
     count = rag.get_status()["vector_count"]
     assert count > 0
     name = rag.create_snapshot("before_clear")
-    assert rag.clear_knowledge_base() and rag.get_status()["vector_count"] == 0
+    assert clear_knowledge(rag) and rag.get_status()["vector_count"] == 0
     assert rag.restore_snapshot(name) and rag.get_status()["vector_count"] == count
 
 
@@ -299,7 +300,7 @@ def test_old_local_vectors_that_cannot_be_deleted_are_reported(make_rag, monkeyp
                                                                windows_deletes_old_local):
     rag = old_local_rag(make_rag, monkeypatch)
     windows_deletes_old_local.set(lambda path, ignore_errors=False, **kw: None)
-    assert rag.clear_knowledge_base() is False
+    assert not clear_knowledge(rag)
     assert "could not be deleted" in (rag.last_error or "")
 
 

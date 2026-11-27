@@ -17,6 +17,7 @@ from orchestrator.Core.config_manager import ConfigManager
 from orchestrator.rag.chunking import build_preamble, chunk_document, normalized_hash, point_id
 from orchestrator.rag.embeddings import SparseVec
 from orchestrator.rag.errors import EmbeddingModelNotCached, KnowledgeBaseError
+from tests.knowledge_clear import clear_knowledge  # noqa: E402
 
 # Words of one group share a dimension, so the fake "understands" synonyms across EN/DE; any other word
 # (error codes, flags) is invisible to it. Real semantics are not the point, deterministic ones are.
@@ -371,7 +372,7 @@ class TestCollections:
 
         name = rag.create_snapshot("before_clear")
         assert name == "before_clear" and name in rag.list_snapshots()
-        assert rag.clear_knowledge_base() and rag.get_status()["vector_count"] == 0
+        assert clear_knowledge(rag) and rag.get_status()["vector_count"] == 0
         assert rag.restore_snapshot(name)
 
         assert rag.get_status()["vector_count"] == count
@@ -1026,7 +1027,7 @@ class TestCommunityRoundtrip:
         assert {e["source"] for e in data} == set(DOCS)
         assert all("chunk_hash" in e["metadata"] and e["metadata"]["shared_as"] == "full_text" for e in data)
 
-        rag.clear_knowledge_base()
+        clear_knowledge(rag)
         # Handed back as a loose file (DESIGN round 23 item 1): never imported unsorted, sorted into a topic first
         community.knowledge_dir.mkdir(parents=True, exist_ok=True)
         shutil.move(str(export), str(community.knowledge_dir / export.name))

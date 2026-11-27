@@ -43,6 +43,13 @@ TEXTS = {
         "storage.old.failed": "The knowledge base still uses the storage of earlier versions: its conversion to "
                               "Qdrant Edge failed ({reason}). It keeps working. It is tried again {retry}.",
         "storage.old.delete": "Delete the old storage...",
+        "knowledge.clear": "Empty Knowledge Base...",
+        "knowledge.clear.title": "Empty the knowledge base",
+        "knowledge.clear.intro": "Every collection of the knowledge base goes. The active one is saved as a snapshot "
+                                 "first, so this window can bring it back; Ditto's archive stays.",
+        "knowledge.clear.none": "The knowledge base is empty; there is nothing to empty.",
+        "knowledge.clear.done": "The knowledge base is empty. Snapshot taken first: {snapshot}.",
+        "knowledge.clear.failed": "The knowledge base was not emptied: {reason}",
         "storage.old.title": "Old knowledge base storage",
         "storage.old.none": "There is no old storage folder to delete.",
         "storage.old.done.trash": "Moved to the trash: the old knowledge base storage. You can restore it from the "
@@ -338,6 +345,13 @@ TEXTS = {
                               "Qdrant Edge ist fehlgeschlagen ({reason}). Sie funktioniert weiter. Ein neuer Versuch "
                               "läuft {retry}.",
         "storage.old.delete": "Alten Speicher löschen...",
+        "knowledge.clear": "Wissensdatenbank leeren...",
+        "knowledge.clear.title": "Die Wissensdatenbank leeren",
+        "knowledge.clear.intro": "Jede Sammlung der Wissensdatenbank geht. Die aktive wird zuerst als Snapshot "
+                                 "gesichert, also kann dieses Fenster sie zurückholen; Dittos Archiv bleibt.",
+        "knowledge.clear.none": "Die Wissensdatenbank ist leer; es gibt nichts zu leeren.",
+        "knowledge.clear.done": "Die Wissensdatenbank ist leer. Zuerst gesicherter Snapshot: {snapshot}.",
+        "knowledge.clear.failed": "Die Wissensdatenbank wurde nicht geleert: {reason}",
         "storage.old.title": "Alter Speicher der Wissensdatenbank",
         "storage.old.none": "Es gibt keinen alten Speicherordner zum Löschen.",
         "storage.old.done.trash": "In den Papierkorb verschoben: der alte Speicher der Wissensdatenbank. Du kannst "

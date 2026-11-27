@@ -7512,6 +7512,42 @@ def _private_rag(ctx: FrameworkContext):
     return rag
 
 
+@knowledge.command('clear')
+@pass_context
+def knowledge_clear(ctx: FrameworkContext):
+    """Empty the knowledge base, after you confirm the list at a terminal: every collection (the active one with its
+    chunks, those of earlier embedding models) goes; the active one is saved as a snapshot first, so 'llm-cli
+    knowledge snapshots' brings it back, and without room for that snapshot nothing is emptied. Ditto's archive stays.
+    The same as Empty Knowledge Base... in Tools > Knowledge Snapshots..."""
+    from orchestrator.Core.deletion import PlanChanged
+    from orchestrator.Core.knowledge_snapshots import SnapshotNoRoom
+    from orchestrator.rag.errors import KnowledgeBaseError
+    rag = _private_rag(ctx)
+    try:
+        plan = rag.clear_plan()
+    except KnowledgeBaseError as e:
+        console.print(f"[red]The knowledge base cannot be read: {escape(redact_secrets(str(e)))}[/red]")
+        sys.exit(1)
+    if plan is None:
+        console.print("The knowledge base is empty; there is nothing to empty.")
+        return
+    accepted = confirm_deletion(plan, title=f"The knowledge base's collections ({len(plan.items)})",
+                                again="llm-cli knowledge clear", verb="Empty")
+    if accepted is None:
+        return
+    try:
+        result = rag.clear_knowledge_base(accepted, audit=_cli_audit(ctx))
+    except (PlanChanged, PermissionError, RuntimeError, SnapshotNoRoom) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        sys.exit(1)
+    if result.snapshot:
+        console.print(f"Snapshot taken first: {escape(result.snapshot)} (llm-cli knowledge snapshots).")
+    if not result:
+        console.print(f"[red]The knowledge base was not emptied: {escape(result.problem)}.[/red]")
+        sys.exit(1)
+    console.print(f"[green]The knowledge base is empty ({len(result.emptied or [])} collections).[/green]")
+
+
 @knowledge.command('add-private')
 @click.argument('file', type=click.Path(path_type=Path))
 @click.option('--source', 'address', default='',

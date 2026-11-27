@@ -61,8 +61,8 @@ IMPORT_MARKS = ("bookkeeping: the framework's own import note of an installed pa
 RELEASED_NOTE = ("bookkeeping: the framework's own note that an uninstalled pack's excerpts left the knowledge base, "
                  "removed once the pack (restored from the trash or installed again) is imported again")
 KNOWLEDGE_REPLACED = ("the knowledge base's own storage: a collection replaced by a restore, which saves the current "
-                      "content as a snapshot first (round 5 b); clear_knowledge_base, its other caller, has no caller "
-                      "(OPEN, reported)")
+                      "content as a snapshot first (round 5 b), and clear_knowledge_base, the person's `knowledge "
+                      "clear` (the exact list, the active collection saved as a snapshot first, audited)")
 
 DELETION_SITES = {
     # the person's objects

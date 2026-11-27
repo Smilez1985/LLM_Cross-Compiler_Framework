@@ -19,6 +19,7 @@ import pytest
 from orchestrator.rag.embeddings import SparseVec
 from orchestrator.rag.errors import KnowledgeBaseError
 from test_rag import DOCS, FakeEmbedder, ingest_all, make_rag  # noqa: F401  (make_rag is a fixture)
+from tests.knowledge_clear import clear_knowledge  # noqa: E402
 
 ALIAS = "framework_knowledge"
 DIM = 4
@@ -229,7 +230,7 @@ class TestSnapshotFormats:
                         (list(sparse.indices), list(sparse.values)) if sparse is not None else None, record.payload))
         rag.snapshot_dir.mkdir(parents=True, exist_ok=True)
         write_v1_snapshot(rag.snapshot_dir / "from_old_storage.jsonl.gz", "fake/concepts", 16, old)
-        assert rag.clear_knowledge_base() and rag.get_status()["vector_count"] == 0
+        assert clear_knowledge(rag) and rag.get_status()["vector_count"] == 0
         assert rag.restore_snapshot("from_old_storage")
         assert rag.get_status()["vector_count"] == len(old) and rag.get_status()["store_format"] == "qdrant-edge"
         assert rag.search("what does E2041 mean")[0].source == "https://docs.example/e2041"
