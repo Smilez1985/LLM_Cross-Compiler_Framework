@@ -353,7 +353,7 @@ class BoardBenchWorker(QThread):
             from orchestrator.Core.config_manager import framework_mode
             out = dev.benchmark(state, device, profile, settings, fp, allow_untrusted=self.allow_untrusted,
                                 consent=self._consent, output_dirs=artifact_folders(self.framework),
-                                mode=framework_mode(config), cancel=self._stop, on_client=self._stop.hold)
+                                mode=framework_mode(config), cancel=self._stop, on_client=self._on_client)
         except SettingsError as e:
             self.finished.emit(False, str(e))
             return

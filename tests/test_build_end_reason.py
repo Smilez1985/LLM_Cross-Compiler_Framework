@@ -242,3 +242,18 @@ def test_the_vocabulary_maps_to_the_old_statuses():
     assert set(build_end.END_REASONS) == set(build_end.STATUS_OF)
     assert build_end.exit_code("done") == 0 and build_end.exit_code("idle") == 1 and \
         build_end.exit_code("cancelled") == 2
+
+
+def test_the_build_record_carries_the_end_as_build_info_does(engine, client, tmp_path):
+    """The design of the build's end: the reason, exit and stage are in the build record too (BuildProgress.end_facts,
+    the one place that writes both)."""
+    import json
+    client.stage_options["llm-build-"] = {"exit_code": 4}
+    engine.build_model(config_for(tmp_path))
+    progress = _finish(engine, "b1")
+    from pathlib import Path
+    record = json.loads((Path(engine.records_dir) / "b1.json").read_text())
+    assert record["end_reason"] == "failed"
+    assert {k: record["end"][k] for k in ("reason", "exit", "stage")} == {"reason": "failed", "exit": 4,
+                                                                           "stage": "target"}
+    assert record["end"] == json.loads(json.dumps(progress.end_facts()))

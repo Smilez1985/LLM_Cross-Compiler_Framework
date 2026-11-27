@@ -368,3 +368,16 @@ def test_follow_prints_new_lines_until_stopped(cli_framework, monkeypatch):
     monkeypatch.setattr(ditto_console, "follow", once)
     result = invoke("ditto", "console", "--follow")
     assert result.exit_code == 0 and "list_targets" in result.output, result.output
+
+
+def test_opening_the_console_looks_at_once(qapp, tmp_path):
+    """ConsoleFollower.look_now: a person who just opened the console does not wait for the poll interval."""
+    console, _registry, _feed, _producer = make_console(qapp, tmp_path)
+    try:
+        assert not console.follower._wake.is_set()
+        console.show()
+        qapp.processEvents()
+        assert console.follower._wake.is_set()
+    finally:
+        console.stop()
+        console.close()

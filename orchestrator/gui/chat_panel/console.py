@@ -128,6 +128,11 @@ class DittoConsole(QWidget):
         self.follower.start()
         self.timer.start()
 
+    def showEvent(self, event: Any) -> None:   # noqa: N802 - Qt's name
+        """The person just opened the console: the next look comes at once, not after the poll interval."""
+        super().showEvent(event)
+        self.follower.look_now()
+
     def stop(self) -> None:
         """Stops the reader thread, the timer and the activity listener (the main window calls it when it closes)."""
         self.timer.stop()

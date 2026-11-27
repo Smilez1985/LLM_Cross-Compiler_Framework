@@ -585,6 +585,8 @@ class SecretsManager:
         if not self._ready():
             return False
         helper = helper if helper is not None else (self._setting("secret_helper") or self._helper)
+        if mode == "keyring":
+            vault_key.reset_probe()   # the person may have unlocked the keyring since it was last probed
         if mode == self._mode and (mode != "helper" or helper == self._helper):
             return self.rotate_key()
         new_provider = vault_key.make_provider(mode, helper=helper, key_file=self._key_file,
@@ -619,6 +621,8 @@ class SecretsManager:
                     old[0].forget(old[4])
                 except Exception as e:
                     self.logger.warning(f"The old vault key ({old[1]}) could not be removed: {type(e).__name__}")
+                if old[1] in ("passphrase", "helper"):
+                    vault_key.clear_derived_keys()   # the old passphrase's or helper's keys leave this process too
         except LockTimeout as e:
             self.logger.error(str(e))
             return False

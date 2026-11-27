@@ -320,13 +320,17 @@ class BuildProgress:
     failed_in_module: bool = False
     failed_step: Optional[str] = None   # the step it failed in (current_stage then)
 
-    def end_facts(self) -> Optional[Dict[str, Any]]:
-        """{'reason', 'exit', 'stage'} of an ended build (build_info.json's "end", the build record), else None."""
-        if self.end_reason is None:
+    def end_facts(self, reason: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """{'reason', 'exit', 'stage'} of an ended build, with how its stage modules ran, how its end folder guarded
+        the end record and the runtime layer's verdict: build_info.json's "end" and the build record's "end" (the
+        design of the build's end). `reason`: the reason before it is set (build_info.json is written while a done
+        build is published); without one, and before the build ended, None."""
+        reason = reason or self.end_reason
+        if reason is None:
             return None
         record = self.end_record
         stage = getattr(record, "stage", None)
-        facts = {"reason": self.end_reason, "exit": getattr(record, "exit", None),
+        facts = {"reason": reason, "exit": getattr(record, "exit", None),
                  "stage": stage if stage and stage != "-" else None}
         if self.isolation:
             facts["isolation"] = self.isolation
@@ -536,6 +540,7 @@ class BuildEngine:
             return
         record = dict(info, status=progress.status.value, stage=progress.current_stage,
                       progress=progress.progress_percent, end_reason=progress.end_reason,
+                      end=progress.end_facts(),   # reason, exit and stage (the design of the build's end)
                       ended=progress.end_time.isoformat(timespec="seconds") if progress.end_time else None,
                       error=progress.errors[-1] if progress.errors else None,
                       resumable=bool(getattr(progress, "resumable", False)) or None)
@@ -3061,18 +3066,10 @@ class BuildEngine:
         options = self._build_options(config, info, dataset)
         record = getattr(progress, "end_record", None) if progress is not None else None
         if record is not None and record.done:
-            # How the build ended (Core/build_end.py): only a build whose end record says done gets here
-            stage = record.stage if record.stage != "-" else None
-            info["end"] = {"reason": "done", "exit": record.exit, "stage": stage}
-            if getattr(progress, "isolation", None):
-                info["end"]["isolation"] = progress.isolation   # how the stage modules ran (stage_user, same_user)
-            # the mode and the checks it passed: how the end folder guarded the end record (protected, or plainly
-            # "unprotected" on a host whose mounts keep no owner or mode) and the runtime layer's verdict, toolbox way,
-            # checks passed and stage order
-            if getattr(progress, "end_protection", None):
-                info["end"]["end_folder"] = progress.end_protection
-            if getattr(progress, "runtime_layer", None):
-                info["end"]["runtime_layer"] = dict(progress.runtime_layer)
+            # How the build ended (Core/build_end.py, BuildProgress.end_facts): only a build whose end record says
+            # done gets here; how its stage modules ran, how the end folder guarded the end record (protected, or
+            # plainly "unprotected" on a host whose mounts keep no owner or mode) and the runtime layer's verdict
+            info["end"] = progress.end_facts("done")
         info.update({
             "build_id": config.build_id,
             # A local model an AI caller pinned is recorded by its label, never its host path (it reaches AI callers)

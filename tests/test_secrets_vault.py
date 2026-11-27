@@ -642,6 +642,24 @@ class TestStorageChoices:
         with pytest.raises(vault_key.StorageError):
             sm.change_storage("ephemeral")
 
+    def test_leaving_a_passphrase_forgets_its_keys_and_the_keyring_is_probed_anew(self, memory_keyring, tmp_path,
+                                                                                    monkeypatch):
+        """change_storage: the keys derived from the old passphrase leave this process (clear_derived_keys), and a
+        move to the keyring probes it again (reset_probe), since the person may have unlocked it meanwhile."""
+        config = SimpleNamespace(user_state_dir=tmp_path / "state", config_dir=tmp_path / "configs",
+                                 set=lambda k, v: None, save_user_config=lambda: True)
+        sm = SecretsManager(SimpleNamespace(config=config))
+        assert sm.initialize() and sm.set_secret("hf_token", HF)
+        vault_key.set_passphrase_prompt(lambda new: "a passphrase for now")
+        assert sm.change_storage("passphrase")
+        assert vault_key._derived_cache
+        probes = []
+        real_reset = vault_key.reset_probe
+        monkeypatch.setattr(vault_key, "reset_probe", lambda: (probes.append(1), real_reset()))
+        assert sm.change_storage("keyring")
+        assert probes == [1] and not vault_key._derived_cache
+        assert sm.get_secret("hf_token") == HF
+
 
 # ======================================================================================================
 # Records, names and migration
