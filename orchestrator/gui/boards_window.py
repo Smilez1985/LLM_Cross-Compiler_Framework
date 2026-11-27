@@ -950,6 +950,41 @@ class BoardsWindow(BoardSteps, QDialog):
             text = self._t("boards.remove.gone", device_id=row["device_id"])
         self._say(text)
         self.reload()
+        self._ask_board_files(row["device_id"])
+
+    def _ask_board_files(self, device_id: str) -> None:
+        """The board's stored files after its trust went (`deploy devices remove`'s second half): the exact list in the
+        deletion dialog, "No" by default, to the trash or for good; nothing is asked when it has none."""
+        from orchestrator.Core.deletion import PlanChanged
+        from orchestrator.Core.trash import Trash
+        from orchestrator.gui.deletion_dialog import ask_deletion
+        from orchestrator.runtime.device.person_steps import board_files_plan, remove_board_files
+        try:
+            plan = board_files_plan(self.state_dir, device_id)
+        except ValueError:
+            plan = None
+        if plan is None:
+            return
+        title = self._t("boards.files.title", device_id=device_id)
+        accepted = ask_deletion(self, plan, title=title, intro=self._t("boards.files.intro"), lang=self.lang)
+        if accepted is None:
+            return
+        state, framework, audit = self.state_dir, self.framework, self.audit
+
+        def remove():
+            return remove_board_files(state, device_id, accepted, trash=Trash.for_framework(framework), audit=audit)
+
+        def failed(error: BaseException) -> bool:
+            if isinstance(error, PlanChanged):
+                self._info(self._t("deletion.changed"), "warning")
+                return True
+            if isinstance(error, (PermissionError, RuntimeError)):
+                self._info(self._t("deletion.failed", reason=one_line(str(error))), "warning")
+                return True
+            return False
+
+        self._start(self._t("boards.files.removing"), remove,
+                    lambda result: self._deletion_result(result, accepted.mode, title), failed=failed)
 
     # --- deploy settings ---------------------------------------------------------------------------------------
 

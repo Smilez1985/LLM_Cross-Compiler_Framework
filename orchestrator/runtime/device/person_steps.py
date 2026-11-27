@@ -121,6 +121,76 @@ def remove_trust(state_dir: Path, device_id: str, *, audit: Any, actor: str, cha
     return True
 
 
+BOARD_FILE_WHAT = {"probe": "the board's hardware probe", "probe_info": "the probe's label and address",
+                   "deploy_settings": "the board's deploy settings", "limits": "the board's measurement (memory, load)"}
+
+
+def board_files_plan(state_dir: Path, device_id: str):
+    """The deletion plan of a board's stored files (runtime/profile.ProfileStore.device_files: its probe, the probe's
+    label and address, its deploy settings, its measurement), each that exists with its full path, file name, size and
+    what it is: the second, optional half of `deploy devices remove` (the rule of Deletion and the trash). None when
+    the board has none."""
+    from orchestrator.Core.deletion import plan_of
+    from orchestrator.runtime.profile import ProfileStore
+    from orchestrator.tools.spec import DeletionItem
+    items = []
+    for key, path in ProfileStore(Path(state_dir)).device_files(device_id).items():
+        if path.is_file() and not path.is_symlink():
+            items.append(DeletionItem(kind="board_files", speaking_name=f"{device_id} {key}", full_path=str(path),
+                                      file_name=path.name, size_bytes=path.stat().st_size,
+                                      what=BOARD_FILE_WHAT[key]))
+    return plan_of(items, ("trash", "permanent"))
+
+
+def remove_board_files(state_dir: Path, device_id: str, accepted: Any, trash: Any = None, audit: Any = None):
+    """Removes exactly the board's stored files of the plan the person accepted (board_files_plan): into the trash of
+    the per-user folder or for good (ProfileStore.remove_device). The plan is built again first and must be the
+    accepted one (PlanChanged otherwise: nothing goes); the removal is audited before anything goes (RuntimeError,
+    nothing removed, without the audit log). Only the person, in the GUI or at a terminal (PermissionError otherwise).
+    Returns a deletion.DeletionResult."""
+    from orchestrator.Core.deletion import DeletionResult, note_kept, require_person, require_same
+    from orchestrator.runtime.profile import ProfileStore
+    accepted = require_person(accepted)
+    if accepted.actor not in ("gui", "cli"):
+        raise PermissionError("Only the person removes a board's stored files, in the GUI or at a terminal.")
+    state_dir = Path(state_dir)
+    require_same(accepted, board_files_plan(state_dir, device_id), "the list of the board's files")
+    if accepted.mode == "trash" and trash is None:
+        raise RuntimeError("The trash is not available; nothing was removed.")
+    if audit is None or not callable(getattr(audit, "record", None)):
+        raise RuntimeError("The audit log is not available, so nothing was removed.")
+    names = [i.file_name for i in accepted.plan.items]
+    try:
+        audit.record(accepted.actor, "device_files_removed", "framework", "person", "started", approved=True,
+                     arguments={"device_id": device_id, "files": names, "bytes": accepted.plan.total_bytes,
+                                "mode": accepted.mode},
+                     detail=f"{len(names)} stored files of board {device_id} "
+                            + ("moved to the trash" if accepted.mode == "trash" else "deleted for good"),
+                     extra=accepted.audit_extra())
+    except Exception:  # noqa: BLE001 - the reason could name a host path
+        raise RuntimeError("The audit log cannot record the removal; nothing was removed.") from None
+    result = DeletionResult()
+    if accepted.mode == "permanent":
+        ProfileStore(state_dir).remove_device(device_id)
+        for item in accepted.plan.items:
+            path = Path(item.full_path)
+            if note_kept(result, item.speaking_name, path, [path] if path.exists() else []):
+                continue
+            result.freed_bytes += item.size_bytes
+            result.done.append(item.speaking_name)
+        return result
+    for item in accepted.plan.items:
+        try:
+            entry = trash.move("board_files", Path(item.full_path), state_dir, "state", item.speaking_name, accepted,
+                               accepted.actor)
+        except Exception as e:  # noqa: BLE001 - a TrashError: that file stays and is reported
+            result.failed.append((item.speaking_name, str(e)))
+            continue
+        result.trash_ids.append(entry.id)
+        result.done.append(item.speaking_name)
+    return result
+
+
 def check_board_entry(host: str, user: str, label: Optional[str]) -> Optional[str]:
     """The checks of `llmcf deploy devices add HOST --user U [--label L]`: an address or host name, an account name and
     a label of 1-64 printable characters. Returns the cleaned label (None: none given)."""
@@ -1098,7 +1168,7 @@ __all__ = ["BoardPrune", "CLOCK_CONSENT", "ask_clock_once", "change_clock_answer
            "UNTRUSTED_CONSENT", "UNTRUSTED_QUESTION", "add_trusted_board", "board_address", "boards_overview",
            "change_settings", "check_board_entry", "connect_stored", "device_rows", "list_board_builds",
            "load_settings", "not_known_error", "previous_build", "read_host_key", "record_consent", "remember_board",
-           "remove_board_builds", "remove_trust", "settings_to_change", "trusted_rows", "unreachable_error",
+           "remove_board_builds", "remove_trust", "board_files_plan", "remove_board_files", "BOARD_FILE_WHAT", "settings_to_change", "trusted_rows", "unreachable_error",
            "BoardChange", "CHANGE_QUESTION", "change_board", "change_lines", "framework_key_logs_in",
            "moved_lines", "plan_board_change", "BuildDeploy", "BoardSwitch", "PersonPairer", "SWITCHED_STEP",
            "adopt_switched_board", "switched_text", "deploy_build", "device_audit", "remember_deployed",

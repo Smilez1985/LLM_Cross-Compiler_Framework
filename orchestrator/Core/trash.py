@@ -59,10 +59,10 @@ WHAT = {"artifact": "built model", "model_file": "model file", "knowledge_snapsh
         "deploy_package": "device runtime package", "knowledge_store": "old knowledge base storage",
         "build_dependency": "pinned build dependency", "bundle": "board bundle",
         "acp_agent": "ACP agent folder", "f16_intermediate": "kept F16 intermediate",
-        "model_archive": "model archive taken in"}
+        "model_archive": "model archive taken in", "board_files": "stored board file"}
 EntryKind = Literal["artifact", "model_file", "knowledge_snapshot", "module", "pack", "runtime_build",
                     "deploy_package", "knowledge_store", "build_dependency", "bundle", "acp_agent", "f16_intermediate",
-                    "model_archive"]
+                    "model_archive", "board_files"]
 # Names that keep their double suffix when a restored copy needs another name.
 _SUFFIXES = (".jsonl.gz", ".tar.gz", ".zip", ".gguf", ".rkllm", ".rknn", ".onnx", ".bin", ".safetensors")
 

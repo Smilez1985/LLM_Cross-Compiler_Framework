@@ -57,31 +57,6 @@ class ValidationError(Exception):
         self.details = details or {}
 
 
-class ConfigurationValidationError(ValidationError):
-    """Configuration validation specific error"""
-    pass
-
-
-class SystemValidationError(ValidationError):
-    """System validation specific error"""
-    pass
-
-
-class PathValidationError(ValidationError):
-    """Path validation specific error"""
-    pass
-
-
-class SecurityValidationError(ValidationError):
-    """Security validation specific error"""
-    pass
-
-
-class DependencyValidationError(ValidationError):
-    """Dependency validation specific error"""
-    pass
-
-
 # ============================================================================
 # ENUMS AND CONSTANTS
 # ============================================================================

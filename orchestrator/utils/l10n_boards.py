@@ -312,6 +312,10 @@ TEXTS = {
                                   "audit log.",
         "boards.remove.done": "Board {label} ({device_id}) was removed from the trusted boards.",
         "boards.remove.gone": "There is no trusted board {device_id} any more.",
+        "boards.files.title": "The stored files of board {device_id}",
+        "boards.files.intro": "The board's probe, its deploy settings and its measurement are still stored on this "
+                              "computer. Remove them too? They are needed only if you add the board again.",
+        "boards.files.removing": "Removing the board's stored files...",
         # a trusted board's address and host key (deploy devices edit, Q5)
         "boards.edit.title": "Edit address or key",
         "boards.edit.intro": "Board {label} ({device_id}): change its host name or IP address, its SSH port or its "
@@ -1019,6 +1023,11 @@ TEXTS = {
                                   "vermerkt.",
         "boards.remove.done": "Board {label} ({device_id}) wurde aus den vertrauten Boards entfernt.",
         "boards.remove.gone": "Es gibt kein vertrautes Board {device_id} mehr.",
+        "boards.files.title": "Die gespeicherten Dateien von Board {device_id}",
+        "boards.files.intro": "Die Probe des Boards, seine Deploy-Einstellungen und seine Messung sind noch auf diesem "
+                              "Computer gespeichert. Auch entfernen? Sie werden nur gebraucht, wenn du das Board wieder "
+                              "hinzufügst.",
+        "boards.files.removing": "Entferne die gespeicherten Dateien des Boards...",
         "boards.edit.title": "Adresse oder Schlüssel ändern",
         "boards.edit.intro": "Board {label} ({device_id}): ändere seinen Hostnamen oder seine IP-Adresse, seinen "
                              "SSH-Port oder seinen Host-Schlüssel in der known_hosts-Datei des Frameworks, zum "

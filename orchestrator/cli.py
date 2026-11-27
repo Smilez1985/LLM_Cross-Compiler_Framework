@@ -9090,7 +9090,9 @@ def _tier_cell(tier: str, mode: str = "private") -> str:
 @click.argument('device_id')
 @pass_context
 def deploy_devices_remove(ctx: FrameworkContext, device_id: str):
-    """Remove a device's record: AI tools can no longer name it (its known_hosts entry is kept)"""
+    """Remove a device's record: AI tools can no longer name it (its known_hosts entry is kept). Then its stored files
+    (its probe, deploy settings and measurement) are listed and go only after your yes at a terminal: into the trash
+    by default, or for good ("No" keeps them)."""
     from orchestrator.runtime.device.person_steps import remove_trust
     state_dir = _state_dir(ctx)
     if not remove_trust(state_dir, device_id, audit=lambda: _device_audit(ctx, state_dir), actor="cli",
@@ -9098,6 +9100,36 @@ def deploy_devices_remove(ctx: FrameworkContext, device_id: str):
         console.print(f"[red]No trusted device {escape(device_id)} (llm-cli deploy devices list).[/red]")
         sys.exit(1)
     console.print(f"Device {escape(device_id)} removed from the trusted devices.")
+    _remove_board_files_cli(ctx, state_dir, device_id)
+
+
+def _remove_board_files_cli(ctx: FrameworkContext, state_dir: Path, device_id: str) -> None:
+    """The board's stored files after its record went: the exact list, then the person's yes (Deletion and the
+    trash); nothing is asked when it has none."""
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    from orchestrator.runtime.device.person_steps import board_files_plan, remove_board_files
+    try:
+        plan = board_files_plan(state_dir, device_id)
+    except ValueError:
+        plan = None
+    if plan is None:
+        return
+    accepted = confirm_deletion(plan, title=f"The stored files of board {device_id} ({len(plan.items)}, "
+                                            f"{size_text(plan.total_bytes)})",
+                                again=f"llm-cli deploy devices remove {device_id}", verb="Remove")
+    if accepted is None:
+        console.print("Its stored files stay.")
+        return
+    trash, audit = _person_trash(ctx, state_dir)
+    try:
+        result = remove_board_files(state_dir, device_id, accepted, trash=trash, audit=audit)
+    except (PlanChanged, PermissionError, RuntimeError) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        return
+    for name in result.done:
+        console.print(f"[green]{'Moved to the trash' if accepted.mode == 'trash' else 'Deleted'}: "
+                      f"{escape(name)}[/green]")
+    _print_kept(result)
 
 
 @deploy_devices.command('add')

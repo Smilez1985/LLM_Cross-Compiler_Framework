@@ -47,6 +47,9 @@ START_ENTRY = ("the framework's own start entry: only the person's own desktop e
                "carries the framework's mark, removed on the person's own command (llm-cli launcher remove, Remove "
                "under File > Settings..., Update); a file of that name without the mark stays")
 UNUSED = "OPEN (reported): no caller; must get a plan before it is wired"
+BOARD_FILES = ("the person's yes to the exact list (deploy devices remove's second half, the Boards window's Remove "
+               "Trust...): a board's stored probe, deploy settings and measurement, after its trust went, for good "
+               "(person_steps.remove_board_files) or to the trash")
 OWN_SOFTWARE = ("the framework's own optional software (Ditto's search engine SearXNG in its own folder, or its "
                 "container): made by the installer or `ditto web setup`, removed only on the person's own command "
                 "(`ditto web remove`, the uninstaller's question) and never what was there before (the settings file and "
@@ -313,8 +316,8 @@ DELETION_SITES = {
     # the start entry that opens the GUI without a terminal
     ("orchestrator/utils/launcher.py", "linux_remove"): START_ENTRY,
     ("orchestrator/utils/launcher.py", "windows_remove"): START_ENTRY,
-    # open, reported
-    ("orchestrator/runtime/profile.py", "ProfileStore.remove_device"): UNUSED,
+    # a board's stored files, after its trust went (the deletion rule)
+    ("orchestrator/runtime/profile.py", "ProfileStore.remove_device"): BOARD_FILES,
     # the board preload unpacked once for its check at take-in (board_packages.check_preload)
     ("orchestrator/runtime/device/board_packages.py", "check_preload"): STAGING,
 }
