@@ -411,6 +411,18 @@ module's `__all__` or marked `# noqa: F401` with the reason).
 ruff check --select E9,F63,F7,F82,F401 orchestrator scripts tests targets
 ```
 
+**Dead code** (`ci.yml`): `scripts/dead_code.py` runs vulture over `orchestrator` and `scripts` (the tests are no
+caller, so a function only tests call counts as unused) and fails on every unused function, method, class or property
+that does not stand in `configs/vulture_allowlist.py` with its reason (a library's callback, a button connected by
+name, a preparation for its roadmap row, a test API, a decision of the maintainer, or one that waits for that
+decision), and on an entry that is no longer unused. Functions a decorator registers (Click commands, validators,
+`atexit`) are recognised by the script. Wire new code where the design puts it; a new exception is the maintainer's
+decision.
+
+```bash
+python scripts/dead_code.py
+```
+
 **ShellCheck** (`ci.yml`): errors in all tracked shell scripts. `targets/_template` is skipped because it contains
 placeholders that the module generator fills in.
 

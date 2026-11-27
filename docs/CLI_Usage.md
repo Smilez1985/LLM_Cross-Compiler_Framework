@@ -140,6 +140,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `models take-over` | Copy what earlier versions of the Hugging Face browser saved in the Hugging Face cache into the models folder, each file checked, then offer to remove the old copies |
 | `models list` / `models delete` | Every downloaded model and every build in one list (the Models tab) / delete rows of it, each through its own deletion |
 | `models bench` / `models bench-results` | Measure a GGUF model with llama-bench on this computer (the Benchmark window) / the kept runs |
+| `models compare` | Compare the quality of GGUF models of the list by their perplexity on the auto-tuning's evaluation text (Compare Quality... in the Models tab) |
 | `models archive write` / `take` / `list` / `delete` | A portable model archive for a computer without a network: write one from a Hugging Face model at its exact commit, take one in after its checks and your yes to its licence, list and delete the ones taken in (Model Archives... in the Models tab) |
 | `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
 | `targets boards` | Each board of a target with its optimization profile and its benchmark rows (measured, published or unmeasured) |
@@ -621,6 +622,19 @@ conversion again** (after a failure) for `convert`, offered on the same conditio
 llm-cli knowledge storage
 llm-cli knowledge storage delete-old
 ```
+
+### knowledge clear
+
+```
+llm-cli knowledge clear
+```
+
+Empties the knowledge base after you confirm the list at a terminal: every collection of it (the active one with its
+number of chunks, those of earlier embedding models, each with where it is stored) goes. The active collection is saved
+as the snapshot `pre_clear_<time>` first, so `knowledge snapshots` brings it back; without room for that snapshot
+nothing is emptied. The emptying is written to the audit log first. Ditto's archive is no collection of the knowledge
+base and stays. No AI tool does this. In the GUI: **Tools > Knowledge Snapshots... > Empty Knowledge Base...** (the
+deletion dialog, "No" by default).
 
 ---
 
@@ -1380,7 +1394,7 @@ deployment, and by `deploy devices add` and `deploy devices edit`. No tool write
 | `add HOST --user USER` | Adds a board you trusted before this version (its host key is already in the framework's `known_hosts`). Needs a terminal: it shows the fingerprint and asks; it never trusts a new key and never asks for a password, and it marks the board as paired only when the framework's key logs in. |
 | `edit DEVICE` | Changes a trusted board's address (`--host`: host name or IP address, `--port`) or its SSH host key in the framework's `known_hosts`, e.g. after its address changed or it was reinstalled. `DEVICE` is its device ID, its label or its address. The new key is pasted with `--key` (the line of `/etc/ssh/ssh_host_ed25519_key.pub` on the board, a `known_hosts` line or a line of `ssh-keyscan`, in quotes; nobody types a key) or read from the board at its (new) address with `--read-key`; a line with `authorized_keys` options, commands or a second key, and the key of another trusted board, are refused. Needs a terminal: it shows the address and the fingerprint now and after the change and asks ("No" is the default); the change is written to the audit log first. A new key gives the board a new device ID (it derives from the key): the record moves there with its label and user, and whether the framework's key logs in is tested once. The board's data moves with it: its stored probe, deploy settings, deployed runtime (the record of the last deployment with its checks and benchmark, and its runtime packages), deploy record and its benchmark results with the builds ("tested on"). Each part is copied to the new ID and checked before `known_hosts` changes, and the old ID's copies go only after the change; when a copy fails, nothing is changed. A part the new ID already has with other content stays under the old ID, and an old copy that cannot be removed stays too; the command names both. Probe the board again if it was set up anew. When something on this computer stops the change (the framework's `known_hosts` held by another part of the framework, such as the GUI or an MCP server, settings or a file that cannot be read), it says so with the reason (`local_problem`) and exit code 1, never with a traceback; nothing is changed. |
 | `pair-code` | Pairs a board whose hardware probe shows a pairing code (`hardware_probe.sh --pair-code` or `hardware_probe.py --pair-code`, run with sudo on the board; the probe starts `llmcf-pair`, which shows 8 digits on the board's console for at most 10 minutes). It looks for such boards on this computer's local links only (`--wait`, default 3 seconds): a cable straight between the computer and the board (link-local addresses, no router needed), the computer's own hotspot, the board's WLAN as access point, or the own network; never through the internet. You pick the board and type the code (hidden; it never crosses the network: SPAKE2). A wrong code uses one of the board's three tries. After both sides proved the code, the board's SSH host keys are pinned through the same pairing core as a probe kit's result (a one-time pairing offer, audited; the fingerprints are worked out from the key lines the board proved; no host-key question follows), with the board's address: its IPv4 address on the link, else its link-local IPv6 address with the interface (`fe80::...%eth0`, an address `deploy` and `scan --device` take). The framework's key line and signer files go to the board, where the probe installs them with the probe kit's own root step and reports the pairing in its result file like a kit's (importing that file later brings the hardware data; the pairing counts as done). Needs a terminal; never through an AI. |
-| `remove DEVICE_ID` | Removes the record (written to the audit log); AI tools can no longer name the device. Its `known_hosts` entry is kept. |
+| `remove DEVICE_ID` | Removes the record (written to the audit log); AI tools can no longer name the device. Its `known_hosts` entry is kept. Then the board's stored files (its probe, the probe's label and address, its deploy settings, its measurement) are listed with full path, size and what each is and go only after your yes at a terminal: to the trash by default or for good ("No" keeps them; they are needed only if you add the board again). |
 
 A record is usable only while the framework's `known_hosts` holds exactly the key it names: for a reinstalled board
 whose key changed, give the record the board's new key with `deploy devices edit` (or remove the changed key there and
@@ -1393,7 +1407,8 @@ code in one dialog), **Add a trusted board...** does `add` (address, user, port,
 asked, "No" is the default), **Edit address or key...** does `edit` (host name or IP address, port and a field you
 paste the new key into, or **Read the key from the board** instead; the address, the host key and the device ID now
 and after the change side by side, "No" is the default) and **Remove trust...** does `remove` (it names exactly what
-goes, "No" is the default, and it writes the same audit record).
+goes, "No" is the default, and it writes the same audit record; then the deletion dialog lists the board's stored files,
+"No" by default).
 
 ### deploy ssh-config
 
@@ -4504,6 +4519,23 @@ choice). Ctrl+C stops it. The run is kept; `bench-results` lists the kept runs, 
 llm-cli models list --kind build
 llm-cli models bench ~/llmcf/models/hf/owner--model-GGUF/0123456789ab/model-q8_0.gguf --threads 4
 llm-cli models bench-results
+```
+
+```
+llm-cli models compare NAME... [--base NAME] [--json]
+```
+
+`compare` measures the quality of GGUF models of the list by their perplexity (lower is better) on the auto-tuning's
+fixed evaluation text (public-domain prose in English and German, checked by its sha256, never the calibration text),
+with the tuning's context of 512 tokens and its 16 chunks, and ranks them; with `--base` (for example the F16 or a Q8_0
+of the same model) each gets its ratio to the base. A model whose measurement failed is listed with its reason after
+the measured ones. Ditto's catalogue models run natively; every other model only in the Docker sandbox with the
+llama-perplexity built in the builder container. It is for models already built; a model not built yet is measured by
+the auto-tuning (`build tune start`), which quantizes the candidates itself and compares them by KL divergence. In the
+GUI: **Compare Quality...** in the Models tab (tick the models, choose the base, **Compare**).
+
+```bash
+llm-cli models compare model-Q4_K_M.gguf model-Q5_K_M.gguf --base model-Q8_0.gguf
 ```
 
 ```

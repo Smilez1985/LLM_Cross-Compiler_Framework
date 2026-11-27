@@ -433,6 +433,15 @@ files in its network-less sandbox without asking Hugging Face anything. The arch
 and target modules are shared. What the build runs with (images, wheels, the llama.cpp commit, packages) comes with the
 build's preload, one for many models.
 
+### Comparing the quality of built models
+
+**Compare Quality...** in the Models tab (or `llm-cli models compare`) compares GGUF models you already have by their
+perplexity on the auto-tuning's fixed evaluation text in English and German (never the calibration text), with the
+tuning's context and chunks, so its numbers read like the tuning's report: tick the models, choose a base to compare
+against (for example the F16 or a Q8_0 of the same model), **Compare**. They are ranked, lower is better, each with its
+ratio to the base; a model whose measurement failed is listed with its reason. Ditto's own models run on this computer,
+every other model only in the Docker sandbox. For a model not built yet, the auto-tuning measures the types itself.
+
 ### The Benchmark window
 
 **Build > Benchmark...** (or **Benchmark...** in the Models tab) measures a GGUF model with llama-bench: how fast it
@@ -618,7 +627,8 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   edit`: host name or IP address, port and the key pasted or read from the board, old and new side by side; with a
   new key the board's probe, deploy settings, deployed runtime, deploy record and "tested on" records move to its new
   device ID, each copied and checked before the change),
-  **Remove trust...** (`deploy devices remove`: without it, a board paired once stays allowed for AI deploys), **Settings...**, **Runtime plan**,
+  **Remove trust...** (`deploy devices remove`: without it, a board paired once stays allowed for AI deploys; then its
+  stored probe, settings and measurement go too after your yes to their list), **Settings...**, **Runtime plan**,
   **Status**, **Build runtime...**, **Deploy runtime...**, **Verify...**, **Remove older runtime packages...** and
   **Remove older builds on the board...** (the `device` commands below; deletions in the deletion dialog with the
   full list), and **Check this board (Mojo)** (one connection to the board's SSH port, no login). Every contact with
@@ -2220,7 +2230,9 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   words of `llm-cli knowledge snapshots`). **Tools > Knowledge Snapshots...** in the GUI or `llm-cli knowledge
   snapshots` lists each one with its full path, name, size and what it is, nothing ticked. To free space you tick the
   ones to delete (they go to the trash first; `llm-cli knowledge snapshots prune` or `delete NAME...`) or copy them elsewhere (export;
-  `llm-cli knowledge snapshots export NAME... --to FOLDER`, each copy checked by sha256). See [Deleting and the
+  `llm-cli knowledge snapshots export NAME... --to FOLDER`, each copy checked by sha256). **Empty Knowledge Base...**
+  in the same window (`llm-cli knowledge clear`) empties the knowledge base after your yes to the list of its
+  collections; the active one is saved as a snapshot first, and Ditto's archive stays. See [Deleting and the
   trash](#deleting-and-the-trash). Restoring a snapshot is not available from the GUI or the CLI yet. A snapshot is a
   portable file; snapshots written by earlier versions (format 1) are converted when they are restored.
 - **Search:** hybrid. Dense vectors find meaning, BM25 finds exact terms such as error codes and compiler flags; both

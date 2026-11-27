@@ -438,6 +438,18 @@ zum Import durch andere bleibt, steht im `__all__` des Moduls oder ist mit `# no
 ruff check --select E9,F63,F7,F82,F401 orchestrator scripts tests targets
 ```
 
+**Toter Code** (`ci.yml`): `scripts/dead_code.py` lässt vulture über `orchestrator` und `scripts` laufen (die Tests sind
+kein Aufrufer, also zählt eine Funktion, die nur Tests aufrufen, als ungenutzt) und scheitert an jeder ungenutzten
+Funktion, Methode, Klasse oder Eigenschaft, die nicht mit ihrem Grund in `configs/vulture_allowlist.py` steht (ein
+Rückruf einer Bibliothek, ein Button, der über seinen Namen verbunden ist, eine Vorarbeit für ihre Roadmap-Zeile, eine
+Test-API, eine Entscheidung des Maintainers oder einer, der auf diese Entscheidung wartet), und an einem Eintrag, der
+nicht mehr ungenutzt ist. Funktionen, die ein Dekorator registriert (Click-Befehle, Validatoren, `atexit`), erkennt das
+Skript selbst. Neuen Code dort anschließen, wo das Design ihn vorsieht; eine neue Ausnahme entscheidet der Maintainer.
+
+```bash
+python scripts/dead_code.py
+```
+
 **ShellCheck** (`ci.yml`): Fehler in allen versionierten Shell-Skripten. `targets/_template` wird übersprungen, weil
 es Platzhalter enthält, die der Modulgenerator ausfüllt.
 

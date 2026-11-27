@@ -141,6 +141,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `models take-over` | Was frühere Versionen des Hugging-Face-Browsers im Hugging-Face-Cache gespeichert haben, in den Modellordner kopieren, jede Datei geprüft, und danach das Entfernen der alten Kopien anbieten |
 | `models list` / `models delete` | Jedes heruntergeladene Modell und jeden Build in einer Liste (der Reiter Modelle) / Zeilen daraus löschen, jede über ihr eigenes Löschen |
 | `models bench` / `models bench-results` | Ein GGUF-Modell mit llama-bench auf diesem Rechner messen (das Benchmark-Fenster) / die aufbewahrten Läufe |
+| `models compare` | Die Qualität von GGUF-Modellen der Liste an ihrer Perplexity auf dem Bewertungstext des Auto-Tunings vergleichen (Qualität vergleichen... im Modelle-Tab) |
 | `models archive write` / `take` / `list` / `delete` | Ein portables Modell-Archiv für einen Computer ohne Netz: eines aus einem Hugging-Face-Modell in seinem genauen Commit schreiben, eines nach seinen Prüfungen und deinem Ja zu seiner Lizenz einlesen, die eingelesenen auflisten und löschen (Modell-Archive… im Reiter Modelle) |
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
 | `targets boards` | Jedes Board eines Targets mit seinem Optimierungsprofil und seinen Benchmark-Zeilen (gemessen, veröffentlicht oder ungemessen) |
@@ -638,6 +639,19 @@ angeboten (nicht, solange ein Qdrant-Server eingestellt ist); **Alten Speicher l
 llm-cli knowledge storage
 llm-cli knowledge storage delete-old
 ```
+
+### knowledge clear
+
+```
+llm-cli knowledge clear
+```
+
+Leert die Wissensdatenbank, nachdem du die Liste im Terminal bestätigt hast: Jede ihrer Sammlungen (die aktive mit ihrer
+Zahl an Abschnitten, die früherer Embedding-Modelle, jede mit dem Ort, an dem sie gespeichert ist) geht. Die aktive
+Sammlung wird zuerst als Snapshot `pre_clear_<Zeit>` gesichert, also bringt `knowledge snapshots` sie zurück; ohne Platz
+für diesen Snapshot wird nichts geleert. Das Leeren wird zuerst ins Audit-Log geschrieben. Dittos Archiv ist keine
+Sammlung der Wissensdatenbank und bleibt. Kein KI-Tool tut das. In der GUI: **Werkzeuge > Wissens-Snapshots... >
+Wissensdatenbank leeren...** (der Löschdialog, „Nein“ als Vorgabe).
 
 ---
 
@@ -1438,7 +1452,7 @@ dieselbe ID, die `llm-cli device list` zeigt. Einträge schreibst nur du: `deplo
 | `add HOST --user BENUTZER` | Nimmt ein Board auf, dem du vor dieser Version vertraut hast (sein Host-Schlüssel steht schon in der `known_hosts` des Frameworks). Braucht ein Terminal: Es zeigt den Fingerabdruck und fragt; es vertraut nie einem neuen Schlüssel, fragt nie nach einem Passwort und markiert das Board nur dann als gekoppelt, wenn der Schlüssel des Frameworks sich anmeldet. |
 | `edit GERÄT` | Ändert die Adresse eines vertrauten Boards (`--host`: Hostname oder IP-Adresse, `--port`) oder seinen SSH-Host-Schlüssel in der `known_hosts` des Frameworks, z. B. nachdem sich seine Adresse geändert hat oder es neu installiert wurde. `GERÄT` ist seine Geräte-ID, sein Name oder seine Adresse. Den neuen Schlüssel fügst du mit `--key` ein (die Zeile aus `/etc/ssh/ssh_host_ed25519_key.pub` auf dem Board, eine `known_hosts`-Zeile oder eine Zeile von `ssh-keyscan`, in Anführungszeichen; niemand tippt einen Schlüssel ab), oder `--read-key` liest ihn vom Board unter seiner (neuen) Adresse; eine Zeile mit Optionen aus `authorized_keys`, Befehlen oder einem zweiten Schlüssel und der Schlüssel eines anderen vertrauten Boards werden abgelehnt. Braucht ein Terminal: Es zeigt die Adresse und den Fingerabdruck jetzt und nach der Änderung und fragt ("Nein" ist die Vorgabe); die Änderung kommt zuerst ins Audit-Log. Ein neuer Schlüssel gibt dem Board eine neue Geräte-ID (sie leitet sich vom Schlüssel ab): Der Eintrag zieht mit Name und Benutzer dorthin, und ob sich der Schlüssel des Frameworks anmeldet, wird einmal getestet. Die Daten des Boards ziehen mit: seine gespeicherte Probe, die Deploy-Einstellungen, die deployte Laufzeit (der Eintrag des letzten Deployments mit seinen Prüfungen und seinem Benchmark und seine Laufzeit-Pakete), der Deploy-Eintrag und seine Benchmark-Ergebnisse bei den Builds ("getestet auf"). Jeder Teil wird zur neuen ID kopiert und geprüft, bevor sich die `known_hosts` ändert, und die Kopien der alten ID gehen erst nach der Änderung; scheitert eine Kopie, wird nichts geändert. Ein Teil, den die neue ID schon mit anderem Inhalt hat, bleibt unter der alten ID, ebenso eine alte Kopie, die sich nicht entfernen lässt; der Befehl nennt beides. Prüfe das Board erneut, wenn es neu eingerichtet wurde. Hält etwas auf diesem Computer die Änderung auf (die `known_hosts` des Frameworks ist von einem anderen Teil des Frameworks belegt, etwa der GUI oder einem MCP-Server, Einstellungen oder eine Datei lassen sich nicht lesen), sagt der Befehl das mit dem Grund (`local_problem`) und Exit-Code 1, nie mit einem Traceback; es wird nichts geändert. |
 | `pair-code` | Koppelt ein Board, dessen Hardware-Probe einen Kopplungscode zeigt (`hardware_probe.sh --pair-code` oder `hardware_probe.py --pair-code`, mit sudo auf dem Board ausgeführt; die Probe startet `llmcf-pair`, das höchstens 10 Minuten lang 8 Ziffern auf der Konsole des Boards zeigt). Es sucht solche Boards nur auf den lokalen Verbindungen dieses Computers (`--wait`, Standard 3 Sekunden): ein Kabel direkt zwischen Computer und Board (Link-Local-Adressen, kein Router nötig), der eigene Hotspot des Computers, das WLAN des Boards als Access Point oder das eigene Netz; nie über das Internet. Du wählst das Board und gibst den Code ein (verdeckt; er geht nie über das Netz: SPAKE2). Ein falscher Code verbraucht einen der drei Versuche des Boards. Nachdem beide Seiten den Code bewiesen haben, werden die SSH-Host-Keys des Boards über denselben Kopplungskern festgehalten wie das Ergebnis eines Probe-Kits (ein einmaliges Kopplungsangebot, im Audit-Log vermerkt; die Fingerabdrücke werden aus den Schlüsselzeilen berechnet, die das Board bewiesen hat; keine Host-Key-Frage folgt), mit der Adresse des Boards: seiner IPv4-Adresse auf der Verbindung, sonst seiner link-lokalen IPv6-Adresse mit der Schnittstelle (`fe80::...%eth0`, eine Adresse, die `deploy` und `scan --device` nehmen). Die Schlüsselzeile und die Signer-Dateien des Frameworks gehen an das Board, wo die Probe sie mit dem eigenen Root-Schritt des Probe-Kits installiert und die Kopplung in ihrer Ergebnisdatei wie ein Kit meldet (ein späterer Import dieser Datei bringt die Hardware-Daten; die Kopplung gilt als erledigt). Braucht ein Terminal; nie über eine KI. |
-| `remove GERÄTE_ID` | Entfernt den Eintrag (im Audit-Log vermerkt); KI-Tools können das Gerät dann nicht mehr nennen. Sein Eintrag in `known_hosts` bleibt. |
+| `remove GERÄTE_ID` | Entfernt den Eintrag (im Audit-Log vermerkt); KI-Tools können das Gerät dann nicht mehr nennen. Sein Eintrag in `known_hosts` bleibt. Danach werden die gespeicherten Dateien des Boards (seine Probe, deren Bezeichnung und Adresse, seine Deploy-Einstellungen, seine Messung) mit vollem Pfad, Größe und was jede ist gelistet und gehen erst nach deinem Ja im Terminal: standardmäßig in den Papierkorb oder endgültig („Nein“ behält sie; gebraucht werden sie nur, wenn du das Board wieder hinzufügst). |
 
 Ein Eintrag ist nur nutzbar, solange die `known_hosts` des Frameworks genau den Schlüssel enthält, den er nennt:
 Gib dem Eintrag eines neu installierten Boards, dessen Schlüssel sich geändert hat, mit `deploy devices edit` den
@@ -1452,7 +1466,8 @@ Benutzer, Port, Name; der Fingerabdruck wird gezeigt und erfragt, "Nein" ist die
 Schlüssel ändern...** macht `edit` (Hostname oder IP-Adresse, Port und ein Feld, in das du den neuen Schlüssel
 einfügst, oder stattdessen **Schlüssel vom Board lesen**; Adresse, Host-Schlüssel und Geräte-ID jetzt und nach der
 Änderung nebeneinander, "Nein" ist die Vorgabe), und **Vertrauen entfernen...** macht `remove` (es nennt genau, was
-wegfällt, "Nein" ist die Vorgabe, und es schreibt denselben Audit-Eintrag).
+wegfällt, "Nein" ist die Vorgabe, und es schreibt denselben Audit-Eintrag; danach listet der Löschdialog die
+gespeicherten Dateien des Boards, „Nein“ als Vorgabe).
 
 ### deploy ssh-config
 
@@ -4716,6 +4731,24 @@ neuesten zuerst. Ein Board wird mit `device runtime verify DEVICE --bench-model 
 llm-cli models list --kind build
 llm-cli models bench ~/llmcf/models/hf/owner--model-GGUF/0123456789ab/model-q8_0.gguf --threads 4
 llm-cli models bench-results
+```
+
+```
+llm-cli models compare NAME... [--base NAME] [--json]
+```
+
+`compare` misst die Qualität von GGUF-Modellen der Liste an ihrer Perplexity (niedriger ist besser) auf dem festen
+Bewertungstext des Auto-Tunings (gemeinfreie Prosa auf Englisch und Deutsch, an seiner sha256 geprüft, nie der
+Kalibrierungstext), mit dem Kontext des Tunings von 512 Tokens und seinen 16 Abschnitten, und reiht sie; mit `--base`
+(zum Beispiel das F16 oder ein Q8_0 desselben Modells) bekommt jedes sein Verhältnis zur Basis. Ein Modell, dessen
+Messung scheiterte, steht mit seinem Grund nach den gemessenen. Dittos Katalogmodelle laufen nativ; jedes andere Modell
+nur in der Docker-Sandbox mit dem im Builder-Container gebauten llama-perplexity. Es ist für Modelle, die schon gebaut
+sind; ein Modell, das noch nicht gebaut ist, misst das Auto-Tuning (`build tune start`), das die Kandidaten selbst
+quantisiert und per KL-Divergenz vergleicht. In der GUI: **Qualität vergleichen...** im Modelle-Tab (die Modelle
+anhaken, die Basis wählen, **Vergleichen**).
+
+```bash
+llm-cli models compare model-Q4_K_M.gguf model-Q5_K_M.gguf --base model-Q8_0.gguf
 ```
 
 ```

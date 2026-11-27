@@ -111,6 +111,8 @@ dev = [
     # shellcheck-py follows ShellCheck, whose 0.x minor releases add checks that can fail the lint
     "shellcheck-py>=0.11.0.1,<0.12",
     "actionlint-py>=1.7.12,<2",
+    # the CI's dead-code step (configs/vulture_allowlist.py): a new function nothing calls fails the build
+    "vulture>=2.16,<3",
 ]
 # The fresh resolve on the machine (scripts/fresh_deps.py from install.sh and install.bat) and the scheduled update run:
 # uv resolves the newest compatible set, pip-audit audits it. Installed from the hash-pinned export

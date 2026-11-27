@@ -463,6 +463,16 @@ seiner Sandbox ohne Netz, ohne Hugging Face etwas zu fragen. Das Archiv erschein
 werden nur Rezepte und Target-Module. Womit der Build läuft (Images, Wheels, der llama.cpp-Commit, Pakete), kommt mit
 dem Preload des Builds, einem für viele Modelle.
 
+### Die Qualität gebauter Modelle vergleichen
+
+**Qualität vergleichen...** im Modelle-Tab (oder `llm-cli models compare`) vergleicht GGUF-Modelle, die du schon hast,
+an ihrer Perplexity auf dem festen Bewertungstext des Auto-Tunings auf Englisch und Deutsch (nie der Kalibrierungstext),
+mit dem Kontext und den Abschnitten des Tunings, sodass seine Zahlen sich wie der Bericht des Tunings lesen: die Modelle
+anhaken, eine Basis zum Vergleich wählen (zum Beispiel das F16 oder ein Q8_0 desselben Modells), **Vergleichen**. Sie
+werden gereiht, niedriger ist besser, jedes mit seinem Verhältnis zur Basis; ein Modell, dessen Messung scheiterte,
+steht mit seinem Grund da. Dittos eigene Modelle laufen auf diesem Computer, jedes andere Modell nur in der
+Docker-Sandbox. Für ein Modell, das noch nicht gebaut ist, misst das Auto-Tuning die Typen selbst.
+
 ### Das Benchmark-Fenster
 
 **Build > Benchmark…** (oder **Benchmark…** im Reiter Modelle) misst ein GGUF-Modell mit llama-bench: wie schnell es
@@ -664,7 +674,8 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   nebeneinander; mit einem neuen Schlüssel ziehen Probe, Deploy-Einstellungen, deployte Laufzeit, Deploy-Eintrag und
   "getestet auf"-Einträge des Boards zu seiner neuen Geräte-ID, jeweils vor der Änderung kopiert und geprüft),
   **Vertrauen entfernen...** (`deploy devices remove`:
-  ohne es bleibt ein einmal gekoppeltes Board für KI-Deployments erlaubt), **Einstellungen...**,
+  ohne es bleibt ein einmal gekoppeltes Board für KI-Deployments erlaubt; danach gehen auch seine gespeicherte Probe,
+  Einstellungen und Messung nach deinem Ja zu ihrer Liste), **Einstellungen...**,
   **Laufzeit-Plan**, **Status**, **Laufzeit bauen...**, **Laufzeit installieren...**, **Prüfen...**, **Ältere
   Laufzeit-Pakete entfernen...** und **Ältere Builds auf dem Board entfernen...** (die `device`-Befehle unten;
   Löschen im Löschdialog mit der vollständigen Liste) sowie **Dieses Board prüfen (Mojo)** (eine Verbindung zum
@@ -2446,7 +2457,9 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   und was er ist, nichts angehakt. Um Platz zu
   schaffen, hakst du die an, die gelöscht werden sollen (sie kommen zuerst in den Papierkorb; `llm-cli knowledge
   snapshots prune` oder `delete NAME...`), oder kopierst sie woandershin (Export; `llm-cli knowledge snapshots export
-  NAME... --to ORDNER`, jede Kopie per sha256 geprüft). Siehe [Löschen und der Papierkorb](#löschen-und-der-papierkorb).
+  NAME... --to ORDNER`, jede Kopie per sha256 geprüft). **Wissensdatenbank leeren...** im selben Fenster (`llm-cli
+  knowledge clear`) leert die Wissensdatenbank nach deinem Ja zur Liste ihrer Sammlungen; die aktive wird zuerst als
+  Snapshot gesichert, und Dittos Archiv bleibt. Siehe [Löschen und der Papierkorb](#löschen-und-der-papierkorb).
   Einen Schnappschuss wiederherstellen kann man über GUI oder CLI noch nicht. Ein Schnappschuss ist eine portable
   Datei; Schnappschüsse früherer Versionen (Format 1) werden beim Wiederherstellen umgewandelt.
 - **Suche:** hybrid. Dichte Vektoren finden die Bedeutung, BM25 findet exakte Begriffe wie Fehlercodes und
