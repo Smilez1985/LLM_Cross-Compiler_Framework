@@ -44,6 +44,22 @@ TEXTS = {
         "models.info": "Build Info...",
         "models.deploy": "Deploy...",
         "models.bench": "Benchmark...",
+        "models.compare": "Compare Quality...",
+        "compare.title": "Compare the quality of models",
+        "compare.intro": "Tick the GGUF models to compare. Each is measured by its perplexity (lower is better) on the "
+                         "auto-tuning's fixed evaluation text in English and German; Ditto's models run on this "
+                         "computer, every other model only in the Docker sandbox. This takes a few minutes per model.",
+        "compare.base": "Compare against:",
+        "compare.no_base": "(no base)",
+        "compare.run": "Compare",
+        "compare.none": "Tick at least one model.",
+        "compare.running": "Measuring {n} models...",
+        "compare.done": "Measured.",
+        "compare.error": "The comparison failed: {reason}",
+        "compare.base_line": "Base: {name}, perplexity {ppl}",
+        "compare.line": "{n}. {name}: perplexity {ppl}, to the base {ratio}",
+        "compare.failed_line": "Not measured: {name} ({reason})",
+        "compare.evaluation": "Evaluation: {chunks} chunks of {ctx} tokens of the fixed evaluation text.",
         "models.delete": "Delete...",
         "models.count": "{shown} of {total} shown, {size} in all.",
         "models.empty": "No downloaded model and no build on this computer yet. Download a model from Hugging Face, "
@@ -184,6 +200,23 @@ TEXTS = {
         "models.info": "Build-Info…",
         "models.deploy": "Ausrollen…",
         "models.bench": "Benchmark…",
+        "models.compare": "Qualität vergleichen…",
+        "compare.title": "Die Qualität von Modellen vergleichen",
+        "compare.intro": "Hake die GGUF-Modelle an, die du vergleichen willst. Jedes wird an seiner Perplexity gemessen "
+                         "(niedriger ist besser), auf dem festen Bewertungstext des Auto-Tunings auf Englisch und "
+                         "Deutsch; Dittos Modelle laufen auf diesem Computer, jedes andere Modell nur in der "
+                         "Docker-Sandbox. Das dauert einige Minuten je Modell.",
+        "compare.base": "Vergleichen mit:",
+        "compare.no_base": "(keine Basis)",
+        "compare.run": "Vergleichen",
+        "compare.none": "Hake mindestens ein Modell an.",
+        "compare.running": "Messe {n} Modelle...",
+        "compare.done": "Gemessen.",
+        "compare.error": "Der Vergleich ist gescheitert: {reason}",
+        "compare.base_line": "Basis: {name}, Perplexity {ppl}",
+        "compare.line": "{n}. {name}: Perplexity {ppl}, zur Basis {ratio}",
+        "compare.failed_line": "Nicht gemessen: {name} ({reason})",
+        "compare.evaluation": "Bewertung: {chunks} Abschnitte zu {ctx} Tokens des festen Bewertungstexts.",
         "models.delete": "Löschen…",
         "models.count": "{shown} von {total} gezeigt, {size} insgesamt.",
         "models.empty": "Noch kein heruntergeladenes Modell und kein Build auf diesem Rechner. Ein Modell lässt sich "

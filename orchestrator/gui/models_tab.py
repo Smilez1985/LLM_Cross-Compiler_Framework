@@ -89,6 +89,7 @@ class ModelsTab(QWidget):
         self.btn_info = self._button(actions, "btn_models_info", "models.info", self.show_info)
         self.btn_deploy = self._button(actions, "btn_models_deploy", "models.deploy", self.deploy)
         self.btn_bench = self._button(actions, "btn_models_bench", "models.bench", self.benchmark)
+        self.btn_compare = self._button(actions, "btn_models_compare", "models.compare", self.compare)
         self.btn_archives = self._button(actions, "btn_models_archives", "models.archive.button",
                                          self.open_archives)
         actions.addStretch(1)
@@ -227,6 +228,18 @@ class ModelsTab(QWidget):
             return
         if callable(self._open_benchmark):
             self._open_benchmark(row.key)
+
+    def compare(self) -> Optional[Any]:
+        """Compare Quality... (`llm-cli models compare`): the dialog with the tab's GGUF models, nothing ticked."""
+        from orchestrator.gui.model_compare import ModelCompareDialog
+        rows = [row for row in self.shown if row.gguf is not None]
+        if not rows:
+            plain_box(self, "information", ui_text("compare.title"), ui_text("models.bench.not_gguf"))
+            return None
+        dialog = ModelCompareDialog(self.framework, rows, self)
+        self.compare_dialog = dialog
+        dialog.show()
+        return dialog
 
     def _audit(self):
         return getattr(self.framework, "audit", None) or \

@@ -218,6 +218,24 @@ class TestNative:
         assert report["ranking"][1]["error"] and "Best model is" in report["recommendation"]
         assert json.dumps(report)
 
+    def test_models_compare_measures_on_the_tunings_evaluation_text(self, tmp_path):
+        """`llmcf models compare` (the second recon's decision C): the auto-tuning's fixed evaluation text, its context
+        and its chunks, each model with its ratio to the base."""
+        from orchestrator.Core.tuning import CHUNKS_DEFAULT, CTX_DEFAULT
+        from orchestrator.utils.evaluation_text import build_evaluation_text, text_sha256
+        store, _ = stored(tmp_path)
+        good, _text = model_file(tmp_path)
+        runner = Runner()
+        report = manager(tmp_path, store, catalog=trusting(good), runner=runner).compare_models(good, [good])
+        assert report["evaluation"] == {"text_sha256": text_sha256(), "chunks": CHUNKS_DEFAULT, "ctx": CTX_DEFAULT}
+        assert report["ranking"][0]["ratio"] == 1.0 and "ppl" in report["baseline"]
+        for argv, _cwd, _env in runner.calls:
+            assert argv[argv.index("-c") + 1] == str(CTX_DEFAULT)
+            assert argv[argv.index("--chunks") + 1] == str(CHUNKS_DEFAULT)
+            text_arg = argv[argv.index("-f") + 1]
+            assert text_arg.endswith("evaluation.txt")
+        assert build_evaluation_text()   # the shipped text, whole (its sha256 checked)
+
 
 class Engine(ContainerEngine):
     def __init__(self, reason=None, images=(), rc=0):

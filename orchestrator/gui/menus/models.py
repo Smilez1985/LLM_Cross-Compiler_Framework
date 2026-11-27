@@ -2,7 +2,7 @@
 """
 The models area's mouse paths: the Models tab (orchestrator/gui/models_tab.py), Build > Benchmark...
 (orchestrator/gui/benchmark_window.py) and Build > Model Archives... (orchestrator/gui/model_archive_window.py, also
-the Models tab's button), as `llm-cli models list | delete | bench | bench-results | archive` do them (DESIGN "GUI
+the Models tab's button), as `llm-cli models list | delete | bench | bench-results | compare | archive` do them (DESIGN "GUI
 and the person's path", the row "The Models tab is one list").
 
 install() adds Build > Benchmark... after F16 Intermediates... (MENU_LAYOUT places it) and keeps the window on the main
@@ -28,6 +28,8 @@ CLI_PATHS: Dict[str, str] = {
     "models bench": "btn_bench_run",                  # Build > Benchmark... > Run Benchmark (and the tab's button)
     "models bench --threads": "spin_bench_threads",
     "models bench-results": "tbl_bench_earlier",      # the window's earlier runs
+    "models compare": "btn_models_compare",           # Compare Quality... of the Models tab (the ticked models)
+    "models compare --base": "btn_models_compare",    # its "Compare against:"
     # the portable model archives (Build > Model Archives..., the Models tab's Model Archives...)
     "models archive write": "btn_archive_write",
     "models archive write --revision": "txt_archive_revision",
@@ -40,7 +42,8 @@ CLI_PATHS: Dict[str, str] = {
 }
 TAB_OBJECTS: Dict[str, str] = {name: MODELS_TAB for name in (
     "tbl_models", "cb_models_kind", "txt_models_search", "btn_models_delete", "btn_models_refresh",
-    "btn_models_open_folder", "btn_models_info", "btn_models_deploy", "btn_models_bench", "btn_models_archives")}
+    "btn_models_open_folder", "btn_models_info", "btn_models_deploy", "btn_models_bench", "btn_models_archives",
+    "btn_models_compare")}
 WINDOW_OBJECTS: Dict[str, str] = {name: BENCH_ACTION for name in (
     "btn_bench_run", "btn_bench_cancel", "spin_bench_threads", "tbl_bench_earlier", "tbl_bench_results",
     "cb_bench_model", "cb_bench_where", "cb_bench_board", "txt_bench_board_model")}
@@ -50,6 +53,7 @@ WINDOW_OBJECTS.update({name: ARCHIVES_ACTION for name in (
 MACHINE_ONLY: Dict[str, str] = {
     "models list --json": "machine-readable output; the Models tab shows the same rows",
     "models bench --json": "machine-readable output; the Benchmark window shows the same table",
+    "models compare --json": "machine-readable output; Compare Quality... shows the same ranking",
     "models bench-results --json": "machine-readable output; the Benchmark window lists the same runs",
     "models archive list --json": "machine-readable output; Model Archives... lists the same archives",
 }

@@ -8259,6 +8259,51 @@ def library_bench(ctx: FrameworkContext, name: str, threads: int, as_json: bool)
                   + (f", peak memory {run.peak_rss_mib} MiB" if run.peak_rss_mib else "") + ").")
 
 
+@models.command('compare')
+@click.argument('names', nargs=-1, required=True)
+@click.option('--base', 'base', default=None, metavar='NAME',
+              help='A model of the list to compare against (for example the F16 or a Q8_0): each ratio is to it')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def library_compare(ctx: FrameworkContext, names: Tuple[str, ...], base: Optional[str], as_json: bool):
+    """Compare the quality of GGUF models of the list by their perplexity (lower is better), measured on the
+    auto-tuning's fixed evaluation text (English and German, never the calibration text) with its context of 512 and
+    its 16 chunks, ranked, each with its ratio to --base. Ditto's catalogue models run natively; every other model only
+    in the Docker sandbox with the llama-perplexity built in the builder container. For a model not built yet, the
+    auto-tuning measures the types itself ('llm-cli build tune start'). The same as Compare Quality... in the
+    Models tab."""
+    ctx.require_framework()
+    from orchestrator.Core.dataset_manager import DatasetManager
+    rows = [_model_row(ctx, name) for name in names]
+    base_row = _model_row(ctx, base) if base else None
+    for row in rows + ([base_row] if base_row else []):
+        if row.gguf is None:
+            raise click.UsageError(f"{row.name!r} is no GGUF model file; only those are compared.")
+    with console.status(f"Measuring {len(rows) + (1 if base_row else 0)} models on the evaluation text..."):
+        result = DatasetManager(ctx.framework_manager).compare_models(base_row.gguf if base_row else None,
+                                                                      [row.gguf for row in rows])
+    if as_json:
+        click.echo(json.dumps(result, indent=2))
+        return
+    table = Table(title="Quality on the evaluation text (perplexity, lower is better)")
+    for column in ("#", "Model", "Perplexity", "To the base", "Note"):
+        table.add_column(column)
+    baseline = result.get("baseline") or {}
+    if baseline:
+        table.add_row("base", escape(Path(baseline["path"]).name), f"{baseline['ppl']:.4f}" if "ppl" in baseline
+                      else "-", "1.00", escape(baseline.get("error", "")))
+    for number, entry in enumerate(result["ranking"], 1):
+        if "ppl" in entry:
+            ratio = f"{entry['ratio']:.3f}" if entry.get("ratio") else "-"
+            table.add_row(str(number), escape(entry["name"]), f"{entry['ppl']:.4f}", ratio, "")
+        else:
+            table.add_row("-", escape(entry["name"]), "-", "-", escape(entry["error"]))
+    console.print(table)
+    ev = result["evaluation"]
+    console.print(f"Evaluation: {ev['chunks']} chunks of {ev['ctx']} tokens of the fixed evaluation text "
+                  f"(sha256 {ev['text_sha256'][:12]}).")
+
+
 @models.command('bench-results')
 @click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
 @pass_context

@@ -170,12 +170,12 @@ class DatasetManager:
 
     # --- the perplexity check ---
     def measure_perplexity(self, model_path: Path, dataset_path: Path, context_length: int = 512, *,
-                           sandbox: bool = False) -> float:
+                           sandbox: bool = False, chunks: int = CHUNKS) -> float:
         """The perplexity (PPL, lower is better) of a GGUF model on a text file. See run_perplexity."""
-        return self.run_perplexity(model_path, dataset_path, context_length, sandbox=sandbox).ppl
+        return self.run_perplexity(model_path, dataset_path, context_length, sandbox=sandbox, chunks=chunks).ppl
 
     def run_perplexity(self, model_path: Path, dataset_path: Path, context_length: int = 512, *,
-                       sandbox: bool = False) -> PerplexityRun:
+                       sandbox: bool = False, chunks: int = CHUNKS) -> PerplexityRun:
         """Runs the self-built llama-perplexity on the model. A catalog model runs natively (or in the Docker sandbox
         with sandbox=True); any other model runs in the Docker sandbox only, never natively on this computer.
         Raises PerplexityError."""
@@ -188,25 +188,28 @@ class DatasetManager:
         ctx = int(context_length)
         if not 64 <= ctx <= 32768:
             raise PerplexityError("the context length must be between 64 and 32768 tokens")
+        chunks = int(chunks)
+        if not 1 <= chunks <= 256:
+            raise PerplexityError("the number of chunks must be between 1 and 256")
         digest = _sha256(model)
         trusted = digest in self.trusted_sha256()
         sandbox = sandbox or not trusted  # a model built for a board is never measured natively here
         build, binary = self.perplexity_build(sandbox=sandbox)
         if sandbox:
-            output = self._run_sandbox(build, model, text, ctx)
+            output = self._run_sandbox(build, model, text, ctx, chunks)
             where = "sandbox"
         else:
-            output = self._run_native(binary, model, text, ctx)
+            output = self._run_native(binary, model, text, ctx, chunks)
             where = "native"
         ppl = parse_perplexity(output)
         self.logger.info(f"Perplexity of {model.name}: {ppl} ({where}, build {build.build_id[:16]})")
         return PerplexityRun(ppl=ppl, model=model.name, sha256=digest, trusted=trusted, where=where,
                              build_id=build.build_id)
 
-    def _run_native(self, binary: Path, model: Path, text: Path, ctx: int) -> str:
+    def _run_native(self, binary: Path, model: Path, text: Path, ctx: int, chunks: int = CHUNKS) -> str:
         from orchestrator.runtime.server_policy import check_command, cleared_env
         argv = [str(binary), "-m", str(model.resolve()), "-f", str(text.resolve()), "-c", str(ctx),
-                "--chunks", str(CHUNKS)]
+                "--chunks", str(chunks)]
         check_command(argv)
         with tempfile.TemporaryDirectory(prefix="llm-ppl-") as tmp:
             home = Path(tmp) / "home"
@@ -216,7 +219,7 @@ class DatasetManager:
             raise PerplexityError(f"llama-perplexity failed (exit {rc}): {_tail(err or out)}")
         return err + "\n" + out
 
-    def _run_sandbox(self, build: Any, model: Path, text: Path, ctx: int) -> str:
+    def _run_sandbox(self, build: Any, model: Path, text: Path, ctx: int, chunks: int = CHUNKS) -> str:
         from orchestrator.runtime.build.executor import DockerEngine, Mount
         from orchestrator.runtime.server_policy import check_command
         from orchestrator.utils.sandbox import container_sandbox, sandbox_user
@@ -232,7 +235,7 @@ class DatasetManager:
                                   "are built locally, never pulled): build the runtime in the container again, "
                                   "llm-cli ditto runtime install --placement container")
         command = ["/opt/llama/bin/llama-perplexity", "-m", "/models/model.gguf", "-f", "/data/text.txt",
-                   "-c", str(ctx), "--chunks", str(CHUNKS)]
+                   "-c", str(ctx), "--chunks", str(chunks)]
         check_command(command)
         options = container_sandbox(sandbox_user(), working_dir=CONTAINER_TMP)
         if options.get("network_mode") != "none":  # pragma: no cover - guarded by the sandbox module's tests
@@ -252,30 +255,48 @@ class DatasetManager:
         return output
 
     def compare_quantizations(self, base_model: Optional[Path], quant_models: List[Path], dataset: Path, *,
-                              sandbox: bool = False) -> Dict[str, Any]:
-        """Measures the perplexity of each quantization (and of the base model) and ranks them; a model whose
-        measurement failed is listed with its error, after the measured ones."""
+                              sandbox: bool = False, context_length: int = 512,
+                              chunks: int = CHUNKS) -> Dict[str, Any]:
+        """Measures the perplexity of each quantization (and of the base model) and ranks them, each with its ratio to
+        the base when there is one; a model whose measurement failed is listed with its error, after the measured
+        ones."""
         results: Dict[str, Any] = {}
         base_ppl = None
         if base_model and Path(base_model).exists():
             try:
-                base_ppl = self.measure_perplexity(base_model, dataset, sandbox=sandbox)
+                base_ppl = self.measure_perplexity(base_model, dataset, context_length, sandbox=sandbox,
+                                                   chunks=chunks)
                 results["baseline"] = {"path": str(base_model), "ppl": base_ppl}
             except PerplexityError as e:
                 results["baseline"] = {"path": str(base_model), "error": str(e)}
         measured, failed = [], []
         for qm in quant_models:
             try:
-                ppl = self.measure_perplexity(qm, dataset, sandbox=sandbox)
+                ppl = self.measure_perplexity(qm, dataset, context_length, sandbox=sandbox, chunks=chunks)
             except PerplexityError as e:
                 failed.append({"name": Path(qm).name, "path": str(qm), "error": str(e)})
                 continue
             degradation = ((ppl - base_ppl) / base_ppl) * 100 if base_ppl else 0.0
             measured.append({"name": Path(qm).name, "path": str(qm), "ppl": ppl,
+                             "ratio": round(ppl / base_ppl, 4) if base_ppl else None,
                              "degradation_percent": round(degradation, 2)})
         measured.sort(key=lambda x: x["ppl"])  # lower is better
         results["ranking"] = measured + failed
         if measured:
             best = measured[0]
             results["recommendation"] = f"Best model is {best['name']} with PPL {best['ppl']}"
+        return results
+
+    def compare_models(self, base_model: Optional[Path], models: List[Path]) -> Dict[str, Any]:
+        """`llmcf models compare` and the Models tab's Compare Quality...: compare_quantizations on the auto-tuning's
+        fixed evaluation text (utils/evaluation_text, checked by its sha256; never the calibration text) with the
+        tuning's context and chunks, so a number here and the tuning's report read alike. Ditto's catalogue models
+        run natively, every other model only in the Docker sandbox. The result also names the evaluation."""
+        from orchestrator.Core.tuning import CHUNKS_DEFAULT, CTX_DEFAULT
+        from orchestrator.utils.evaluation_text import text_sha256, write_evaluation_text
+        with tempfile.TemporaryDirectory(prefix="llm-compare-") as tmp:
+            text = write_evaluation_text(Path(tmp) / "evaluation.txt")
+            results = self.compare_quantizations(base_model, list(models), text, context_length=CTX_DEFAULT,
+                                                 chunks=CHUNKS_DEFAULT)
+        results["evaluation"] = {"text_sha256": text_sha256(), "chunks": CHUNKS_DEFAULT, "ctx": CTX_DEFAULT}
         return results
