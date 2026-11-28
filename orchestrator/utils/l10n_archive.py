@@ -65,6 +65,18 @@ TEXTS = {
                             "the newer text becomes the copy.",
         "archive.done": "Done: {entry}",
         "archive.deleted": "Deleted: {entry}",
+        # the question before a value of an unconfirmed entry is used (gui/claim_question.py)
+        "pilot.claim.title": "An unconfirmed claim of Ditto's archive",
+        "pilot.claim.text": "Ditto would fill {field} of the format {format} with:\n{value}\n\nThe value rests on an "
+                            "entry of Ditto's archive that is not confirmed: {have} of {needed} independent domains "
+                            "say it.{competing}\n\nThe entry ({entry}):\n{text}\n\nIts sources:\n{evidence}\n\n"
+                            "Use it as it is, confirm it once you have checked its sources, or leave the field empty.",
+        "pilot.claim.competing": " Other values were found for it as well ({count}).",
+        "pilot.claim.no_evidence": "(none)",
+        "pilot.claim.use": "Use it",
+        "pilot.claim.confirm": "Checked: confirm and use",
+        "pilot.claim.skip": "Do not use it",
+        "pilot.claim.failed": "The entry could not be confirmed: {reason}",
     },
     "de": {
         "archive.menu": "Dittos Archiv ...",
@@ -126,6 +138,18 @@ TEXTS = {
                             "Eintrag, und der neuere Text wird die Kopie.",
         "archive.done": "Erledigt: {entry}",
         "archive.deleted": "Gelöscht: {entry}",
+        "pilot.claim.title": "Eine unbestätigte Aussage aus Dittos Archiv",
+        "pilot.claim.text": "Ditto würde {field} des Formats {format} so füllen:\n{value}\n\nDer Wert beruht auf "
+                            "einem Eintrag in Dittos Archiv, der nicht bestätigt ist: {have} von {needed} unabhängigen "
+                            "Domains sagen es.{competing}\n\nDer Eintrag ({entry}):\n{text}\n\nSeine Quellen:\n"
+                            "{evidence}\n\nSo verwenden, nach dem Prüfen der Quellen bestätigen, oder das Feld leer "
+                            "lassen.",
+        "pilot.claim.competing": " Dafür wurden auch andere Werte gefunden ({count}).",
+        "pilot.claim.no_evidence": "(keine)",
+        "pilot.claim.use": "Verwenden",
+        "pilot.claim.confirm": "Geprüft: bestätigen und verwenden",
+        "pilot.claim.skip": "Nicht verwenden",
+        "pilot.claim.failed": "Der Eintrag konnte nicht bestätigt werden: {reason}",
     },
 }
 

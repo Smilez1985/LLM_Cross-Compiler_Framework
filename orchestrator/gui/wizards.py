@@ -1373,7 +1373,9 @@ class ModuleCreationWizard(QWizard):
 
     def on_formats_proposed(self, proposal) -> None:
         """Ditto's proposal of the format values fills the form: each value with its reason, source and confidence
-        beside its field, the gaps empty with why. The field counts as Ditto's (marked, the module untested)."""
+        beside its field, the gaps empty with why. The field counts as Ditto's (marked, the module untested). A value
+        that rests on an unconfirmed entry of Ditto's archive is asked first (decide_pending)."""
+        self.decide_pending(proposal)
         self.format_proposal = proposal
         form = getattr(self, "gui_form", None)
         text = self.formats_form.proposal_text(proposal)
@@ -1382,6 +1384,23 @@ class ModuleCreationWizard(QWizard):
             self.formats_form.set_proposal_notes(proposal)
         else:   # the person asked for it over their own values (or the same values): the form takes it
             self.formats_form.load_proposal(proposal)
+
+    def decide_pending(self, proposal) -> None:
+        """The framework's question per value that rests on an unconfirmed entry of Ditto's archive
+        (gui/claim_question.py), before the form shows the proposal: the person's answer goes into the proposal
+        (FormatProposal.decide). A confirmation that fails is shown and asked again."""
+        from orchestrator.gui import claim_question
+        from orchestrator.gui.plain import plain_box
+        archive = getattr(self.framework_manager, "ditto_archive", None)
+        for pending in list(getattr(proposal, "pending", lambda: [])()):
+            while True:
+                decision = claim_question.ask_claim(self, pending, can_confirm=archive is not None)
+                try:
+                    proposal.decide(pending, decision, archive)
+                except Exception as e:  # noqa: BLE001 - the archive could not confirm it: shown, asked again
+                    plain_box(self, "warning", ui_text("pilot.claim.title"), ui_text("pilot.claim.failed", reason=e))
+                    continue
+                break
 
     def _formats_person_edited(self) -> None:
         form = getattr(self, "gui_form", None)

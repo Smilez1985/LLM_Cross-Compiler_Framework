@@ -3082,7 +3082,12 @@ Ingest](#knowledge)): jeder Wert mit Grund, Quelle (der Adresse der Seite, einem
 selbst) und Sicherheit. Das Framework prüft die Antwort, bevor du sie siehst: Ein Wert, dessen Quelle kein Auszug ist,
 den Ditto bekam, und kein Schlüssel der Probe, bleibt leer und wird als Lücke genannt (ein Wert wird gelesen, nie
 geraten); ein Wert für einen Pfad, den die Vorlage nicht hat, oder mit einem gefährlichen Befehl wird abgelehnt; und
-jeder Wert geht durch die Prüfungen der Vorlage, jeder Grund an seinem Feld genannt. Das Ergebnis ist ein Entwurf, nie
+jeder Wert geht durch die Prüfungen der Vorlage, jeder Grund an seinem Feld genannt. Ein Eintrag aus Dittos Archiv ist
+ebenfalls eine Quelle, nur für die eigenen Werte des Formats (nie die Schlüsselnamen der Probe oder die Pfade auf dem
+Board); ein Wert, der auf einem nicht bestätigten Eintrag beruht, wird vor der Verwendung abgefragt, wenn du den Befehl
+selbst ausführst: `use` (der Eintrag bleibt unbestätigt), `confirm` (du hast seine Quellen geprüft: der Eintrag wird
+bestätigt, dann verwendet) oder `skip` (die Vorgabe: das Feld bleibt leer). Mit `--json` oder ohne Person am Befehl
+wartet er weiter und wird aufgeführt. Das Ergebnis ist ein Entwurf, nie
 ein Modul: `--out DATEI` schreibt seine Formate als YAML für `module create --formats DATEI --ask-values`, `--json`
 gibt ihn ganz an Skripte (in eine Datei gespeichert, nimmt `module create --formats` auch diese Datei: jedes
 vorgeschlagene Format als seine Werte).

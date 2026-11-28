@@ -1430,6 +1430,8 @@ def module_propose_values(ctx: FrameworkContext, probe_file: str, provider: Opti
         else:
             console.print(f"[red]{escape(_printable(e))}[/red]")
         sys.exit(1)
+    if not as_json and _interactive():
+        _decide_pending_values(ctx, proposal)
     if out_file and proposal.drafts:
         Path(out_file).write_text(proposal.formats_yaml(), encoding="utf-8")
     if as_json:
@@ -1438,6 +1440,34 @@ def module_propose_values(ctx: FrameworkContext, probe_file: str, provider: Opti
     click.echo("\n".join(visible(line) for line in proposal.lines()) or "Ditto proposed no format.")
     if out_file and proposal.drafts:
         console.print(f"The proposed formats are in {escape(out_file)}.")
+
+
+def _decide_pending_values(ctx: FrameworkContext, proposal) -> None:
+    """`module propose-values` in a terminal: the question per value that rests on an unconfirmed entry of Ditto's
+    archive, as the module wizard asks it (gui/claim_question.py): use it, confirm the entry once its sources are
+    checked and use it, or leave the field empty ("skip", the default). Without a terminal the values keep waiting."""
+    from orchestrator.tools.confirmation import visible
+    archive = getattr(ctx.framework_manager, "ditto_archive", None)
+    choices = ["use", "confirm", "skip"] if archive is not None else ["use", "skip"]
+    for pending in proposal.pending():
+        entry = pending.entry
+        console.print(f"\n[bold]An unconfirmed claim of Ditto's archive[/bold] for {escape(pending.format_id)}."
+                      f"{escape(pending.path)}:")
+        click.echo(visible(f"  value: {pending.shown_value}"))
+        click.echo(f"  {entry.independent_sources} of {pending.needed} independent domains say it"
+                   + (f"; other values were found as well ({len(entry.competing)})" if entry.competing else ""))
+        click.echo(visible(f"  entry {entry.key}: {entry.text}"))
+        for address in entry.evidence or ["(no source)"]:
+            click.echo(visible(f"  - {address}"))
+        while True:
+            decision = click.prompt("Use it, confirm it (you checked its sources) and use it, or skip it",
+                                    type=click.Choice(choices), default="skip")
+            try:
+                proposal.decide(pending, decision, archive)
+            except Exception as e:  # noqa: BLE001 - the archive could not confirm it: said, asked again
+                console.print(f"[red]The entry could not be confirmed: {escape(_printable(e))}[/red]")
+                continue
+            break
 
 
 @module.command('propose-dependencies')

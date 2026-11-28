@@ -100,8 +100,12 @@ FORMAT_VALUES_TASK = (
     "the output format(s) the hardware's own accelerator needs (not GGUF, which the template already has), one value "
     "per field path, from the hardware probe and the numbered documentation excerpts only. For each value give its "
     "path (records by index: runtime_libraries.0.version), the value (a word, a list of words, or true/false), the "
-    "reason, the source (S1, S2 ... for an excerpt, probe:KEY for a key of the probe, or template for a value the "
-    "template itself defines, such as its board paths or the format's id and label), and a confidence from 0 to 1. "
+    "reason, the source (S1, S2 ... for an excerpt, A1, A2 ... for an entry of Ditto's archive, probe:KEY for a key "
+    "of the probe, or template for a value the template itself defines, such as its board paths or the format's id "
+    "and label), and a confidence from 0 to 1. An archive entry is a source only for the format's own values (its "
+    "converter, quantizations, runtime libraries, SDK and vendor files), never for the hardware itself (its memory, "
+    "SoC, NPU, the probe's key names or the board's paths come from the probe or the template), and the value must "
+    "be the entry's value or stand in its sentence; an unconfirmed entry is shown to the person before it is used. "
     "Never guess: a value you cannot read from the probe or an excerpt goes into missing with why, and stays empty. "
     "Converter arguments are single words with the placeholders {input}, {output}, {output_dir}, {quant}, "
     "{model_name} and {work_dir}; never a shell string, no sudo, no download piped into a shell. A vendor file the "
@@ -270,10 +274,11 @@ FORMAT_EXCERPTS_CHARS = 16000  # all of them
 
 def format_value_parts(fields: str, probe: str = "", board: str = "", excerpts: Sequence[Any] = (),
                        current: str = "", log_content: str = "",
-                       roots: Optional[Dict[str, str]] = None) -> List[str]:
+                       roots: Optional[Dict[str, str]] = None, claims: Sequence[Any] = ()) -> List[str]:
     """The user turns of a format-values task: the template's fields (the framework's own text), the probe or the
-    board, each documentation excerpt numbered S1, S2 ... with its source (untrusted), the module's current values
-    (a repair; untrusted) and the end of the failed build's log (log_for_ai)."""
+    board, each documentation excerpt numbered S1, S2 ... with its source (untrusted), each entry of Ditto's archive
+    numbered A1, A2 ... with its key, status and sentence (untrusted), the module's current values (a repair;
+    untrusted) and the end of the failed build's log (log_for_ai)."""
     parts = ["The template's variables (path: kind; choices; explanation):\n" + fields]
     parts += module_parts(probe, board)
     used = 0
@@ -287,6 +292,11 @@ def format_value_parts(fields: str, probe: str = "", board: str = "", excerpts: 
     if not excerpts:
         parts.append("No documentation excerpt was found for this hardware: values that need the vendor's "
                      "documentation go into missing.")
+    for number, entry in enumerate(claims, 1):
+        value = f", value: {entry.value}" if getattr(entry, "value", None) else ""
+        key = sanitize_untrusted(str(entry.key), 140)
+        parts.append(f"Archive entry A{number} (key: {key}, {entry.status}{value}):\n"
+                     + wrap_untrusted(str(entry.text), f"archive entry A{number}", max_len=800))
     if current:
         parts.append("The module's current values (YAML; change only what the log shows is wrong):\n"
                      + wrap_untrusted(current, "current template values", max_len=MODULE_FILE_CHARS))

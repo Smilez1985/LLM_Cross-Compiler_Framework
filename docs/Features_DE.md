@@ -3896,7 +3896,16 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   Entwurf, den du vervollständigst. Die KI-Analyse des Assistenten tut das, wenn die Probe einen Beschleuniger nennt,
   **Ditto: Werte vorschlagen** auf der Flags-Seite fragt erneut, `llm-cli module generate-ai` gibt ihn aus, `llm-cli
   module propose-values` gibt ihn als YAML oder JSON, und eine Reparatur eines solchen Moduls aus seinem Log schlägt
-  zuerst geänderte Werte vor. Die Flags-Seite und der Bearbeitungsschritt zeigen die Formate als Formular je Wert, aus
+  zuerst geänderte Werte vor. Was [Dittos Archiv](#dittos-archiv) über die Hardware weiß, ist ebenfalls eine Quelle (der
+  Schlüssel des Eintrags), nur für die eigenen Werte des Formats: die Werte der Hardware selbst (die Schlüsselnamen der
+  Probe, die Pfade auf dem Board) kommen aus der Probe oder der Vorlage. Ein Wert, der auf einem **nicht bestätigten**
+  Eintrag des Archivs beruht, wird nie von selbst eingetragen: Bevor das Formular den Vorschlag zeigt, fragt der
+  Assistent dich je solchem Wert, mit dem Feld, dem Wert, dem Satz des Eintrags, seinen Quellen und wie viele unabhängige
+  Domains es sagen von wie vielen die Stufe des Archivs braucht: **Verwenden** (eingetragen, der Eintrag bleibt
+  unbestätigt, seine Notiz sagt das), **Geprüft: bestätigen und verwenden** (der Eintrag wird von dir bestätigt, dann
+  eingetragen) oder **Nicht verwenden** (die Vorgabe; das Feld bleibt leer, mit Grund). `llm-cli module propose-values`
+  fragt dasselbe, wenn du es selbst ausführst; überall sonst (`--json`, ein Lauf ohne Person, eine Reparatur, eine KI)
+  wartet ein solcher Wert weiter und wird genannt. Die Flags-Seite und der Bearbeitungsschritt zeigen die Formate als Formular je Wert, aus
   dem Schema erzeugt (Hilfetext, Pflichtfelder, der Grund unter seinem Feld, Dittos Vorschlag daneben; **YAML
   (erweitert)** behält die Textansicht); am Terminal tun `--ask-values` und `--set FORMAT.PFAD=WERT` dasselbe.
 - **Herstellerdateien und Toolchains unter deiner eigenen Annahme der Lizenz:** Eine Datei, die ein Format nennt und

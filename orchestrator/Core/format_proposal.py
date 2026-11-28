@@ -2,7 +2,8 @@
 """
 Ditto's proposal of a format's values (docs/DESIGN.md, Targets, hardware and templates: Ditto's proposal of a
 format's values): the values of the general template's variables for the hardware in front of it, one value at a time,
-from the hardware probe and the crawled vendor documentation, each with its reason, its source and its confidence.
+from the hardware probe, the crawled vendor documentation and the entries of Ditto's archive, each with its reason, its
+source and its confidence.
 
 The model's answer (FormatValuesAnswer) is checked here, by the framework, before anyone sees it:
 
@@ -10,6 +11,11 @@ The model's answer (FormatValuesAnswer) is checked here, by the framework, befor
 - a value whose source is no excerpt the model was given and no key the probe holds loses its value and becomes a
   named gap (a value is read, never guessed); `template` is a source only for what the template itself defines (its
   board paths, the format's id and label);
+- an entry of Ditto's archive (A1, A2 ...) is a source of the format's own values only, never of the hardware itself
+  (HARDWARE_PATHS and the board paths come from the probe or the template), and the value must be the entry's value
+  (or stand in its sentence); a value that rests on an entry that is not confirmed is not put into the draft: it waits
+  as a PendingValue until the person decides it (FormatProposal.decide: use it, confirm the entry and use it, or leave
+  the field empty; the wizard and `module propose-values` ask, every other path leaves it waiting);
 - a value with a dangerous command in it is refused;
 - every value goes through the schema and the module's checks (Core/template_values.field_problems), and a failing
   one is shown with its reason at its field, never changed silently;
@@ -36,10 +42,16 @@ from orchestrator.Core.template_values import (field_by_path, field_problems, fo
                                                missing_required, set_value)
 
 PROBE_KEY_RE = re.compile(r"^\s*([A-Z][A-Z0-9_]{1,47})\s*[=:]\s*(\S.*)?$", re.M)
-SOURCE_RE = re.compile(r"^(?:S(\d{1,2})|probe:([A-Z][A-Z0-9_]{1,47})|template)$")
+SOURCE_RE = re.compile(r"^(?:S(\d{1,2})|A(\d{1,2})|probe:([A-Z][A-Z0-9_]{1,47})|template)$")
 # What the template itself defines: a value of these may name the template as its source.
 TEMPLATE_SOURCED = ("id", "label", "output_extension", "board_paths.install_dir", "board_paths.model_dir",
                     "board_paths.lib_dir")
+# The hardware's own values: they come from the probe or the template, never from the archive (the archive holds what
+# the person does not know and the probe does not give).
+HARDWARE_PATHS = ("sdk.runtime_key", "sdk.driver_key")
+# The person's answers to a value that rests on an unconfirmed entry of the archive.
+DECISIONS = ("use", "confirm", "skip")
+CLAIMS_LIMIT = 6
 
 
 def _limit(value: str, size: int) -> str:
@@ -53,7 +65,8 @@ class ProposedValue(BaseModel):
                                                  "runtime_libraries.0.version")
     value: Union[bool, List[str], str] = Field(description="A word, a list of words, or true/false")
     reason: str = Field(default="", description="Why this value, in one sentence")
-    source: str = Field(default="", description="S1, S2 ... (an excerpt), probe:KEY, or template")
+    source: str = Field(default="", description="S1, S2 ... (an excerpt), A1, A2 ... (an archive entry), probe:KEY, "
+                                                "or template")
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
 
     @field_validator("reason")
@@ -113,18 +126,63 @@ class ValueNote:
 
 
 @dataclass
+class PendingValue:
+    """A proposed value that rests on an entry of Ditto's archive that is not confirmed: it is not in the draft until
+    the person decides it (FormatProposal.decide)."""
+    format_id: str
+    path: str
+    value: Any
+    reason: str
+    confidence: float
+    entry: Any          # schemas/archive.ArchiveEntry
+    needed: int         # the independent domains the archive's security level needs to confirm it
+
+    @property
+    def shown_value(self) -> str:
+        return " ".join(str(v) for v in self.value) if isinstance(self.value, list) else str(self.value)
+
+    def line(self) -> str:
+        entry = self.entry
+        return (f"{self.format_id}.{self.path} = {self.shown_value}  [archive {entry.key}, unconfirmed: "
+                f"{entry.independent_sources} of {self.needed} independent domains]: waits for your decision")
+
+    def as_json(self) -> Dict[str, Any]:
+        entry = self.entry
+        return {"format": self.format_id, "path": self.path, "value": self.value, "reason": self.reason,
+                "confidence": self.confidence, "entry": {"id": entry.id, "key": entry.key, "text": entry.text,
+                                                         "evidence": list(entry.evidence),
+                                                         "independent_sources": entry.independent_sources,
+                                                         "needed": self.needed,
+                                                         "competing": len(entry.competing)}}
+
+
+@dataclass
 class FormatDraft:
-    """One format of the proposal: its values (a draft), the notes per path, the gaps and the checks' reasons."""
+    """One format of the proposal: its values (a draft), the notes per path, the gaps, the checks' reasons and the
+    values that wait for the person's decision."""
     id: str
     values: Dict[str, Any]
     notes: Dict[str, ValueNote] = field(default_factory=dict)
     gaps: List[Tuple[str, str]] = field(default_factory=list)
     problems: Dict[str, List[str]] = field(default_factory=dict)
     changed: List[str] = field(default_factory=list)   # a repair: the paths whose value changed
+    pending: List[PendingValue] = field(default_factory=list)
+    reasons: Dict[str, str] = field(default_factory=dict)   # why a path is empty, before the required ones are added
 
     @property
     def complete(self) -> bool:
-        return not self.gaps and not self.problems
+        return not self.gaps and not self.problems and not self.pending
+
+    def settle(self, fields: Optional[Sequence[Any]] = None) -> None:
+        """The gaps and the checks' reasons from the values now: a waiting value is no gap (it is pending)."""
+        fields = fields if fields is not None else format_fields()
+        waiting = {p.path for p in self.pending}
+        gaps = dict(self.reasons)
+        for path in missing_required(self.values, fields):
+            gaps.setdefault(path, "not found in the probe or the documentation")
+        self.gaps = [(p, w) for p, w in gaps.items()
+                     if p not in waiting and get_value(self.values, p) in (None, "", [])]
+        self.problems = field_problems(self.values) if not self.gaps and not self.pending else {}
 
 
 @dataclass
@@ -139,6 +197,40 @@ class FormatProposal:
     @property
     def complete(self) -> bool:
         return bool(self.drafts) and all(d.complete for d in self.drafts)
+
+    def pending(self) -> List[PendingValue]:
+        """The values that wait for the person's decision, in the order of the drafts."""
+        return [p for d in self.drafts for p in d.pending]
+
+    def decide(self, pending: PendingValue, decision: str, archive: Any = None) -> None:
+        """The person's answer to a value that rests on an unconfirmed entry of the archive: `use` puts it into the
+        draft (the entry stays unconfirmed, its note says so), `confirm` confirms the entry first (`archive`:
+        DittoArchive.confirm, the person's confirmation; its ArchiveError is raised and nothing changes) and then puts
+        it in, `skip` leaves the field empty with why. Only the person's own channels call it."""
+        if decision not in DECISIONS:
+            raise ValueError(f"a decision is one of {', '.join(DECISIONS)}, not {decision!r}")
+        draft = next((d for d in self.drafts if pending in d.pending), None)
+        if draft is None:
+            raise ValueError("this value does not wait for a decision in this proposal")
+        key = pending.entry.key
+        if decision == "confirm":
+            if archive is None:
+                raise ValueError("confirming needs Ditto's archive")
+            archive.confirm(pending.entry.id)
+        draft.pending.remove(pending)
+        if decision == "skip":
+            draft.reasons[pending.path] = f"you did not use the unconfirmed archive entry {key}"
+        else:
+            before = get_value(draft.values, pending.path)
+            set_value(draft.values, pending.path, pending.value)
+            if before is not None and before != pending.value and pending.path not in draft.changed:
+                draft.changed.append(pending.path)   # a repair: the module's value changes
+            label = (f"archive {key}, confirmed by you" if decision == "confirm" else
+                     f"archive {key}, unconfirmed, used on your decision")
+            draft.notes[pending.path] = ValueNote(pending.path, pending.value, pending.reason, label,
+                                                  pending.confidence)
+            draft.reasons.pop(pending.path, None)
+        draft.settle()
 
     def formats(self) -> List[Dict[str, Any]]:
         return [copy.deepcopy(d.values) for d in self.drafts]
@@ -166,11 +258,15 @@ class FormatProposal:
                                                                      "documentation", 300))
             for path, reasons in draft.problems.items():
                 out += [f"  check {path or 'format'}: " + sanitize_untrusted(r, 300) for r in reasons]
+            out += ["  " + sanitize_untrusted(p.line(), 600) for p in draft.pending]
         if self.dropped:
             out.append("Refused: " + "; ".join(sanitize_untrusted(d, 200) for d in self.dropped))
         if not self.complete and self.drafts:
             out.append("The draft has gaps: fill them before the module is made (the wizard's form, or "
                        "the command line's questions per value).")
+        if self.pending():
+            out.append("A value that rests on an unconfirmed entry of Ditto's archive is used only when you decide "
+                       "it: the module wizard asks, and module propose-values asks when you run it yourself.")
         return out
 
     def as_json(self) -> Dict[str, Any]:
@@ -180,7 +276,8 @@ class FormatProposal:
                              "proposed": [{"path": n.path, "value": n.value, "reason": n.reason, "source": n.source,
                                            "confidence": n.confidence} for n in d.notes.values()],
                              "gaps": [{"path": p, "why": w} for p, w in d.gaps], "problems": d.problems,
-                             "changed": d.changed} for d in self.drafts]}
+                             "changed": d.changed, "pending": [p.as_json() for p in d.pending]}
+                            for d in self.drafts]}
 
 
 def probe_keys(probe: str) -> Dict[str, str]:
@@ -196,7 +293,24 @@ def accelerator_named(probe: str) -> bool:
         any(k.startswith(("HAILO_", "NPU_", "TENSORRT", "QNN_", "OPENVINO")) and v for k, v in keys.items())
 
 
-def _resolve_source(source: str, sources: Sequence[str], keys: Dict[str, str], path: str) -> Tuple[str, str]:
+def hardware_path(path: str) -> bool:
+    """Whether `path` is a value of the hardware itself (the probe's or the template's, never the archive's)."""
+    return path in HARDWARE_PATHS or path.startswith("board_paths.")
+
+
+def claim_holds(entry: Any, value: Any) -> bool:
+    """Whether the proposed `value` is what the archive's `entry` says: its typed value (normalized as the archive
+    normalizes it), or, for an entry without one, every word of the value in its sentence."""
+    from orchestrator.schemas.archive import comparable_text, normalize_value
+    words = [str(v) for v in value] if isinstance(value, list) else [str(value)]
+    if getattr(entry, "value", None):
+        return len(words) == 1 and normalize_value(entry.value_type or "text", words[0]) == entry.value
+    text = comparable_text(entry.text)
+    return bool(words) and all(comparable_text(w) and comparable_text(w) in text for w in words)
+
+
+def _resolve_source(source: str, sources: Sequence[str], keys: Dict[str, str], path: str,
+                    claims: Sequence[Any] = ()) -> Tuple[str, str]:
     """(the source as the person reads it, why it does not count; "" when it counts)."""
     m = SOURCE_RE.fullmatch((source or "").strip())
     if not m:
@@ -207,9 +321,17 @@ def _resolve_source(source: str, sources: Sequence[str], keys: Dict[str, str], p
             return sources[n - 1], ""
         return "", f"it cites S{n}, which was not given"
     if m.group(2):
-        if m.group(2) in keys:
-            return f"probe {m.group(2)}", ""
-        return "", f"it cites the probe key {m.group(2)}, which the probe does not hold"
+        n = int(m.group(2))
+        if not 1 <= n <= len(claims):
+            return "", f"it cites A{n}, which was not given"
+        if hardware_path(path):
+            return "", ("a value of the hardware itself comes from the probe or the template, never from Ditto's "
+                        "archive")
+        return f"archive {claims[n - 1].key}", ""
+    if m.group(3):
+        if m.group(3) in keys:
+            return f"probe {m.group(3)}", ""
+        return "", f"it cites the probe key {m.group(3)}, which the probe does not hold"
     top = path.split(".")[0] if not path.startswith("board_paths.") else path
     if top in TEMPLATE_SOURCED or path in TEMPLATE_SOURCED:
         return "the template", ""
@@ -217,9 +339,11 @@ def _resolve_source(source: str, sources: Sequence[str], keys: Dict[str, str], p
 
 
 def build_proposal(answer: FormatValuesAnswer, sources: Sequence[str], probe: str,
-                   current: Optional[List[Dict[str, Any]]] = None) -> FormatProposal:
+                   current: Optional[List[Dict[str, Any]]] = None, claims: Sequence[Any] = (),
+                   needed: int = 0) -> FormatProposal:
     """The framework's checks of the model's answer (see the module text): the drafts the person reviews. `current`:
-    the module's values (a repair: a draft starts from them and records what changed)."""
+    the module's values (a repair: a draft starts from them and records what changed); `claims`: the archive's
+    entries given as A1, A2 ..., `needed`: the independent domains its level needs to confirm one."""
     from orchestrator.Core.ditto_manager import dangerous_command
     keys = probe_keys(probe)
     fields = format_fields()
@@ -244,7 +368,7 @@ def build_proposal(answer: FormatValuesAnswer, sources: Sequence[str], probe: st
                 if path != "id":
                     dropped.append(f"{fid}.{path[:60]}: the template has no such variable")
                 continue
-            label, why = _resolve_source(item.source, sources, keys, path)
+            label, why = _resolve_source(item.source, sources, keys, path, claims)
             if why:
                 gaps[path] = why
                 continue
@@ -262,6 +386,15 @@ def build_proposal(answer: FormatValuesAnswer, sources: Sequence[str], probe: st
                 value = value.strip().lower() in ("true", "yes", "1")
             if kind in ("text", "choice") and isinstance(value, list):
                 value = " ".join(str(v) for v in value)
+            claim = _cited_claim(item.source, claims)
+            if claim is not None:
+                if not claim_holds(claim, value):
+                    gaps[path] = f"the value is not what the archive entry {claim.key} says"
+                    continue
+                if claim.status != "confirmed":   # the person decides it first (FormatProposal.decide)
+                    draft.pending.append(PendingValue(fid, path, value, item.reason, float(item.confidence), claim,
+                                                      needed))
+                    continue
             before = get_value(draft.values, path)
             set_value(draft.values, path, value)
             if fid in current_by_id and before != value:
@@ -270,13 +403,17 @@ def build_proposal(answer: FormatValuesAnswer, sources: Sequence[str], probe: st
         for gap in proposed.missing:
             if gap.path.strip() and gap.path.strip() not in draft.notes:
                 gaps.setdefault(gap.path.strip(), gap.why or "not found in the probe or the documentation")
-        for path in missing_required(draft.values, fields):
-            gaps.setdefault(path, "not found in the probe or the documentation")
-        draft.gaps = [(p, w) for p, w in gaps.items() if get_value(draft.values, p) in (None, "", [])]
-        if not draft.gaps:
-            draft.problems = field_problems(draft.values)
+        draft.reasons = gaps
+        draft.settle(fields)
         drafts.append(draft)
     return FormatProposal(drafts, answer.summary, list(sources), dropped, cannot)
+
+
+def _cited_claim(source: str, claims: Sequence[Any]) -> Optional[Any]:
+    m = SOURCE_RE.fullmatch((source or "").strip())
+    if m and m.group(2) and 1 <= int(m.group(2)) <= len(claims):
+        return claims[int(m.group(2)) - 1]
+    return None
 
 
 def propose(ditto: Any, probe_file: Optional[Any] = None, board: str = "", *, probe_text: str = "",
@@ -304,14 +441,58 @@ def propose(ditto: Any, probe_file: Optional[Any] = None, board: str = "", *, pr
         raise DittoCannot(CannotAnswer(reason="missing_information",
                                        missing="a hardware probe of the board, or the board's name and its SoC",
                                        next_step="Import the board's probe first."), confirmed=True)
-    excerpts = retrieve(ditto._rag_manager(), probe, board, logger=getattr(ditto, "logger", None))
+    logger = getattr(ditto, "logger", None)
+    excerpts = retrieve(ditto._rag_manager(), probe, board, logger=logger)
+    archive = archive_of(ditto)
+    claims = retrieve_claims(archive, probe, board, logger=logger)
+    needed = _needed(archive) if claims else 0
     current_yaml = yaml.safe_dump(current, sort_keys=False, allow_unicode=True) if current else ""
     parts = format_value_parts(catalogue_text(), probe, board, excerpts, current_yaml, log_content,
-                               roots=ditto._folder_labels() if log_content else None)
+                               roots=ditto._folder_labels() if log_content else None, claims=claims)
     parts.append("Repair the values: propose only the values that change." if current else
                  "Propose the values of the format(s) this hardware's accelerator needs.")
     answer = ditto._structured("json", FORMAT_VALUES_SYSTEM, "\n\n".join(parts), FormatValuesAnswer)
-    return build_proposal(answer, [source for source, _content in excerpts], probe, current)
+    return build_proposal(answer, [source for source, _content in excerpts], probe, current, claims, needed)
+
+
+def archive_of(ditto: Any) -> Optional[Any]:
+    """Ditto's archive (Core/ditto_archive.DittoArchive) of the framework Ditto runs in, while the knowledge base is
+    on; None otherwise."""
+    if ditto._rag_manager() is None:
+        return None
+    return getattr(getattr(ditto, "framework", None), "ditto_archive", None)
+
+
+def _needed(archive: Any) -> int:
+    try:
+        return int(archive.needed())
+    except Exception:  # noqa: BLE001 - shown only; the decision is the person's either way
+        return 0
+
+
+def claims_query(probe: str, board: str = "") -> str:
+    """The archive search for the probe's hardware: its SDK family, the SoC and the NPU as the probe names them, and
+    what a format needs."""
+    from orchestrator.llm.task_prompts import module_query
+    keys = probe_keys(probe)
+    named = " ".join(keys.get(k, "") for k in ("SOC_VENDOR", "SOC_MODEL", "NPU_VENDOR", "NPU_MODEL") if keys.get(k))
+    hint = module_query(probe, board).split(" ", 1)[0]
+    return " ".join(w for w in (hint, named, board, "NPU model format converter quantization runtime SDK") if w)
+
+
+def retrieve_claims(archive: Any, probe: str, board: str = "", limit: int = CLAIMS_LIMIT,
+                    logger: Any = None) -> List[Any]:
+    """The archive's entries for the probe's hardware (schemas/archive.ArchiveEntry, confirmed or not; a copy never),
+    [] without the archive or when its search fails."""
+    if archive is None:
+        return []
+    try:
+        hits = archive.search(claims_query(probe, board), limit=limit)
+    except Exception as e:  # noqa: BLE001 - the archive is optional context
+        if logger is not None:
+            logger.warning(f"Archive search failed: {e}")
+        return []
+    return [h.entry for h in hits or [] if getattr(h.entry, "kind", "entry") == "entry"]
 
 
 def retrieve(rag: Any, probe: str, board: str = "", limit: int = 6, logger: Any = None) -> List[Tuple[str, str]]:

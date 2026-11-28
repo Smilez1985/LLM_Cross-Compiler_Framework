@@ -3518,7 +3518,15 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   dangerous command, and checks every value; the result is a draft you complete. The wizard's AI analysis does it when
   the probe names an accelerator, **Ditto: Propose the Values** on the flags page asks again, `llm-cli module
   generate-ai` prints it, `llm-cli module propose-values` gives it as YAML or JSON, and a repair of such a module from
-  its log proposes changed values first. The flags page and the edit step show the formats as a form per value
+  its log proposes changed values first. What [Ditto's archive](#dittos-archive) knows about the hardware is a source
+  as well (the entry's key), for the format's own values only: the hardware's own values (the probe's key names, the
+  board's paths) come from the probe or the template. A value that rests on an archive entry that is **not confirmed**
+  is never filled by itself: before the form shows the proposal, the wizard asks you per such value, with the field,
+  the value, the entry's sentence, its sources and how many independent domains say it of how many the archive's
+  level needs: **Use it** (filled, the entry stays unconfirmed, its note says so), **Checked: confirm and use** (the
+  entry is confirmed by you, then filled) or **Do not use it** (the default; the field stays empty with why).
+  `llm-cli module propose-values` asks the same when you run it yourself; everywhere else (`--json`, a run without a
+  person, a repair, an AI) such a value keeps waiting and is named. The flags page and the edit step show the formats as a form per value
   generated from the schema (help text, required fields, the reason under its field, Ditto's proposal beside it;
   **YAML (advanced)** keeps the text view); at a terminal `--ask-values` and `--set FORMAT.PATH=VALUE` do the same.
 - **Vendor files and toolchains under your own licence acceptance:** a file a format names that its vendor does not

@@ -2953,7 +2953,11 @@ Ingest](#knowledge)): each value with its reason, its source (the page's address
 itself) and its confidence. The framework checks the answer before you see it: a value whose source is no excerpt
 Ditto was given and no key of the probe is left empty and named as a gap (a value is read, never guessed), a value for
 a path the template does not have or with a dangerous command is refused, and every value goes through the template's
-checks, each reason named at its field. The result is a draft, never a module: `--out FILE` writes its formats as
+checks, each reason named at its field. An entry of Ditto's archive is a source too, for the format's own values only
+(never the probe's key names or the board's paths); a value that rests on an entry that is not confirmed is asked
+before it is used when you run the command yourself: `use` (the entry stays unconfirmed), `confirm` (you checked its
+sources: the entry is confirmed, then used) or `skip` (the default: the field stays empty). With `--json` or without
+a person at the command it keeps waiting and is listed. The result is a draft, never a module: `--out FILE` writes its formats as
 YAML for `module create --formats FILE --ask-values`, `--json` prints it whole for scripts (saved to a file, `module
 create --formats` takes that file too: each proposed format as its values).
 
