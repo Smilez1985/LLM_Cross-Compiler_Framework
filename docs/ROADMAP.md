@@ -1,4 +1,4 @@
-Version 3.4.0 · Last updated 2026-11-27
+Version 3.4.0 · Last updated 2026-11-28
 
 **English** · [Deutsch](ROADMAP_DE.md)
 
@@ -41,7 +41,6 @@ The order of the open items (maintainer, 2026-11-18, [design](DESIGN.md#decision
 
 | Item | Status |
 |---|---|
-| **No dead code: the last open finding** (maintainer, 2026-11-27, [design](DESIGN.md#tests-ci-and-the-windows-hazards)): the transports' `host_key` property (`remote/transport.py`), which nothing reads, waits for the maintainer's decision (wire it, or remove it with its replacement named); the CI step `scripts/dead_code.py` keeps every other new function wired. | planned |
 | **The enterprise mode's features** (maintainer, 2026-11-24, [decision](DESIGN.md#decision-round-122)): each feature of ConfigManager's advanced mode is wired when the enterprise mode needs it: HashiCorp Vault and CyberArk Conjur, compliance and audit (`ENTERPRISE_FEATURES` is empty until then). Design: [Installer, platforms and dependencies](DESIGN.md#installer-platforms-and-dependencies). | planned |
 | **Sign-in per access type** for all common cloud and API providers and for local engines (details below). | in progress |
 | **Documentation in English and German, the rest**: every document has its German twin (checked by `tests/test_docs.py`); still to do is the pass over every window's texts (see "Every window translated" under Later). | in progress |

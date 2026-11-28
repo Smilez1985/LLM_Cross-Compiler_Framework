@@ -139,6 +139,4 @@ ALLOWED = {
     "orchestrator/utils/logging.py::configure_logger": KEPT,
     "orchestrator/utils/sandbox.py::runner_text_problem": KEPT,
     "orchestrator/utils/validation.py::_validate_port_availability": KEPT,
-    # OPEN
-    "orchestrator/remote/transport.py::host_key": OPEN,
 }

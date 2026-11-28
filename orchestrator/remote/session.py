@@ -5,13 +5,14 @@ the architecture audit). It is what DeploymentManager's board session could do a
 the probe and the on-board benchmark can use the same steps (chain c2-remote-callers):
 
 - open(): reads the host key the board presents, checks it against the framework's known_hosts (and against the
-  fingerprint the person was shown, `expect_fingerprint`, and the board the caller means, `expect_device_id`), then
-  logs in; `last_check` keeps that KeyCheck (also of a refused login) and `key` the key that passed. Every login
-  after a network drop checks the key again the same way. adopt(client, key) takes over a login the caller made
-  itself (the person's scan), so later logins are the session's own. The credentials are typed: KeyOnly() logs
-  in with the framework's key only (every AI path), OneTimePassword(password) also sends a password the person
-  typed for these logins, and only with it can pair() install the framework's key on the board. An AI path that
-  holds no OneTimePassword cannot pair, not even indirectly.
+  fingerprint the person was shown, `expect_fingerprint`, and the board the caller means, `expect_device_id`), then logs
+  in, and the key of the authenticated connection (Transport.host_key) must be that checked key, else the login is
+  closed ("other_key"); `last_check` keeps that KeyCheck (also of a refused login) and `key` the key that passed. Every
+  login after a network drop checks the key again the same way. adopt(client, key) takes over a login the caller made
+  itself (the person's scan), so later logins are the session's own. The credentials are typed: KeyOnly() logs in with
+  the framework's key only (every AI path), OneTimePassword(password) also sends a password the person typed for these
+  logins, and only with it can pair() install the framework's key on the board. An AI path that holds no OneTimePassword
+  cannot pair, not even indirectly.
 - run(script): one `sh -c` on the board with a time limit and an output cap (transport.ParamikoTransport.run).
 - private_dir(parent, prefix): a private, unpredictable folder made by mktemp, its answer checked strictly.
 - upload(fh, remote_path, size, sha256): sends an open file as <remote_path>.part in pipelined chunks of
@@ -363,8 +364,31 @@ class RemoteSession:
             raise SessionFailure(f"SSH login to {self.user}@{self.host} failed" + failed_because(code, e), "login",
                                  code, e) from None
         self.transport = self._factory(self.client)
+        self._login_key_is_the_checked_key()
         if self.on_client is not None:
             self.on_client(self.client)
+
+    def _login_key_is_the_checked_key(self) -> None:
+        """The login is bound to the key checked just before it: TrustStore.check reads the board's key over a
+        connection of its own (and compares it with the fingerprint shown and the board meant), the login is a second
+        connection that paramiko checks against known_hosts only. The key of the authenticated connection
+        (Transport.host_key) must be that checked key; another one (known_hosts may hold more than one key of the
+        address, and the login is checked against that list only, not against the fingerprint shown or the board
+        meant) closes the login and raises SessionFailure "other_key". A transport that says None checks the key
+        itself (OpenSSH) or is a stand-in."""
+        from orchestrator.remote import reasons
+        from orchestrator.utils import ssh_trust   # looked up now, as at the check (KeyCheck.of)
+        presented = getattr(self.transport, "host_key", None)   # a stand-in transport may have none
+        if presented is None or self.key is None:
+            return
+        login_fp = ssh_trust.fingerprint(presented)
+        if login_fp == self.fingerprint:
+            return
+        checked = self.fingerprint
+        self._disconnect()
+        raise SessionFailure(f"The device {self.host} answered the login with another host key ({login_fp}) than the "
+                             f"one checked just before ({checked}): the login was closed.", "other_key",
+                             reasons.HOST_KEY_CHANGED)
 
     def _proxy_through_openssh(self) -> None:
         """paramiko reads no configuration file: a board the framework's own SSH settings reach through a ProxyJump or

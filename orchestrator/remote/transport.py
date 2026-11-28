@@ -205,7 +205,8 @@ class Transport:
 
     @property
     def host_key(self) -> Any:
-        """The host key of the authenticated connection."""
+        """The host key of the authenticated connection, or None when the transport checks the key itself and gives
+        none out (OpenSSH). RemoteSession.open compares it with the key it checked before the login."""
         raise NotImplementedError
 
     def close(self) -> None:
@@ -340,7 +341,10 @@ class ParamikoTransport(Transport):
 
     @property
     def host_key(self) -> Any:
-        return self.client.get_transport().get_remote_server_key()
+        """paramiko's key of the authenticated connection; None for a stand-in client that has none (a paramiko
+        SSHClient always has one once logged in)."""
+        read = getattr(getattr(self.client, "get_transport", lambda: None)(), "get_remote_server_key", None)
+        return read() if read is not None else None
 
     def close(self) -> None:
         try:

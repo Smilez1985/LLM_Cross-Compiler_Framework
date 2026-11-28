@@ -1,4 +1,4 @@
-Version 3.4.0 · Stand 2026-11-27
+Version 3.4.0 · Stand 2026-11-28
 
 [English](ROADMAP.md) · **Deutsch**
 
@@ -42,7 +42,6 @@ Die Reihenfolge der offenen Punkte (Maintainer, 2026-11-18, [Design](DESIGN_DE.m
 
 | Punkt | Status |
 |---|---|
-| **Kein toter Code: der letzte offene Fund** (Maintainer, 2026-11-27, [Design](DESIGN_DE.md#tests-ci-und-die-windows-fallen)): die Eigenschaft `host_key` der Transporte (`remote/transport.py`), die nichts liest, wartet auf die Entscheidung des Maintainers (anschließen oder mit genanntem Ersatz entfernen); der CI-Schritt `scripts/dead_code.py` hält jede andere neue Funktion verdrahtet. | geplant |
 | **Die Funktionen des Enterprise-Modus** (Maintainer, 2026-11-24, [Entscheidung](DESIGN_DE.md#decision-round-122)): Jede Funktion des erweiterten Modus von ConfigManager wird angeschlossen, wenn der Enterprise-Modus sie braucht: HashiCorp Vault und CyberArk Conjur, Compliance und Audit (`ENTERPRISE_FEATURES` ist bis dahin leer). Design: [Installer, Plattformen und Abhängigkeiten](DESIGN_DE.md#installer-plattformen-und-abhängigkeiten). | geplant |
 | **Anmeldung je Zugangsart** für alle gängigen Cloud- und API-Anbieter und für lokale Engines (Einzelheiten unten). | in Arbeit |
 | **Dokumentation auf Englisch und Deutsch, der Rest**: Jedes Dokument hat seinen deutschen Zwilling (geprüft von `tests/test_docs.py`); offen ist noch der Durchgang über die Texte jedes Fensters (siehe „Jedes Fenster übersetzt“ unter Später). | in Arbeit |
