@@ -240,33 +240,56 @@ def _without(line: str, spans: Sequence[Tuple[int, int]]) -> str:
     return "".join(kept) + line[pos:]
 
 
+LineHits = Tuple[Tuple[str, str, bool, bool], ...]   # (kind, redacted match, exact, allowed) of one line
+
+
+def line_hits(line: str, local: Sequence["re.Pattern[str]"] = (), exact_only: bool = False,
+              allowed: AbstractSet[str] = frozenset()) -> LineHits:
+    """What every rule finds in one line, without its place: the same line gives the same hits wherever it stands,
+    so the history scan (scan_revs) checks a line that many versions of a file share only once."""
+    hits = []
+    # Before the marker: GitHub blocks these values whatever the line says.
+    exact, listed = [], []  # the values reported, the spans of the listed ones
+    for kind, value, span, is_listed in exact_matches(line, allowed):
+        hits.append((kind, redact(value), True, is_listed))
+        if is_listed:
+            listed.append(span)
+        else:
+            exact.append(value)
+    if exact_only or ALLOW_PRAGMA in line:
+        return tuple(hits)
+    variants = [line, _without(line, listed)] if listed else [line]
+    whole = find_secrets(line)
+    found = whole + ([hit for hit in find_secrets(variants[1]) if hit not in whole] if listed else [])
+    for kind, match in found:
+        if not any(value in match or match in value for value in exact):  # each value reported once
+            hits.append((kind, redact(match), False, False))
+    for i, rx in enumerate(local, 1):
+        if any(rx.search(variant) for variant in variants):
+            hits.append((f"local pattern #{i}", "", False, False))
+    return tuple(hits)
+
+
 def scan_text(where: str, text: str, local: Sequence["re.Pattern[str]"] = (), exact_only: bool = False,
-              allowed: AbstractSet[str] = frozenset()) -> List[Finding]:
+              allowed: AbstractSet[str] = frozenset(), seen: Optional[Dict[bytes, LineHits]] = None
+              ) -> List[Finding]:
     """Findings of every rule in text. An exact-format value whose digest is in `allowed` comes back marked as
     allowed and hides nothing: the other rules still report it if it looks real, and they also read the line
     without it, so a value next to it is reported even where one match would take in the mock and look like a
-    placeholder."""
+    placeholder. `seen`: the hits of lines checked before in this scan (by a digest of the line and the mode), so a
+    line many versions of a file share is checked once; the same `local` and `allowed` for every call."""
     findings = []
     for number, line in enumerate(text.splitlines(), 1):
-        # Before the marker: GitHub blocks these values whatever the line says.
-        exact, listed = [], []  # the values reported, the spans of the listed ones
-        for kind, value, span, is_listed in exact_matches(line, allowed):
-            findings.append(Finding(where, number, kind, redact(value), exact=True, allowed=is_listed))
-            if is_listed:
-                listed.append(span)
-            else:
-                exact.append(value)
-        if exact_only or ALLOW_PRAGMA in line:
-            continue
-        variants = [line, _without(line, listed)] if listed else [line]
-        whole = find_secrets(line)
-        hits = whole + ([hit for hit in find_secrets(variants[1]) if hit not in whole] if listed else [])
-        for kind, match in hits:
-            if not any(value in match or match in value for value in exact):  # each value reported once
-                findings.append(Finding(where, number, kind, redact(match)))
-        for i, rx in enumerate(local, 1):
-            if any(rx.search(variant) for variant in variants):
-                findings.append(Finding(where, number, f"local pattern #{i}", ""))
+        if seen is None:
+            hits = line_hits(line, local, exact_only, allowed)
+        else:
+            key = hashlib.blake2b(line.encode("utf-8", "surrogatepass"), digest_size=16,
+                                  person=b"exact" if exact_only else b"all").digest()
+            hits = seen.get(key)
+            if hits is None:
+                hits = seen[key] = line_hits(line, local, exact_only, allowed)
+        for kind, match, exact, is_listed in hits:
+            findings.append(Finding(where, number, kind, match, exact=exact, allowed=is_listed))
     return findings
 
 
@@ -282,14 +305,14 @@ def check_name(path: str) -> Optional[Finding]:
     return None
 
 
-def scan_blob(where: str, data: bytes, local: Sequence["re.Pattern[str]"], allowed: AbstractSet[str] = frozenset()
-              ) -> List[Finding]:
+def scan_blob(where: str, data: bytes, local: Sequence["re.Pattern[str]"], allowed: AbstractSet[str] = frozenset(),
+              seen: Optional[Dict[bytes, LineHits]] = None) -> List[Finding]:
     if b"\0" in data[:8192]:
         return []
     # A text file too big for every rule still gets the exact formats: GitHub reads files of any size (it skips only
     # pushes over 50 MB), and one search rules out nearly every line.
     return scan_text(where, data.decode("utf-8", "replace"), local, exact_only=len(data) > MAX_BYTES,
-                     allowed=allowed)
+                     allowed=allowed, seen=seen)
 
 
 def _git(repo: Path, *args: str, check: bool = True, data: Optional[bytes] = None) -> str:
@@ -469,8 +492,9 @@ def scan_revs(repo: Path, rev_args: Sequence[str], local, allowed: AbstractSet[s
     pairs = _objects(repo, rev_args)
     findings = [f for f in (check_name(p) for _, p in pairs) if f]
     paths = dict(pairs)
+    seen: Dict[bytes, LineHits] = {}   # the versions of a file share most lines: each line is checked once
     for sha, data in _read_blobs(repo, [sha for sha, _ in pairs]):
-        findings += scan_blob(f"{paths[sha]} (blob {sha[:10]})", data, local, allowed)
+        findings += scan_blob(f"{paths[sha]} (blob {sha[:10]})", data, local, allowed, seen)
     return findings
 
 

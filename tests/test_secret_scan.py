@@ -518,6 +518,26 @@ def test_history_skips_a_listed_mock_in_old_commits(repo, capsys):
     assert "Hugging Face token in its exact format" in capsys.readouterr().err
 
 
+def test_a_line_many_versions_share_is_checked_once_with_the_same_findings(repo, monkeypatch):
+    """The history scan remembers what each line gave (scan_revs' `seen`): a file's versions share most lines, so a
+    shared line is checked once, and its findings at every place are those of a scan without the memory."""
+    allowed = frozenset(secret_scan.digest(v) for v in HISTORY_MOCKS.values())
+    others = [value for _, value in EXACT_SAMPLES if value not in HISTORY_MOCKS.values()]
+    text = "\n".join(["plain text", f'A = "{others[0]}"', f'B = "{HISTORY_MOCKS["GitHub token"]}"', "plain text",
+                       f'C = "{others[0]}"']) + "\n"
+    plain = secret_scan.scan_text("f", text, [], allowed=allowed)
+    seen = {}
+    remembered = secret_scan.scan_text("f", text, [], allowed=allowed, seen=seen)
+    assert [(f.line, f.kind, f.sample, f.exact, f.allowed) for f in remembered] == \
+           [(f.line, f.kind, f.sample, f.exact, f.allowed) for f in plain]
+    assert len(seen) == 4, "the two plain lines and the two equal ones are checked once each"
+    checked = []
+    real = secret_scan.line_hits
+    monkeypatch.setattr(secret_scan, "line_hits", lambda *a, **k: checked.append(a[0]) or real(*a, **k))
+    secret_scan.scan_text("g", text + "one more line\n", [], allowed=allowed, seen=seen)
+    assert checked == ["one more line"], "only the new line of the next version is checked"
+
+
 def test_history_reports_every_other_exact_format_value(repo):
     allow(repo, *HISTORY_MOCKS.values())
     others = [value for _, value in EXACT_SAMPLES if value not in HISTORY_MOCKS.values()] + MOCK_VARIANTS
